@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-02T09:11:12.044Z",
+  "generatedAt": "2026-05-02T12:48:01.500Z",
   "pets": [
     {
       "slug": "boba",
@@ -30,6 +30,11 @@
       "slug": "cosmo",
       "displayName": "Crafternauta",
       "packPath": "/packs/cosmo.zip"
+    },
+    {
+      "slug": "denissexy-itier",
+      "displayName": "Denissexy ITier",
+      "packPath": "/packs/denissexy-itier.zip"
     },
     {
       "slug": "kebo",

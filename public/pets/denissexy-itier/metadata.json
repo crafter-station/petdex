@@ -1,0 +1,16 @@
+{
+  "id": "denissexy-itier",
+  "slug": "denissexy-itier",
+  "displayName": "Denissexy ITier",
+  "description": "A cheerful aqua-and-cream pixel robot pet with a green face screen, rosy cheeks, and a red antenna light.",
+  "spritesheetPath": "/pets/denissexy-itier/spritesheet.webp",
+  "petJsonPath": "/pets/denissexy-itier/pet.json",
+  "approvalState": "approved",
+  "kind": "creature",
+  "vibes": [],
+  "tags": ["cheerful", "pixel"],
+  "importedAt": "2026-05-02T12:48:01.323Z",
+  "qa": {
+    "contactSheetPath": "/pets/denissexy-itier/contact-sheet.png"
+  }
+}
