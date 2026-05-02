@@ -1,0 +1,19 @@
+{
+  "name": "@petdex/cli",
+  "version": "0.1.0",
+  "description": "Upload local Codex pet characters to Petdex from the terminal.",
+  "type": "module",
+  "bin": {
+    "petdex": "./bin/petdex.js"
+  },
+  "files": [
+    "bin",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "jszip": "^3.10.1"
+  }
+}

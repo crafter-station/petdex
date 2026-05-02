@@ -1,6 +1,5 @@
 {
   "lockfileVersion": 1,
-  "configVersion": 1,
   "workspaces": {
     "": {
       "name": "petdex",
@@ -29,6 +28,16 @@
         "drizzle-kit": "^0.31.10",
         "tailwindcss": "^4",
         "typescript": "^5",
+      },
+    },
+    "packages/petdex-cli": {
+      "name": "@petdex/cli",
+      "version": "0.1.0",
+      "bin": {
+        "petdex": "./bin/petdex.js",
+      },
+      "dependencies": {
+        "jszip": "^3.10.1",
       },
     },
   },
@@ -219,6 +228,8 @@
     "@next/swc-win32-x64-msvc": ["@next/swc-win32-x64-msvc@16.2.4", "", { "os": "win32", "cpu": "x64" }, "sha512-kMVGgsqhO5YTYODD9IPGGhA6iprWidQckK3LmPeW08PIFENRmgfb4MjXHO+p//d+ts2rpjvK5gXWzXSMrPl9cw=="],
 
     "@opentelemetry/semantic-conventions": ["@opentelemetry/semantic-conventions@1.40.0", "", {}, "sha512-cifvXDhcqMwwTlTK04GBNeIe7yyo28Mfby85QXFe1Yk8nmi36Ab/5UQwptOx84SsoGNRg+EVSjwzfSZMy6pmlw=="],
+
+    "@petdex/cli": ["@petdex/cli@workspace:packages/petdex-cli"],
 
     "@stablelib/base64": ["@stablelib/base64@1.0.1", "", {}, "sha512-1bnPQqSxSuc3Ii6MhBysoWCg58j97aUjuCSZrGSmDxNqtytIi0k8utUenAwTZN4V5mXXYGsVUI9zeBqy+jBOSQ=="],
 

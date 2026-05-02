@@ -17,6 +17,21 @@ bun install
 bun dev
 ```
 
+## CLI submissions
+
+The `@petdex/cli` package uploads local Codex characters from
+`~/.codex/pets`.
+
+```bash
+PETDEX_TOKEN=... bun run upload-characters
+```
+
+The CLI auto-detects folders that contain `pet.json` and `spritesheet.webp`,
+shows a numbered selection, builds a ZIP for each selected character, and sends
+it to `/api/cli/submit`. The server must have `PETDEX_CLI_TOKEN` configured;
+set `PETDEX_CLI_OWNER_ID` or `PETDEX_CLI_OWNER_EMAIL` to customize how CLI
+submissions are attributed.
+
 ## Production
 
 ```bash

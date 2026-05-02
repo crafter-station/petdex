@@ -2,15 +2,20 @@
   "name": "petdex",
   "version": "0.1.0",
   "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "test": "bun test",
     "check": "biome check .",
     "format": "biome check --write .",
     "generate-assets": "bun scripts/generate-assets.ts",
     "import-pet": "bun scripts/import-pet.ts",
-    "build-packs": "bun scripts/build-packs.ts"
+    "build-packs": "bun scripts/build-packs.ts",
+    "upload-characters": "bun packages/petdex-cli/bin/petdex.js upload"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.3.0",
