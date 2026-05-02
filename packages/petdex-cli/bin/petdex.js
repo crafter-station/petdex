@@ -1,5 +1,16 @@
 #!/usr/bin/env node
-import { readdir, readFile, stat } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
+import {
+  chmod,
+  mkdir,
+  readdir,
+  readFile,
+  stat,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
+import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { stdin as input, stdout as output } from "node:process";
@@ -9,6 +20,7 @@ import JSZip from "jszip";
 
 const REQUIRED = { width: 1536, height: 1872 };
 const DEFAULT_URL = "https://petdex.crafter.run";
+const LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
 
 main().catch((error) => {
   console.error(`petdex: ${error.message}`);
@@ -23,8 +35,23 @@ async function main() {
     return;
   }
 
-  if (command !== "upload" && command !== "list") {
+  if (!["upload", "list", "login", "logout", "whoami"].includes(command)) {
     throw new Error(`Unknown command "${command}". Run petdex --help.`);
+  }
+
+  if (command === "login") {
+    await login(options);
+    return;
+  }
+
+  if (command === "logout") {
+    await logout();
+    return;
+  }
+
+  if (command === "whoami") {
+    await whoami();
+    return;
   }
 
   const petsDir = expandHome(
@@ -46,15 +73,22 @@ async function main() {
     return;
   }
 
-  const token = options.token ?? process.env.PETDEX_TOKEN;
+  const config = await readConfig();
+  const apiBase = normalizeUrl(
+    options.url ?? process.env.PETDEX_URL ?? config?.siteUrl ?? DEFAULT_URL,
+  );
+  const token =
+    options.token ??
+    process.env.PETDEX_TOKEN ??
+    tokenFromConfig(config, apiBase);
   if (!token) {
-    throw new Error("Set PETDEX_TOKEN or pass --token to upload.");
+    throw new Error("Run `petdex login` or set PETDEX_TOKEN before uploading.");
   }
 
-  const apiBase = normalizeUrl(
-    options.url ?? process.env.PETDEX_URL ?? DEFAULT_URL,
-  );
-  const ownerEmail = options.email ?? process.env.PETDEX_OWNER_EMAIL;
+  const ownerEmail =
+    options.email ??
+    process.env.PETDEX_OWNER_EMAIL ??
+    emailFromConfig(config, apiBase);
 
   for (const candidate of selected) {
     if (candidate.issues.length > 0) {
@@ -71,6 +105,144 @@ async function main() {
     console.log(
       `Submitted ${candidate.displayName} for review: ${apiBase}/pets/${result.slug}`,
     );
+  }
+}
+
+async function login(options) {
+  const config = await readConfig();
+  const apiBase = normalizeUrl(
+    options.url ?? process.env.PETDEX_URL ?? config?.siteUrl ?? DEFAULT_URL,
+  );
+  const state = randomBytes(24).toString("base64url");
+  const result = await waitForBrowserLogin(apiBase, state);
+
+  await writeConfig({
+    siteUrl: result.siteUrl ?? apiBase,
+    token: result.token,
+    ownerEmail: result.ownerEmail,
+    expiresAt: result.expiresAt,
+    loggedInAt: new Date().toISOString(),
+  });
+
+  console.log(
+    `Logged in to ${result.siteUrl ?? apiBase}${result.ownerEmail ? ` as ${result.ownerEmail}` : ""}.`,
+  );
+}
+
+async function logout() {
+  try {
+    await unlink(configFilePath());
+    console.log("Logged out of Petdex CLI.");
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+    console.log("Petdex CLI is already logged out.");
+  }
+}
+
+async function whoami() {
+  const config = await readConfig();
+  if (!config?.token) {
+    throw new Error("Not logged in. Run `petdex login`.");
+  }
+
+  console.log(`Site: ${config.siteUrl ?? DEFAULT_URL}`);
+  console.log(`Account: ${config.ownerEmail ?? "unknown"}`);
+  if (config.expiresAt) console.log(`Expires: ${config.expiresAt}`);
+}
+
+async function waitForBrowserLogin(apiBase, state) {
+  let settle;
+  let rejectLogin;
+  const loginResult = new Promise((resolve, reject) => {
+    settle = resolve;
+    rejectLogin = reject;
+  });
+  let completed = false;
+
+  const server = createServer(async (req, res) => {
+    const url = new URL(req.url ?? "/", "http://127.0.0.1");
+
+    if (req.method === "GET" && url.pathname === "/callback") {
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(callbackHtml());
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/complete") {
+      try {
+        const body = await readJsonBody(req);
+        if (body.state !== state) {
+          throw new Error("CLI login state did not match.");
+        }
+        if (typeof body.token !== "string" || !body.token) {
+          throw new Error("CLI login did not return a token.");
+        }
+        if (!completed) {
+          completed = true;
+          settle({
+            expiresAt:
+              typeof body.expiresAt === "string" && body.expiresAt
+                ? body.expiresAt
+                : null,
+            ownerEmail:
+              typeof body.ownerEmail === "string" && body.ownerEmail
+                ? body.ownerEmail
+                : null,
+            siteUrl:
+              typeof body.siteUrl === "string" && body.siteUrl
+                ? normalizeUrl(body.siteUrl)
+                : apiBase,
+            token: body.token,
+          });
+        }
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (error) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            error: error instanceof Error ? error.message : "Login failed",
+          }),
+        );
+      }
+      return;
+    }
+
+    res.writeHead(404, { "Content-Type": "text/plain" });
+    res.end("Not found");
+  });
+
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    server.close();
+    throw new Error("Could not start local CLI login callback.");
+  }
+
+  const callback = `http://127.0.0.1:${address.port}/callback`;
+  const authUrl = new URL("/cli-auth", apiBase);
+  authUrl.searchParams.set("callback", callback);
+  authUrl.searchParams.set("state", state);
+
+  console.log(`Opening ${authUrl.toString()}`);
+  if (!openBrowser(authUrl.toString())) {
+    console.log("Open this URL in your browser to finish login:");
+    console.log(authUrl.toString());
+  }
+
+  const timeout = setTimeout(() => {
+    rejectLogin(new Error("Timed out waiting for browser login."));
+  }, LOGIN_TIMEOUT_MS);
+
+  try {
+    return await loginResult;
+  } finally {
+    clearTimeout(timeout);
+    server.close();
   }
 }
 
@@ -339,8 +511,11 @@ function printHelp() {
   console.log(`petdex CLI
 
 Usage:
+  petdex login [--url https://petdex.crafter.run]
   petdex upload [--dir ~/.codex/pets] [--url https://petdex.crafter.run]
   petdex list
+  petdex whoami
+  petdex logout
 
 Options:
   --all             Select every detected character
@@ -348,7 +523,7 @@ Options:
   --pet <id>        Select one character by id or slug; repeatable
   --dir <path>      Pets directory (default: ~/.codex/pets)
   --url <url>       Petdex URL (default: ${DEFAULT_URL})
-  --token <token>   Upload token (or PETDEX_TOKEN)
+  --token <token>   Upload token override (or PETDEX_TOKEN)
   --email <email>   Owner email attached to the submission
   --help, -h        Show help
 `);
@@ -387,6 +562,122 @@ async function isFile(filePath) {
   } catch {
     return false;
   }
+}
+
+async function readConfig() {
+  try {
+    return JSON.parse(await readFile(configFilePath(), "utf8"));
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+async function writeConfig(config) {
+  const filePath = configFilePath();
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, `${JSON.stringify(config, null, 2)}\n`, {
+    mode: 0o600,
+  });
+  await chmod(filePath, 0o600).catch(() => {});
+}
+
+function configFilePath() {
+  const configRoot =
+    process.env.PETDEX_CONFIG_HOME ??
+    process.env.XDG_CONFIG_HOME ??
+    path.join(os.homedir(), ".config");
+  return path.join(configRoot, "petdex", "config.json");
+}
+
+function tokenFromConfig(config, apiBase) {
+  if (
+    !config?.token ||
+    normalizeUrl(config.siteUrl ?? DEFAULT_URL) !== apiBase
+  ) {
+    return null;
+  }
+  return config.token;
+}
+
+function emailFromConfig(config, apiBase) {
+  if (
+    !config?.ownerEmail ||
+    normalizeUrl(config.siteUrl ?? DEFAULT_URL) !== apiBase
+  ) {
+    return undefined;
+  }
+  return config.ownerEmail;
+}
+
+function openBrowser(url) {
+  const command =
+    process.platform === "darwin"
+      ? "open"
+      : process.platform === "win32"
+        ? "cmd"
+        : "xdg-open";
+  const args =
+    process.platform === "darwin"
+      ? [url]
+      : process.platform === "win32"
+        ? ["/c", "start", "", url]
+        : [url];
+
+  try {
+    const child = spawn(command, args, { detached: true, stdio: "ignore" });
+    child.on("error", () => {});
+    child.unref();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function readJsonBody(req) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > 1024 * 1024) throw new Error("Request body is too large.");
+    chunks.push(chunk);
+  }
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
+
+function callbackHtml() {
+  return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Petdex CLI Login</title>
+    <style>
+      body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 3rem; color: #111; }
+      main { max-width: 34rem; margin: 0 auto; line-height: 1.6; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Finishing Petdex CLI login...</h1>
+      <p>You can close this tab once the terminal says login completed.</p>
+    </main>
+    <script>
+      const params = new URLSearchParams(window.location.hash.slice(1));
+      fetch("/complete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(Object.fromEntries(params))
+      }).then(async (response) => {
+        if (!response.ok) throw new Error(await response.text());
+        document.querySelector("h1").textContent = "Petdex CLI login complete";
+        document.querySelector("p").textContent = "Return to your terminal.";
+      }).catch((error) => {
+        document.querySelector("h1").textContent = "Petdex CLI login failed";
+        document.querySelector("p").textContent = error.message;
+      });
+    </script>
+  </body>
+</html>`;
 }
 
 function isInsideDir(parent, child) {

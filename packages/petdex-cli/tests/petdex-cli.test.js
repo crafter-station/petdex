@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -49,6 +50,72 @@ test("list blocks spritesheet paths that escape the character folder", async () 
   );
 });
 
+test("upload asks for browser login when no token is available", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "petdex-cli-"));
+  const configRoot = await mkdtemp(path.join(os.tmpdir(), "petdex-config-"));
+  const petDir = path.join(root, "paperclip");
+  await mkdir(petDir);
+  await writePet(petDir, {
+    id: "paperclip",
+    displayName: "Paperclip",
+    description: "A small helpful paperclip.",
+  });
+
+  const result = await runCliRaw(
+    ["upload", "--dir", root, "--pet", "paperclip"],
+    {
+      XDG_CONFIG_HOME: configRoot,
+    },
+  );
+
+  expect(result.exitCode).toBe(1);
+  expect(result.stderr).toContain("Run `petdex login`");
+});
+
+test("upload uses the stored browser login token", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "petdex-cli-"));
+  const configRoot = await mkdtemp(path.join(os.tmpdir(), "petdex-config-"));
+  const petDir = path.join(root, "paperclip");
+  await mkdir(petDir);
+  await writePet(petDir, {
+    id: "paperclip",
+    displayName: "Paperclip",
+    description: "A small helpful paperclip.",
+  });
+
+  const received = {};
+  const server = createServer((req, res) => {
+    received.authorization = req.headers.authorization;
+    res.writeHead(201, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true, slug: "paperclip" }));
+  });
+  await listen(server);
+  const address = server.address();
+  const siteUrl = `http://127.0.0.1:${address.port}`;
+  await mkdir(path.join(configRoot, "petdex"), { recursive: true });
+  await writeFile(
+    path.join(configRoot, "petdex", "config.json"),
+    `${JSON.stringify({
+      siteUrl,
+      token: "stored-token",
+      ownerEmail: "user@example.com",
+    })}\n`,
+  );
+
+  try {
+    const result = await runCliRaw(
+      ["upload", "--dir", root, "--pet", "paperclip", "--url", siteUrl],
+      { XDG_CONFIG_HOME: configRoot },
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("Submitted Paperclip for review");
+    expect(received.authorization).toBe("Bearer stored-token");
+  } finally {
+    server.close();
+  }
+});
+
 async function writePet(dir, manifest) {
   await writeFile(
     path.join(dir, "pet.json"),
@@ -66,7 +133,16 @@ async function writePet(dir, manifest) {
 }
 
 async function runCli(args) {
+  const { exitCode, stderr, stdout } = await runCliRaw(args);
+
+  expect(stderr).toBe("");
+  expect(exitCode).toBe(0);
+  return { stdout };
+}
+
+async function runCliRaw(args, env = {}) {
   const proc = Bun.spawn(["node", cliPath, ...args], {
+    env: { ...process.env, ...env },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -76,9 +152,14 @@ async function runCli(args) {
     proc.exited,
   ]);
 
-  expect(stderr).toBe("");
-  expect(exitCode).toBe(0);
-  return { stdout };
+  return { exitCode, stderr, stdout };
+}
+
+function listen(server) {
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
 }
 
 function webpBytes() {

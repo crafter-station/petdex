@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 
 import { UTApi, UTFile } from "uploadthing/server";
 
+import { verifyCliToken } from "@/lib/cli-auth";
 import { registerSubmittedPet, stableCliOwnerId } from "@/lib/submissions";
 import { getWebpDimensions } from "@/lib/webp";
 
@@ -12,20 +13,10 @@ export const runtime = "nodejs";
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
 
 export async function POST(req: Request) {
-  const configuredToken = process.env.PETDEX_CLI_TOKEN;
-  if (!configuredToken) {
-    return NextResponse.json(
-      {
-        error: "cli_upload_disabled",
-        message: "PETDEX_CLI_TOKEN is not configured on this Petdex server.",
-      },
-      { status: 503 },
-    );
-  }
-
   const requestToken = getRequestToken(req);
-  if (!requestToken || !secureEquals(requestToken, configuredToken)) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const cliAuth = authenticateCliToken(requestToken);
+  if (!cliAuth.ok) {
+    return NextResponse.json(cliAuth.body, { status: cliAuth.status });
   }
 
   let formData: FormData;
@@ -138,11 +129,8 @@ export async function POST(req: Request) {
     petId,
     spritesheetWidth: dimensions.width,
     spritesheetHeight: dimensions.height,
-    ownerId: process.env.PETDEX_CLI_OWNER_ID ?? stableCliOwnerId(requestToken),
-    ownerEmail:
-      getString(formData, "ownerEmail") ??
-      process.env.PETDEX_CLI_OWNER_EMAIL ??
-      null,
+    ownerId: cliAuth.ownerId,
+    ownerEmail: getString(formData, "ownerEmail") ?? cliAuth.ownerEmail,
     kind: "character",
   });
 
@@ -159,6 +147,79 @@ function getRequestToken(req: Request) {
     return auth.slice("bearer ".length).trim();
   }
   return req.headers.get("x-petdex-token")?.trim() ?? null;
+}
+
+function authenticateCliToken(token: string | null):
+  | { ok: true; ownerEmail: string | null; ownerId: string }
+  | {
+      ok: false;
+      status: 401 | 503;
+      body: { error: string; message?: string };
+    } {
+  if (!token) {
+    return {
+      ok: false,
+      status: 401,
+      body: {
+        error: "unauthorized",
+        message: "Run `petdex login` before uploading.",
+      },
+    };
+  }
+
+  const verified = verifyCliToken(token);
+  if (verified.ok) {
+    return {
+      ok: true,
+      ownerId: verified.token.ownerId,
+      ownerEmail: verified.token.ownerEmail,
+    };
+  }
+
+  if (token.startsWith("pdx_")) {
+    return {
+      ok: false,
+      status: verified.error === "secret_missing" ? 503 : 401,
+      body: {
+        error:
+          verified.error === "expired" ? "token_expired" : "invalid_cli_token",
+        message:
+          verified.error === "expired"
+            ? "Run `petdex login` again; this CLI login expired."
+            : "Run `petdex login` again; this CLI login is not valid.",
+      },
+    };
+  }
+
+  const configuredToken = process.env.PETDEX_CLI_TOKEN;
+  if (configuredToken && secureEquals(token, configuredToken)) {
+    return {
+      ok: true,
+      ownerId: process.env.PETDEX_CLI_OWNER_ID ?? stableCliOwnerId(token),
+      ownerEmail: process.env.PETDEX_CLI_OWNER_EMAIL ?? null,
+    };
+  }
+
+  if (!configuredToken && verified.error === "secret_missing") {
+    return {
+      ok: false,
+      status: 503,
+      body: {
+        error: "cli_upload_disabled",
+        message:
+          "Set PETDEX_CLI_TOKEN_SECRET or CLERK_SECRET_KEY to enable CLI uploads.",
+      },
+    };
+  }
+
+  return {
+    ok: false,
+    status: 401,
+    body: {
+      error: "unauthorized",
+      message: "Run `petdex login` before uploading.",
+    },
+  };
 }
 
 function secureEquals(left: string, right: string) {

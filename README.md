@@ -23,14 +23,16 @@ The `@petdex/cli` package uploads local Codex characters from
 `~/.codex/pets`.
 
 ```bash
-PETDEX_TOKEN=... bun run upload-characters
+bun packages/petdex-cli/bin/petdex.js login
+bun run upload-characters
 ```
 
 The CLI auto-detects folders that contain `pet.json` and `spritesheet.webp`,
 shows a numbered selection, builds a ZIP for each selected character, and sends
-it to `/api/cli/submit`. The server must have `PETDEX_CLI_TOKEN` configured;
-set `PETDEX_CLI_OWNER_ID` or `PETDEX_CLI_OWNER_EMAIL` to customize how CLI
-submissions are attributed.
+it to `/api/cli/submit`. `petdex login` opens `/cli-auth` in the browser,
+reuses the existing Clerk sign-in flow, and stores a user-scoped token locally.
+The server must have `PETDEX_CLI_TOKEN_SECRET` or `CLERK_SECRET_KEY` configured
+to issue CLI login tokens. `PETDEX_CLI_TOKEN` is still supported for automation.
 
 ## Production
 
