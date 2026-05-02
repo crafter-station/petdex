@@ -23,6 +23,11 @@ The `@petdex/cli` package uploads local Codex characters from
 `~/.codex/pets`.
 
 ```bash
+npx @petdex/cli install boba
+npx @petdex/cli login
+npx @petdex/cli upload
+
+# From this workspace:
 bun packages/petdex-cli/bin/petdex.js login
 bun packages/petdex-cli/bin/petdex.js install boba
 bun run upload-characters

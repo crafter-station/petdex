@@ -1,10 +1,13 @@
 {
   "name": "@petdex/cli",
   "version": "0.1.0",
-  "description": "Upload local Codex pet characters to Petdex from the terminal.",
+  "description": "Install and upload Codex pet characters from the terminal.",
   "type": "module",
   "bin": {
-    "petdex": "./bin/petdex.js"
+    "petdex": "bin/petdex.js"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "files": [
     "bin",
