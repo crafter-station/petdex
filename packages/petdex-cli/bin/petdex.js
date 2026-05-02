@@ -35,8 +35,23 @@ async function main() {
     return;
   }
 
-  if (!["upload", "list", "login", "logout", "whoami"].includes(command)) {
+  if (
+    !["upload", "list", "install", "login", "logout", "whoami"].includes(
+      command,
+    )
+  ) {
     throw new Error(`Unknown command "${command}". Run petdex --help.`);
+  }
+
+  if (command !== "install" && options.args.length > 0) {
+    throw new Error(
+      `Unexpected argument "${options.args[0]}". Run petdex --help.`,
+    );
+  }
+
+  if (command === "install") {
+    await install(options);
+    return;
   }
 
   if (command === "login") {
@@ -148,6 +163,106 @@ async function whoami() {
   console.log(`Site: ${config.siteUrl ?? DEFAULT_URL}`);
   console.log(`Account: ${config.ownerEmail ?? "unknown"}`);
   if (config.expiresAt) console.log(`Expires: ${config.expiresAt}`);
+}
+
+async function install(options) {
+  const config = await readConfig();
+  const apiBase = normalizeUrl(
+    options.url ?? process.env.PETDEX_URL ?? config?.siteUrl ?? DEFAULT_URL,
+  );
+  const requested = [...options.args, ...options.pet];
+  const choices = requested.length
+    ? requested.map((slug) => ({ slug, displayName: titleize(slug) }))
+    : await selectInstallChoices(await fetchInstallManifest(apiBase), options);
+
+  if (choices.length === 0) {
+    console.log("No pets selected.");
+    return;
+  }
+
+  for (const choice of choices) {
+    await installSlug(apiBase, choice.slug);
+  }
+}
+
+async function fetchInstallManifest(apiBase) {
+  const response = await fetch(`${apiBase}/packs/manifest.json`);
+  if (!response.ok) {
+    throw new Error(`Could not load Petdex manifest: HTTP ${response.status}`);
+  }
+  const manifest = await response.json();
+  if (!Array.isArray(manifest.pets)) {
+    throw new Error("Petdex manifest did not include a pets list.");
+  }
+  return manifest.pets
+    .filter(
+      (pet) =>
+        typeof pet.slug === "string" && typeof pet.displayName === "string",
+    )
+    .map((pet) => ({ slug: pet.slug, displayName: pet.displayName }));
+}
+
+async function selectInstallChoices(pets, options) {
+  if (pets.length === 0) {
+    throw new Error("No installable pets found in Petdex manifest.");
+  }
+
+  console.log("Installable Petdex pets:");
+  pets.forEach((pet, index) => {
+    console.log(
+      `${String(index + 1).padStart(2, " ")}. ${pet.displayName} (${pet.slug})`,
+    );
+  });
+
+  if (options.all || options.yes) return pets;
+
+  const rl = createInterface({ input, output });
+  try {
+    const answer = await rl.question(
+      "Select pets to install (numbers, comma-separated, or all): ",
+    );
+    return parseSelection(answer, pets);
+  } finally {
+    rl.close();
+  }
+}
+
+async function installSlug(apiBase, slug) {
+  const safeSlug = slugify(slug);
+  if (!safeSlug) {
+    throw new Error(`Invalid pet slug "${slug}"`);
+  }
+
+  const response = await fetch(
+    `${apiBase}/install/${encodeURIComponent(safeSlug)}`,
+  );
+  const script = await response.text();
+  if (!response.ok) {
+    throw new Error(
+      `Install failed for ${safeSlug}: ${firstNonEmptyLine(script) ?? `HTTP ${response.status}`}`,
+    );
+  }
+
+  await runShellScript(script);
+}
+
+function runShellScript(script) {
+  if (process.platform === "win32") {
+    throw new Error("petdex install requires a POSIX shell.");
+  }
+
+  return new Promise((resolve, reject) => {
+    const child = spawn("sh", [], { stdio: ["pipe", "inherit", "inherit"] });
+    child.on("error", reject);
+    child.on("exit", (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`Install script exited with code ${code}`));
+      }
+    });
+    child.stdin.end(script);
+  });
 }
 
 async function waitForBrowserLogin(apiBase, state) {
@@ -465,7 +580,7 @@ function normalizedPetJson(candidate) {
 
 function parseArgs(args) {
   let command = "upload";
-  const options = { pet: [] };
+  const options = { args: [], pet: [] };
 
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
@@ -491,6 +606,8 @@ function parseArgs(args) {
       options.email = readOptionValue(args, ++index, arg);
     } else if (arg === "--pet") {
       options.pet.push(readOptionValue(args, ++index, arg));
+    } else if (!arg.startsWith("-")) {
+      options.args.push(arg);
     } else {
       throw new Error(`Unknown option "${arg}"`);
     }
@@ -512,6 +629,8 @@ function printHelp() {
 
 Usage:
   petdex login [--url https://petdex.crafter.run]
+  petdex install <slug> [--url https://petdex.crafter.run]
+  petdex install [--url https://petdex.crafter.run]
   petdex upload [--dir ~/.codex/pets] [--url https://petdex.crafter.run]
   petdex list
   petdex whoami
@@ -519,8 +638,8 @@ Usage:
 
 Options:
   --all             Select every detected character
-  --yes, -y         Non-interactive: select all ready characters
-  --pet <id>        Select one character by id or slug; repeatable
+  --yes, -y         Non-interactive: select all ready characters/pets
+  --pet <id>        Select one character/pet by id or slug; repeatable
   --dir <path>      Pets directory (default: ~/.codex/pets)
   --url <url>       Petdex URL (default: ${DEFAULT_URL})
   --token <token>   Upload token override (or PETDEX_TOKEN)
@@ -554,6 +673,13 @@ function titleize(value) {
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+function firstNonEmptyLine(value) {
+  return value
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^#? ?/, "").trim())
+    .find(Boolean);
 }
 
 async function isFile(filePath) {

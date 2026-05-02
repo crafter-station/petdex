@@ -116,6 +116,34 @@ test("upload uses the stored browser login token", async () => {
   }
 });
 
+test("install runs the Petdex install script for a slug", async () => {
+  const requested = {};
+  const server = createServer((req, res) => {
+    requested.url = req.url;
+    if (req.url === "/install/boba") {
+      res.writeHead(200, { "Content-Type": "text/x-shellscript" });
+      res.end('#!/bin/sh\necho "Installed Boba"\n');
+      return;
+    }
+
+    res.writeHead(404, { "Content-Type": "text/plain" });
+    res.end("not found");
+  });
+  await listen(server);
+  const address = server.address();
+  const siteUrl = `http://127.0.0.1:${address.port}`;
+
+  try {
+    const result = await runCliRaw(["install", "boba", "--url", siteUrl]);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("Installed Boba");
+    expect(requested.url).toBe("/install/boba");
+  } finally {
+    server.close();
+  }
+});
+
 async function writePet(dir, manifest) {
   await writeFile(
     path.join(dir, "pet.json"),
