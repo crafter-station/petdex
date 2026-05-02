@@ -369,7 +369,7 @@ function PetCard({ pet, index, stateCount }: PetCardProps) {
 
   return (
     <article
-      className={`group relative flex flex-col rounded-3xl border bg-white/76 backdrop-blur transition hover:-translate-y-0.5 hover:bg-white hover:shadow-xl hover:shadow-blue-950/10 ${
+      className={`group relative flex cursor-pointer flex-col rounded-3xl border bg-white/76 backdrop-blur transition-all duration-300 ease-out hover:-translate-y-1 hover:bg-white hover:shadow-xl hover:shadow-blue-950/10 ${
         pet.featured
           ? "border-[#6478f6]/45 shadow-[0_0_0_1px_rgba(100,120,246,0.18),0_18px_45px_-22px_rgba(82,102,234,0.5)]"
           : "border-black/10 shadow-sm shadow-blue-950/5"
@@ -378,7 +378,7 @@ function PetCard({ pet, index, stateCount }: PetCardProps) {
       <Link
         href={href}
         aria-label={`Open ${pet.displayName}`}
-        className="absolute inset-0 z-0 rounded-3xl"
+        className="absolute inset-0 z-10 rounded-3xl"
       />
 
       <div className="relative z-20 flex items-center justify-between rounded-t-3xl border-b border-black/[0.06] px-5 pt-4 pb-3">
