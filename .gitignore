@@ -37,6 +37,7 @@ yarn-error.log*
 .vercel
 
 # local generation artifacts
+.claude/
 .hatch-batches/
 .hatch-import/
 .hatch-runs/
