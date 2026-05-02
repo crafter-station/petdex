@@ -11,6 +11,7 @@ import { getWebpDimensions } from "@/lib/webp";
 export const runtime = "nodejs";
 
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
+const MAX_TOTAL_FILE_BYTES = 24 * 1024 * 1024;
 
 export async function POST(req: Request) {
   const requestToken = getRequestToken(req);
@@ -50,6 +51,17 @@ export async function POST(req: Request) {
         { status: 413 },
       );
     }
+  }
+
+  const totalFileBytes = zipFile.size + spritesheetFile.size + petJsonFile.size;
+  if (totalFileBytes > MAX_TOTAL_FILE_BYTES) {
+    return NextResponse.json(
+      {
+        error: "files_too_large",
+        message: "CLI upload files must be 24MB or smaller in total.",
+      },
+      { status: 413 },
+    );
   }
 
   const displayName = getString(formData, "displayName");
