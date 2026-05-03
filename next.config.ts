@@ -11,8 +11,8 @@ import type { NextConfig } from "next";
 // - clerk.petdex.crafter.run + *.clerk.com / *.clerk.accounts.dev for
 //   the Clerk client SDK
 // - vercel-scripts / vitals for Vercel analytics
-// - R2 public bucket + UploadThing host + Clerk image hosts + social
-//   avatar hosts for sprites and avatars
+// - R2 public bucket + R2 write endpoint + UploadThing host + Clerk image
+//   hosts + social avatar hosts for sprites, avatars, and direct uploads
 const cspDirectives = [
   "default-src 'self'",
   "base-uri 'self'",
@@ -24,7 +24,7 @@ const cspDirectives = [
   "img-src 'self' data: blob: https://pub-94495283df974cfea5e98d6a9e3fa462.r2.dev https://yu2vz9gndp.ufs.sh https://img.clerk.com https://images.clerk.dev https://avatars.githubusercontent.com https://pbs.twimg.com https://storage.googleapis.com",
   "media-src 'self' https://pub-94495283df974cfea5e98d6a9e3fa462.r2.dev",
   "font-src 'self' data:",
-  "connect-src 'self' https://clerk.petdex.crafter.run https://*.clerk.com https://*.clerk.accounts.dev https://api.clerk.com https://pub-94495283df974cfea5e98d6a9e3fa462.r2.dev https://yu2vz9gndp.ufs.sh https://utfs.io https://va.vercel-scripts.com https://vitals.vercel-insights.com",
+  "connect-src 'self' https://clerk.petdex.crafter.run https://*.clerk.com https://*.clerk.accounts.dev https://api.clerk.com https://pub-94495283df974cfea5e98d6a9e3fa462.r2.dev https://*.r2.cloudflarestorage.com https://yu2vz9gndp.ufs.sh https://utfs.io https://va.vercel-scripts.com https://vitals.vercel-insights.com",
   "worker-src 'self' blob:",
   "manifest-src 'self'",
   "upgrade-insecure-requests",
