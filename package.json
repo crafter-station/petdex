@@ -32,8 +32,8 @@
     "node-vibrant": "^4.0.4",
     "openai": "^6.35.0",
     "postcss": "^8.5.13",
-    "react": "19.2.4",
-    "react-dom": "19.2.4",
+    "react": "19.2.5",
+    "react-dom": "19.2.5",
     "resend": "^6.12.2",
     "sharp": "^0.34.5",
     "uploadthing": "^7.7.4"
