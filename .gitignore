@@ -53,6 +53,9 @@ next-env.d.ts
 .scratch/
 seed/
 
+# Script output / rescue results — local only
+.rescue-results.json
+
 # End-of-session handoff doc — local only, not committed
 HANDOFF.md
 .handoff-archive/

@@ -47,7 +47,7 @@ export function ThemeToggle({ className }: { className?: string }) {
       onClick={next}
       className={
         className ??
-        "grid size-10 place-items-center rounded-full border border-border-base bg-surface/70 text-muted-2 backdrop-blur transition hover:bg-white dark:hover:bg-stone-800"
+        "grid size-10 place-items-center rounded-full border border-border-base bg-surface/70 text-muted-2 backdrop-blur transition hover:bg-white dark:hover:bg-stone-800"
       }
     >
       <Icon className="size-4" />

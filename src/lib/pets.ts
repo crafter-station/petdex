@@ -3,7 +3,7 @@
 // JSON dump is only consulted by that backfill script; the rest of the app
 // reads from the DB.
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 import { db, schema } from "@/lib/db/client";
 import {
@@ -97,11 +97,11 @@ export async function getApprovedPetsWithMetrics(): Promise<PetWithMetrics[]> {
 }
 
 export async function getApprovedPetCount(): Promise<number> {
-  const rows = await db
-    .select({ slug: schema.submittedPets.slug })
+  const row = await db
+    .select({ n: sql<number>`count(*)::int` })
     .from(schema.submittedPets)
     .where(eq(schema.submittedPets.status, "approved"));
-  return rows.length;
+  return row[0]?.n ?? 0;
 }
 
 export function rowToPet(
