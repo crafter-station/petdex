@@ -1,14 +1,23 @@
 // Integration tests for the gallery search / sort. Hits the real Postgres
 // instance pointed at by DATABASE_URL — same shape the API route uses.
 //
-// Run: bun test
+// Run: DATABASE_URL=... bun run test:db
 
 import { describe, expect, it } from "bun:test";
 
-import { searchPets } from "@/lib/pet-search";
+import type { searchPets as searchPetsFn } from "@/lib/pet-search";
+
+if (!process.env.DATABASE_URL) {
+  throw new Error("DATABASE_URL is required for pet-search integration tests");
+}
+
+async function loadSearchPets(): Promise<typeof searchPetsFn> {
+  return (await import("@/lib/pet-search")).searchPets;
+}
 
 describe("searchPets", () => {
   it("returns pets and total > 0 with no filters", async () => {
+    const searchPets = await loadSearchPets();
     const out = await searchPets({});
     expect(out.pets.length).toBeGreaterThan(0);
     expect(out.total).toBeGreaterThanOrEqual(out.pets.length);
@@ -18,6 +27,7 @@ describe("searchPets", () => {
   });
 
   it("sort=installed orders by installCount descending (regression #11)", async () => {
+    const searchPets = await loadSearchPets();
     const out = await searchPets({ sort: "installed", limit: 60 });
     expect(out.pets.length).toBeGreaterThan(1);
     for (let i = 1; i < out.pets.length; i++) {
@@ -28,6 +38,7 @@ describe("searchPets", () => {
   });
 
   it("sort=popular orders by likeCount descending", async () => {
+    const searchPets = await loadSearchPets();
     const out = await searchPets({ sort: "popular", limit: 60 });
     expect(out.pets.length).toBeGreaterThan(1);
     for (let i = 1; i < out.pets.length; i++) {
@@ -38,6 +49,7 @@ describe("searchPets", () => {
   });
 
   it("sort=alpha orders pets by displayName ascending", async () => {
+    const searchPets = await loadSearchPets();
     const out = await searchPets({ sort: "alpha", limit: 60 });
     expect(out.pets.length).toBeGreaterThan(1);
     // Postgres asc(displayName) orders by raw byte order (ASCII first),
@@ -52,6 +64,7 @@ describe("searchPets", () => {
   });
 
   it("sort=curated puts featured pets first", async () => {
+    const searchPets = await loadSearchPets();
     const out = await searchPets({ sort: "curated", limit: 60 });
     let sawNonFeatured = false;
     for (const pet of out.pets) {
@@ -66,6 +79,7 @@ describe("searchPets", () => {
   });
 
   it("ties in sort=installed break by displayName ascending", async () => {
+    const searchPets = await loadSearchPets();
     const out = await searchPets({ sort: "installed", limit: 60 });
     for (let i = 1; i < out.pets.length; i++) {
       const a = out.pets[i - 1];
@@ -77,6 +91,7 @@ describe("searchPets", () => {
   });
 
   it("vibes filter only returns pets with that vibe", async () => {
+    const searchPets = await loadSearchPets();
     const out = await searchPets({ vibes: ["cozy"], limit: 60 });
     if (out.pets.length === 0) return; // skip if dataset has no cozy
     for (const pet of out.pets) {
@@ -85,6 +100,7 @@ describe("searchPets", () => {
   });
 
   it("kinds filter only returns pets of that kind", async () => {
+    const searchPets = await loadSearchPets();
     const out = await searchPets({ kinds: ["creature"], limit: 60 });
     if (out.pets.length === 0) return;
     for (const pet of out.pets) {
@@ -93,6 +109,7 @@ describe("searchPets", () => {
   });
 
   it("batches filter only returns pets from that approval month", async () => {
+    const searchPets = await loadSearchPets();
     const initial = await searchPets({ limit: 1 });
     const firstBatch = initial.facets.batches[0]?.key;
     if (!firstBatch) return;
@@ -104,14 +121,11 @@ describe("searchPets", () => {
   });
 
   it("q search hits displayName / description / tags", async () => {
+    const searchPets = await loadSearchPets();
     const out = await searchPets({ q: "otter", limit: 10 });
     if (out.pets.length === 0) return;
     for (const pet of out.pets) {
-      const haystack = [
-        pet.displayName,
-        pet.description,
-        ...pet.tags,
-      ]
+      const haystack = [pet.displayName, pet.description, ...pet.tags]
         .join(" ")
         .toLowerCase();
       expect(haystack).toContain("otter");
@@ -119,6 +133,7 @@ describe("searchPets", () => {
   });
 
   it("pagination cursor returns disjoint slices", async () => {
+    const searchPets = await loadSearchPets();
     const limit = 5;
     const first = await searchPets({ limit, sort: "alpha" });
     if (first.nextCursor == null) return; // dataset too small
@@ -134,6 +149,7 @@ describe("searchPets", () => {
   });
 
   it("limit is clamped to MAX_LIMIT", async () => {
+    const searchPets = await loadSearchPets();
     const out = await searchPets({ limit: 9999 });
     expect(out.pets.length).toBeLessThanOrEqual(60);
   });

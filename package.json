@@ -12,7 +12,8 @@
     "generate-assets": "bun scripts/generate-assets.ts",
     "auto-tag": "bun scripts/auto-tag.ts",
     "i18n:check": "bun scripts/i18n-check.ts",
-    "test": "bun test"
+    "test": "bun test",
+    "test:db": "bun test ./src/lib/pet-search.integration.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1041.0",

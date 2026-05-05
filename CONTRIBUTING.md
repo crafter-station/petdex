@@ -55,7 +55,8 @@ This path is for maintainers and trusted collaborators.
 
 - **Runtime**: Bun (never `npm install`).
 - **Lint/format**: `bun run check` / `bun run format` (Biome).
-- **Tests**: `bun test`.
+- **Tests**: `bun test`. DB-backed search integration tests are explicit:
+  `DATABASE_URL=... bun run test:db`.
 - **Commit style**: conventional commits (`feat:`, `fix:`, `docs:`, etc.).
 
 ## Where to look

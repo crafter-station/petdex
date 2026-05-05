@@ -3,13 +3,14 @@
 // Run: bun test --env-file=.env.local
 
 import { describe, expect, it } from "bun:test";
+import { spawnSync } from "node:child_process";
 
 import {
   posixInstallScript,
-  powershellInstallScript,
   posixNotFoundScript,
-} from "@/lib/install-script";
-import { validateSubmission } from "@/lib/submissions";
+  powershellInstallScript,
+} from "@/lib/install-script-render";
+import { validateSubmission } from "@/lib/submissions-validation";
 import {
   isAllowedAssetUrl,
   isAllowedAvatarUrl,
@@ -66,10 +67,12 @@ describe("isAllowedAssetUrl", () => {
   });
 
   it("blocks LAN / metadata IPs", () => {
-    expect(isAllowedAssetUrl("https://169.254.169.254/latest/meta-data/"))
-      .toBe(false);
-    expect(isAllowedAssetUrl("https://localhost:3000/api/admin/secret"))
-      .toBe(false);
+    expect(isAllowedAssetUrl("https://169.254.169.254/latest/meta-data/")).toBe(
+      false,
+    );
+    expect(isAllowedAssetUrl("https://localhost:3000/api/admin/secret")).toBe(
+      false,
+    );
   });
 
   it("rejects empty / undefined", () => {
@@ -110,8 +113,7 @@ describe("validateSubmission", () => {
   it("rejects shell-injection in petJsonUrl (off allowlist)", () => {
     const r = validateSubmission({
       ...BASE_INPUT,
-      petJsonUrl:
-        "https://evil.example.com/x'; rm -rf $HOME; echo 'pwned",
+      petJsonUrl: "https://evil.example.com/x'; rm -rf $HOME; echo 'pwned",
     });
     expect(r?.ok).toBe(false);
     if (r && r.ok === false) {
@@ -121,6 +123,8 @@ describe("validateSubmission", () => {
 });
 
 describe("posixInstallScript shell-injection", () => {
+  const shAvailable = spawnSync("sh", ["-c", "exit 0"]).status === 0;
+
   const safeBase = {
     slug: "boba",
     displayName: "Boba",
@@ -132,13 +136,14 @@ describe("posixInstallScript shell-injection", () => {
   };
 
   it("escapes single quotes in URLs (sh syntax-checks clean)", () => {
+    if (!shAvailable) return;
+
     // If our hard-quoting was wrong, the script wouldn't parse — `sh -n`
     // would surface a syntax error. We don't actually run it (would touch
     // the filesystem); we only prove the tokenization round-trips.
     const evilUrl = "https://x.com/a'; rm -rf /; echo '";
     const script = posixInstallScript({ ...safeBase, petJsonUrl: evilUrl });
-    const { spawnSync } = require("node:child_process") as typeof import("node:child_process");
-    const r = spawnSync("/bin/sh", ["-n"], { input: script, encoding: "utf8" });
+    const r = spawnSync("sh", ["-n"], { input: script, encoding: "utf8" });
     expect(r.status).toBe(0);
     expect(r.stderr).toBe("");
   });
@@ -184,7 +189,8 @@ describe("powershellInstallScript", () => {
 });
 
 describe("isSameOrigin (CSRF guard)", () => {
-  const { isSameOrigin } = require("@/lib/same-origin") as typeof import("@/lib/same-origin");
+  const { isSameOrigin } =
+    require("@/lib/same-origin") as typeof import("@/lib/same-origin");
 
   function reqWith(headers: Record<string, string>): Request {
     return new Request("https://petdex.crafter.run/api/x", {
@@ -200,13 +206,13 @@ describe("isSameOrigin (CSRF guard)", () => {
   });
 
   it("allows localhost dev", () => {
-    expect(isSameOrigin(reqWith({ origin: "http://localhost:3000" })))
-      .toBe(true);
+    expect(isSameOrigin(reqWith({ origin: "http://localhost:3000" }))).toBe(
+      true,
+    );
   });
 
   it("blocks attacker.com cross-origin POST", () => {
-    expect(isSameOrigin(reqWith({ origin: "https://evil.com" })))
-      .toBe(false);
+    expect(isSameOrigin(reqWith({ origin: "https://evil.com" }))).toBe(false);
   });
 
   it("blocks origin null (e.g. data: pages)", () => {
@@ -214,12 +220,12 @@ describe("isSameOrigin (CSRF guard)", () => {
   });
 
   it("uses Sec-Fetch-Site fallback when Origin missing", () => {
-    expect(
-      isSameOrigin(reqWith({ "sec-fetch-site": "same-origin" })),
-    ).toBe(true);
-    expect(
-      isSameOrigin(reqWith({ "sec-fetch-site": "cross-site" })),
-    ).toBe(false);
+    expect(isSameOrigin(reqWith({ "sec-fetch-site": "same-origin" }))).toBe(
+      true,
+    );
+    expect(isSameOrigin(reqWith({ "sec-fetch-site": "cross-site" }))).toBe(
+      false,
+    );
   });
 
   it("allows non-browser callers (no Origin, no Sec-Fetch)", () => {
@@ -238,14 +244,10 @@ describe("isAllowedAvatarUrl", () => {
   it("allows clerk and known socials", () => {
     expect(isAllowedAvatarUrl("https://img.clerk.com/eyJ...")).toBe(true);
     expect(
-      isAllowedAvatarUrl(
-        "https://avatars.githubusercontent.com/u/12345?v=4",
-      ),
+      isAllowedAvatarUrl("https://avatars.githubusercontent.com/u/12345?v=4"),
     ).toBe(true);
     expect(
-      isAllowedAvatarUrl(
-        "https://storage.googleapis.com/avatars/x.png",
-      ),
+      isAllowedAvatarUrl("https://storage.googleapis.com/avatars/x.png"),
     ).toBe(true);
   });
   it("rejects attacker-controlled host (tracking pixel)", () => {
