@@ -51,6 +51,19 @@ export function dedupePins(slugs: string[]): string[] {
   return out;
 }
 
+export function isPinOnlyProfilePatch(body: unknown): boolean {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return false;
+  const patch = body as Record<string, unknown>;
+  const hasPinMutation =
+    "featuredPetSlugs" in patch || "pin" in patch || "unpin" in patch;
+  const hasIdentityMutation =
+    "displayName" in patch ||
+    "handle" in patch ||
+    "bio" in patch ||
+    "preferredLocale" in patch;
+  return hasPinMutation && !hasIdentityMutation;
+}
+
 export function normalizeProfileDisplayName(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const normalized = value.replace(/\s+/g, " ").trim();

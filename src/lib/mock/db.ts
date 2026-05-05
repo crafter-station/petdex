@@ -16,7 +16,22 @@ import { drizzle } from "drizzle-orm/pglite";
 import * as schema from "../db/schema";
 import { MOCK_USER } from "./index";
 
-let _db: ReturnType<typeof drizzle<typeof schema>> | null = null;
+type MockDbState = {
+  db: ReturnType<typeof drizzle<typeof schema>> | null;
+  initPromise: Promise<void> | null;
+};
+
+const globalMockDb = globalThis as typeof globalThis & {
+  __petdexMockDb?: MockDbState;
+};
+
+if (!globalMockDb.__petdexMockDb) {
+  globalMockDb.__petdexMockDb = {
+    db: null,
+    initPromise: null,
+  };
+}
+const state: MockDbState = globalMockDb.__petdexMockDb;
 
 async function bootstrap(client: PGlite): Promise<void> {
   // Drizzle migrations are SQL files. We run them in order, tolerating
@@ -81,6 +96,40 @@ async function bootstrap(client: PGlite): Promise<void> {
       "image_rejection_reason" text,
       "created_at" timestamp with time zone NOT NULL DEFAULT now(),
       "updated_at" timestamp with time zone NOT NULL DEFAULT now()
+    )`,
+    `CREATE TABLE IF NOT EXISTS "feedback" (
+      "id" text PRIMARY KEY NOT NULL,
+      "kind" text NOT NULL DEFAULT 'suggestion',
+      "status" text NOT NULL DEFAULT 'pending',
+      "message" text NOT NULL,
+      "email" text,
+      "page_url" text,
+      "user_agent" text,
+      "user_id" text,
+      "addressed_at" timestamp with time zone,
+      "archived_at" timestamp with time zone,
+      "admin_note" text,
+      "notify_email" boolean NOT NULL DEFAULT true,
+      "user_last_read_at" timestamp with time zone,
+      "admin_last_read_at" timestamp with time zone,
+      "created_at" timestamp with time zone NOT NULL DEFAULT now()
+    )`,
+    `CREATE TABLE IF NOT EXISTS "feedback_replies" (
+      "id" text PRIMARY KEY NOT NULL,
+      "feedback_id" text NOT NULL,
+      "author_kind" text NOT NULL,
+      "author_user_id" text,
+      "body" text NOT NULL,
+      "created_at" timestamp with time zone NOT NULL DEFAULT now()
+    )`,
+    `CREATE TABLE IF NOT EXISTS "notifications" (
+      "id" text PRIMARY KEY NOT NULL,
+      "user_id" text NOT NULL,
+      "kind" text NOT NULL,
+      "payload" jsonb NOT NULL,
+      "href" text NOT NULL,
+      "read_at" timestamp with time zone,
+      "created_at" timestamp with time zone NOT NULL DEFAULT now()
     )`,
     `ALTER TABLE "submitted_pets" ADD COLUMN IF NOT EXISTS "source" text NOT NULL DEFAULT 'submit'`,
     `ALTER TABLE "submitted_pets" ADD COLUMN IF NOT EXISTS "dominant_color" text`,
@@ -193,14 +242,14 @@ async function seed(client: PGlite): Promise<void> {
 // Bootstrap+seed are run synchronously at module load via top-level
 // await. PGlite's underlying postgres-on-wasm queues exec calls so the
 // schema is fully ready before drizzle's first .select() runs.
-let _initPromise: Promise<void> | null = null;
-
 export function getMockDb() {
-  if (_db) return { db: _db, ready: _initPromise ?? Promise.resolve() };
+  if (state.db) {
+    return { db: state.db, ready: state.initPromise ?? Promise.resolve() };
+  }
 
   const client = new PGlite();
-  _db = drizzle(client, { schema });
-  _initPromise = (async () => {
+  state.db = drizzle(client, { schema });
+  state.initPromise = (async () => {
     await bootstrap(client);
     await seed(client);
     console.log(
@@ -208,13 +257,13 @@ export function getMockDb() {
     );
   })();
 
-  return { db: _db, ready: _initPromise };
+  return { db: state.db, ready: state.initPromise };
 }
 
 // Awaitable used by /src/lib/db/client.ts to block on first import.
 export const mockDbReady = (): Promise<void> => {
-  if (_initPromise) return _initPromise;
+  if (state.initPromise) return state.initPromise;
   // Side-effect of getMockDb seeds _initPromise; ignore the returned db.
   getMockDb();
-  return _initPromise ?? Promise.resolve();
+  return state.initPromise ?? Promise.resolve();
 };

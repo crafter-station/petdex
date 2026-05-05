@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 
 import {
+  isPinOnlyProfilePatch,
   normalizeProfileDisplayName,
   normalizeProfileHandle,
   validateProfileHandle,
@@ -27,5 +28,22 @@ describe("profile identity helpers", () => {
     expect(validateProfileHandle("my pets")).toBe("invalid_format");
     expect(validateProfileHandle("-kevwuzy")).toBe("invalid_format");
     expect(validateProfileHandle("admin")).toBe("reserved");
+  });
+
+  it("classifies pin-only profile patches", () => {
+    expect(isPinOnlyProfilePatch({ featuredPetSlugs: ["boba"] })).toBe(true);
+    expect(isPinOnlyProfilePatch({ pin: { slug: "boba" } })).toBe(true);
+    expect(isPinOnlyProfilePatch({ unpin: { slug: "boba" } })).toBe(true);
+  });
+
+  it("does not classify identity edits as pin-only patches", () => {
+    expect(
+      isPinOnlyProfilePatch({
+        featuredPetSlugs: ["boba"],
+        bio: "tiny pets",
+      }),
+    ).toBe(false);
+    expect(isPinOnlyProfilePatch({ displayName: "Petdex" })).toBe(false);
+    expect(isPinOnlyProfilePatch(null)).toBe(false);
   });
 });

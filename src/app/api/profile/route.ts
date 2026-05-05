@@ -6,12 +6,13 @@ import { and, eq, inArray, ne } from "drizzle-orm";
 import { db, schema } from "@/lib/db/client";
 import {
   dedupePins,
+  isPinOnlyProfilePatch,
   MAX_PINNED_PETS,
   normalizeProfileDisplayName,
   normalizeProfileHandle,
   validateProfileHandle,
 } from "@/lib/profiles";
-import { profileEditRatelimit } from "@/lib/ratelimit";
+import { profileEditRatelimit, profilePinRatelimit } from "@/lib/ratelimit";
 import { requireSameOrigin } from "@/lib/same-origin";
 
 import { defaultLocale, hasLocale, type Locale } from "@/i18n/config";
@@ -39,19 +40,22 @@ export async function PATCH(req: Request): Promise<Response> {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const lim = await profileEditRatelimit.limit(userId);
-  if (!lim.success) {
-    return NextResponse.json(
-      { error: "rate_limited", retryAfter: lim.reset },
-      { status: 429 },
-    );
-  }
-
   let body: PatchBody;
   try {
     body = (await req.json()) as PatchBody;
   } catch {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
+  }
+
+  const limiter = isPinOnlyProfilePatch(body)
+    ? profilePinRatelimit
+    : profileEditRatelimit;
+  const lim = await limiter.limit(userId);
+  if (!lim.success) {
+    return NextResponse.json(
+      { error: "rate_limited", retryAfter: lim.reset },
+      { status: 429 },
+    );
   }
 
   const patch: {
