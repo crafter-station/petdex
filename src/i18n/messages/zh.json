@@ -924,7 +924,9 @@
     "shareToX": "分享到 X",
     "shareToLinkedIn": "分享到 LinkedIn",
     "more": "更多…",
-    "downloadZip": "下载 ZIP"
+    "downloadZip": "下载 ZIP",
+    "removeFromPetdex": "从 Petdex 删除",
+    "removing": "删除中…"
   },
   "petStateViewer": {
     "eyebrow": "状态查看器",

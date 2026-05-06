@@ -771,7 +771,9 @@
     "shareToX": "Share to X",
     "shareToLinkedIn": "Share to LinkedIn",
     "more": "More…",
-    "downloadZip": "Download ZIP"
+    "downloadZip": "Download ZIP",
+    "removeFromPetdex": "Remove from Petdex",
+    "removing": "Removing…"
   },
   "petStateViewer": {
     "eyebrow": "State viewer",
