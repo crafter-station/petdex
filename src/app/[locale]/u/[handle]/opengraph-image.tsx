@@ -17,14 +17,12 @@ import { db, schema } from "@/lib/db/client";
 import { userIdForHandle } from "@/lib/handles";
 import { isAllowedAssetUrl, isAllowedAvatarUrl } from "@/lib/url-allowlist";
 
-export const runtime = "nodejs";
 export const contentType = "image/png";
 export const size = { width: 1200, height: 630 };
 export const alt = "Petdex profile preview";
 // 24h ISR — same reasoning as the per-pet OG. Profile bios change
 // rarely and the unfurl bots that hit this path are noisy. Cached
 // PNG saves Fluid CPU + Origin Transfer on every Discord/X share.
-export const revalidate = 86400;
 
 const FRAME_W = 192;
 const FRAME_H = 208;

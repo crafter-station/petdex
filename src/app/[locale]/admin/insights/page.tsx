@@ -14,8 +14,6 @@ import {
 import { AdminFeatureToggle } from "@/components/admin-feature-toggle";
 import { AdminVelocityChart } from "@/components/admin-velocity-chart";
 
-export const dynamic = "force-dynamic";
-
 export const metadata = {
   title: "Insights — Petdex admin",
   robots: { index: false, follow: false },

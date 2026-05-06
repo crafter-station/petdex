@@ -9,8 +9,6 @@ import { db, schema } from "@/lib/db/client";
 
 import { FeedbackThread } from "@/components/feedback-thread";
 
-export const dynamic = "force-dynamic";
-
 export const metadata = {
   title: "Feedback thread — Admin",
   robots: { index: false, follow: false },

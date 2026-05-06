@@ -1,14 +1,11 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { notFound } from "next/navigation";
+import { Suspense } from "react";
 
 import { Analytics } from "@vercel/analytics/next";
 import { NextIntlClientProvider } from "next-intl";
-import {
-  getMessages,
-  getTranslations,
-  setRequestLocale,
-} from "next-intl/server";
+import { getTranslations, setRequestLocale } from "next-intl/server";
 
 import { AnnouncementQueue } from "@/components/announcement-queue";
 import { FeedbackWidget } from "@/components/feedback-widget";
@@ -17,6 +14,9 @@ import { ProfileAnnouncementModal } from "@/components/profile-announcement-moda
 import { AppProviders } from "@/components/theme-providers";
 
 import { hasLocale, locales } from "@/i18n/config";
+import enMessages from "@/i18n/messages/en.json";
+import esMessages from "@/i18n/messages/es.json";
+import zhMessages from "@/i18n/messages/zh.json";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -34,6 +34,11 @@ type Props = {
 };
 
 const SITE_URL = "https://petdex.crafter.run";
+const messagesByLocale = {
+  en: enMessages,
+  es: esMessages,
+  zh: zhMessages,
+};
 
 export function generateStaticParams() {
   return locales.map((locale) => ({ locale }));
@@ -90,7 +95,7 @@ export default async function LocaleLayout({ children, params }: Props) {
   }
 
   setRequestLocale(locale);
-  const messages = await getMessages();
+  const messages = messagesByLocale[locale];
 
   return (
     <html
@@ -99,16 +104,26 @@ export default async function LocaleLayout({ children, params }: Props) {
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-background text-foreground">
-        <NextIntlClientProvider messages={messages}>
-          <AppProviders>
-            <HeaderStateProvider>
-              {children}
-              <FeedbackWidget />
-              <AnnouncementQueue />
-              <ProfileAnnouncementModal />
-              <Analytics />
-            </HeaderStateProvider>
-          </AppProviders>
+        <NextIntlClientProvider
+          formats={{}}
+          locale={locale}
+          messages={messages}
+          now={new Date(0)}
+          timeZone="UTC"
+        >
+          <Suspense fallback={null}>
+            <AppProviders>
+              <HeaderStateProvider>
+                {children}
+                <Suspense fallback={null}>
+                  <FeedbackWidget />
+                  <AnnouncementQueue />
+                  <ProfileAnnouncementModal />
+                </Suspense>
+                <Analytics />
+              </HeaderStateProvider>
+            </AppProviders>
+          </Suspense>
         </NextIntlClientProvider>
       </body>
     </html>

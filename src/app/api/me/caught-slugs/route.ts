@@ -4,8 +4,6 @@ import { auth } from "@clerk/nextjs/server";
 
 import { getCaughtSlugSet } from "@/lib/catch-status";
 
-export const runtime = "nodejs";
-
 // Per-visitor list of pet slugs the signed-in user has caught (liked).
 // Pulled out of the home page SSR so the gallery can stay statically
 // rendered. The client fetches this after hydration and applies the

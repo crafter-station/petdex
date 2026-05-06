@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useLocale, useTranslations } from "next-intl";
 import { useSearchParams } from "next/navigation";
+
+import { useLocale, useTranslations } from "next-intl";
 
 import { localizePath } from "@/i18n/config";
 

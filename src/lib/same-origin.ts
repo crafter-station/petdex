@@ -54,10 +54,10 @@ export function isSameOrigin(req: Request): boolean {
 
 export function requireSameOrigin(req: Request): Response | null {
   if (!isSameOrigin(req)) {
-    return new Response(
-      JSON.stringify({ error: "csrf_blocked" }),
-      { status: 403, headers: { "Content-Type": "application/json" } },
-    );
+    return new Response(JSON.stringify({ error: "csrf_blocked" }), {
+      status: 403,
+      headers: { "Content-Type": "application/json" },
+    });
   }
   return null;
 }

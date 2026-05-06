@@ -24,8 +24,6 @@ export async function generateMetadata({
   };
 }
 
-export const dynamic = "force-dynamic";
-
 type SP = { status?: string };
 
 type Filter =

@@ -8,8 +8,6 @@ import { setLikeCount } from "@/lib/db/metrics";
 import { likeRatelimit } from "@/lib/ratelimit";
 import { requireSameOrigin } from "@/lib/same-origin";
 
-export const runtime = "nodejs";
-
 type Params = { slug: string };
 
 export async function POST(

@@ -73,8 +73,6 @@ export function computeStats(
       maxInstalls,
     ),
     loved: getNormalizedLogScore(pet.metrics?.likeCount ?? 0, maxLikes),
-    freshness: Math.round(
-      100 - clamp((daysSinceApproved / 90) * 100, 0, 100),
-    ),
+    freshness: Math.round(100 - clamp((daysSinceApproved / 90) * 100, 0, 100)),
   };
 }

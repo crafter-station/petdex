@@ -29,9 +29,7 @@ export function getPublicAdminUserIds(): Set<string> {
   );
 }
 
-export function isAdminClientSafe(
-  userId: string | null | undefined,
-): boolean {
+export function isAdminClientSafe(userId: string | null | undefined): boolean {
   if (!userId) return false;
   return getPublicAdminUserIds().has(userId);
 }

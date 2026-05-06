@@ -5,7 +5,6 @@
 import { sql } from "drizzle-orm";
 
 import { db } from "@/lib/db/client";
-
 import { formatBatchLabel } from "@/lib/dex-batch";
 
 export async function getAvailableBatches(): Promise<

@@ -13,8 +13,6 @@ import { requireSameOrigin } from "@/lib/same-origin";
 import { refreshSimilarityFor } from "@/lib/similarity";
 import { getPreferredLocaleForUser } from "@/lib/user-locale";
 
-export const runtime = "nodejs";
-
 type Params = { id: string };
 
 type PatchBody = {
@@ -54,10 +52,7 @@ export async function PATCH(
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
   if (!row.pendingSubmittedAt) {
-    return NextResponse.json(
-      { error: "no_pending_edit" },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: "no_pending_edit" }, { status: 400 });
   }
 
   if (body.action === "approve") {

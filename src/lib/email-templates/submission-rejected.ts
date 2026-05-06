@@ -1,5 +1,11 @@
+import {
+  normalizeLocale,
+  p,
+  petdexUrl,
+  wrapEmail,
+} from "@/lib/email-templates/shared";
+
 import type { Locale } from "@/i18n/config";
-import { normalizeLocale, p, petdexUrl, wrapEmail } from "@/lib/email-templates/shared";
 
 type Vars = {
   petName: string;
@@ -17,7 +23,8 @@ export function renderSubmissionRejectedEmail(
       ? {
           subject: `Tu envío a Petdex necesita cambios — ${vars.petName}`,
           intro: `Hola, tu mascota "${vars.petName}" no fue aprobada en esta ronda.`,
-          noReason: "No se indicó una razón. Si quieres, itera y vuelve a enviarla.",
+          noReason:
+            "No se indicó una razón. Si quieres, itera y vuelve a enviarla.",
           cta: `Puedes enviar una versión revisada aquí: ${submitUrl}`,
         }
       : current === "zh"
@@ -30,13 +37,20 @@ export function renderSubmissionRejectedEmail(
         : {
             subject: `Your Petdex submission needs changes — ${vars.petName}`,
             intro: `Hey, your pet "${vars.petName}" wasn't approved this round.`,
-            noReason: "No reason was provided. Feel free to iterate and resubmit.",
+            noReason:
+              "No reason was provided. Feel free to iterate and resubmit.",
             cta: `You can submit a revised version here: ${submitUrl}`,
           };
 
   const reasonLine = vars.reason ? `Reason: ${vars.reason}` : copy.noReason;
-  const text = [copy.intro, "", reasonLine, "", copy.cta, "", "Petdex"].join("\n");
-  const html = wrapEmail(copy.subject, [p(copy.intro), p(reasonLine), p(copy.cta)]);
+  const text = [copy.intro, "", reasonLine, "", copy.cta, "", "Petdex"].join(
+    "\n",
+  );
+  const html = wrapEmail(copy.subject, [
+    p(copy.intro),
+    p(reasonLine),
+    p(copy.cta),
+  ]);
 
   return { subject: copy.subject, html, text };
 }

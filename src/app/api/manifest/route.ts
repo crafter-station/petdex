@@ -3,14 +3,12 @@ import { NextResponse } from "next/server";
 import { logManifestFetch } from "@/lib/manifest-telemetry";
 import { getAllApprovedPets } from "@/lib/pets";
 
-export const runtime = "nodejs";
 // Cache the slim manifest at the edge for 5 minutes with a 1h
 // stale-while-revalidate window. Pet listings turn over slowly and the
 // CLI hits this endpoint on every `petdex list` / `petdex install`
 // invocation. Without edge cache every CLI install woke a function and
 // burned an invocation; the s-maxage hint below was previously
 // neutralized by force-dynamic.
-export const revalidate = 300;
 
 // Slim public manifest. Returns only the fields the CLI strictly
 // needs: slug, displayName, kind, submittedBy display name, and the

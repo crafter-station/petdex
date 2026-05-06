@@ -5,8 +5,6 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 
 import { db, schema } from "@/lib/db/client";
 
-export const runtime = "nodejs";
-
 // GET /api/notifications -> last 20 notifications for the current user
 // + unread count. Bell polls this every 60s.
 export async function GET() {

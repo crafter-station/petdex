@@ -48,9 +48,6 @@ type PageProps = {
   }>;
 };
 
-export const dynamicParams = true;
-export const revalidate = 60;
-
 type DexNavPet = {
   slug: string;
   displayName: string;

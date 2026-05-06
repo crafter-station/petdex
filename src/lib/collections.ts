@@ -1,3 +1,5 @@
+import { cacheLife, cacheTag } from "next/cache";
+
 import { and, asc, desc, eq, getTableColumns, inArray } from "drizzle-orm";
 
 import { db, schema } from "@/lib/db/client";
@@ -19,6 +21,11 @@ export type PetCollectionWithPets = PetCollection & {
 export async function getFeaturedCollections(
   limit = 3,
 ): Promise<PetCollectionWithPets[]> {
+  "use cache";
+  cacheLife("hours");
+  cacheTag("gallery");
+  cacheTag("collections");
+
   let rows: PetCollection[];
   try {
     rows = await db
@@ -36,6 +43,10 @@ export async function getFeaturedCollections(
 }
 
 export async function getAllCollections(): Promise<PetCollectionWithPets[]> {
+  "use cache";
+  cacheLife("hours");
+  cacheTag("collections");
+
   let rows: PetCollection[];
   try {
     rows = await db
@@ -53,6 +64,11 @@ export async function getAllCollections(): Promise<PetCollectionWithPets[]> {
 export async function getCollection(
   slug: string,
 ): Promise<PetCollectionWithPets | null> {
+  "use cache";
+  cacheLife("hours");
+  cacheTag("collections");
+  cacheTag(`collection:${slug}`);
+
   let row: PetCollection | undefined;
   try {
     row = await db.query.petCollections.findFirst({
@@ -219,6 +235,11 @@ export async function getCollectionCandidatesForPet(
 export async function getCollectionsContainingPet(
   petSlug: string,
 ): Promise<Array<Pick<PetCollection, "slug" | "title" | "ownerId">>> {
+  "use cache";
+  cacheLife("hours");
+  cacheTag("collections");
+  cacheTag(`pet:${petSlug}`);
+
   try {
     const rows = await db
       .select({

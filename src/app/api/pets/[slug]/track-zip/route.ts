@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
+
 import { eq } from "drizzle-orm";
 
 import { db, schema } from "@/lib/db/client";
 import { incrementZipDownloadCount } from "@/lib/db/metrics";
 import { trackZipRatelimit } from "@/lib/ratelimit";
 import { requireSameOrigin } from "@/lib/same-origin";
-
-export const runtime = "nodejs";
 
 type Params = { slug: string };
 

@@ -6,7 +6,7 @@ import { ExternalLink, Heart, TerminalSquare } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 
 import { getCaughtSlugSet } from "@/lib/catch-status";
-import { getCollection } from "@/lib/collections";
+import { getAllCollections, getCollection } from "@/lib/collections";
 import { getDexNumberMap } from "@/lib/dex";
 import { buildLocaleAlternates } from "@/lib/locale-routing";
 import { resolveOwnerCredits } from "@/lib/owner-credit";
@@ -17,11 +17,14 @@ import { PetSprite } from "@/components/pet-sprite";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 
-export const dynamic = "force-dynamic";
-
 const SITE_URL = "https://petdex.crafter.run";
 
 type PageProps = { params: Promise<{ slug: string; locale: string }> };
+
+export async function generateStaticParams() {
+  const collections = await getAllCollections();
+  return collections.map((collection) => ({ slug: collection.slug }));
+}
 
 export async function generateMetadata({ params }: PageProps) {
   const { slug } = await params;

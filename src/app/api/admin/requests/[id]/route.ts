@@ -8,8 +8,6 @@ import { db, schema } from "@/lib/db/client";
 import { createNotification } from "@/lib/notifications";
 import { requireSameOrigin } from "@/lib/same-origin";
 
-export const runtime = "nodejs";
-
 type Params = { id: string };
 
 type PatchBody = {

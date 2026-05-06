@@ -15,8 +15,6 @@ import {
   validateSubmission,
 } from "@/lib/submissions";
 
-export const runtime = "nodejs";
-
 function clientIp(req: Request): string {
   const xff = req.headers.get("x-forwarded-for") ?? "";
   return xff.split(",")[0]?.trim() || "anon";

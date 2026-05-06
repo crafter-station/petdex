@@ -98,9 +98,7 @@ const ALLOWED_CREDIT_HOSTS = new Set<string>([
   "youtube.com",
 ]);
 
-export function isWellKnownCreditUrl(
-  raw: string | null | undefined,
-): boolean {
+export function isWellKnownCreditUrl(raw: string | null | undefined): boolean {
   if (!raw) return false;
   let url: URL;
   try {

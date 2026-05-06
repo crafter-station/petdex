@@ -5,8 +5,6 @@
 
 import { NextResponse } from "next/server";
 
-export const runtime = "nodejs";
-
 const DEFAULT_ISSUER = "https://clerk.petdex.crafter.run";
 const DEFAULT_CLIENT_ID = "LcThwEayl6KAA1Qm";
 const DEFAULT_SCOPES = ["profile", "email", "openid", "offline_access"];

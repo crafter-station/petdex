@@ -2,8 +2,6 @@ import { NextResponse } from "next/server";
 
 import { getVariantsFor } from "@/lib/variants";
 
-export const runtime = "nodejs";
-
 type Params = { slug: string };
 
 export async function GET(

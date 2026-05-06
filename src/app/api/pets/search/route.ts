@@ -5,7 +5,6 @@ import { SEARCH_LIMITS, type SortKey, searchPets } from "@/lib/pet-search";
 import { readShuffleSeed } from "@/lib/shuffle-seed";
 import { PET_KINDS, PET_VIBES, type PetKind, type PetVibe } from "@/lib/types";
 
-export const runtime = "nodejs";
 // Search responses for non-curated sorts are deterministic per-query
 // and can sit in the edge cache. Curated falls back to per-visitor
 // (shuffle seed cookie) so it's tagged below as private. Letting Next

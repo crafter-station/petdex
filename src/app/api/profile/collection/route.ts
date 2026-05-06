@@ -1,3 +1,4 @@
+import { updateTag } from "next/cache";
 import { NextResponse } from "next/server";
 
 import { auth } from "@clerk/nextjs/server";
@@ -7,9 +8,6 @@ import { canManageCreatorCollections } from "@/lib/collection-access";
 import { db, schema } from "@/lib/db/client";
 import { validateProfileHandle } from "@/lib/profiles";
 import { requireSameOrigin } from "@/lib/same-origin";
-
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
 
 const MAX_PETS = 24;
 const MAX_TITLE = 80;
@@ -135,6 +133,10 @@ export async function PATCH(req: Request): Promise<Response> {
       })),
     );
   }
+
+  updateTag("collections");
+  updateTag(`collection:${collection.slug}`);
+  updateTag(`profile:${userId}`);
 
   return NextResponse.json({
     ok: true,

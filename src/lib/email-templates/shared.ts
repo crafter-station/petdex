@@ -1,4 +1,4 @@
-import { defaultLocale, localizePath, type Locale } from "@/i18n/config";
+import { defaultLocale, type Locale, localizePath } from "@/i18n/config";
 
 const SITE_URL = "https://petdex.crafter.run";
 

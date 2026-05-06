@@ -1,3 +1,5 @@
+import { updateTag } from "next/cache";
+
 import { eq } from "drizzle-orm";
 import { Resend } from "resend";
 
@@ -110,6 +112,9 @@ export async function applySubmissionAction(
   let row = updated;
   if (body.action === "approve" && !options.skipSideEffects) {
     row = await runPostApprovalEffects(row, actor, db);
+    updateTag("gallery");
+    updateTag(`pet:${row.slug}`);
+    updateTag(`profile:${row.ownerId}`);
   }
 
   if (

@@ -15,8 +15,6 @@ import { db, schema } from "@/lib/db/client";
 import { submitRatelimit } from "@/lib/ratelimit";
 import { requireSameOrigin } from "@/lib/same-origin";
 
-export const runtime = "nodejs";
-
 type Body = { petSlug?: string; note?: string };
 
 export async function POST(

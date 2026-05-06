@@ -13,14 +13,12 @@ import { isAllowedAssetUrl } from "@/lib/url-allowlist";
 
 import { defaultLocale, hasLocale } from "@/i18n/config";
 
-export const runtime = "nodejs";
 export const contentType = "image/png";
 export const size = { width: 1200, height: 630 };
 export const alt = "Petdex collection preview";
 // 24h ISR for the same reason the per-pet OG caches: every Discord /
 // Slack / X unfurl was re-running sharp + 6 sprite fetches before
 // this. See per-pet opengraph-image.tsx.
-export const revalidate = 86400;
 
 const FRAME_W = 192;
 const FRAME_H = 208;

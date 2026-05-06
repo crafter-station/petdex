@@ -13,7 +13,6 @@ import { isAllowedAssetUrl } from "@/lib/url-allowlist";
 
 import { defaultLocale, hasLocale } from "@/i18n/config";
 
-export const runtime = "nodejs";
 export const contentType = "image/png";
 export const size = { width: 1200, height: 630 };
 export const alt = "Petdex pet preview";
@@ -23,7 +22,6 @@ export const alt = "Petdex pet preview";
 // / Slack / X unfurl re-runs sharp + the spritesheet fetch, which is
 // the single biggest line on the Vercel bill (Fluid CPU + Origin
 // Transfer combined). 24h ISR + immutable headers neutralize it.
-export const revalidate = 86400;
 
 // Petdex spritesheets are an 8-column × 9-row grid (max frames per state ×
 // state count). Per-frame size is 192×208 — most states use fewer than 8

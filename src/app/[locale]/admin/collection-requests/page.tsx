@@ -12,8 +12,6 @@ export const metadata = {
   robots: { index: false, follow: false },
 };
 
-export const dynamic = "force-dynamic";
-
 export default async function AdminCollectionRequestsPage() {
   // Pending first (newest first), then anything decided in the last
   // ~30 days for a quick audit trail. Older history can stay paged

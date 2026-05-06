@@ -5,8 +5,6 @@ import { eq } from "drizzle-orm";
 
 import { db, schema } from "@/lib/db/client";
 
-export const runtime = "nodejs";
-
 // Tells the client menu whether the current viewer is allowed to hard-
 // delete this pet. The check has to happen server-side because the
 // public PetdexPet shape deliberately omits ownerId (we don't want

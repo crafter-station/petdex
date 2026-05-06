@@ -16,8 +16,6 @@ import sharp from "sharp";
 import { db, schema } from "@/lib/db/client";
 import { isAllowedAssetUrl } from "@/lib/url-allowlist";
 
-export const runtime = "nodejs";
-
 // Per-pet thumbnails are content-addressed by slug; the underlying
 // sheet only changes on resubmit. One year + immutable lets the CDN +
 // browser cache hold them indefinitely. Resubmits already mint a new

@@ -1,12 +1,10 @@
 import { NextResponse } from "next/server";
 
 import { auth } from "@clerk/nextjs/server";
-import { and, eq, inArray, sql as dsql } from "drizzle-orm";
+import { and, sql as dsql, eq, inArray } from "drizzle-orm";
 
 import { isAdmin } from "@/lib/admin";
 import { db, schema } from "@/lib/db/client";
-
-export const runtime = "nodejs";
 
 // GET /api/feedback/unread -> { count, role }
 //

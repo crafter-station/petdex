@@ -1,7 +1,8 @@
 import { eq } from "drizzle-orm";
 
-import { defaultLocale, hasLocale, type Locale } from "@/i18n/config";
 import { db, schema } from "@/lib/db/client";
+
+import { defaultLocale, hasLocale, type Locale } from "@/i18n/config";
 
 export async function getPreferredLocaleForUser(
   userId: string | null | undefined,

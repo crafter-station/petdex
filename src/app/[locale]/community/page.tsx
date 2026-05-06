@@ -15,7 +15,6 @@ import { JsonLd } from "@/components/json-ld";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 
-export const dynamic = "force-static";
 const SITE_URL = "https://petdex.crafter.run";
 
 export async function generateMetadata() {

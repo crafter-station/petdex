@@ -22,8 +22,6 @@ export const metadata = {
   robots: { index: false, follow: false },
 };
 
-export const dynamic = "force-dynamic";
-
 const KIND_META: Record<
   string,
   { label: string; tone: string; icon: React.ReactNode }
