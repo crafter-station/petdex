@@ -119,3 +119,16 @@ export const profilePinRatelimit = createRatelimit({
   limiter: Ratelimit.slidingWindow(60, "24 h"),
   prefix: "petdex:profile-pin",
 });
+
+// /api/manifest/full pulls the full pet catalog with descriptions,
+// tags, install commands, page URLs, and asset paths. It's auth-gated
+// so it only fires for signed-in users, but the response is bigger
+// than slim and re-runs a full DB scan on every hit. 120 reqs/hour
+// per user covers any reasonable CLI / dashboard / scripting workflow
+// (CLI does 1 per `petdex install`, ~50/h is the realistic ceiling)
+// while shutting down a loop. Keyed by userId.
+export const manifestFullRatelimit = createRatelimit({
+  redis,
+  limiter: Ratelimit.slidingWindow(120, "1 h"),
+  prefix: "petdex:manifest-full",
+});
