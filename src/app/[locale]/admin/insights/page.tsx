@@ -1,15 +1,17 @@
 import Link from "next/link";
 
-import { Heart, Plus, TerminalSquare, Users } from "lucide-react";
+import { Heart, Plus, Star, TerminalSquare, Users } from "lucide-react";
 
 import {
   getActiveCreators,
+  getCurrentlyFeatured,
   getHiddenHits,
   getOverviewStats,
   getQueueDepth,
   getSubmissionVelocity,
 } from "@/lib/admin-insights";
 
+import { AdminFeatureToggle } from "@/components/admin-feature-toggle";
 import { AdminVelocityChart } from "@/components/admin-velocity-chart";
 
 export const dynamic = "force-dynamic";
@@ -20,14 +22,21 @@ export const metadata = {
 };
 
 export default async function AdminInsightsPage() {
-  const [overview, queueDepth, velocity, hiddenHits, activeCreators] =
-    await Promise.all([
-      getOverviewStats(),
-      getQueueDepth(),
-      getSubmissionVelocity(24),
-      getHiddenHits(8),
-      getActiveCreators(7, 12),
-    ]);
+  const [
+    overview,
+    queueDepth,
+    velocity,
+    hiddenHits,
+    activeCreators,
+    currentlyFeatured,
+  ] = await Promise.all([
+    getOverviewStats(),
+    getQueueDepth(),
+    getSubmissionVelocity(24),
+    getHiddenHits(8),
+    getActiveCreators(7, 12),
+    getCurrentlyFeatured(24),
+  ]);
 
   return (
     <section className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-5 pb-16 md:px-8">
@@ -162,7 +171,7 @@ export default async function AdminInsightsPage() {
                       {pet.slug}
                     </span>
                   </div>
-                  <div className="flex items-center gap-4 font-mono text-[11px] tracking-[0.16em] text-muted-2 uppercase">
+                  <div className="flex flex-wrap items-center gap-3 font-mono text-[11px] tracking-[0.16em] text-muted-2 uppercase">
                     <span className="inline-flex items-center gap-1">
                       <TerminalSquare className="size-3" />
                       {pet.installCount}
@@ -174,10 +183,79 @@ export default async function AdminInsightsPage() {
                     <span className="rounded-full bg-chip-success-bg px-2 py-0.5 text-chip-success-fg">
                       {ratio}× ratio
                     </span>
+                    <AdminFeatureToggle
+                      petId={pet.id}
+                      initialFeatured={false}
+                      petName={pet.displayName}
+                    />
                   </div>
                 </li>
               );
             })}
+          </ul>
+        )}
+      </section>
+
+      {/* Currently featured */}
+      <section className="rounded-3xl border border-border-base bg-surface/80 p-5 backdrop-blur md:p-6">
+        <header className="mb-4 flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <p className="inline-flex items-center gap-1.5 font-mono text-[10px] tracking-[0.22em] text-brand uppercase">
+              <Star className="size-3 fill-current" />
+              Currently featured
+            </p>
+            <h2 className="mt-1 text-xl font-semibold tracking-tight text-foreground md:text-2xl">
+              {currentlyFeatured.length === 0
+                ? "No pets featured"
+                : currentlyFeatured.length === 1
+                  ? "1 pet featured"
+                  : `${currentlyFeatured.length} pets featured`}
+            </h2>
+            <p className="mt-1 text-xs text-muted-3">
+              Featured pets land in the home hero strip and the curated sort's
+              top tier. Demote stale ones to free up the slot.
+            </p>
+          </div>
+        </header>
+        {currentlyFeatured.length === 0 ? (
+          <p className="text-sm text-muted-3">
+            Promote a hidden hit above or flip the star on a pet from the queue.
+          </p>
+        ) : (
+          <ul className="divide-y divide-black/[0.05] dark:divide-white/[0.05]">
+            {currentlyFeatured.map((pet) => (
+              <li
+                key={pet.slug}
+                className="flex flex-wrap items-center justify-between gap-3 py-2.5"
+              >
+                <div className="flex flex-col">
+                  <Link
+                    href={`/pets/${pet.slug}`}
+                    className="font-medium text-foreground transition hover:text-brand"
+                  >
+                    {pet.displayName}
+                  </Link>
+                  <span className="font-mono text-[10px] tracking-[0.18em] text-muted-3 uppercase">
+                    {pet.slug}
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-3 font-mono text-[11px] tracking-[0.16em] text-muted-2 uppercase">
+                  <span className="inline-flex items-center gap-1">
+                    <TerminalSquare className="size-3" />
+                    {pet.installCount}
+                  </span>
+                  <span className="inline-flex items-center gap-1">
+                    <Heart className="size-3" />
+                    {pet.likeCount}
+                  </span>
+                  <AdminFeatureToggle
+                    petId={pet.id}
+                    initialFeatured={true}
+                    petName={pet.displayName}
+                  />
+                </div>
+              </li>
+            ))}
           </ul>
         )}
       </section>

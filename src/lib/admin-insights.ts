@@ -105,6 +105,7 @@ export async function getQueueDepth(): Promise<QueueDepth> {
 }
 
 export type HiddenHit = {
+  id: string;
   slug: string;
   displayName: string;
   installCount: number;
@@ -121,6 +122,7 @@ export type HiddenHit = {
 export async function getHiddenHits(limit = 10): Promise<HiddenHit[]> {
   const out = (await db.execute(sql`
     SELECT
+      p.id,
       p.slug,
       p.display_name,
       COALESCE(m.install_count, 0)      AS install_count,
@@ -139,6 +141,7 @@ export async function getHiddenHits(limit = 10): Promise<HiddenHit[]> {
     LIMIT ${limit}
   `)) as unknown as {
     rows: Array<{
+      id: string;
       slug: string;
       display_name: string;
       install_count: number | string;
@@ -148,10 +151,62 @@ export async function getHiddenHits(limit = 10): Promise<HiddenHit[]> {
     }>;
   };
   return (out.rows ?? []).map((row) => ({
+    id: row.id,
     slug: row.slug,
     displayName: row.display_name,
     installCount: Number(row.install_count),
     zipDownloadCount: Number(row.zip_download_count),
+    likeCount: Number(row.like_count),
+    approvedAt:
+      row.approved_at instanceof Date
+        ? row.approved_at.toISOString()
+        : (row.approved_at as string | null),
+  }));
+}
+
+export type FeaturedPet = {
+  id: string;
+  slug: string;
+  displayName: string;
+  installCount: number;
+  likeCount: number;
+  approvedAt: string | null;
+};
+
+// Pets currently flagged featured = true. Surfaces in the insights
+// dashboard so the admin can see what's promoted and rotate stale
+// entries (low install count relative to peers means the slot would
+// be better used by something else).
+export async function getCurrentlyFeatured(limit = 24): Promise<FeaturedPet[]> {
+  const out = (await db.execute(sql`
+    SELECT
+      p.id,
+      p.slug,
+      p.display_name,
+      COALESCE(m.install_count, 0) AS install_count,
+      COALESCE(m.like_count, 0)    AS like_count,
+      p.approved_at
+    FROM submitted_pets p
+    LEFT JOIN pet_metrics m ON m.pet_slug = p.slug
+    WHERE p.status = 'approved'
+      AND p.featured = true
+    ORDER BY m.install_count DESC NULLS LAST, p.approved_at DESC NULLS LAST
+    LIMIT ${limit}
+  `)) as unknown as {
+    rows: Array<{
+      id: string;
+      slug: string;
+      display_name: string;
+      install_count: number | string;
+      like_count: number | string;
+      approved_at: string | Date | null;
+    }>;
+  };
+  return (out.rows ?? []).map((row) => ({
+    id: row.id,
+    slug: row.slug,
+    displayName: row.display_name,
+    installCount: Number(row.install_count),
     likeCount: Number(row.like_count),
     approvedAt:
       row.approved_at instanceof Date

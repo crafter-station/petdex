@@ -20,6 +20,8 @@ import {
 import type { SubmittedPet } from "@/lib/db/schema";
 import { petStates } from "@/lib/pet-states";
 
+import { AdminFeatureToggle } from "@/components/admin-feature-toggle";
+
 type AdminReviewRowProps = {
   pet: SubmittedPet;
   stateCount: number;
@@ -422,19 +424,27 @@ export function AdminReviewRow({
             </button>
           </>
         ) : status === "approved" ? (
-          <button
-            type="button"
-            onClick={() => void takedown()}
-            disabled={busy}
-            className="inline-flex h-9 items-center justify-center gap-1.5 rounded-full border border-chip-danger-fg/30 bg-chip-danger-bg px-4 text-xs font-medium text-chip-danger-fg transition hover:border-chip-danger-fg/50 disabled:opacity-60"
-          >
-            {busy ? (
-              <Loader2 className="size-3.5 animate-spin" />
-            ) : (
-              <Trash2 className="size-3.5" />
-            )}
-            Take down
-          </button>
+          <>
+            <AdminFeatureToggle
+              petId={pet.id}
+              initialFeatured={pet.featured}
+              petName={pet.displayName}
+              variant="solid"
+            />
+            <button
+              type="button"
+              onClick={() => void takedown()}
+              disabled={busy}
+              className="inline-flex h-9 items-center justify-center gap-1.5 rounded-full border border-chip-danger-fg/30 bg-chip-danger-bg px-4 text-xs font-medium text-chip-danger-fg transition hover:border-chip-danger-fg/50 disabled:opacity-60"
+            >
+              {busy ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Trash2 className="size-3.5" />
+              )}
+              Take down
+            </button>
+          </>
         ) : null}
       </div>
       <SimilarPanel petId={pet.id} status={status} />
