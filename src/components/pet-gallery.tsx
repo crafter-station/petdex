@@ -744,9 +744,16 @@ export function PetCard({
       : undefined;
 
   return (
+    // The has-[] selector lifts this card above its row siblings while
+    // the action menu is open. Without it the dropdown gets clipped by
+    // the next card down: each card has its own stacking context (from
+    // backdrop-blur + the hover translate), so a z-index inside the
+    // dropdown can never climb above a later sibling's context. The
+    // PetActionMenu trigger button toggles aria-expanded, which is the
+    // signal we hook here.
     <article
       style={accentStyle}
-      className={`group relative flex h-full flex-col rounded-3xl border bg-surface/76 backdrop-blur transition hover:-translate-y-0.5 hover:bg-white hover:shadow-xl hover:shadow-blue-950/10 ${
+      className={`group relative flex h-full flex-col rounded-3xl border bg-surface/76 backdrop-blur transition has-[[aria-expanded=true]]:z-30 hover:-translate-y-0.5 hover:bg-white hover:shadow-xl hover:shadow-blue-950/10 ${
         pet.featured
           ? "border-brand-light/45 shadow-[0_0_0_1px_rgba(100,120,246,0.18),0_18px_45px_-22px_rgba(82,102,234,0.5)]"
           : pet.dominantColor

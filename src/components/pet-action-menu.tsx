@@ -372,7 +372,7 @@ export function PetActionMenu({ pet, variant = "card", ownerActions }: Props) {
                   target="_blank"
                   rel="noreferrer"
                   onClick={onZipClick}
-                  className="flex items-center gap-2.5 border-t border-black/[0.06] px-3 py-2.5 text-sm text-muted-2 transition hover:bg-[#f4f6ff] hover:text-foreground dark:border-white/[0.06]"
+                  className="flex items-center gap-2.5 border-t border-black/[0.06] px-3 py-2.5 text-sm text-muted-2 transition hover:bg-surface-muted hover:text-foreground dark:border-white/[0.06]"
                 >
                   <Download className="size-4" />
                   <span className="flex-1">{t("downloadZip")}</span>
@@ -407,7 +407,7 @@ export function PetActionMenu({ pet, variant = "card", ownerActions }: Props) {
                 <Link
                   href="/submit"
                   onClick={() => setOpen(false)}
-                  className="flex items-center gap-2.5 border-t border-black/[0.06] px-3 py-2.5 text-sm text-foreground transition hover:bg-[#f4f6ff] dark:border-white/[0.06]"
+                  className="flex items-center gap-2.5 border-t border-black/[0.06] px-3 py-2.5 text-sm text-foreground transition hover:bg-surface-muted dark:border-white/[0.06]"
                 >
                   <Plus className="size-4" />
                   <span className="flex-1">{t("submitNewVersion")}</span>
@@ -419,7 +419,7 @@ export function PetActionMenu({ pet, variant = "card", ownerActions }: Props) {
                 <Link
                   href={`/pets/${pet.slug}#edit`}
                   onClick={() => setOpen(false)}
-                  className="flex items-center gap-2.5 border-t border-black/[0.06] px-3 py-2.5 text-sm text-foreground transition hover:bg-[#f4f6ff] dark:border-white/[0.06]"
+                  className="flex items-center gap-2.5 border-t border-black/[0.06] px-3 py-2.5 text-sm text-foreground transition hover:bg-surface-muted dark:border-white/[0.06]"
                 >
                   <Pencil className="size-4" />
                   <span className="flex-1">{t("editDetails")}</span>
@@ -483,7 +483,7 @@ function MenuItem({ icon, label, hint, onClick }: MenuItemProps) {
           e.preventDefault();
           onClick();
         }}
-        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-muted-2 transition hover:bg-[#f4f6ff] hover:text-foreground"
+        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-muted-2 transition hover:bg-surface-muted hover:text-foreground"
       >
         {icon}
         <span className="flex flex-col">
