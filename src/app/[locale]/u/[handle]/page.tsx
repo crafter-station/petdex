@@ -27,6 +27,7 @@ import { ProfileAnalytics } from "@/components/profile-analytics";
 import { ProfileExternalLink } from "@/components/profile-external-link";
 import { ProfileInlineEditor } from "@/components/profile-inline-editor";
 import { ProfilePinButton } from "@/components/profile-pin-button";
+import { ProfileShareButton } from "@/components/profile-share-button";
 import { ProfileTabs } from "@/components/profile-tabs";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
@@ -358,8 +359,14 @@ export default async function UserProfilePage({ params }: PageProps) {
               ) : null}
             </div>
 
-            {/* Owner action */}
-            <div className="flex justify-center lg:justify-end">
+            {/* Owner + visitor actions. Share is on for everyone so a
+                fan can spread a profile they liked, the same growth
+                motion as the creator promoting their own page. */}
+            <div className="flex flex-wrap items-center justify-center gap-2 lg:justify-end">
+              <ProfileShareButton
+                handle={publicHandle}
+                displayName={displayName}
+              />
               {isOwner ? (
                 <ProfileInlineEditor
                   handle={publicHandle}

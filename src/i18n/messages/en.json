@@ -760,6 +760,17 @@
   "commandLine": {
     "copyAria": "Copy command"
   },
+  "profileShare": {
+    "share": "Share",
+    "eyebrow": "Share this profile",
+    "close": "Close",
+    "copyLink": "Copy link",
+    "copied": "Copied",
+    "shareToX": "Share to X",
+    "shareToLinkedIn": "Share to LinkedIn",
+    "more": "More…",
+    "shareText": "Check out {name}'s Codex pet collection on Petdex"
+  },
   "petActions": {
     "moreActions": "More actions for {name}",
     "share": "Share",

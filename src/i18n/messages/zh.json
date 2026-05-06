@@ -911,6 +911,17 @@
   "commandLine": {
     "copyAria": "复制命令"
   },
+  "profileShare": {
+    "share": "分享",
+    "eyebrow": "分享此资料",
+    "close": "关闭",
+    "copyLink": "复制链接",
+    "copied": "已复制",
+    "shareToX": "分享到 X",
+    "shareToLinkedIn": "分享到 LinkedIn",
+    "more": "更多…",
+    "shareText": "看看 {name} 在 Petdex 上的 Codex 宠物合集"
+  },
   "petActions": {
     "moreActions": "{name} 的更多操作",
     "moreActions__fixme": true,

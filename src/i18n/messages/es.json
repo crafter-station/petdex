@@ -760,6 +760,17 @@
   "commandLine": {
     "copyAria": "Copiar comando"
   },
+  "profileShare": {
+    "share": "Compartir",
+    "eyebrow": "Compartir este perfil",
+    "close": "Cerrar",
+    "copyLink": "Copiar enlace",
+    "copied": "Copiado",
+    "shareToX": "Compartir en X",
+    "shareToLinkedIn": "Compartir en LinkedIn",
+    "more": "Más…",
+    "shareText": "Mira la colección de mascotas de Codex de {name} en Petdex"
+  },
   "petActions": {
     "moreActions": "Más acciones para {name}",
     "share": "Compartir",
