@@ -163,7 +163,8 @@
       "requests": "请求",
       "collections": "合集",
       "feedback": "反馈",
-      "manifest": "Manifest"
+      "manifest": "Manifest",
+      "insights": "数据"
     },
     "status": {
       "pending": "待处理",

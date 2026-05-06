@@ -129,7 +129,8 @@
       "requests": "Requests",
       "collections": "Collections",
       "feedback": "Feedback",
-      "manifest": "Manifest"
+      "manifest": "Manifest",
+      "insights": "Insights"
     },
     "status": {
       "pending": "Pending",

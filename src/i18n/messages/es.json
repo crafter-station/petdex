@@ -129,7 +129,8 @@
       "requests": "Pedidos",
       "collections": "Colecciones",
       "feedback": "Feedback",
-      "manifest": "Manifest"
+      "manifest": "Manifest",
+      "insights": "Métricas"
     },
     "status": {
       "pending": "Pendiente",
