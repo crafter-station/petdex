@@ -72,8 +72,8 @@ export function UserButton() {
   return (
     <div
       style={{
-        width: 28,
-        height: 28,
+        width: 44,
+        height: 44,
         borderRadius: "50%",
         background: "#666",
         color: "white",
