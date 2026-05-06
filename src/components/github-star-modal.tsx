@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
-import { track } from "@vercel/analytics";
 import { ArrowRight, Star, X } from "lucide-react";
 
 type GithubStarModalProps = {
@@ -12,15 +11,9 @@ type GithubStarModalProps = {
 export function GithubStarModal({ onClose }: GithubStarModalProps) {
   const [closing, setClosing] = useState(false);
 
-  useEffect(() => {
-    track("announcement_shown", { announcement: "github_star" });
-  }, []);
-
-  function close(reason: "dismiss" | "cta_star" | "later" = "dismiss") {
-    track("announcement_closed", {
-      announcement: "github_star",
-      reason,
-    });
+  // Engagement is captured downstream via cta_star clicks; the
+  // announcement_shown / announcement_closed pair was pure noise.
+  function close(_reason: "dismiss" | "cta_star" | "later" = "dismiss") {
     setClosing(true);
     window.setTimeout(() => {
       onClose();
@@ -83,10 +76,9 @@ export function GithubStarModal({ onClose }: GithubStarModalProps) {
             Help Petdex grow — star us on GitHub
           </h2>
           <p className="text-sm leading-6 text-muted-2">
-            Petdex is fully open source. Every star helps more pet
-            creators find the project, and gives us cover to keep
-            shipping freely (sounds, leaderboard, the upcoming web pet
-            studio…).
+            Petdex is fully open source. Every star helps more pet creators find
+            the project, and gives us cover to keep shipping freely (sounds,
+            leaderboard, the upcoming web pet studio…).
           </p>
           <p className="text-sm leading-6 text-muted-2">
             Takes ten seconds.{" "}

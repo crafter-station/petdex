@@ -1,9 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
-import { track } from "@vercel/analytics";
 import { ArrowRight, Sparkles, X } from "lucide-react";
 
 type AnnouncementModalProps = {
@@ -13,17 +12,14 @@ type AnnouncementModalProps = {
 export function AnnouncementModal({ onClose }: AnnouncementModalProps) {
   const [closing, setClosing] = useState(false);
 
-  useEffect(() => {
-    track("announcement_shown", { announcement: "vibe_search" });
-  }, []);
-
+  // Note: previously tracked announcement_shown / announcement_closed
+  // here. Combined those two events were 47% of all Web Analytics
+  // events but produced zero actionable signal — removed to drop the
+  // bill. Engagement is already visible through the actual CTA clicks
+  // (cta_search / cta_requests) further down the funnel.
   function close(
-    reason: "dismiss" | "cta_search" | "cta_requests" = "dismiss",
+    _reason: "dismiss" | "cta_search" | "cta_requests" = "dismiss",
   ) {
-    track("announcement_closed", {
-      announcement: "vibe_search",
-      reason,
-    });
     setClosing(true);
     window.setTimeout(() => {
       onClose();
@@ -99,8 +95,8 @@ export function AnnouncementModal({ onClose }: AnnouncementModalProps) {
           </p>
           <p className="text-sm leading-6 text-muted-2">
             Doesn't find what you wanted?{" "}
-            <strong className="text-foreground">Request the pet</strong>{" "}
-            and the community can upvote it. Most-asked land in the queue first.
+            <strong className="text-foreground">Request the pet</strong> and the
+            community can upvote it. Most-asked land in the queue first.
           </p>
 
           <div className="flex items-center gap-2 pt-1">

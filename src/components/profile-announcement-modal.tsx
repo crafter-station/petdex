@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { useUser } from "@clerk/nextjs";
-import { track } from "@vercel/analytics";
 import { ArrowRight, Sparkles, X } from "lucide-react";
 
 const STORAGE_KEY = "petdex_announce_profile_v1";
@@ -30,13 +29,15 @@ export function ProfileAnnouncementModal() {
 
     const t = window.setTimeout(() => {
       setOpen(true);
-      track("announcement_shown", { announcement: "profile" });
     }, 1500);
     return () => window.clearTimeout(t);
   }, [isLoaded, isSignedIn, user]);
 
-  function close(reason: "dismiss" | "cta_view" | "cta_customize" = "dismiss") {
-    track("announcement_closed", { announcement: "profile", reason });
+  // Engagement is captured downstream via the cta_view click event;
+  // the announcement_shown / announcement_closed pair was pure noise.
+  function close(
+    _reason: "dismiss" | "cta_view" | "cta_customize" = "dismiss",
+  ) {
     setClosing(true);
     window.setTimeout(() => {
       setOpen(false);

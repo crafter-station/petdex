@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
-import { track } from "@vercel/analytics";
 import { ArrowRight, Sparkles, X } from "lucide-react";
 
 type CollectionsAnnouncementModalProps = {
@@ -14,15 +13,9 @@ export function CollectionsAnnouncementModal({
 }: CollectionsAnnouncementModalProps) {
   const [closing, setClosing] = useState(false);
 
-  useEffect(() => {
-    track("announcement_shown", { announcement: "collections" });
-  }, []);
-
-  function close(reason: "dismiss" | "cta_browse" | "later" = "dismiss") {
-    track("announcement_closed", {
-      announcement: "collections",
-      reason,
-    });
+  // Engagement is captured downstream via cta_browse clicks; the
+  // announcement_shown / announcement_closed pair was pure noise.
+  function close(_reason: "dismiss" | "cta_browse" | "later" = "dismiss") {
     setClosing(true);
     window.setTimeout(() => {
       onClose();
