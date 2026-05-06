@@ -50,6 +50,8 @@
     "discord": "Discord",
     "about": "关于",
     "about__fixme": true,
+    "followOnX": "在 X 上关注更新",
+    "followOnX__fixme": true,
     "language": "语言",
     "settings": "设置",
     "settings__fixme": true,

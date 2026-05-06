@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
-import { Menu, MoreHorizontal, X } from "lucide-react";
+import { ExternalLink, Menu, MoreHorizontal, X } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { withLocale } from "@/lib/locale-routing";
@@ -213,6 +213,19 @@ export function SiteHeader({ hideSubmitCta = false }: SiteHeaderProps) {
             <MobileLink href={href("/about")} onClick={() => setOpen(false)}>
               {t("about")}
             </MobileLink>
+            <a
+              href="https://x.com/raillyhugo"
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => setOpen(false)}
+              className="flex items-center justify-between gap-2 rounded-2xl px-4 py-3 text-foreground transition hover:bg-white dark:hover:bg-stone-800"
+            >
+              <span className="inline-flex items-center gap-2">
+                <XLogo className="size-4 text-muted-3" />
+                {t("followOnX")}
+              </span>
+              <ExternalLink className="size-4 text-muted-4" />
+            </a>
             <GithubStarsLink
               size="mobile"
               className="rounded-2xl px-4 py-3 hover:bg-surface-muted"
@@ -262,6 +275,19 @@ function HeaderSettingsMenu({
         <SettingsLink href={href("/about")} onClick={onNavigate}>
           {t("about")}
         </SettingsLink>
+        <a
+          href="https://x.com/raillyhugo"
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={onNavigate}
+          className="flex items-center justify-between gap-2 rounded-xl px-3 py-2 text-sm text-foreground transition hover:bg-surface-muted"
+        >
+          <span className="inline-flex items-center gap-2">
+            <XLogo className="size-3.5 text-muted-3" />
+            {t("followOnX")}
+          </span>
+          <ExternalLink className="size-3.5 text-muted-4" />
+        </a>
       </div>
       <div className="mt-2 border-t border-border-base pt-2">
         <p className="px-2 pb-2 font-mono text-[10px] tracking-[0.18em] text-muted-3 uppercase">
@@ -293,6 +319,19 @@ function SettingsLink({
     >
       {children}
     </Link>
+  );
+}
+
+function XLogo({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      className={className}
+      fill="currentColor"
+    >
+      <path d="M18.244 2H21l-6.55 7.49L22 22h-6.93l-4.83-6.31L4.6 22H1.84l7.01-8.02L1 2h7.07l4.36 5.78L18.244 2zm-2.43 18h1.91L7.27 4H5.27l10.544 16z" />
+    </svg>
   );
 }
 
