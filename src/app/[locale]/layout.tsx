@@ -4,10 +4,15 @@ import { notFound } from "next/navigation";
 
 import { Analytics } from "@vercel/analytics/next";
 import { NextIntlClientProvider } from "next-intl";
-import { getMessages, getTranslations, setRequestLocale } from "next-intl/server";
+import {
+  getMessages,
+  getTranslations,
+  setRequestLocale,
+} from "next-intl/server";
 
 import { AnnouncementQueue } from "@/components/announcement-queue";
 import { FeedbackWidget } from "@/components/feedback-widget";
+import { HeaderStateProvider } from "@/components/header-state-provider";
 import { ProfileAnnouncementModal } from "@/components/profile-announcement-modal";
 import { AppProviders } from "@/components/theme-providers";
 
@@ -96,11 +101,13 @@ export default async function LocaleLayout({ children, params }: Props) {
       <body className="min-h-full flex flex-col bg-background text-foreground">
         <NextIntlClientProvider messages={messages}>
           <AppProviders>
-            {children}
-            <FeedbackWidget />
-            <AnnouncementQueue />
-            <ProfileAnnouncementModal />
-            <Analytics />
+            <HeaderStateProvider>
+              {children}
+              <FeedbackWidget />
+              <AnnouncementQueue />
+              <ProfileAnnouncementModal />
+              <Analytics />
+            </HeaderStateProvider>
           </AppProviders>
         </NextIntlClientProvider>
       </body>

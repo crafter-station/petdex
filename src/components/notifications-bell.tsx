@@ -13,6 +13,8 @@ import {
   XCircle,
 } from "lucide-react";
 
+import { useHeaderState } from "@/components/header-state-provider";
+
 type Kind =
   | "pet_approved"
   | "pet_rejected"
@@ -112,31 +114,35 @@ function relativeTime(iso: string): string {
 }
 
 export function NotificationsBell() {
+  const { state, refresh } = useHeaderState();
+  const unread = state.notifications.unreadCount;
   const [items, setItems] = useState<Notif[]>([]);
-  const [unread, setUnread] = useState(0);
+  const [itemsLoaded, setItemsLoaded] = useState(false);
   const [open, setOpen] = useState(false);
   const popoverRef = useRef<HTMLDivElement | null>(null);
 
-  const load = useCallback(async () => {
+  const setUnread = useCallback(
+    (_next: number | ((n: number) => number)) => {
+      void refresh();
+    },
+    [refresh],
+  );
+
+  const loadItems = useCallback(async () => {
     try {
       const res = await fetch("/api/notifications", { cache: "no-store" });
       if (!res.ok) return;
-      const j = (await res.json()) as {
-        items?: Notif[];
-        unreadCount?: number;
-      };
+      const j = (await res.json()) as { items?: Notif[] };
       setItems(j.items ?? []);
-      setUnread(j.unreadCount ?? 0);
+      setItemsLoaded(true);
     } catch {
       /* silent */
     }
   }, []);
 
   useEffect(() => {
-    void load();
-    const i = setInterval(() => void load(), 60000);
-    return () => clearInterval(i);
-  }, [load]);
+    if (open && !itemsLoaded) void loadItems();
+  }, [open, itemsLoaded, loadItems]);
 
   // Click outside / Escape closes the panel.
   useEffect(() => {
