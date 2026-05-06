@@ -99,7 +99,30 @@ export function PetGallery({
   const [activeColors, setActiveColors] = useState<Set<ColorFamily>>(new Set());
   const [activeBatches, setActiveBatches] = useState<Set<string>>(new Set());
   const [sort, setSort] = useState<SortKey>("curated");
-  const caughtSet = new Set(caughtSlugs ?? []);
+  // The home page no longer ships caughtSlugs server-side — that would
+  // make every SSR render per-visitor and kill ISR. When the prop is
+  // missing we fetch /api/me/caught-slugs after hydration so the
+  // "caught" highlight on PetCard still works for signed-in users
+  // without holding up the static shell.
+  const [hydratedCaught, setHydratedCaught] = useState<string[] | null>(null);
+  useEffect(() => {
+    if (caughtSlugs !== undefined) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/me/caught-slugs");
+        if (!res.ok) return;
+        const data = (await res.json()) as { caught: string[] };
+        if (!cancelled) setHydratedCaught(data.caught);
+      } catch {
+        /* anonymous viewers + offline fall through */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [caughtSlugs]);
+  const caughtSet = new Set(caughtSlugs ?? hydratedCaught ?? []);
 
   const [pets, setPets] = useState<PetWithMetrics[]>(initial.pets);
   const [total, setTotal] = useState<number>(initial.total);

@@ -1,9 +1,7 @@
 import Link from "next/link";
 
-import { auth } from "@clerk/nextjs/server";
 import { getTranslations } from "next-intl/server";
 
-import { getCaughtSlugSet } from "@/lib/catch-status";
 import {
   getFeaturedCollections,
   type PetCollectionWithPets,
@@ -16,7 +14,6 @@ import {
   getFeaturedPetsWithMetrics,
   type PetWithMetrics,
 } from "@/lib/pets";
-import { readShuffleSeed } from "@/lib/shuffle-seed";
 
 import { CollectionCover } from "@/components/collection-cover";
 import { CommandLine } from "@/components/command-line";
@@ -29,37 +26,36 @@ import { SiteHeader } from "@/components/site-header";
 import { SubmitCTA } from "@/components/submit-cta";
 import { SurprisePetCard } from "@/components/surprise-pet-card";
 
-export const dynamic = "force-dynamic";
+// ISR. The home page used to be force-dynamic because it pulled the
+// visitor's shuffle seed cookie and caught-slug set. Both moved to
+// the client: PetGallery re-fetches /api/pets/search after hydration
+// (which picks up the cookie) and /api/me/caught-slugs feeds the
+// "caught" highlight. The server now renders an alpha-ordered, anon
+// shell that the edge can cache for 60s — enough to keep new pets
+// surfacing without waking a function on every visit.
+export const revalidate = 60;
 export const metadata = {
   alternates: buildLocaleAlternates("/"),
 };
 const SITE_URL = "https://petdex.crafter.run";
 
 export default async function Home() {
-  const { userId } = await auth();
   const t = await getTranslations("home");
-
-  // Read the visitor's shuffle seed (minted by the middleware on the
-  // very first request, so every subsequent SSR + /api/pets/search call
-  // shares the same ordering). On the first visit the cookie isn't on
-  // *this* request yet — searchPets falls back to alpha for that single
-  // SSR, then the next navigation picks up the freshly-minted seed.
-  // See lib/shuffle-seed.ts + proxy.ts for context.
-  const shuffleSeed = (await readShuffleSeed()) ?? undefined;
 
   const [
     heroPets,
     totalPets,
     initialSearch,
     dexEntries,
-    caughtSlugs,
     allFeaturedCollections,
   ] = await Promise.all([
     getFeaturedPetsWithMetrics(6),
     getApprovedPetCount(),
-    searchPets({ sort: "curated", shuffleSeed }),
+    // No shuffleSeed → searchPets falls back to alpha order, which is
+    // the same for every visitor and therefore safe to cache. The
+    // client re-fetches with the visitor's seed on hydration.
+    searchPets({ sort: "curated" }),
     getDexNumberMap(),
-    getCaughtSlugSet(userId),
     getFeaturedCollections(20),
   ]);
 
@@ -78,7 +74,6 @@ export default async function Home() {
   // Plain-object so the server -> client serializer doesn't choke on a
   // Map. Same source of truth either way.
   const dexMap = Object.fromEntries(dexEntries.entries());
-  const caughtSlugList = Array.from(caughtSlugs);
 
   const jsonLd = [
     {
@@ -181,7 +176,6 @@ export default async function Home() {
             initial={initialSearch}
             totalPets={totalPets}
             dexMap={dexMap}
-            caughtSlugs={caughtSlugList}
           />
         ) : null}
       </section>

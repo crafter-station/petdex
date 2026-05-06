@@ -11,7 +11,10 @@ import { JsonLd } from "@/components/json-ld";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 
-export const dynamic = "force-dynamic";
+// /collections is fully public — no auth, no cookies, no per-visitor
+// data. ISR with 5 minute revalidation lets featured-collection
+// rotations show up quickly without waking a function on every visit.
+export const revalidate = 300;
 
 const SITE_URL = "https://petdex.crafter.run";
 
