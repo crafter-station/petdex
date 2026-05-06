@@ -668,6 +668,22 @@ function FilterChips({
   );
 }
 
+export type PetCardOwnerActions = {
+  /**
+   * Submission id (pet_xxx). Required to call the owner-action APIs
+   * for edit / withdraw. When omitted the action menu only shows
+   * the public actions (copy, share, download, owner self-delete).
+   */
+  submissionId: string;
+  status: "pending" | "approved" | "rejected";
+  rejectionReason?: string | null;
+};
+
+export type PetCardStatusOverlay = {
+  label: string;
+  tone: "warning" | "danger";
+};
+
 type PetCardProps = {
   pet: PetWithMetrics;
   index: number;
@@ -687,9 +703,29 @@ type PetCardProps = {
    * card never renders a blank slot.
    */
   dexNumber?: number | null;
+  /**
+   * Owner-only actions surfaced in the action menu. Pass on the
+   * profile page when the viewer is the pet's owner so the menu
+   * gets Withdraw (pending), Edit (approved), Submit new version
+   * (rejected) entries.
+   */
+  ownerActions?: PetCardOwnerActions;
+  /**
+   * Visual badge overlaying the card. Used on the owner profile to
+   * tag pending and rejected pets with the same shape as the rest
+   * of the gallery cards. Approved pets render no overlay.
+   */
+  statusOverlay?: PetCardStatusOverlay;
 };
 
-export function PetCard({ pet, index, dexNumber, caught }: PetCardProps) {
+export function PetCard({
+  pet,
+  index,
+  dexNumber,
+  caught,
+  ownerActions,
+  statusOverlay,
+}: PetCardProps) {
   const dexLabel =
     dexNumber != null
       ? dexNumber < 1000
@@ -828,6 +864,21 @@ export function PetCard({ pet, index, dexNumber, caught }: PetCardProps) {
         />
       </div>
 
+      {/* Status overlay (owner profile only). Positioned over the dex
+          row so it reads alongside the No. label without competing
+          with the action menu in the top-right. */}
+      {statusOverlay ? (
+        <span
+          className={`pointer-events-none absolute top-3 left-3 z-20 inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-mono text-[10px] tracking-[0.15em] uppercase ring-1 ${
+            statusOverlay.tone === "danger"
+              ? "bg-chip-danger-bg text-chip-danger-fg ring-chip-danger-fg/20"
+              : "bg-chip-warning-bg text-chip-warning-fg ring-chip-warning-fg/20"
+          }`}
+        >
+          {statusOverlay.label}
+        </span>
+      ) : null}
+
       {/* Action menu lives outside the Link so its clicks don't navigate.
  Absolute-positioned to overlap the featured badge corner. */}
       <div className="absolute top-3 right-4 z-20">
@@ -838,6 +889,7 @@ export function PetCard({ pet, index, dexNumber, caught }: PetCardProps) {
             zipUrl: pet.zipUrl,
             description: pet.description,
           }}
+          ownerActions={ownerActions}
         />
       </div>
     </article>

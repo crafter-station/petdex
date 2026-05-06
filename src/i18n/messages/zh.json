@@ -926,7 +926,11 @@
     "more": "更多…",
     "downloadZip": "下载 ZIP",
     "removeFromPetdex": "从 Petdex 删除",
-    "removing": "删除中…"
+    "removing": "删除中…",
+    "withdrawSubmission": "撤回提交",
+    "withdrawing": "撤回中…",
+    "submitNewVersion": "提交新版本",
+    "editDetails": "编辑名称和描述"
   },
   "petStateViewer": {
     "eyebrow": "状态查看器",

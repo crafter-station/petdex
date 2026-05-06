@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -13,8 +14,11 @@ import {
   Link2,
   Loader2,
   MoreHorizontal,
+  Pencil,
+  Plus,
   Terminal,
   Trash2,
+  XCircle,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 
@@ -27,20 +31,31 @@ export type PetActionMenuPet = {
   description?: string;
 };
 
+export type PetActionMenuOwnerActions = {
+  /** Submission id for the owner-action API endpoints. */
+  submissionId: string;
+  status: "pending" | "approved" | "rejected";
+};
+
 type Variant = "card" | "detail";
 
 type Props = {
   pet: PetActionMenuPet;
   variant?: Variant;
+  /** When the viewer is the owner, surfaces status-aware actions
+   *  (Withdraw, Edit link, Submit new version) inside the dropdown. */
+  ownerActions?: PetActionMenuOwnerActions;
 };
 
-export function PetActionMenu({ pet, variant = "card" }: Props) {
+export function PetActionMenu({ pet, variant = "card", ownerActions }: Props) {
   const t = useTranslations("petActions");
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState<"install" | "link" | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [withdrawing, setWithdrawing] = useState(false);
+  const [withdrawError, setWithdrawError] = useState<string | null>(null);
   // canDelete is fetched lazily the first time the menu opens. The
   // public PetdexPet shape deliberately doesn't carry ownerId, so the
   // viewer/owner check has to round-trip. /api/pets/[slug]/can-delete
@@ -192,6 +207,42 @@ export function PetActionMenu({ pet, variant = "card" }: Props) {
     }
   }, [deleting, pet.slug, pet.displayName, router]);
 
+  const onWithdraw = useCallback(async () => {
+    if (withdrawing || !ownerActions) return;
+    if (
+      !window.confirm(
+        `Withdraw "${pet.displayName}"? Pending submissions can't be brought back — you'd have to resubmit.`,
+      )
+    ) {
+      return;
+    }
+    setWithdrawing(true);
+    setWithdrawError(null);
+    try {
+      const res = await fetch(
+        `/api/my-pets/${ownerActions.submissionId}/withdraw`,
+        { method: "POST" },
+      );
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          message?: string;
+        };
+        setWithdrawError(
+          data.message ?? data.error ?? `Request failed (${res.status})`,
+        );
+        setWithdrawing(false);
+        return;
+      }
+      track("pet_owner_withdrew", { slug: pet.slug });
+      setOpen(false);
+      router.refresh();
+    } catch {
+      setWithdrawError("network_error");
+      setWithdrawing(false);
+    }
+  }, [withdrawing, ownerActions, pet.slug, pet.displayName, router]);
+
   // Detail variant: bigger trigger that reads as an action button next to
   // the like button. Card variant: compact circular icon in a corner.
   const triggerClassName =
@@ -328,6 +379,53 @@ export function PetActionMenu({ pet, variant = "card" }: Props) {
                 </a>
               </li>
             ) : null}
+            {ownerActions?.status === "pending" ? (
+              <li>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    void onWithdraw();
+                  }}
+                  disabled={withdrawing}
+                  className="flex w-full items-center gap-2.5 border-t border-black/[0.06] px-3 py-2.5 text-left text-sm text-chip-danger-fg transition hover:bg-chip-danger-bg disabled:opacity-60 dark:border-white/[0.06]"
+                >
+                  {withdrawing ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <XCircle className="size-4" />
+                  )}
+                  <span className="flex-1">
+                    {withdrawing ? t("withdrawing") : t("withdrawSubmission")}
+                  </span>
+                </button>
+              </li>
+            ) : null}
+            {ownerActions?.status === "rejected" ? (
+              <li>
+                <Link
+                  href="/submit"
+                  onClick={() => setOpen(false)}
+                  className="flex items-center gap-2.5 border-t border-black/[0.06] px-3 py-2.5 text-sm text-foreground transition hover:bg-[#f4f6ff] dark:border-white/[0.06]"
+                >
+                  <Plus className="size-4" />
+                  <span className="flex-1">{t("submitNewVersion")}</span>
+                </Link>
+              </li>
+            ) : null}
+            {ownerActions?.status === "approved" ? (
+              <li>
+                <Link
+                  href={`/pets/${pet.slug}#edit`}
+                  onClick={() => setOpen(false)}
+                  className="flex items-center gap-2.5 border-t border-black/[0.06] px-3 py-2.5 text-sm text-foreground transition hover:bg-[#f4f6ff] dark:border-white/[0.06]"
+                >
+                  <Pencil className="size-4" />
+                  <span className="flex-1">{t("editDetails")}</span>
+                </Link>
+              </li>
+            ) : null}
             {canDelete ? (
               <li>
                 <button
@@ -355,6 +453,11 @@ export function PetActionMenu({ pet, variant = "card" }: Props) {
           {deleteError ? (
             <p className="border-t border-black/[0.06] bg-chip-danger-bg px-3 py-2 text-xs text-chip-danger-fg dark:border-white/[0.06]">
               {deleteError}
+            </p>
+          ) : null}
+          {withdrawError ? (
+            <p className="border-t border-black/[0.06] bg-chip-danger-bg px-3 py-2 text-xs text-chip-danger-fg dark:border-white/[0.06]">
+              {withdrawError}
             </p>
           ) : null}
         </div>

@@ -773,7 +773,11 @@
     "more": "More…",
     "downloadZip": "Download ZIP",
     "removeFromPetdex": "Remove from Petdex",
-    "removing": "Removing…"
+    "removing": "Removing…",
+    "withdrawSubmission": "Withdraw submission",
+    "withdrawing": "Withdrawing…",
+    "submitNewVersion": "Submit a new version",
+    "editDetails": "Edit name & description"
   },
   "petStateViewer": {
     "eyebrow": "State viewer",

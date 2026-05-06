@@ -773,7 +773,11 @@
     "more": "Más…",
     "downloadZip": "Descargar ZIP",
     "removeFromPetdex": "Eliminar de Petdex",
-    "removing": "Eliminando…"
+    "removing": "Eliminando…",
+    "withdrawSubmission": "Retirar envío",
+    "withdrawing": "Retirando…",
+    "submitNewVersion": "Enviar una nueva versión",
+    "editDetails": "Editar nombre y descripción"
   },
   "petStateViewer": {
     "eyebrow": "Visor de estados",

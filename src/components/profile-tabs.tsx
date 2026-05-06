@@ -12,11 +12,7 @@ import {
   CollectionEditor,
   type EditableCollection,
 } from "@/components/collection-editor";
-import {
-  ClaimableBanner,
-  type Submission,
-  SubmissionCard,
-} from "@/components/my-pets-view";
+import { ClaimableBanner, type Submission } from "@/components/my-pets-view";
 import { PetCard } from "@/components/pet-gallery";
 
 // Tabs surface for /u/<handle>. Owner sees Pets (all statuses with
@@ -171,7 +167,7 @@ export function ProfileTabs(props: ProfileTabsProps) {
 
 function PetsPanel({
   isOwner,
-  publicHandle,
+  publicHandle: _publicHandle,
   approvedPets,
   pendingSubmissions,
   rejectedSubmissions,
@@ -213,9 +209,41 @@ function PetsPanel({
 
   return (
     <div className="space-y-10">
+      {/* Live pets first — what visitors care about, what owners see
+          as their portfolio. */}
+      {approvedPets.length > 0 ? (
+        <section className="space-y-3">
+          {isOwner &&
+          (pendingSubmissions.length > 0 || rejectedSubmissions.length > 0) ? (
+            <header>
+              <p className="font-mono text-[11px] tracking-[0.22em] text-chip-success-fg uppercase">
+                Approved ({approvedPets.length})
+              </p>
+            </header>
+          ) : null}
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+            {approvedPets.map((pet, index) => (
+              <PetCard
+                key={pet.slug}
+                pet={pet}
+                index={index}
+                stateCount={stateCount}
+                ownerActions={
+                  isOwner
+                    ? { submissionId: pet.id, status: "approved" }
+                    : undefined
+                }
+              />
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {/* Pending review — owner-only. Same card shape, status pill
+          overlays the dex row so it reads as one continuous grid. */}
       {pendingSubmissions.length > 0 ? (
         <section className="space-y-3">
-          <header className="flex items-end justify-between gap-3">
+          <header className="flex flex-wrap items-end justify-between gap-3">
             <p className="font-mono text-[11px] tracking-[0.22em] text-chip-warning-fg uppercase">
               Pending review ({pendingSubmissions.length})
             </p>
@@ -223,17 +251,30 @@ function PetsPanel({
               Visible only to you until an admin approves.
             </p>
           </header>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {pendingSubmissions.map((s) => (
-              <SubmissionCard key={s.id} submission={s} />
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+            {pendingSubmissions.map((submission, index) => (
+              <PetCard
+                key={submission.id}
+                pet={submissionToPet(submission)}
+                index={index}
+                stateCount={stateCount}
+                statusOverlay={{ label: "Pending", tone: "warning" }}
+                ownerActions={{
+                  submissionId: submission.id,
+                  status: "pending",
+                }}
+              />
             ))}
           </div>
         </section>
       ) : null}
 
+      {/* Rejected — owner-only. The rejection reason still surfaces on
+          the pet detail page; the menu offers a Submit new version
+          link as the natural next step. */}
       {rejectedSubmissions.length > 0 ? (
         <section className="space-y-3">
-          <header className="flex items-end justify-between gap-3">
+          <header className="flex flex-wrap items-end justify-between gap-3">
             <p className="font-mono text-[11px] tracking-[0.22em] text-chip-danger-fg uppercase">
               Rejected ({rejectedSubmissions.length})
             </p>
@@ -241,85 +282,56 @@ function PetsPanel({
               Visible only to you. Submit a fresh version when ready.
             </p>
           </header>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {rejectedSubmissions.map((s) => (
-              <SubmissionCard key={s.id} submission={s} />
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+            {rejectedSubmissions.map((submission, index) => (
+              <PetCard
+                key={submission.id}
+                pet={submissionToPet(submission)}
+                index={index}
+                stateCount={stateCount}
+                statusOverlay={{ label: "Rejected", tone: "danger" }}
+                ownerActions={{
+                  submissionId: submission.id,
+                  status: "rejected",
+                }}
+              />
             ))}
           </div>
-        </section>
-      ) : null}
-
-      {approvedPets.length > 0 ? (
-        <section className="space-y-3">
-          {pendingSubmissions.length > 0 || rejectedSubmissions.length > 0 ? (
-            <p className="font-mono text-[11px] tracking-[0.22em] text-muted-3 uppercase">
-              Live pets
-            </p>
-          ) : null}
-          {isOwner ? (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {approvedPets.map((pet) => (
-                <ApprovedSubmissionEditor
-                  key={pet.slug}
-                  pet={pet}
-                  publicHandle={publicHandle}
-                />
-              ))}
-            </div>
-          ) : (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-              {approvedPets.map((pet, index) => (
-                <PetCard
-                  key={pet.slug}
-                  pet={pet}
-                  index={index}
-                  stateCount={stateCount}
-                />
-              ))}
-            </div>
-          )}
         </section>
       ) : null}
     </div>
   );
 }
 
-// Approved pet for the owner: same PetCard the public sees, plus the
-// existing edit/withdraw flows surfaced as a SubmissionCard. We pass
-// the approved pet as a Submission shape so SubmissionCard handles
-// edit, view, install all in one place.
-function ApprovedSubmissionEditor({
-  pet,
-  publicHandle: _publicHandle,
-}: {
-  pet: PetWithMetrics;
-  publicHandle: string;
-}) {
-  const submission: Submission = {
-    id: pet.id,
-    slug: pet.slug,
-    displayName: pet.displayName,
-    description: pet.description,
-    spritesheetUrl: pet.spritesheetPath,
-    zipUrl: pet.zipUrl ?? "",
-    kind: pet.kind,
-    vibes: pet.vibes ?? [],
-    tags: pet.tags ?? [],
-    featured: pet.featured ?? false,
-    status: "approved",
-    createdAt: pet.importedAt,
-    approvedAt: pet.approvedAt ?? null,
-    rejectedAt: null,
-    rejectionReason: null,
-    pending: null,
-    pendingRejectionReason: null,
-    metrics: {
-      installCount: pet.metrics.installCount,
-      zipDownloadCount: pet.metrics.zipDownloadCount,
-      likeCount: pet.metrics.likeCount,
-    },
+// Pending and rejected submissions never make it through rowToPet
+// because the gallery queries filter on status='approved'. Build a
+// PetWithMetrics-shaped object here so PetCard can render them with
+// the same layout as the rest of the grid.
+function submissionToPet(submission: Submission): PetWithMetrics {
+  return {
+    id: submission.id,
+    slug: submission.slug,
+    displayName: submission.displayName,
+    description: submission.description,
+    spritesheetPath: submission.spritesheetUrl,
+    petJsonPath: "",
+    zipUrl: submission.zipUrl,
+    soundUrl: null,
+    approvalState:
+      submission.status === "approved" ? "approved" : "needs-review",
+    featured: submission.featured,
+    kind: submission.kind as PetWithMetrics["kind"],
+    vibes: submission.vibes as PetWithMetrics["vibes"],
+    tags: submission.tags,
+    dominantColor: null,
+    colorFamily: null,
+    submittedBy: undefined,
+    source: "submit",
+    approvedAt: submission.approvedAt,
+    importedAt: submission.createdAt,
+    qa: {},
+    metrics: submission.metrics,
   };
-  return <SubmissionCard submission={submission} />;
 }
 
 function LikedPanel({
