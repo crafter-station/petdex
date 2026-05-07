@@ -11,6 +11,8 @@ import { verifyCliBearer } from "@/lib/cli-auth";
 import { presignPut } from "@/lib/r2";
 import { cliVerifyRatelimit, submitRatelimit } from "@/lib/ratelimit";
 
+export const runtime = "nodejs";
+
 const MAX_KEY_LEN = 80;
 const MAX_BYTES = 8 * 1024 * 1024;
 
@@ -65,7 +67,8 @@ export async function POST(req: Request): Promise<Response> {
   if (!slugHint) {
     return NextResponse.json({ error: "invalid_slug_hint" }, { status: 400 });
   }
-  const ext: "webp" | "png" = body.spritesheetExt === "png" ? "png" : "webp";
+  const ext: "webp" | "png" =
+    body.spritesheetExt === "png" ? "png" : "webp";
   const spriteCT = ext === "png" ? "image/png" : "image/webp";
 
   const uploadId = crypto.randomUUID().replace(/-/g, "").slice(0, 12);

@@ -7,6 +7,8 @@ import { Redis } from "@upstash/redis";
 import { db, schema } from "@/lib/db/client";
 import { requireSameOrigin } from "@/lib/same-origin";
 
+export const runtime = "nodejs";
+
 const VALID_KINDS = new Set(["suggestion", "bug", "praise", "other"]);
 const MAX_LEN = 4000;
 
@@ -64,7 +66,10 @@ export async function POST(req: Request): Promise<Response> {
   const userAgent = req.headers.get("user-agent")?.slice(0, 500) ?? null;
 
   if (message.length < 4) {
-    return NextResponse.json({ error: "message_too_short" }, { status: 400 });
+    return NextResponse.json(
+      { error: "message_too_short" },
+      { status: 400 },
+    );
   }
   if (message.length > MAX_LEN) {
     return NextResponse.json(

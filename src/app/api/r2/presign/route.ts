@@ -7,6 +7,8 @@ import { presignPut } from "@/lib/r2";
 import { presignRatelimit } from "@/lib/ratelimit";
 import { requireSameOrigin } from "@/lib/same-origin";
 
+export const runtime = "nodejs";
+
 const MAX_KEY_LEN = 80;
 const ALLOWED_CT = new Set([
   "application/zip",

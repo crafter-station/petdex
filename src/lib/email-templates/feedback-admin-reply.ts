@@ -1,3 +1,4 @@
+import type { Locale } from "@/i18n/config";
 import {
   normalizeLocale,
   p,
@@ -5,8 +6,6 @@ import {
   quoteBlock,
   wrapEmail,
 } from "@/lib/email-templates/shared";
-
-import type { Locale } from "@/i18n/config";
 
 type Vars = {
   feedbackId: string;

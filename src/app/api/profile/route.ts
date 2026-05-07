@@ -1,4 +1,3 @@
-import { updateTag } from "next/cache";
 import { NextResponse } from "next/server";
 
 import { auth } from "@clerk/nextjs/server";
@@ -17,6 +16,8 @@ import { profileEditRatelimit, profilePinRatelimit } from "@/lib/ratelimit";
 import { requireSameOrigin } from "@/lib/same-origin";
 
 import { defaultLocale, hasLocale, type Locale } from "@/i18n/config";
+
+export const runtime = "nodejs";
 
 type PatchBody = {
   displayName?: string | null;
@@ -221,11 +222,6 @@ export async function PATCH(req: Request): Promise<Response> {
         updatedAt: new Date(),
       },
     });
-
-  updateTag(`profile:${userId}`);
-  if (typeof patch.handle === "string") {
-    updateTag(`profile:${patch.handle}`);
-  }
 
   return NextResponse.json({
     ok: true,

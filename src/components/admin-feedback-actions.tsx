@@ -1,10 +1,10 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { Archive, CheckCircle2, Loader2, RotateCcw } from "lucide-react";
-import { useTranslations } from "next-intl";
 
 type Status = "pending" | "addressed" | "archived";
 

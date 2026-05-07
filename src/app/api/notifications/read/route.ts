@@ -6,7 +6,11 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db, schema } from "@/lib/db/client";
 import { requireSameOrigin } from "@/lib/same-origin";
 
-type Body = { all: true } | { ids: string[] };
+export const runtime = "nodejs";
+
+type Body =
+  | { all: true }
+  | { ids: string[] };
 
 // POST /api/notifications/read body { all: true } -> mark every unread
 // notification of the current user as read. body { ids: [...] } ->

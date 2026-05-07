@@ -21,6 +21,8 @@ const SITE_URL = "https://petdex.crafter.run";
 
 type Props = { params: Promise<{ locale: string; vibe: string }> };
 
+export const revalidate = 600;
+
 export function generateStaticParams() {
   return PET_VIBES.map((vibe) => ({ vibe }));
 }

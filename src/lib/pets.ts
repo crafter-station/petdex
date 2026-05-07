@@ -3,8 +3,6 @@
 // JSON dump is only consulted by that backfill script; the rest of the app
 // reads from the DB.
 
-import { cacheLife, cacheTag } from "next/cache";
-
 import { and, eq, sql } from "drizzle-orm";
 
 import { db, schema } from "@/lib/db/client";
@@ -24,11 +22,6 @@ const EMPTY_METRICS: Metrics = {
 };
 
 export async function getPet(slug: string): Promise<PetdexPet | undefined> {
-  "use cache";
-  cacheLife("hours");
-  cacheTag("gallery");
-  cacheTag(`pet:${slug}`);
-
   const row = await db.query.submittedPets.findFirst({
     where: and(
       eq(schema.submittedPets.slug, slug),
@@ -51,10 +44,6 @@ export async function getPetWithMetrics(
  *  pre-render featured pets at build time; everything else is rendered
  *  on-demand and revalidated. */
 export async function getStaticPetSlugs(): Promise<string[]> {
-  "use cache";
-  cacheLife("hours");
-  cacheTag("gallery");
-
   const rows = await db
     .select({ slug: schema.submittedPets.slug })
     .from(schema.submittedPets)
@@ -64,17 +53,12 @@ export async function getStaticPetSlugs(): Promise<string[]> {
         eq(schema.submittedPets.featured, true),
       ),
     );
-  const slugs = rows.map((r) => r.slug);
-  return slugs.length > 0 ? slugs : ["boba"];
+  return rows.map((r) => r.slug);
 }
 
 export async function getFeaturedPetsWithMetrics(
   limit = 6,
 ): Promise<PetWithMetrics[]> {
-  "use cache";
-  cacheLife("hours");
-  cacheTag("gallery");
-
   const rows = await db
     .select()
     .from(schema.submittedPets)
@@ -95,10 +79,6 @@ export async function getFeaturedPetsWithMetrics(
 }
 
 export async function getAllApprovedPets(): Promise<PetdexPet[]> {
-  "use cache";
-  cacheLife("hours");
-  cacheTag("gallery");
-
   const rows = await db
     .select()
     .from(schema.submittedPets)
@@ -107,10 +87,6 @@ export async function getAllApprovedPets(): Promise<PetdexPet[]> {
 }
 
 export async function getApprovedPetsWithMetrics(): Promise<PetWithMetrics[]> {
-  "use cache";
-  cacheLife("hours");
-  cacheTag("gallery");
-
   const pets = await getAllApprovedPets();
   if (pets.length === 0) return [];
   const metrics = await getAllMetrics();
@@ -121,10 +97,6 @@ export async function getApprovedPetsWithMetrics(): Promise<PetWithMetrics[]> {
 }
 
 export async function getApprovedPetCount(): Promise<number> {
-  "use cache";
-  cacheLife("hours");
-  cacheTag("gallery");
-
   const row = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(schema.submittedPets)

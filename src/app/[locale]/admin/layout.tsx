@@ -1,5 +1,4 @@
 import { notFound } from "next/navigation";
-import { Suspense } from "react";
 
 import { auth } from "@clerk/nextjs/server";
 
@@ -12,20 +11,15 @@ export const metadata = {
   robots: { index: false, follow: false },
 };
 
-export default function AdminLayout({
+export default async function AdminLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  return (
-    <Suspense fallback={null}>
-      <AdminGate>{children}</AdminGate>
-    </Suspense>
-  );
-}
-
-async function AdminGate({ children }: { children: React.ReactNode }) {
   const { userId } = await auth();
+  // Single gate at the layout level — every nested page (/admin,
+  // /admin/requests, /admin/feedback) inherits this protection so
+  // no individual page has to re-check.
   if (!isAdmin(userId)) notFound();
 
   return (

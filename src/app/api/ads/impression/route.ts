@@ -9,6 +9,7 @@ import { validateImpressionInput } from "@/lib/ads/validation";
 import { adImpressionRatelimit } from "@/lib/ratelimit";
 import { requireSameOrigin } from "@/lib/same-origin";
 
+export const runtime = "nodejs";
 
 export async function POST(req: Request): Promise<Response> {
   const csrf = requireSameOrigin(req);

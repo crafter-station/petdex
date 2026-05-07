@@ -39,8 +39,7 @@ export function PetKeyboardNav({
       if (!target) return false;
       const el = target as HTMLElement;
       const tag = el.tagName?.toLowerCase();
-      if (tag === "input" || tag === "textarea" || tag === "select")
-        return true;
+      if (tag === "input" || tag === "textarea" || tag === "select") return true;
       if (el.isContentEditable) return true;
       return false;
     }

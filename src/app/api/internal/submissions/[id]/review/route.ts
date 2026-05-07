@@ -6,6 +6,8 @@ import { isAdmin } from "@/lib/admin";
 import { requireSameOrigin } from "@/lib/same-origin";
 import { reviewSubmission } from "@/lib/submission-review";
 
+export const runtime = "nodejs";
+
 type Params = { id: string };
 
 export async function POST(

@@ -16,7 +16,9 @@ const LS = String.fromCharCode(0x2028);
 const PS = String.fromCharCode(0x2029);
 
 function escapeJsonForScriptTag(json: string): string {
-  let out = json.replace(/<\/(script)/gi, "<\\/$1").replace(/<!--/g, "<\\!--");
+  let out = json
+    .replace(/<\/(script)/gi, "<\\/$1")
+    .replace(/<!--/g, "<\\!--");
   out = out.split(LS).join("\\u2028").split(PS).join("\\u2029");
   return out;
 }

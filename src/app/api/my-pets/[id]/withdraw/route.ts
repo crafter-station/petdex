@@ -7,6 +7,8 @@ import { db, schema } from "@/lib/db/client";
 import { withdrawRatelimit } from "@/lib/ratelimit";
 import { requireSameOrigin } from "@/lib/same-origin";
 
+export const runtime = "nodejs";
+
 type Params = { id: string };
 
 export async function POST(

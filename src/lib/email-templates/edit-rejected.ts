@@ -1,11 +1,5 @@
-import {
-  normalizeLocale,
-  p,
-  petdexUrl,
-  wrapEmail,
-} from "@/lib/email-templates/shared";
-
 import type { Locale } from "@/i18n/config";
+import { normalizeLocale, p, petdexUrl, wrapEmail } from "@/lib/email-templates/shared";
 
 type Vars = {
   petName: string;
@@ -42,14 +36,8 @@ export function renderEditRejectedEmail(
           };
 
   const reasonLine = vars.reason ? `Reason: ${vars.reason}` : copy.noReason;
-  const text = [copy.intro, "", reasonLine, "", copy.cta, "", "Petdex"].join(
-    "\n",
-  );
-  const html = wrapEmail(copy.subject, [
-    p(copy.intro),
-    p(reasonLine),
-    p(copy.cta),
-  ]);
+  const text = [copy.intro, "", reasonLine, "", copy.cta, "", "Petdex"].join("\n");
+  const html = wrapEmail(copy.subject, [p(copy.intro), p(reasonLine), p(copy.cta)]);
 
   return { subject: copy.subject, html, text };
 }

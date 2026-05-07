@@ -1,4 +1,3 @@
-import { updateTag } from "next/cache";
 import { NextResponse } from "next/server";
 
 import { auth } from "@clerk/nextjs/server";
@@ -9,6 +8,8 @@ import { db, schema } from "@/lib/db/client";
 import { requireSameOrigin } from "@/lib/same-origin";
 import { applySubmissionAction } from "@/lib/submission-decisions";
 import { takedownPet } from "@/lib/takedown";
+
+export const runtime = "nodejs";
 
 type Params = { id: string };
 
@@ -107,10 +108,6 @@ export async function DELETE(
     source: "admin",
     actorId: userId ?? "unknown",
   });
-
-  updateTag("gallery");
-  updateTag(`pet:${pet.slug}`);
-  updateTag(`profile:${pet.ownerId}`);
 
   return NextResponse.json({ ok: true });
 }

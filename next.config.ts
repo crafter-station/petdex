@@ -85,7 +85,6 @@ const securityHeaders = [
 const mockRoot = path.resolve(__dirname, "src/lib/mock");
 
 const nextConfig: NextConfig = {
-  cacheComponents: true,
   // Hide the framework banner on every response.
   poweredByHeader: false,
   images: {

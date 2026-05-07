@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-
 import { createPortal } from "react-dom";
 
 import type { PetStateId } from "@/lib/pet-states";
@@ -344,10 +343,7 @@ export function PetFloater({ src, petName }: PetFloaterProps) {
 
         samples.push({ time: ev.timeStamp, x: nextX, y: nextY });
         const sampleCutoff = ev.timeStamp - THROW_SAMPLE_WINDOW_MS;
-        while (
-          samples.length > THROW_SAMPLE_MAX ||
-          samples[1]?.time < sampleCutoff
-        ) {
+        while (samples.length > THROW_SAMPLE_MAX || samples[1]?.time < sampleCutoff) {
           samples.shift();
         }
 
@@ -376,8 +372,7 @@ export function PetFloater({ src, petName }: PetFloaterProps) {
         const recentSamples = samples.filter(
           (sample) => endTime - sample.time <= THROW_SAMPLE_WINDOW_MS,
         );
-        const velocitySamples =
-          recentSamples.length > 1 ? recentSamples : samples;
+        const velocitySamples = recentSamples.length > 1 ? recentSamples : samples;
         const firstSample = velocitySamples[0];
         const lastSample = velocitySamples[velocitySamples.length - 1];
         const dt = lastSample.time - firstSample.time;
@@ -423,8 +418,8 @@ export function PetFloater({ src, petName }: PetFloaterProps) {
           const unclampedX = currentPos.x + nextVx * dtMs;
           const unclampedY = currentPos.y + nextVy * dtMs;
 
-          const nextX = Math.min(Math.max(unclampedX, SAFE_MARGIN_PX), maxX);
-          const nextY = Math.min(Math.max(unclampedY, SAFE_MARGIN_PX), maxY);
+          let nextX = Math.min(Math.max(unclampedX, SAFE_MARGIN_PX), maxX);
+          let nextY = Math.min(Math.max(unclampedY, SAFE_MARGIN_PX), maxY);
 
           if (nextX !== unclampedX) {
             nextVx *= THROW_BOUNCE_DAMPING;

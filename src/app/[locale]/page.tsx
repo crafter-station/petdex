@@ -34,6 +34,7 @@ import { SurprisePetCard } from "@/components/surprise-pet-card";
 // "caught" highlight. The server now renders an alpha-ordered, anon
 // shell that the edge can cache for 60s — enough to keep new pets
 // surfacing without waking a function on every visit.
+export const revalidate = 60;
 export const metadata = {
   alternates: buildLocaleAlternates("/"),
 };

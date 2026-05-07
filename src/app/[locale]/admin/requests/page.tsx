@@ -13,6 +13,8 @@ export const metadata = {
   robots: { index: false, follow: false },
 };
 
+export const dynamic = "force-dynamic";
+
 type ClerkInfo = {
   imageUrl: string | null;
   displayName: string | null;

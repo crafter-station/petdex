@@ -12,6 +12,8 @@ import { MyFeedbackFilters } from "@/components/my-feedback-filters";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 
+export const dynamic = "force-dynamic";
+
 export async function generateMetadata({
   params,
 }: {
@@ -187,7 +189,9 @@ export default async function MyFeedbackPage({
           <h1 className="text-4xl font-medium tracking-tight md:text-5xl">
             {t("title")}
           </h1>
-          <p className="text-sm text-muted-2">{t("subtitle")}</p>
+          <p className="text-sm text-muted-2">
+            {t("subtitle")}
+          </p>
           {decorated.length > 0 ? (
             <MyFeedbackFilters counts={counts} defaultFilter={defaultFilter} />
           ) : null}

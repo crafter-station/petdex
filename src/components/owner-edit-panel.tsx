@@ -198,7 +198,9 @@ export function OwnerEditPanel({
                 <h2 className="text-xl font-medium tracking-tight">
                   {t("modalTitle")}
                 </h2>
-                <p className="mt-1 text-xs text-muted-3">{t("modalBody")}</p>
+                <p className="mt-1 text-xs text-muted-3">
+                  {t("modalBody")}
+                </p>
               </div>
               <button
                 type="button"

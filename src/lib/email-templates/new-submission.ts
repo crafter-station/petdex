@@ -1,6 +1,5 @@
-import { normalizeLocale, p, wrapEmail } from "@/lib/email-templates/shared";
-
 import type { Locale } from "@/i18n/config";
+import { normalizeLocale, p, wrapEmail } from "@/lib/email-templates/shared";
 
 type Vars = {
   displayName: string;

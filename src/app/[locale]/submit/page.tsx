@@ -37,7 +37,9 @@ export default async function SubmitPage() {
           <h1 className="mt-4 text-5xl leading-tight font-medium tracking-normal text-foreground md:text-7xl">
             {t("title")}
           </h1>
-          <p className="mt-6 text-lg leading-8 text-muted-2">{t("body")}</p>
+          <p className="mt-6 text-lg leading-8 text-muted-2">
+            {t("body")}
+          </p>
           <Link
             href="/create"
             className="mt-5 inline-flex items-center gap-2 rounded-full border border-border-base bg-surface/70 px-4 py-2 text-sm font-medium text-muted-2 backdrop-blur transition hover:bg-white hover:text-foreground dark:hover:bg-stone-800"

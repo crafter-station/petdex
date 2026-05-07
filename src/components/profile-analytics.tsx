@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect } from "react";
-
 import { track } from "@vercel/analytics";
+import { useEffect } from "react";
 
 // Fires a single profile_viewed event when a /u/[handle] page is opened.
 // Self-views (where viewerIsOwner === true) are tagged so they can be

@@ -7,6 +7,8 @@ import { isAdmin } from "@/lib/admin";
 import { db, schema } from "@/lib/db/client";
 import { requireSameOrigin } from "@/lib/same-origin";
 
+export const runtime = "nodejs";
+
 // Toggle the `featured` flag on an approved pet. Featured pets land
 // at the top of the gallery, get pinned tier in the curated sort, and
 // pre-fill the home page's hero strip when their slug matches the

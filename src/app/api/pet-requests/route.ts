@@ -14,6 +14,9 @@ import { R2_PUBLIC_BASE } from "@/lib/r2";
 import { petRequestRatelimit } from "@/lib/ratelimit";
 import { requireSameOrigin } from "@/lib/same-origin";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 const rawSql = neon(process.env.DATABASE_URL ?? "");
 
 function normalize(q: string): string {

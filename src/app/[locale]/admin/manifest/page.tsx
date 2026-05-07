@@ -7,6 +7,8 @@ export const metadata = {
   robots: { index: false, follow: false },
 };
 
+export const dynamic = "force-dynamic";
+
 export default async function AdminManifestPage() {
   // Last 7 days, basic shape: total fetches, by-day, by-country, by-UA,
   // and the loudest IPs. Anything older than 7d gets pruned periodically

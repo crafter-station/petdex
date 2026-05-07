@@ -11,6 +11,8 @@ import { FeedbackThread } from "@/components/feedback-thread";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 
+export const dynamic = "force-dynamic";
+
 type Params = { id: string; locale: string };
 
 export async function generateMetadata({

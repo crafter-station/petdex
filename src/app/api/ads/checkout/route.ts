@@ -10,6 +10,7 @@ import { adCheckoutRatelimit } from "@/lib/ratelimit";
 import { requireSameOrigin } from "@/lib/same-origin";
 import { getSiteUrl, getStripe } from "@/lib/stripe";
 
+export const runtime = "nodejs";
 
 type Body = {
   campaignId?: string;

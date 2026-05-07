@@ -10,6 +10,8 @@ import { PetSprite } from "@/components/pet-sprite";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 
+export const dynamic = "force-dynamic";
+
 export async function generateMetadata({
   params,
 }: {
@@ -32,7 +34,9 @@ export default async function NotFound() {
     getApprovedPetCount(),
   ]);
 
-  const lost = featured[0] ?? null;
+  // Pick a random featured pet for the "lost" sprite. Falls back gracefully
+  // if the curated set is empty (early days / fresh DB).
+  const lost = featured[Math.floor(Math.random() * featured.length)] ?? null;
 
   return (
     <main className="min-h-dvh bg-background text-foreground">

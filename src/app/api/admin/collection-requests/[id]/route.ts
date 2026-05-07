@@ -12,6 +12,8 @@ import { isAdmin } from "@/lib/admin";
 import { db, schema } from "@/lib/db/client";
 import { requireSameOrigin } from "@/lib/same-origin";
 
+export const runtime = "nodejs";
+
 type Params = { id: string };
 type PatchBody = {
   action: "approve" | "reject";

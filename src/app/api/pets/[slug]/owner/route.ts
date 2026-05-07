@@ -8,6 +8,8 @@ import { withdrawRatelimit } from "@/lib/ratelimit";
 import { requireSameOrigin } from "@/lib/same-origin";
 import { takedownPet } from "@/lib/takedown";
 
+export const runtime = "nodejs";
+
 // Owner self-service delete. Hard-removes a pet the caller owns:
 // drops the DB row, every cross-table reference, and the R2 assets.
 // The slug becomes available for someone else to reuse.

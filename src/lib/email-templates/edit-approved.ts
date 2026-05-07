@@ -1,11 +1,5 @@
-import {
-  normalizeLocale,
-  p,
-  petdexUrl,
-  wrapEmail,
-} from "@/lib/email-templates/shared";
-
 import type { Locale } from "@/i18n/config";
+import { normalizeLocale, p, petdexUrl, wrapEmail } from "@/lib/email-templates/shared";
 
 type Vars = {
   petName: string;

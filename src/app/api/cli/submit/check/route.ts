@@ -15,6 +15,8 @@ import { db, schema } from "@/lib/db/client";
 import { cliVerifyRatelimit } from "@/lib/ratelimit";
 import { slugify } from "@/lib/submissions";
 
+export const runtime = "nodejs";
+
 const MAX_CANDIDATES = 100;
 
 type Candidate = { petId?: string; slugHint?: string };

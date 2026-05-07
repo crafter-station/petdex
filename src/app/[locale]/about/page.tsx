@@ -12,6 +12,8 @@ import { SiteHeader } from "@/components/site-header";
 
 const SITE_URL = "https://petdex.crafter.run";
 
+export const revalidate = 3600;
+
 export async function generateMetadata({
   params,
 }: {

@@ -4,6 +4,9 @@ import { sql } from "drizzle-orm";
 
 import { db, schema } from "@/lib/db/client";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 // GET /api/pets/random?exclude=current-slug
 //
 // Picks a random approved pet (excluding the optional `exclude` slug).

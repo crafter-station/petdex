@@ -7,6 +7,8 @@ import { db, schema } from "@/lib/db/client";
 import { editRatelimit } from "@/lib/ratelimit";
 import { requireSameOrigin } from "@/lib/same-origin";
 
+export const runtime = "nodejs";
+
 type Params = { id: string };
 
 type PatchBody = {
@@ -139,7 +141,10 @@ export async function PATCH(
     patch.pendingDescription === null &&
     patch.pendingTags === null;
   if (noOp) {
-    return NextResponse.json({ error: "nothing_changed" }, { status: 400 });
+    return NextResponse.json(
+      { error: "nothing_changed" },
+      { status: 400 },
+    );
   }
 
   const [updated] = await db

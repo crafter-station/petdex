@@ -12,6 +12,8 @@ import { createNotification } from "@/lib/notifications";
 import { requireSameOrigin } from "@/lib/same-origin";
 import { getPreferredLocaleForUser } from "@/lib/user-locale";
 
+export const runtime = "nodejs";
+
 type Params = { id: string };
 
 type PostBody = {

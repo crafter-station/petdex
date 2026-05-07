@@ -1,4 +1,3 @@
-import { updateTag } from "next/cache";
 import { NextResponse } from "next/server";
 
 import { auth, currentUser } from "@clerk/nextjs/server";
@@ -12,6 +11,8 @@ import {
   type SubmissionPrincipal,
   validateSubmission,
 } from "@/lib/submissions";
+
+export const runtime = "nodejs";
 
 export async function POST(req: Request) {
   const csrf = requireSameOrigin(req);
@@ -86,11 +87,6 @@ export async function POST(req: Request) {
   if (!result.ok) {
     const { status, ...rest } = result;
     return NextResponse.json(rest, { status });
-  }
-  updateTag("gallery");
-  updateTag(`profile:${result.profileHandle}`);
-  if (result.status === "approved") {
-    updateTag(`pet:${result.slug}`);
   }
   return NextResponse.json(result, { status: 201 });
 }

@@ -5,6 +5,7 @@ import type Stripe from "stripe";
 import { activateCampaignFromCheckout } from "@/lib/ads/queries";
 import { getStripe } from "@/lib/stripe";
 
+export const runtime = "nodejs";
 
 export async function POST(req: Request): Promise<Response> {
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;

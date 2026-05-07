@@ -84,7 +84,9 @@ export default async function CreatePage() {
               </code>
               {t("steps.hatch.afterCommand")}
             </p>
-            <p className="text-xs text-muted-3">{t("steps.hatch.tip")}</p>
+            <p className="text-xs text-muted-3">
+              {t("steps.hatch.tip")}
+            </p>
           </Step>
 
           <Step

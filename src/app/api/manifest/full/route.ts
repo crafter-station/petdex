@@ -7,6 +7,9 @@ import { logManifestFetch } from "@/lib/manifest-telemetry";
 import { getAllApprovedPets } from "@/lib/pets";
 import { manifestFullRatelimit } from "@/lib/ratelimit";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 // Authenticated, full-fat manifest. Only returns when the caller is
 // signed in. Surfaces description, tags, vibes, install commands,
 // page URLs and counts — anything richer than the slim public path.

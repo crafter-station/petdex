@@ -11,6 +11,7 @@ import { isAllowedAssetUrl } from "@/lib/url-allowlist";
 
 import { defaultLocale, hasLocale } from "@/i18n/config";
 
+export const runtime = "nodejs";
 export const contentType = "image/png";
 export const size = { width: 1200, height: 630 };
 export const alt = "Petdex featured collections";
@@ -19,6 +20,7 @@ export const alt = "Petdex featured collections";
 // thing on the Vercel bill, and the rendered PNG is identical for
 // hours at a time. See per-pet opengraph-image.tsx for the same
 // reasoning.
+export const revalidate = 86400;
 
 const FRAME_W = 192;
 const FRAME_H = 208;

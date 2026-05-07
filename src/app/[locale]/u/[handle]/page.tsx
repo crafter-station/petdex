@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { Suspense } from "react";
 
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { desc, eq } from "drizzle-orm";
@@ -32,6 +31,8 @@ import { ProfileShareButton } from "@/components/profile-share-button";
 import { ProfileTabs } from "@/components/profile-tabs";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
+
+export const dynamic = "force-dynamic";
 
 const SITE_URL = "https://petdex.crafter.run";
 
@@ -68,15 +69,7 @@ export async function generateMetadata({ params }: PageProps) {
   };
 }
 
-export default function UserProfilePage({ params }: PageProps) {
-  return (
-    <Suspense fallback={null}>
-      <UserProfileContent params={params} />
-    </Suspense>
-  );
-}
-
-async function UserProfileContent({ params }: PageProps) {
+export default async function UserProfilePage({ params }: PageProps) {
   const { handle } = await params;
   const requestedHandle = handle.toLowerCase();
   const ownerId = await userIdForHandle(handle);
