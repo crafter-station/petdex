@@ -1,4 +1,4 @@
-import { updateTag } from "next/cache";
+import { revalidateTag } from "next/cache";
 import { NextResponse } from "next/server";
 
 import { auth } from "@clerk/nextjs/server";
@@ -108,9 +108,9 @@ export async function DELETE(
     actorId: userId ?? "unknown",
   });
 
-  updateTag("gallery");
-  updateTag(`pet:${pet.slug}`);
-  updateTag(`profile:${pet.ownerId}`);
+  revalidateTag("gallery", "max");
+  revalidateTag(`pet:${pet.slug}`, "max");
+  revalidateTag(`profile:${pet.ownerId}`, "max");
 
   return NextResponse.json({ ok: true });
 }

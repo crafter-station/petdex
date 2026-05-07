@@ -1,4 +1,4 @@
-import { updateTag } from "next/cache";
+import { revalidateTag } from "next/cache";
 import { NextResponse } from "next/server";
 
 import { auth } from "@clerk/nextjs/server";
@@ -222,9 +222,9 @@ export async function PATCH(req: Request): Promise<Response> {
       },
     });
 
-  updateTag(`profile:${userId}`);
+  revalidateTag(`profile:${userId}`, "max");
   if (typeof patch.handle === "string") {
-    updateTag(`profile:${patch.handle}`);
+    revalidateTag(`profile:${patch.handle}`, "max");
   }
 
   return NextResponse.json({

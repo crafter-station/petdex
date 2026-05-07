@@ -1,4 +1,4 @@
-import { updateTag } from "next/cache";
+import { revalidateTag } from "next/cache";
 
 import { eq } from "drizzle-orm";
 import { Resend } from "resend";
@@ -112,9 +112,9 @@ export async function applySubmissionAction(
   let row = updated;
   if (body.action === "approve" && !options.skipSideEffects) {
     row = await runPostApprovalEffects(row, actor, db);
-    updateTag("gallery");
-    updateTag(`pet:${row.slug}`);
-    updateTag(`profile:${row.ownerId}`);
+    revalidateTag("gallery", "max");
+    revalidateTag(`pet:${row.slug}`, "max");
+    revalidateTag(`profile:${row.ownerId}`, "max");
   }
 
   if (
