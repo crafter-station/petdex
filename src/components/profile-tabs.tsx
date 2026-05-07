@@ -44,6 +44,12 @@ export type ProfileTabsProps = {
     displayName: string;
     spritesheetUrl: string;
   }[];
+  // Owner-only pin state passed through to the Approved cards so each
+  // can render its own pin/unpin overlay. Visitors get null.
+  pinning?: {
+    pinnedSlugs: string[];
+    maxPins: number;
+  } | null;
 };
 
 type TabKey = "pets" | "liked" | "collections";
@@ -58,7 +64,14 @@ export function ProfileTabs(props: ProfileTabsProps) {
     collection,
     canManageCollections,
     collectionApprovedPets,
+    pinning,
   } = props;
+
+  // Pre-build the lookup once instead of per-card. The Set isn't worth
+  // it for the typical 6-pin cap, but we guard against the rare 100+
+  // owner with .includes().
+  const pinnedSet = pinning ? new Set(pinning.pinnedSlugs) : null;
+  const pinnedCount = pinning?.pinnedSlugs.length ?? 0;
 
   const stateCount = petStates.length;
 
@@ -145,6 +158,9 @@ export function ProfileTabs(props: ProfileTabsProps) {
           pendingSubmissions={pendingSubmissions}
           rejectedSubmissions={rejectedSubmissions}
           stateCount={stateCount}
+          pinnedSet={pinnedSet}
+          pinnedCount={pinnedCount}
+          maxPins={pinning?.maxPins ?? null}
         />
       ) : null}
 
@@ -172,6 +188,9 @@ function PetsPanel({
   pendingSubmissions,
   rejectedSubmissions,
   stateCount,
+  pinnedSet,
+  pinnedCount,
+  maxPins,
 }: {
   isOwner: boolean;
   publicHandle: string;
@@ -179,6 +198,9 @@ function PetsPanel({
   pendingSubmissions: Submission[];
   rejectedSubmissions: Submission[];
   stateCount: number;
+  pinnedSet: Set<string> | null;
+  pinnedCount: number;
+  maxPins: number | null;
 }) {
   if (
     approvedPets.length === 0 &&
@@ -231,6 +253,15 @@ function PetsPanel({
                 ownerActions={
                   isOwner
                     ? { submissionId: pet.id, status: "approved" }
+                    : undefined
+                }
+                pinState={
+                  isOwner && pinnedSet && maxPins != null
+                    ? {
+                        isPinned: pinnedSet.has(pet.slug),
+                        pinnedCount,
+                        maxPins,
+                      }
                     : undefined
                 }
               />

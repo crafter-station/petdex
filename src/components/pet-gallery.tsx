@@ -34,6 +34,7 @@ import { useHeaderState } from "@/components/header-state-provider";
 import { PetActionMenu } from "@/components/pet-action-menu";
 import { PetCardFooter } from "@/components/pet-card-footer";
 import { PetSprite } from "@/components/pet-sprite";
+import { ProfilePinButton } from "@/components/profile-pin-button";
 import { Button } from "@/components/ui/button";
 import {
   InputGroup,
@@ -723,6 +724,15 @@ export type PetCardStatusOverlay = {
   tone: "warning" | "danger";
 };
 
+export type PetCardPinState = {
+  /** Whether this pet is currently in the owner's featured_pet_slugs. */
+  isPinned: boolean;
+  /** Total number of pinned pets — used to enforce the cap. */
+  pinnedCount: number;
+  /** Hard cap for the owner. Same constant the editor uses. */
+  maxPins: number;
+};
+
 type PetCardProps = {
   pet: PetWithMetrics;
   index: number;
@@ -755,6 +765,13 @@ type PetCardProps = {
    * of the gallery cards. Approved pets render no overlay.
    */
   statusOverlay?: PetCardStatusOverlay;
+  /**
+   * Pin/unpin overlay shown on the owner's own profile so they can
+   * promote pets to (or remove from) the pinned strip without going
+   * through the inline editor. Only renders when supplied — visitors
+   * never see this prop populated.
+   */
+  pinState?: PetCardPinState;
 };
 
 export function PetCard({
@@ -764,6 +781,7 @@ export function PetCard({
   caught,
   ownerActions,
   statusOverlay,
+  pinState,
 }: PetCardProps) {
   const dexLabel =
     dexNumber != null
@@ -923,6 +941,21 @@ export function PetCard({
         >
           {statusOverlay.label}
         </span>
+      ) : null}
+
+      {/* Pin overlay — owner-only on their own /u/[handle]. Sits to the
+ left of the action menu so both stay clickable above the card-wide
+ Link. The button itself toggles isPinned via /api/profile and
+ router.refresh()es. */}
+      {pinState ? (
+        <div className="absolute top-3 right-14 z-20">
+          <ProfilePinButton
+            slug={pet.slug}
+            isPinned={pinState.isPinned}
+            pinnedCount={pinState.pinnedCount}
+            maxPins={pinState.maxPins}
+          />
+        </div>
       ) : null}
 
       {/* Action menu lives outside the Link so its clicks don't navigate.

@@ -466,6 +466,11 @@ export default async function UserProfilePage({ params }: PageProps) {
             displayName: p.displayName,
             spritesheetUrl: p.spritesheetPath,
           }))}
+          pinning={
+            isOwner
+              ? { pinnedSlugs: featuredSlugs, maxPins: MAX_PINNED_PETS }
+              : null
+          }
         />
       </section>
 
