@@ -7,7 +7,6 @@ import { isAdmin } from "@/lib/admin";
 import { getCaughtSlugSet } from "@/lib/catch-status";
 import { db, schema } from "@/lib/db/client";
 
-export const runtime = "nodejs";
 
 // GET /api/me/header-state -> single aggregate the SiteHeader needs on
 // every page-view. Combines what used to be three separate endpoints

@@ -6,7 +6,6 @@ import { presignPut } from "@/lib/r2";
 import { presignRatelimit } from "@/lib/ratelimit";
 import { requireSameOrigin } from "@/lib/same-origin";
 
-export const runtime = "nodejs";
 
 const ALLOWED_CT = new Set(["image/png", "image/webp", "image/jpeg"]);
 const MAX_BYTES = 10 * 1024 * 1024;
