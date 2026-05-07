@@ -169,17 +169,19 @@ async function runPostApprovalEffects(
     })();
   }
 
-  void (async () => {
-    try {
-      const { getApprovedPetMissingSoundBySlug, processPetSound } =
-        await import("@/lib/pet-sound");
-      const pet = await getApprovedPetMissingSoundBySlug(row.slug);
-      if (!pet) return;
-      await processPetSound(pet, { workerKey: `${actor}-${row.slug}` });
-    } catch (e) {
-      console.error("sound gen failed", e);
-    }
-  })();
+  if (process.env.ELEVENLABS_API_KEY) {
+    void (async () => {
+      try {
+        const { getApprovedPetMissingSoundBySlug, processPetSound } =
+          await import("@/lib/pet-sound");
+        const pet = await getApprovedPetMissingSoundBySlug(row.slug);
+        if (!pet) return;
+        await processPetSound(pet, { workerKey: `${actor}-${row.slug}` });
+      } catch (e) {
+        console.error("sound gen failed", e);
+      }
+    })();
+  }
 
   return row;
 }
