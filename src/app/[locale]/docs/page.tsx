@@ -29,11 +29,8 @@ const SKILL_URL = `${REPO_URL}/blob/main/.claude/skills/petdex/SKILL.md`;
 export default function DocsPage() {
   return (
     <main className="min-h-dvh bg-background text-foreground">
-      <section className="mx-auto flex w-full max-w-[1440px] flex-col gap-8 px-5 py-5 md:px-8 md:py-5">
-        <SiteHeader />
-      </section>
-
-      <section className="mx-auto grid w-full max-w-6xl gap-12 px-5 pb-12 md:grid-cols-[220px_1fr] md:px-8 md:pb-16">
+      <SiteHeader />
+      <section className="mx-auto grid w-full max-w-6xl gap-12 px-5 pt-8 pb-12 md:grid-cols-[220px_1fr] md:px-8 md:pb-16">
         <aside className="hidden md:block">
           <nav className="sticky top-6 flex flex-col gap-1.5 text-sm">
             <NavHeader>Get started</NavHeader>

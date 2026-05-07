@@ -44,9 +44,10 @@ export default async function AdvertiseDashboardPage({
   const campaigns = await getUserAdCampaigns(userId);
 
   return (
-    <main className="petdex-cloud relative min-h-dvh overflow-hidden bg-background text-foreground">
-      <section className="relative mx-auto flex w-full max-w-[1440px] flex-col gap-8 px-5 pt-5 pb-12 md:px-8 md:pb-16">
-        <SiteHeader />
+    <main className="min-h-dvh bg-background text-foreground">
+      <SiteHeader />
+      <section className="petdex-cloud relative -mt-[84px] overflow-clip pt-[84px]">
+        <div className="relative mx-auto flex w-full max-w-[1440px] flex-col gap-8 px-5 pb-12 md:px-8 md:pb-16">
         <header className="mt-8 flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
           <div>
             <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
@@ -67,6 +68,7 @@ export default async function AdvertiseDashboardPage({
           </Link>
         </header>
         <AdDashboard campaigns={campaigns} />
+        </div>
       </section>
       <SiteFooter />
     </main>

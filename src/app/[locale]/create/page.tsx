@@ -40,10 +40,10 @@ export default async function CreatePage() {
   const t = await getTranslations("create");
 
   return (
-    <main className="petdex-cloud relative min-h-dvh overflow-hidden bg-background text-foreground">
-      <section className="relative mx-auto flex w-full max-w-5xl flex-col gap-10 px-5 py-5 pb-12 md:px-8 md:py-5 md:pb-16">
-        <SiteHeader />
-
+    <main className="min-h-dvh bg-background text-foreground">
+      <SiteHeader />
+      <section className="petdex-cloud relative -mt-[84px] overflow-clip pt-[84px]">
+        <div className="relative mx-auto flex w-full max-w-5xl flex-col gap-10 px-5 pb-12 md:px-8 md:pb-16">
         <header className="mt-6 max-w-3xl">
           <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
             {t("eyebrow")}
@@ -225,6 +225,7 @@ export default async function CreatePage() {
               </p>
             </div>
           </div>
+        </div>
         </div>
       </section>
 

@@ -178,10 +178,8 @@ export default async function MyFeedbackPage({
 
   return (
     <main className="min-h-dvh bg-background text-foreground">
-      <section className="mx-auto flex w-full max-w-[1440px] flex-col gap-8 px-5 py-5 md:px-8 md:py-5">
-        <SiteHeader />
-      </section>
-      <section className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-5 pb-20 md:px-8">
+      <SiteHeader />
+      <section className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-5 pt-8 pb-20 md:px-8">
         <header className="space-y-3">
           <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
             {t("eyebrow")}

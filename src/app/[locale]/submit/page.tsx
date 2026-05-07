@@ -28,10 +28,10 @@ export default async function SubmitPage() {
   const t = await getTranslations("submit");
 
   return (
-    <main className="petdex-cloud relative min-h-dvh overflow-hidden bg-background">
-      <section className="relative mx-auto flex w-full max-w-6xl flex-col gap-10 px-5 py-5 pb-12 md:px-8 md:py-5 md:pb-16">
-        <SiteHeader hideSubmitCta />
-
+    <main className="min-h-dvh bg-background">
+      <SiteHeader hideSubmitCta />
+      <section className="petdex-cloud relative -mt-[84px] overflow-clip pt-[84px]">
+        <div className="relative mx-auto flex w-full max-w-6xl flex-col gap-10 px-5 pb-12 md:px-8 md:pb-16">
         <header className="max-w-3xl">
           <p className="text-sm font-medium text-brand-light">{t("eyebrow")}</p>
           <h1 className="mt-4 text-5xl leading-tight font-medium tracking-normal text-foreground md:text-7xl">
@@ -62,6 +62,7 @@ export default async function SubmitPage() {
           </Link>
           {t("legalSuffix")}
         </p>
+        </div>
       </section>
 
       <SiteFooter />

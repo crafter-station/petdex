@@ -672,14 +672,17 @@ function adForPetIndex(
   index: number,
 ): PublicFeedAd | null {
   if (ads.length === 0) return null;
-  // Density scales inversely with inventory: a single advertiser would
-  // otherwise repeat every 12 pets (8x per 100), reading as spam. With
-  // a healthier roster the slots tighten back up.
-  const stride = ads.length === 1 ? 30 : ads.length <= 3 ? 18 : 12;
+  // Density scales inversely with inventory: with a single advertiser
+  // any stride feels spammy, so we space generously and cap to 3 slots
+  // total. With a healthier roster the slots tighten back up.
+  const stride = ads.length === 1 ? 40 : ads.length <= 3 ? 24 : 16;
+  const maxSlots = ads.length === 1 ? 3 : 8;
   const petPosition = index + 1;
-  if (petPosition < 6) return null;
-  if (petPosition !== 6 && (petPosition - 6) % stride !== 0) return null;
-  const adIndex = Math.floor((petPosition - 6) / stride) % ads.length;
+  if (petPosition < 8) return null;
+  if (petPosition !== 8 && (petPosition - 8) % stride !== 0) return null;
+  const slotNumber = Math.floor((petPosition - 8) / stride);
+  if (slotNumber >= maxSlots) return null;
+  const adIndex = slotNumber % ads.length;
   return ads[adIndex] ?? null;
 }
 
