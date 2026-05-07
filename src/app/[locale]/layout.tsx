@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { notFound } from "next/navigation";
 
 import { Analytics } from "@vercel/analytics/next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import { NextIntlClientProvider } from "next-intl";
 import {
   getMessages,
@@ -107,6 +108,7 @@ export default async function LocaleLayout({ children, params }: Props) {
               <AnnouncementQueue />
               <ProfileAnnouncementModal />
               <Analytics />
+              <SpeedInsights />
             </HeaderStateProvider>
           </AppProviders>
         </NextIntlClientProvider>

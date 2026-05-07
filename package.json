@@ -36,6 +36,7 @@
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.37.0",
     "@vercel/analytics": "^2.0.1",
+    "@vercel/speed-insights": "^2.0.0",
     "ai": "^6.0.175",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
