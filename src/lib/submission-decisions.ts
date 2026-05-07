@@ -183,6 +183,26 @@ async function runPostApprovalEffects(
     })();
   }
 
+  // Suggest matching open requests as candidates for admin review.
+  // Background only — never blocks the approve response. Failures
+  // are logged and swallowed; the admin can still create candidates
+  // manually from /admin/requests if the auto-pass missed something.
+  void (async () => {
+    try {
+      const { autoSuggestCandidates } = await import(
+        "@/lib/request-candidates"
+      );
+      const result = await autoSuggestCandidates(row.id);
+      if (result.inserted > 0) {
+        console.log(
+          `[${actor}] suggested ${result.inserted} request candidate(s) for ${row.slug}`,
+        );
+      }
+    } catch (e) {
+      console.error("request candidate suggest failed", e);
+    }
+  })();
+
   return row;
 }
 

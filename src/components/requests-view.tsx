@@ -24,6 +24,8 @@ import {
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 
+import { ClaimRequestButton } from "@/components/claim-request-button";
+
 type ClerkInfo = {
   handle: string;
   displayName: string | null;
@@ -771,6 +773,14 @@ function RequestCard({
                 {request.fulfilledPet.displayName}
                 <ExternalLink className="size-3" />
               </Link>
+            ) : null}
+
+            {/* Claim CTA — shown only on open requests */}
+            {!fulfilled ? (
+              <ClaimRequestButton
+                requestId={request.id}
+                requestQuery={parsedRequest.label}
+              />
             ) : null}
           </div>
         </div>

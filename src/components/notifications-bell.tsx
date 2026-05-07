@@ -91,6 +91,16 @@ function describe(n: Notif): { title: string; sub?: string } {
         sub: p.excerpt,
       };
     case "request_fulfilled":
+      // Distinguish which side of the fulfillment received this notif.
+      // role="creator" means the recipient owns the pet that fulfilled
+      // someone else's request; role="requester" (or missing) means
+      // their own request shipped.
+      if (p.role === "creator") {
+        return {
+          title: `${p.petName ?? "Your pet"} fulfilled "${p.requestQuery ?? "a request"}"`,
+          sub: "The community asked, you delivered.",
+        };
+      }
       return {
         title: `Your request "${p.requestQuery ?? "..."}" was fulfilled`,
         sub: p.petName ? `Now live as ${p.petName}` : undefined,

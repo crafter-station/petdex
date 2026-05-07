@@ -7,6 +7,7 @@ import {
   pgEnum,
   pgTable,
   primaryKey,
+  real,
   text,
   timestamp,
   uniqueIndex,
@@ -621,6 +622,45 @@ export const petRequestVotes = pgTable(
     pk: primaryKey({ columns: [table.requestId, table.userId] }),
   }),
 );
+
+// Candidates linking a submitted pet to a pet request. Two sources:
+// - "auto"   created by the background match job after a pet hits
+//            status='approved'; similarity holds the cosine score
+// - "manual" created when the pet's owner clicks "I have a pet for
+//            this" on /requests; similarity is null
+// Admin resolves to either approved (request becomes fulfilled) or
+// rejected. A single (petId, requestId) pair can only appear once.
+export const petRequestCandidates = pgTable(
+  "pet_request_candidates",
+  {
+    petId: text("pet_id").notNull(),
+    requestId: text("request_id").notNull(),
+    similarity: real("similarity"),
+    source: text("source").notNull(),
+    status: text("status").notNull().default("pending"),
+    rejectionReason: text("rejection_reason"),
+    suggestedAt: timestamp("suggested_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    resolvedBy: text("resolved_by"),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.petId, table.requestId] }),
+    requestStatusIdx: index("pet_request_candidates_request_status_idx").on(
+      table.requestId,
+      table.status,
+    ),
+    statusSuggestedIdx: index("pet_request_candidates_status_suggested_idx").on(
+      table.status,
+      table.suggestedAt.desc(),
+    ),
+    petIdx: index("pet_request_candidates_pet_idx").on(table.petId),
+  }),
+);
+
+export type PetRequestCandidate = typeof petRequestCandidates.$inferSelect;
+export type NewPetRequestCandidate = typeof petRequestCandidates.$inferInsert;
 
 export type SubmittedPet = typeof submittedPets.$inferSelect;
 export type NewSubmittedPet = typeof submittedPets.$inferInsert;

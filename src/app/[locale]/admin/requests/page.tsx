@@ -5,7 +5,9 @@ import { desc, sql as dsql, inArray } from "drizzle-orm";
 import { ExternalLink, Sparkles } from "lucide-react";
 
 import { db, schema } from "@/lib/db/client";
+import { listPendingCandidates } from "@/lib/request-candidates";
 
+import { AdminCandidateActions } from "@/components/admin-candidate-actions";
 import { AdminRequestActions } from "@/components/admin-request-actions";
 
 export const metadata = {
@@ -138,6 +140,17 @@ export default async function AdminRequestsPage() {
   const fulfilled = rows.filter((r) => r.status === "fulfilled");
   const dismissed = rows.filter((r) => r.status === "dismissed");
 
+  const candidates = await listPendingCandidates(50);
+  const candidateOwnerIds = candidates.map((c) => c.pet.ownerId);
+  for (const id of candidateOwnerIds) userIdSet.add(id);
+  // Re-resolve clerk info if candidates introduced new owner ids that
+  // weren't in the original set. Cheap re-check; loadClerkInfo is a
+  // no-op when ids already known.
+  const candidateClerkInfo = await loadClerkInfo(
+    candidateOwnerIds.filter((id) => !clerkInfo.has(id)),
+  );
+  for (const [k, v] of candidateClerkInfo) clerkInfo.set(k, v);
+
   return (
     <section className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-5 pb-12 md:px-8 md:pb-16">
       <header>
@@ -152,6 +165,18 @@ export default async function AdminRequestsPage() {
           dismissed
         </p>
       </header>
+
+      {candidates.length > 0 ? (
+        <Section title="Candidates awaiting review" count={candidates.length}>
+          {candidates.map((c) => (
+            <CandidateRow
+              key={`${c.petId}:${c.requestId}`}
+              candidate={c}
+              owner={clerkInfo.get(c.pet.ownerId) ?? null}
+            />
+          ))}
+        </Section>
+      ) : null}
 
       {open.length > 0 ? (
         <Section title="Open" count={open.length}>
@@ -427,5 +452,90 @@ function Empty({ children }: { children: React.ReactNode }) {
     <div className="rounded-2xl border border-dashed border-border-base bg-surface/60 p-6 text-center text-sm text-muted-2">
       {children}
     </div>
+  );
+}
+
+type CandidateRowData = Awaited<
+  ReturnType<typeof listPendingCandidates>
+>[number];
+
+function CandidateRow({
+  candidate,
+  owner,
+}: {
+  candidate: CandidateRowData;
+  owner: ClerkInfo | null;
+}) {
+  const ownerLabel =
+    owner?.displayName ||
+    owner?.username ||
+    candidate.pet.creditName ||
+    "unknown";
+  const sourceLabel = candidate.source === "auto" ? "AUTO" : "MANUAL";
+  const similarityLabel =
+    candidate.similarity != null
+      ? `${Math.round(candidate.similarity * 100)}% match`
+      : null;
+
+  return (
+    <article className="grid gap-4 rounded-2xl border border-border-base bg-surface/80 p-4 md:grid-cols-[1fr_auto_1fr_auto]">
+      <Link
+        href={`/pets/${candidate.pet.slug}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex items-center gap-3 rounded-xl p-2 transition hover:bg-surface-muted"
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={candidate.pet.spritesheetUrl}
+          alt=""
+          className="size-12 shrink-0 rounded-lg bg-surface-muted object-cover"
+        />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-foreground">
+            {candidate.pet.displayName}
+          </p>
+          <p className="truncate text-xs text-muted-3">
+            by {ownerLabel}{" "}
+            <span className="ml-1 font-mono text-[10px] tracking-[0.18em] text-muted-4">
+              {sourceLabel}
+              {similarityLabel ? ` · ${similarityLabel}` : ""}
+            </span>
+          </p>
+        </div>
+      </Link>
+
+      <div className="hidden self-center text-muted-4 md:block" aria-hidden>
+        →
+      </div>
+
+      <div className="flex items-start gap-3 p-2">
+        {candidate.request.imageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={candidate.request.imageUrl}
+            alt=""
+            className="size-12 shrink-0 rounded-lg bg-surface-muted object-cover"
+          />
+        ) : (
+          <div className="grid size-12 shrink-0 place-items-center rounded-lg bg-surface-muted">
+            <Sparkles className="size-4 text-muted-4" />
+          </div>
+        )}
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-foreground">
+            {candidate.request.query}
+          </p>
+          <p className="text-xs text-muted-3">
+            {candidate.request.upvoteCount} votes
+          </p>
+        </div>
+      </div>
+
+      <AdminCandidateActions
+        petId={candidate.petId}
+        requestId={candidate.requestId}
+      />
+    </article>
   );
 }
