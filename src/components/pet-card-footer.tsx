@@ -1,9 +1,9 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { memo, useCallback, useState } from "react";
 
-import { useUser } from "@clerk/nextjs";
+import { useClerk } from "@clerk/nextjs";
 import { track } from "@vercel/analytics";
 import { Download, Heart, Loader2, Share2, TerminalSquare } from "lucide-react";
 
@@ -15,7 +15,7 @@ import { PetSoundButton } from "@/components/pet-sound-button";
 //
 // Buttons stop propagation so a click on a footer action does not
 // also fire the card-wide Link wrapper that the parent renders.
-export function PetCardFooter({
+function PetCardFooterImpl({
   slug,
   displayName,
   zipUrl,
@@ -33,92 +33,102 @@ export function PetCardFooter({
   initialLiked?: boolean;
 }) {
   const router = useRouter();
-  const { isLoaded, isSignedIn } = useUser();
+  const clerk = useClerk();
 
   const [liked, setLiked] = useState(initialLiked ?? false);
   const [count, setCount] = useState(likeCount);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  async function toggleLike(e: React.MouseEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    if (busy || !isLoaded) return;
-    if (!isSignedIn) {
-      router.push("/?signin=1");
-      return;
-    }
-    const next = !liked;
-    // Optimistic.
-    setLiked(next);
-    setCount((c) => Math.max(0, c + (next ? 1 : -1)));
-    setBusy(true);
-    track("pet_like_toggled", { slug, liked: next, source: "card-footer" });
-    try {
-      // The API toggles regardless of method, returns current count
-      // and liked state — we reconcile with whatever it returns.
-      const res = await fetch(`/api/pets/${slug}/like`, { method: "POST" });
-      if (!res.ok) {
-        setLiked(!next);
-        setCount((c) => Math.max(0, c + (next ? -1 : 1)));
+  const toggleLike = useCallback(
+    async (e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (busy) return;
+      const session = clerk.session;
+      if (!session) {
+        router.push("/?signin=1");
         return;
       }
-      const j = (await res.json().catch(() => null)) as {
-        likeCount?: number;
-        liked?: boolean;
-      } | null;
-      if (j && typeof j.likeCount === "number") setCount(j.likeCount);
-      if (j && typeof j.liked === "boolean") setLiked(j.liked);
-    } finally {
-      setBusy(false);
-    }
-  }
+      const next = !liked;
+      setLiked(next);
+      setCount((c) => Math.max(0, c + (next ? 1 : -1)));
+      setBusy(true);
+      track("pet_like_toggled", { slug, liked: next, source: "card-footer" });
+      try {
+        const res = await fetch(`/api/pets/${slug}/like`, { method: "POST" });
+        if (!res.ok) {
+          setLiked(!next);
+          setCount((c) => Math.max(0, c + (next ? -1 : 1)));
+          return;
+        }
+        const j = (await res.json().catch(() => null)) as {
+          likeCount?: number;
+          liked?: boolean;
+        } | null;
+        if (j && typeof j.likeCount === "number") setCount(j.likeCount);
+        if (j && typeof j.liked === "boolean") setLiked(j.liked);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [busy, clerk, liked, router, slug],
+  );
 
-  async function copyInstall(e: React.MouseEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    const cmd = `npx petdex install ${slug}`;
-    try {
-      await navigator.clipboard.writeText(cmd);
-      setCopied(true);
-      track("pet_install_copied", { slug, source: "card-footer" });
-      setTimeout(() => setCopied(false), 1400);
-    } catch {
-      /* swallow */
-    }
-  }
+  const copyInstall = useCallback(
+    async (e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const cmd = `npx petdex install ${slug}`;
+      try {
+        await navigator.clipboard.writeText(cmd);
+        setCopied(true);
+        track("pet_install_copied", { slug, source: "card-footer" });
+        setTimeout(() => setCopied(false), 1400);
+      } catch {
+        /* swallow */
+      }
+    },
+    [slug],
+  );
 
-  function download(e: React.MouseEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!zipUrl) return;
-    track("pet_zip_downloaded", { slug, source: "card-footer" });
-    const a = document.createElement("a");
-    a.href = zipUrl;
-    a.download = `${slug}.zip`;
-    a.rel = "noopener";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-  }
+  const download = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!zipUrl) return;
+      track("pet_zip_downloaded", { slug, source: "card-footer" });
+      const a = document.createElement("a");
+      a.href = zipUrl;
+      a.download = `${slug}.zip`;
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    },
+    [slug, zipUrl],
+  );
 
-  async function share(e: React.MouseEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    const url = `${typeof window !== "undefined" ? window.location.origin : ""}/pets/${slug}`;
-    track("pet_shared", { slug, source: "card-footer" });
-    if (navigator.share) {
-      navigator.share({ title: displayName, url }).catch(() => {});
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(url);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1400);
-    } catch {
-      /* swallow */
-    }
-  }
+  const share = useCallback(
+    async (e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const url = `${typeof window !== "undefined" ? window.location.origin : ""}/pets/${slug}`;
+      track("pet_shared", { slug, source: "card-footer" });
+      if (navigator.share) {
+        navigator.share({ title: displayName, url }).catch(() => {});
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(url);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1400);
+      } catch {
+        /* swallow */
+      }
+    },
+    [displayName, slug],
+  );
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 border-t border-black/[0.05] px-2 py-2 dark:border-white/[0.05]">
@@ -175,7 +185,9 @@ export function PetCardFooter({
   );
 }
 
-function FooterBtn({
+export const PetCardFooter = memo(PetCardFooterImpl);
+
+const FooterBtn = memo(function FooterBtn({
   children,
   onClick,
   active,
@@ -201,4 +213,4 @@ function FooterBtn({
       {children}
     </button>
   );
-}
+});

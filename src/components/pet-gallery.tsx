@@ -4,6 +4,7 @@ import Link from "next/link";
 import {
   type CSSProperties,
   Fragment,
+  memo,
   useCallback,
   useEffect,
   useRef,
@@ -774,7 +775,7 @@ type PetCardProps = {
   pinState?: PetCardPinState;
 };
 
-export function PetCard({
+function PetCardImpl({
   pet,
   index,
   dexNumber,
@@ -974,6 +975,8 @@ export function PetCard({
     </article>
   );
 }
+
+export const PetCard = memo(PetCardImpl);
 
 function toggleSet<T>(set: Set<T>, value: T): Set<T> {
   const next = new Set(set);

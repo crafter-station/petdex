@@ -1,6 +1,6 @@
 "use client";
 
-import { type CSSProperties, useEffect, useMemo, useState } from "react";
+import { type CSSProperties, memo, useEffect, useMemo, useState } from "react";
 
 import { type PetStateId, petStates } from "@/lib/pet-states";
 
@@ -14,7 +14,7 @@ type PetSpriteProps = {
   cycleIntervalMs?: number;
 };
 
-export function PetSprite({
+function PetSpriteImpl({
   src,
   state = "idle",
   scale = 1,
@@ -69,6 +69,8 @@ export function PetSprite({
     </div>
   );
 }
+
+export const PetSprite = memo(PetSpriteImpl);
 
 function hashString(value: string) {
   let hash = 0;
