@@ -30,6 +30,14 @@ export async function generateMetadata({ params }: PageProps) {
     return { title: "Collection not found", robots: { index: false } };
   }
 
+  // Pin the OG image URL to the locale-stripped path. The auto-detected
+  // image route from app/[locale]/collections/[slug]/opengraph-image.tsx
+  // would generate /en/collections/.../opengraph-image, which next-intl
+  // rewrites with a 307 redirect under localePrefix="as-needed". Most
+  // social scrapers (Discord, X) don't follow redirects on og:image
+  // and silently fall back to the parent layout's image — so unfurls
+  // showed the generic Petdex hero instead of the per-collection art.
+  const ogImage = `${SITE_URL}/collections/${collection.slug}/opengraph-image`;
   return {
     title: `${collection.title} collection`,
     description: collection.description,
@@ -38,6 +46,13 @@ export async function generateMetadata({ params }: PageProps) {
       title: `${collection.title} on Petdex`,
       description: collection.description,
       url: `${SITE_URL}/collections/${collection.slug}`,
+      images: [{ url: ogImage, width: 1200, height: 630 }],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: `${collection.title} on Petdex`,
+      description: collection.description,
+      images: [ogImage],
     },
   };
 }

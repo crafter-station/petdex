@@ -94,12 +94,24 @@ export async function generateMetadata({ params }: PageProps) {
       description,
       url,
       type: "article",
-      // images auto-injected from app/pets/[slug]/opengraph-image.tsx
+      // Pin to the locale-stripped path. The auto-detected URL from
+      // opengraph-image.tsx includes the [locale] segment, which
+      // next-intl 307-redirects under localePrefix="as-needed". Most
+      // OG scrapers don't follow redirects and fall back to the
+      // generic site image.
+      images: [
+        {
+          url: `${SITE_URL}/pets/${pet.slug}/opengraph-image`,
+          width: 1200,
+          height: 630,
+        },
+      ],
     },
     twitter: {
       card: "summary_large_image",
       title,
       description,
+      images: [`${SITE_URL}/pets/${pet.slug}/opengraph-image`],
     },
   };
 }

@@ -57,6 +57,9 @@ export async function generateMetadata({ params }: PageProps) {
     /* fall back */
   }
   const publicHandle = profile?.handle ?? handle.toLowerCase();
+  // Pin OG image to locale-stripped path; next-intl redirects
+  // /en/u/<handle>/opengraph-image with 307 which scrapers drop.
+  const ogImage = `${SITE_URL}/u/${publicHandle}/opengraph-image`;
   return {
     title: `${displayName} on Petdex`,
     description: `Pets created by ${displayName} for Codex.`,
@@ -65,6 +68,13 @@ export async function generateMetadata({ params }: PageProps) {
       title: `${displayName} on Petdex`,
       description: `Animated Codex pets created by ${displayName}.`,
       url: `${SITE_URL}/u/${publicHandle}`,
+      images: [{ url: ogImage, width: 1200, height: 630 }],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: `${displayName} on Petdex`,
+      description: `Animated Codex pets created by ${displayName}.`,
+      images: [ogImage],
     },
   };
 }
