@@ -137,15 +137,23 @@ async function main() {
     return;
   }
 
-  const ownerId =
-    args.ownerId ??
-    process.env.PETDEX_ADMIN_USER_IDS?.split(",")[0]?.trim() ??
-    "";
+  const explicitOwnerId = args.ownerId?.trim() ?? "";
+  const adminFallbackOwnerId =
+    process.env.PETDEX_ADMIN_USER_IDS?.split(",")[0]?.trim() ?? "";
+  const ownerId = explicitOwnerId || adminFallbackOwnerId;
   if (!ownerId) {
     throw new Error(
       "no owner id — pass --owner-id or set PETDEX_ADMIN_USER_IDS",
     );
   }
+  // When --owner-id points at the actual author the pet is a normal
+  // user submission. When we fall back to the admin user, the pet is
+  // an admin-imported orphan that the real author claims later via
+  // GitHub credit_url match.
+  const importedAsRealOwner = Boolean(explicitOwnerId);
+  const source: "submit" | "discover" = importedAsRealOwner
+    ? "submit"
+    : "discover";
 
   console.log("\nUploading to R2…");
   await r2.send(
@@ -203,11 +211,11 @@ async function main() {
     vibes: [],
     tags: [],
     status: args.approve ? "approved" : "pending",
-    source: "discover",
+    source,
     ownerId,
     ownerEmail: null,
-    creditName: args.creditName ?? null,
-    creditUrl: args.creditUrl ?? null,
+    creditName: importedAsRealOwner ? null : (args.creditName ?? null),
+    creditUrl: importedAsRealOwner ? null : (args.creditUrl ?? null),
     creditImage: null,
     approvedAt: args.approve ? new Date() : null,
   });

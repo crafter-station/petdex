@@ -65,7 +65,7 @@ const PETS_DIR = "~/.codex/pets";
 
 export function PetSubmitForm() {
   const t = useTranslations("submit.form");
-  const { isSignedIn, isLoaded } = useUser();
+  const { isSignedIn, isLoaded, user } = useUser();
   const [parsed, setParsed] = useState<ParsedPet | null>(null);
   const [isReading, setIsReading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -654,7 +654,11 @@ export function PetSubmitForm() {
                 <p className="text-xs leading-5 text-rose-800/80">
                   {t("fallback.beforeLink")}{" "}
                   <a
-                    href={buildIssueUrl(parsed, submission.message)}
+                    href={buildIssueUrl(
+                      parsed,
+                      submission.message,
+                      user?.id ?? null,
+                    )}
                     target="_blank"
                     rel="noreferrer"
                     className="font-medium underline underline-offset-4 hover:text-rose-950"
@@ -972,23 +976,40 @@ function slugify(value: string): string {
 function buildIssueUrl(
   parsed: ParsedPet | null,
   message: string | undefined,
+  userId: string | null,
 ): string {
   const title = parsed?.displayName
     ? `[Submit fail] ${parsed.displayName}`
     : "[Submit fail] Petdex upload";
+  const description = parsed?.description?.trim();
+  const sizeText = parsed?.spritesheetWidth
+    ? `${parsed.spritesheetWidth}×${parsed.spritesheetHeight}`
+    : "n/a";
   const body = [
-    "Submission failed via the web upload. Attaching pet folder/zip below.",
+    "## ⚠️ BEFORE YOU SUBMIT THIS ISSUE",
     "",
-    `**Pet name:** ${parsed?.displayName ?? "n/a"}`,
-    `**Pet id:** ${parsed?.petId ?? "n/a"}`,
-    "**Sprite size:** " +
-      (parsed?.spritesheetWidth
-        ? `${parsed.spritesheetWidth}×${parsed.spritesheetHeight}`
-        : "n/a"),
-    `**Source:** ${parsed?.source ?? "n/a"}`,
-    `**Error:** ${message ?? "Unknown"}`,
+    "Without your pet files I cannot recover the upload. Please:",
     "",
-    "<!-- drag and drop your pet folder zipped here -->",
+    "- [ ] **Attach your zipped pet folder below** (drag-and-drop the .zip into the comment box). It must contain `pet.json` + `spritesheet.webp` (or `.png`).",
+    "- [ ] If the pet has a backstory or tags I should add, paste them in a comment.",
+    "",
+    "Issues without a zip get closed after 48h because there is nothing for me to import.",
+    "",
+    "---",
+    "",
+    "## What the form captured",
+    "",
+    `- **Pet name:** ${parsed?.displayName ?? "n/a"}`,
+    `- **Pet id:** ${parsed?.petId ?? "n/a"}`,
+    `- **Sprite size:** ${sizeText}`,
+    `- **Source:** ${parsed?.source ?? "n/a"}`,
+    `- **Error:** ${message ?? "Unknown"}`,
+    userId ? `- **User id:** \`${userId}\`` : "- **User id:** (not signed in)",
+    description
+      ? `- **Description:**\n  > ${description.replace(/\n/g, "\n  > ")}`
+      : "- **Description:** (none captured)",
+    "",
+    "<!-- ⬇️ Drag-and-drop your pet folder zipped here ⬇️ -->",
   ].join("\n");
 
   const params = new URLSearchParams({
