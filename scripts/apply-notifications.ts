@@ -1,6 +1,8 @@
 import { neon } from "@neondatabase/serverless";
 
-const sql = neon(process.env.DATABASE_URL!);
+import { requiredEnv } from "./env";
+
+const sql = neon(requiredEnv("DATABASE_URL"));
 
 async function tryRun(label: string, fn: () => Promise<unknown>) {
   try {
@@ -20,8 +22,10 @@ async function tryRun(label: string, fn: () => Promise<unknown>) {
   }
 }
 
-await tryRun("create enum notification_kind", () =>
-  sql`CREATE TYPE notification_kind AS ENUM (
+await tryRun(
+  "create enum notification_kind",
+  () =>
+    sql`CREATE TYPE notification_kind AS ENUM (
     'pet_approved',
     'pet_rejected',
     'edit_approved',
@@ -30,8 +34,10 @@ await tryRun("create enum notification_kind", () =>
   )`,
 );
 
-await tryRun("create table notifications", () =>
-  sql`
+await tryRun(
+  "create table notifications",
+  () =>
+    sql`
     CREATE TABLE notifications (
       id text PRIMARY KEY,
       user_id text NOT NULL,
@@ -44,11 +50,15 @@ await tryRun("create table notifications", () =>
   `,
 );
 
-await tryRun("idx notifications_user_created_idx", () =>
-  sql`CREATE INDEX notifications_user_created_idx ON notifications(user_id, created_at)`,
+await tryRun(
+  "idx notifications_user_created_idx",
+  () =>
+    sql`CREATE INDEX notifications_user_created_idx ON notifications(user_id, created_at)`,
 );
-await tryRun("idx notifications_user_unread_idx", () =>
-  sql`CREATE INDEX notifications_user_unread_idx ON notifications(user_id, read_at)`,
+await tryRun(
+  "idx notifications_user_unread_idx",
+  () =>
+    sql`CREATE INDEX notifications_user_unread_idx ON notifications(user_id, read_at)`,
 );
 
 console.log("done");

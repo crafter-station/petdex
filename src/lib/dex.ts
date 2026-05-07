@@ -14,6 +14,7 @@
 //     never returns) we can freeze with a column later.
 
 import { cache } from "react";
+
 import { sql } from "drizzle-orm";
 
 import { db } from "@/lib/db/client";
@@ -22,25 +23,23 @@ export type DexEntry = { slug: string; dexNumber: number };
 
 // Cached for the lifetime of a single render pass — every call inside
 // one request returns the same Map without re-querying.
-export const getDexNumberMap = cache(
-  async (): Promise<Map<string, number>> => {
-    const result = (await db.execute(sql`
+export const getDexNumberMap = cache(async (): Promise<Map<string, number>> => {
+  const result = (await db.execute(sql`
       SELECT slug,
              ROW_NUMBER() OVER (ORDER BY approved_at ASC, created_at ASC)::int AS dex_number
       FROM submitted_pets
       WHERE status = 'approved'
         AND source <> 'discover'
     `)) as unknown as {
-      rows: Array<{ slug: string; dex_number: number }>;
-    };
+    rows: Array<{ slug: string; dex_number: number }>;
+  };
 
-    const out = new Map<string, number>();
-    for (const row of result.rows) {
-      out.set(row.slug, row.dex_number);
-    }
-    return out;
-  },
-);
+  const out = new Map<string, number>();
+  for (const row of result.rows) {
+    out.set(row.slug, row.dex_number);
+  }
+  return out;
+});
 
 // Convenience for callers that only need one slug. Still goes through
 // the cached map so calling it N times in one render is one query.

@@ -12,18 +12,18 @@
 // owner_email. Pets without a matching Clerk user stay on admin (they
 // can still claim later via /my-pets > banner).
 
-import { eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/neon-http";
-import { neon } from "@neondatabase/serverless";
-
-import * as schema from "../src/lib/db/schema";
-
 // Use the Clerk CLI (`clerk api`) so we don't have to handle a sk_live in
 // the script's environment. The CLI authenticates from your local
 // `clerk` config (run `clerk auth login` once) and resolves the right
 // instance via --app + --instance. Set PETDEX_CLERK_APP env var, or pass
 // --app=<id> to override.
 import { execFileSync } from "node:child_process";
+
+import { neon } from "@neondatabase/serverless";
+import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/neon-http";
+
+import * as schema from "../src/lib/db/schema";
 
 const PETDEX_CLERK_APP =
   process.env.PETDEX_CLERK_APP ?? "app_3D9zFHDj1SHAKBi4fxhrOVcZXjM";
@@ -59,7 +59,9 @@ async function clerkFetch<T>(path: string): Promise<T> {
     "error" in parsed &&
     parsed.error
   ) {
-    throw new Error(`clerk cli error for ${path}: ${JSON.stringify(parsed.error)}`);
+    throw new Error(
+      `clerk cli error for ${path}: ${JSON.stringify(parsed.error)}`,
+    );
   }
   return parsed as T;
 }
@@ -145,13 +147,19 @@ async function main() {
 
   // Cache GitHub login -> clerk lookup so we don't re-walk Clerk pages
   // for the same author across multiple pets.
-  const cache = new Map<string, { userId: string; email: string | null } | null>();
+  const cache = new Map<
+    string,
+    { userId: string; email: string | null } | null
+  >();
 
   let relinked = 0;
   let unmatched = 0;
 
   for (const row of rows) {
-    const ghLogin = row.credit_url.replace("https://github.com/", "").replace(/\/.*$/, "").trim();
+    const ghLogin = row.credit_url
+      .replace("https://github.com/", "")
+      .replace(/\/.*$/, "")
+      .trim();
     if (!ghLogin) continue;
 
     let match = cache.get(ghLogin);
@@ -164,7 +172,11 @@ async function main() {
         match = null;
       }
       cache.set(ghLogin, match);
-      console.log(match ? `→ ${match.userId} (${match.email ?? "no email"})` : "no clerk user");
+      console.log(
+        match
+          ? `→ ${match.userId} (${match.email ?? "no email"})`
+          : "no clerk user",
+      );
     }
 
     if (!match) {
@@ -184,7 +196,9 @@ async function main() {
   }
 
   console.log(`\nrelinked: ${relinked}`);
-  console.log(`unmatched: ${unmatched} (no Clerk account with that github yet — they can still claim via /my-pets after sign-in)`);
+  console.log(
+    `unmatched: ${unmatched} (no Clerk account with that github yet — they can still claim via /my-pets after sign-in)`,
+  );
 }
 
 await main();

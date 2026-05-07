@@ -20,13 +20,15 @@
 import { clerkClient } from "@clerk/nextjs/server";
 import { neon } from "@neondatabase/serverless";
 
+import { requiredEnv } from "./env";
+
 const dryRun = process.argv.includes("--dry");
 const adminArg = process.argv.find((a) => a.startsWith("--admin-id="));
 const ADMIN_USER_ID = adminArg
   ? adminArg.split("=")[1]
   : "user_3DA3wOYrJh1UNufe2pgQpcF6GJ7"; // Railly's prod user id
 
-const sql = neon(process.env.DATABASE_URL!);
+const sql = neon(requiredEnv("DATABASE_URL"));
 
 type Row = {
   id: string;
@@ -115,8 +117,9 @@ async function main() {
     if (!username) continue;
     // Skip our own profile.
     if (username === "railly") continue;
-    if (!byUsername.has(username)) byUsername.set(username, []);
-    byUsername.get(username)!.push(r);
+    const matches = byUsername.get(username) ?? [];
+    matches.push(r);
+    byUsername.set(username, matches);
   }
 
   console.log(

@@ -67,8 +67,7 @@ export async function POST(req: Request): Promise<Response> {
   if (!slugHint) {
     return NextResponse.json({ error: "invalid_slug_hint" }, { status: 400 });
   }
-  const ext: "webp" | "png" =
-    body.spritesheetExt === "png" ? "png" : "webp";
+  const ext: "webp" | "png" = body.spritesheetExt === "png" ? "png" : "webp";
   const spriteCT = ext === "png" ? "image/png" : "image/webp";
 
   const uploadId = crypto.randomUUID().replace(/-/g, "").slice(0, 12);

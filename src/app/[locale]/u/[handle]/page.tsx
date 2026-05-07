@@ -264,7 +264,6 @@ export default async function UserProfilePage({ params }: PageProps) {
       <SiteHeader />
       <section className="petdex-cloud relative -mt-[84px] overflow-clip pt-[84px]">
         <div className="relative mx-auto flex w-full max-w-[1440px] flex-col px-5 pb-10 md:px-8">
-
           <header className="mt-10 grid gap-8 md:mt-14 lg:grid-cols-[auto_1fr_auto] lg:items-start">
             {/* Avatar */}
             <div className="flex justify-center lg:block">

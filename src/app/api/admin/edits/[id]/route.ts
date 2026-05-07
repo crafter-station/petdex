@@ -54,10 +54,7 @@ export async function PATCH(
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
   if (!row.pendingSubmittedAt) {
-    return NextResponse.json(
-      { error: "no_pending_edit" },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: "no_pending_edit" }, { status: 400 });
   }
 
   if (body.action === "approve") {

@@ -29,8 +29,7 @@ const args = new Set(process.argv.slice(2));
 const DRY = args.has("--dry");
 const FORCE = args.has("--force");
 const onlySlugIdx = process.argv.indexOf("--slug");
-const ONLY_SLUG =
-  onlySlugIdx >= 0 ? process.argv[onlySlugIdx + 1] : undefined;
+const ONLY_SLUG = onlySlugIdx >= 0 ? process.argv[onlySlugIdx + 1] : undefined;
 
 const VIBE_SET = new Set<string>(PET_VIBES);
 const KIND_SET = new Set<string>(PET_KINDS);
@@ -104,7 +103,7 @@ function callCodex(prompt: string): Promise<string> {
 function extractJson(raw: string): unknown {
   // Codex sometimes wraps in fences or prose. Grab first {...} block.
   const start = raw.indexOf("{");
-  if (start < 0) throw new Error("no json in output: " + raw.slice(0, 200));
+  if (start < 0) throw new Error(`no json in output: ${raw.slice(0, 200)}`);
   let depth = 0;
   let end = -1;
   for (let i = start; i < raw.length; i++) {
@@ -117,16 +116,15 @@ function extractJson(raw: string): unknown {
       }
     }
   }
-  if (end < 0) throw new Error("unbalanced json: " + raw.slice(0, 200));
+  if (end < 0) throw new Error(`unbalanced json: ${raw.slice(0, 200)}`);
   return JSON.parse(raw.slice(start, end + 1));
 }
 
 function validate(obj: unknown): Classification {
-  if (!obj || typeof obj !== "object")
-    throw new Error("not an object");
+  if (!obj || typeof obj !== "object") throw new Error("not an object");
   const o = obj as Record<string, unknown>;
   if (!KIND_SET.has(String(o.kind)))
-    throw new Error("invalid kind: " + String(o.kind));
+    throw new Error(`invalid kind: ${String(o.kind)}`);
 
   const rawVibes = Array.isArray(o.vibes) ? o.vibes : [];
   const vibes = rawVibes
@@ -148,9 +146,14 @@ function validate(obj: unknown): Classification {
       (t) =>
         t.length > 0 &&
         t.length <= 30 &&
-        !["pet", "codex", "creature", "character", "object", "animated"].includes(
-          t,
-        ),
+        ![
+          "pet",
+          "codex",
+          "creature",
+          "character",
+          "object",
+          "animated",
+        ].includes(t),
     )
     .slice(0, 5);
   if (tags.length < 2) throw new Error("too few valid tags");

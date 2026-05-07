@@ -141,10 +141,7 @@ export async function PATCH(
     patch.pendingDescription === null &&
     patch.pendingTags === null;
   if (noOp) {
-    return NextResponse.json(
-      { error: "nothing_changed" },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: "nothing_changed" }, { status: 400 });
   }
 
   const [updated] = await db

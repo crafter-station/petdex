@@ -1,6 +1,6 @@
 import {
-  type PetSoundCandidate,
   listApprovedPetsMissingSound,
+  type PetSoundCandidate,
   processPetSound,
 } from "../src/lib/pet-sound";
 
@@ -12,7 +12,10 @@ type ScriptError = {
 const args = process.argv.slice(2);
 const DRY = args.includes("--dry");
 const LIMIT = readNumberFlag("--limit");
-const CONCURRENCY = Math.min(Math.max(readNumberFlag("--concurrency") ?? 2, 1), 3);
+const CONCURRENCY = Math.min(
+  Math.max(readNumberFlag("--concurrency") ?? 2, 1),
+  3,
+);
 
 const errors: ScriptError[] = [];
 
@@ -47,8 +50,9 @@ async function main() {
   }
 
   await Promise.all(
-    Array.from({ length: Math.min(CONCURRENCY, pets.length || 1) }, (_, index) =>
-      worker(index + 1),
+    Array.from(
+      { length: Math.min(CONCURRENCY, pets.length || 1) },
+      (_, index) => worker(index + 1),
     ),
   );
 

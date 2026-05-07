@@ -32,7 +32,6 @@ function parseTags(input: string): string[] {
 
 export function OwnerEditPanel({
   petId,
-  slug,
   currentDisplayName,
   currentDescription,
   currentTags,
@@ -124,7 +123,7 @@ export function OwnerEditPanel({
     }
   }
 
-  const hasPending = pending && pending.submittedAt;
+  const hasPending = pending?.submittedAt;
 
   return (
     <>
@@ -135,7 +134,7 @@ export function OwnerEditPanel({
           </span>
           <span>
             {t("submittedPrefix")}{" "}
-            {pending && pending.submittedAt
+            {pending?.submittedAt
               ? new Date(pending.submittedAt).toLocaleDateString()
               : ""}
             {t("submittedSuffix")}
@@ -191,6 +190,10 @@ export function OwnerEditPanel({
           onClick={(e) => {
             if (e.target === e.currentTarget) setOpen(false);
           }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setOpen(false);
+          }}
+          tabIndex={-1}
         >
           <div className="w-full max-w-lg rounded-2xl bg-surface p-6 shadow-xl">
             <div className="mb-4 flex items-start justify-between gap-3">
@@ -198,9 +201,7 @@ export function OwnerEditPanel({
                 <h2 className="text-xl font-medium tracking-tight">
                   {t("modalTitle")}
                 </h2>
-                <p className="mt-1 text-xs text-muted-3">
-                  {t("modalBody")}
-                </p>
+                <p className="mt-1 text-xs text-muted-3">{t("modalBody")}</p>
               </div>
               <button
                 type="button"

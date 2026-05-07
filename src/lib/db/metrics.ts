@@ -36,10 +36,7 @@ export async function incrementZipDownloadCount(slug: string): Promise<void> {
     });
 }
 
-export async function setLikeCount(
-  slug: string,
-  count: number,
-): Promise<void> {
+export async function setLikeCount(slug: string, count: number): Promise<void> {
   await db
     .insert(schema.petMetrics)
     .values({ petSlug: slug, likeCount: count })

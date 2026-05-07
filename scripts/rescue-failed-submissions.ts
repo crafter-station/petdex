@@ -6,10 +6,10 @@
 //   4. INSERT a pending row crediting the original GitHub author
 // Idempotent: skips slugs that already exist.
 
-import { readFile, writeFile, mkdir, rm } from "node:fs/promises";
-import { resolve } from "node:path";
-import { tmpdir } from "node:os";
 import { execSync } from "node:child_process";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { resolve } from "node:path";
 
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { neon } from "@neondatabase/serverless";
@@ -60,7 +60,9 @@ function listIssues(): IssueRow[] {
 }
 
 function extractZipUrl(body: string): string | null {
-  const m = body.match(/\((https:\/\/github\.com\/user-attachments\/files\/[^)]+\.zip)\)/i);
+  const m = body.match(
+    /\((https:\/\/github\.com\/user-attachments\/files\/[^)]+\.zip)\)/i,
+  );
   return m ? m[1] : null;
 }
 
@@ -113,7 +115,7 @@ async function processIssue(issue: IssueRow): Promise<{
     extractPetNameFromBody(issue.body) ??
     issue.title.replace(/^\[Submit fail\]\s*/i, "").trim();
   const petId = extractPetIdFromBody(issue.body) ?? petName;
-  let slug = slugify(petId);
+  const slug = slugify(petId);
   if (!slug) {
     return { ok: false, reason: "empty_slug_from_petid" };
   }
@@ -182,7 +184,11 @@ async function processIssue(issue: IssueRow): Promise<{
 
   const prefix = `community/${slug}`;
   const [spritesheetUrl, petJsonUrl, finalZipUrl] = await Promise.all([
-    r2Put(`${prefix}/spritesheet.${spriteExt}`, spriteBuf, spriteExt === "png" ? "image/png" : "image/webp"),
+    r2Put(
+      `${prefix}/spritesheet.${spriteExt}`,
+      spriteBuf,
+      spriteExt === "png" ? "image/png" : "image/webp",
+    ),
     r2Put(`${prefix}/pet.json`, petJsonBuf, "application/json"),
     r2Put(`${prefix}/${slug}.zip`, cleanZipBuf, "application/zip"),
   ]);
@@ -193,7 +199,9 @@ async function processIssue(issue: IssueRow): Promise<{
     id,
     slug,
     displayName: (petJson.displayName ?? petName).slice(0, 60),
-    description: (petJson.description ?? `Submitted by ${issue.author.login}.`).slice(0, 280),
+    description: (
+      petJson.description ?? `Submitted by ${issue.author.login}.`
+    ).slice(0, 280),
     spritesheetUrl,
     petJsonUrl,
     zipUrl: finalZipUrl,
@@ -220,7 +228,13 @@ async function main() {
   );
   console.log(`found ${submitFails.length} submit-fail issues`);
 
-  const results: Array<{ number: number; title: string; ok: boolean; reason?: string; slug?: string }> = [];
+  const results: Array<{
+    number: number;
+    title: string;
+    ok: boolean;
+    reason?: string;
+    slug?: string;
+  }> = [];
   for (const issue of submitFails) {
     process.stdout.write(`#${issue.number} ${issue.title} ... `);
     try {

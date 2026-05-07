@@ -1,6 +1,8 @@
 import { neon } from "@neondatabase/serverless";
 
-const sql = neon(process.env.DATABASE_URL!);
+import { requiredEnv } from "./env";
+
+const sql = neon(requiredEnv("DATABASE_URL"));
 
 async function tryRun(label: string, fn: () => Promise<unknown>) {
   try {
@@ -20,8 +22,10 @@ async function tryRun(label: string, fn: () => Promise<unknown>) {
   }
 }
 
-await tryRun("create table manifest_fetches", () =>
-  sql`
+await tryRun(
+  "create table manifest_fetches",
+  () =>
+    sql`
     CREATE TABLE manifest_fetches (
       id text PRIMARY KEY,
       ip_hash text NOT NULL,
@@ -35,11 +39,15 @@ await tryRun("create table manifest_fetches", () =>
   `,
 );
 
-await tryRun("idx manifest_fetches_fetched_at_idx", () =>
-  sql`CREATE INDEX manifest_fetches_fetched_at_idx ON manifest_fetches(fetched_at)`,
+await tryRun(
+  "idx manifest_fetches_fetched_at_idx",
+  () =>
+    sql`CREATE INDEX manifest_fetches_fetched_at_idx ON manifest_fetches(fetched_at)`,
 );
-await tryRun("idx manifest_fetches_ip_hash_idx", () =>
-  sql`CREATE INDEX manifest_fetches_ip_hash_idx ON manifest_fetches(ip_hash)`,
+await tryRun(
+  "idx manifest_fetches_ip_hash_idx",
+  () =>
+    sql`CREATE INDEX manifest_fetches_ip_hash_idx ON manifest_fetches(ip_hash)`,
 );
 
 console.log("done");

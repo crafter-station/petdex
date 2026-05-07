@@ -1,6 +1,8 @@
 import { neon } from "@neondatabase/serverless";
 
-const sql = neon(process.env.DATABASE_URL!);
+import { requiredEnv } from "./env";
+
+const sql = neon(requiredEnv("DATABASE_URL"));
 
 async function tryRun(label: string, fn: () => Promise<unknown>) {
   try {
@@ -20,22 +22,29 @@ async function tryRun(label: string, fn: () => Promise<unknown>) {
   }
 }
 
-await tryRun("feedback.notify_email column", () =>
-  sql`ALTER TABLE feedback ADD COLUMN notify_email boolean NOT NULL DEFAULT true`,
+await tryRun(
+  "feedback.notify_email column",
+  () =>
+    sql`ALTER TABLE feedback ADD COLUMN notify_email boolean NOT NULL DEFAULT true`,
 );
-await tryRun("feedback.user_last_read_at column", () =>
-  sql`ALTER TABLE feedback ADD COLUMN user_last_read_at timestamptz`,
+await tryRun(
+  "feedback.user_last_read_at column",
+  () => sql`ALTER TABLE feedback ADD COLUMN user_last_read_at timestamptz`,
 );
-await tryRun("feedback.admin_last_read_at column", () =>
-  sql`ALTER TABLE feedback ADD COLUMN admin_last_read_at timestamptz`,
+await tryRun(
+  "feedback.admin_last_read_at column",
+  () => sql`ALTER TABLE feedback ADD COLUMN admin_last_read_at timestamptz`,
 );
 
-await tryRun("create enum feedback_author_kind", () =>
-  sql`CREATE TYPE feedback_author_kind AS ENUM ('admin', 'user')`,
+await tryRun(
+  "create enum feedback_author_kind",
+  () => sql`CREATE TYPE feedback_author_kind AS ENUM ('admin', 'user')`,
 );
 
-await tryRun("create table feedback_replies", () =>
-  sql`
+await tryRun(
+  "create table feedback_replies",
+  () =>
+    sql`
     CREATE TABLE feedback_replies (
       id text PRIMARY KEY,
       feedback_id text NOT NULL REFERENCES feedback(id) ON DELETE CASCADE,
@@ -47,11 +56,15 @@ await tryRun("create table feedback_replies", () =>
   `,
 );
 
-await tryRun("idx feedback_replies_feedback_idx", () =>
-  sql`CREATE INDEX feedback_replies_feedback_idx ON feedback_replies(feedback_id)`,
+await tryRun(
+  "idx feedback_replies_feedback_idx",
+  () =>
+    sql`CREATE INDEX feedback_replies_feedback_idx ON feedback_replies(feedback_id)`,
 );
-await tryRun("idx feedback_replies_created_at_idx", () =>
-  sql`CREATE INDEX feedback_replies_created_at_idx ON feedback_replies(created_at)`,
+await tryRun(
+  "idx feedback_replies_created_at_idx",
+  () =>
+    sql`CREATE INDEX feedback_replies_created_at_idx ON feedback_replies(created_at)`,
 );
 
 console.log("done");

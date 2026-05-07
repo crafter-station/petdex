@@ -12,6 +12,7 @@
 // Stop on first match. Pets without any match stay on admin and the
 // /my-pets claim banner picks them up later.
 
+import { neon } from "@neondatabase/serverless";
 // Direct Clerk Backend API. The clerk CLI 1.0.3 returns empty arrays
 // when called from execFileSync/spawnSync for paginated /users endpoints
 // (works in shell direct, broken from Bun script). Falling back to
@@ -19,7 +20,6 @@
 // pass anyway.
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/neon-http";
-import { neon } from "@neondatabase/serverless";
 
 import * as schema from "../src/lib/db/schema";
 

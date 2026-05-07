@@ -1,6 +1,8 @@
 import { neon } from "@neondatabase/serverless";
 
-const sql = neon(process.env.DATABASE_URL!);
+import { requiredEnv } from "./env";
+
+const sql = neon(requiredEnv("DATABASE_URL"));
 
 async function tryRun(label: string, fn: () => Promise<unknown>) {
   try {
@@ -20,8 +22,10 @@ async function tryRun(label: string, fn: () => Promise<unknown>) {
   }
 }
 
-await tryRun("add featured_pet_slugs column", () =>
-  sql`ALTER TABLE user_profiles ADD COLUMN featured_pet_slugs jsonb NOT NULL DEFAULT '[]'::jsonb`,
+await tryRun(
+  "add featured_pet_slugs column",
+  () =>
+    sql`ALTER TABLE user_profiles ADD COLUMN featured_pet_slugs jsonb NOT NULL DEFAULT '[]'::jsonb`,
 );
 
 // Backfill: any row with a non-null featured_pet_slug becomes a single-
@@ -36,8 +40,9 @@ await tryRun("backfill from featured_pet_slug", async () => {
   `;
 });
 
-await tryRun("drop legacy featured_pet_slug column", () =>
-  sql`ALTER TABLE user_profiles DROP COLUMN featured_pet_slug`,
+await tryRun(
+  "drop legacy featured_pet_slug column",
+  () => sql`ALTER TABLE user_profiles DROP COLUMN featured_pet_slug`,
 );
 
 console.log("done");

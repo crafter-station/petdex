@@ -15,8 +15,10 @@
 import { clerkClient } from "@clerk/nextjs/server";
 import { neon } from "@neondatabase/serverless";
 
+import { requiredEnv } from "./env";
+
 const dryRun = process.argv.includes("--dry");
-const sql = neon(process.env.DATABASE_URL!);
+const sql = neon(requiredEnv("DATABASE_URL"));
 
 type Row = {
   id: string;
@@ -61,7 +63,7 @@ function bestName(
   let candidate: string | null = null;
   if (username) candidate = username;
   else if (first) candidate = last ? `${first} ${last[0]}.` : first;
-  else if (email && email.includes("@")) candidate = email.split("@")[0];
+  else if (email?.includes("@")) candidate = email.split("@")[0];
 
   if (!candidate) return null;
   if (current === candidate) return null;
@@ -142,8 +144,9 @@ async function main() {
       continue;
     }
 
-    const newUrl =
-      !row.credit_url ? externalUrlFor(info.externalAccounts) : null;
+    const newUrl = !row.credit_url
+      ? externalUrlFor(info.externalAccounts)
+      : null;
     const newName = bestName(
       row.credit_name,
       info.username,

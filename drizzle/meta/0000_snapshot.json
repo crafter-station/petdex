@@ -49,10 +49,7 @@
       "compositePrimaryKeys": {
         "pet_likes_user_id_pet_slug_pk": {
           "name": "pet_likes_user_id_pet_slug_pk",
-          "columns": [
-            "user_id",
-            "pet_slug"
-          ]
+          "columns": ["user_id", "pet_slug"]
         }
       },
       "uniqueConstraints": {},
@@ -389,20 +386,12 @@
     "public.approval_status": {
       "name": "approval_status",
       "schema": "public",
-      "values": [
-        "pending",
-        "approved",
-        "rejected"
-      ]
+      "values": ["pending", "approved", "rejected"]
     },
     "public.pet_kind": {
       "name": "pet_kind",
       "schema": "public",
-      "values": [
-        "creature",
-        "object",
-        "character"
-      ]
+      "values": ["creature", "object", "character"]
     }
   },
   "schemas": {},

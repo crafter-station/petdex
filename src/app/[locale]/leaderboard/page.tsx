@@ -97,7 +97,6 @@ export default async function LeaderboardPage({
       <SiteHeader />
       <section className="petdex-cloud relative -mt-[84px] overflow-clip pt-[84px]">
         <div className="relative mx-auto flex w-full max-w-5xl flex-col px-5 pb-10 md:px-8">
-
           <div className="mt-12 flex flex-col items-center text-center md:mt-16">
             <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
               {t("eyebrow")}

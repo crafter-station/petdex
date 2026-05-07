@@ -134,10 +134,7 @@ export async function POST(req: Request): Promise<Response> {
     row.creditUrl.toLowerCase() === ident.githubUrl.toLowerCase();
 
   if (!emailMatch && !githubMatch) {
-    return NextResponse.json(
-      { error: "identity_mismatch" },
-      { status: 403 },
-    );
+    return NextResponse.json({ error: "identity_mismatch" }, { status: 403 });
   }
 
   // When claiming via GitHub match (admin rescue path), also rewrite
@@ -172,8 +169,8 @@ async function getClaimIdentity(userId: string): Promise<ClaimIdentity> {
     let githubUrl: string | null = null;
     for (const acc of user.externalAccounts ?? []) {
       if (acc.provider !== "oauth_github") continue;
-      const v =
-        (acc as { verification?: { status?: string } }).verification?.status;
+      const v = (acc as { verification?: { status?: string } }).verification
+        ?.status;
       if (v && v !== "verified") continue;
       const username = (acc as { username?: string }).username?.trim();
       if (username) {

@@ -16,7 +16,11 @@ type Params = { locale: string; slug: string };
 function detectPlatformFromRequest(req: Request): "posix" | "ps1" {
   const url = new URL(req.url);
   const explicit = url.searchParams.get("platform")?.toLowerCase();
-  if (explicit === "ps1" || explicit === "windows" || explicit === "powershell") {
+  if (
+    explicit === "ps1" ||
+    explicit === "windows" ||
+    explicit === "powershell"
+  ) {
     return "ps1";
   }
   if (explicit === "posix" || explicit === "sh" || explicit === "unix") {

@@ -197,9 +197,9 @@ export default async function AdminManifestPage() {
       {topUserAgents.length > 0 ? (
         <Card title="Top user-agents · last 7d">
           <ul className="space-y-1.5">
-            {topUserAgents.map((u, i) => (
+            {topUserAgents.map((u) => (
               <li
-                key={`${u.userAgent ?? "none"}-${i}`}
+                key={u.userAgent ?? "none"}
                 className="flex items-baseline gap-3 border-t border-black/[0.04] pt-1.5 first:border-0 first:pt-0"
               >
                 <span className="w-16 shrink-0 text-right font-mono text-[11px] font-semibold text-muted-2">

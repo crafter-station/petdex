@@ -60,6 +60,22 @@ export function OnboardingTour({ onClose }: OnboardingTourProps) {
   const [steps, setSteps] = useState<Step[]>(ALL_STEPS);
   const tooltipRef = useRef<HTMLDivElement | null>(null);
 
+  const close = useCallback(() => {
+    onClose();
+  }, [onClose]);
+
+  const next = useCallback(() => {
+    setStep((current) => {
+      if (current < steps.length - 1) return current + 1;
+      close();
+      return current;
+    });
+  }, [close, steps.length]);
+
+  const prev = useCallback(() => {
+    setStep((current) => (current > 0 ? current - 1 : current));
+  }, []);
+
   useEffect(() => {
     const visible = ALL_STEPS.filter(
       (s) => document.querySelector(s.selector) !== null,
@@ -70,10 +86,6 @@ export function OnboardingTour({ onClose }: OnboardingTourProps) {
     }
     setSteps(visible);
     setStep(0);
-  }, []);
-
-  const close = useCallback(() => {
-    onClose();
   }, [onClose]);
 
   // Compute the highlight rect for the current step. Re-measures on resize.
@@ -123,15 +135,7 @@ export function OnboardingTour({ onClose }: OnboardingTourProps) {
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [close, step, steps.length]);
-
-  const next = () => {
-    if (step < steps.length - 1) setStep((s) => s + 1);
-    else close();
-  };
-  const prev = () => {
-    if (step > 0) setStep((s) => s - 1);
-  };
+  }, [close, next, prev]);
 
   if (!steps[step]) return null;
 
@@ -219,7 +223,6 @@ export function OnboardingTour({ onClose }: OnboardingTourProps) {
         aria-label="Petdex feature tour"
         style={tooltipStyle}
         className="z-[60] w-[min(360px,calc(100vw-2rem))] overflow-hidden rounded-3xl border border-border-base bg-surface shadow-2xl shadow-blue-950/25"
-        onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-black/[0.06] px-4 py-3 dark:border-white/[0.06]">
           <div className="flex items-center gap-2 font-mono text-[10px] tracking-[0.18em] text-brand uppercase">

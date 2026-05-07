@@ -66,10 +66,7 @@ export async function POST(req: Request): Promise<Response> {
   const userAgent = req.headers.get("user-agent")?.slice(0, 500) ?? null;
 
   if (message.length < 4) {
-    return NextResponse.json(
-      { error: "message_too_short" },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: "message_too_short" }, { status: 400 });
   }
   if (message.length > MAX_LEN) {
     return NextResponse.json(

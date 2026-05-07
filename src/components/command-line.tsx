@@ -21,14 +21,17 @@ function tokenize(command: string): React.ReactNode {
   const parts = command.split(/(\s+|\||&&|\|\||;)/g).filter((s) => s !== "");
   let cmdSeen = false;
   let firstWordSeen = false;
+  let offset = 0;
 
-  return parts.map((p, i) => {
+  return parts.map((p) => {
+    const key = `${offset}:${p}`;
+    offset += p.length;
     if (/^\s+$/.test(p)) {
-      return <Fragment key={i}>{p}</Fragment>;
+      return <Fragment key={key}>{p}</Fragment>;
     }
     if (p === "|" || p === "&&" || p === "||" || p === ";") {
       return (
-        <span key={i} className="text-muted-4">
+        <span key={key} className="text-muted-4">
           {p}
         </span>
       );
@@ -37,14 +40,14 @@ function tokenize(command: string): React.ReactNode {
       firstWordSeen = true;
       cmdSeen = true;
       return (
-        <span key={i} className="font-medium text-brand-deep">
+        <span key={key} className="font-medium text-brand-deep">
           {p}
         </span>
       );
     }
     if (p.startsWith("-")) {
       return (
-        <span key={i} className="text-brand">
+        <span key={key} className="text-brand">
           {p}
         </span>
       );
@@ -52,13 +55,13 @@ function tokenize(command: string): React.ReactNode {
     if (cmdSeen && /^[a-z][a-z0-9-]*$/.test(p)) {
       cmdSeen = false;
       return (
-        <span key={i} className="font-medium text-foreground">
+        <span key={key} className="font-medium text-foreground">
           {p}
         </span>
       );
     }
     return (
-      <span key={i} className="text-muted-2">
+      <span key={key} className="text-muted-2">
         {p}
       </span>
     );

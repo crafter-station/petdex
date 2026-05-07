@@ -1,10 +1,10 @@
 "use client";
 
-import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { Check, Loader2, X } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 export function AdminEditActions({ id }: { id: string }) {
   const t = useTranslations("admin.editActions");

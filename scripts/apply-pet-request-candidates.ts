@@ -6,7 +6,9 @@
 
 import { neon } from "@neondatabase/serverless";
 
-const sql = neon(process.env.DATABASE_URL!);
+import { requiredEnv } from "./env";
+
+const sql = neon(requiredEnv("DATABASE_URL"));
 
 async function tryRun(label: string, fn: () => Promise<unknown>) {
   try {

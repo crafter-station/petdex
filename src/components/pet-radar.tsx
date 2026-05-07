@@ -110,11 +110,7 @@ export function PetRadar(props: PetRadarProps) {
           x={axis.labelX}
           y={axis.labelY}
           textAnchor={
-            axis.pointDx === 0
-              ? "middle"
-              : axis.pointDx > 0
-                ? "start"
-                : "end"
+            axis.pointDx === 0 ? "middle" : axis.pointDx > 0 ? "start" : "end"
           }
           dominantBaseline={
             axis.pointDy === 0

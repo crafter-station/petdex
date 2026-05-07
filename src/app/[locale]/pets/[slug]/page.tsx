@@ -357,7 +357,6 @@ export default async function PetPage({ params }: PageProps) {
           below in their own contained section. */}
       <section className="petdex-cloud relative -mt-[84px] overflow-visible pt-[84px]">
         <div className="relative mx-auto flex w-full max-w-6xl flex-col gap-6 px-5 pb-10 md:px-8 md:pb-14">
-
           {/* Interactive floater pet — drag, click, watch. Renders an
               absolute-positioned sprite over the banner's empty right
               side. Mounted INSIDE the max-w-6xl content wrapper so it

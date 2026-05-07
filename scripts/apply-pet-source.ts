@@ -1,6 +1,8 @@
 import { neon } from "@neondatabase/serverless";
 
-const sql = neon(process.env.DATABASE_URL!);
+import { requiredEnv } from "./env";
+
+const sql = neon(requiredEnv("DATABASE_URL"));
 
 async function tryRun(label: string, fn: () => Promise<unknown>) {
   try {
@@ -20,11 +22,14 @@ async function tryRun(label: string, fn: () => Promise<unknown>) {
   }
 }
 
-await tryRun("create enum pet_source", () =>
-  sql`CREATE TYPE pet_source AS ENUM ('submit', 'discover', 'claimed')`,
+await tryRun(
+  "create enum pet_source",
+  () => sql`CREATE TYPE pet_source AS ENUM ('submit', 'discover', 'claimed')`,
 );
-await tryRun("submitted_pets.source column", () =>
-  sql`ALTER TABLE submitted_pets ADD COLUMN source pet_source NOT NULL DEFAULT 'submit'`,
+await tryRun(
+  "submitted_pets.source column",
+  () =>
+    sql`ALTER TABLE submitted_pets ADD COLUMN source pet_source NOT NULL DEFAULT 'submit'`,
 );
 
 // Backfill: rows added on behalf of external authors (owned by the

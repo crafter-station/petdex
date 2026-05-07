@@ -130,8 +130,8 @@ export default async function MyFeedbackPage({
     const lastAdminAt = agg?.latestAdminAt ?? null;
     const lastUserRead = row.userLastReadAt;
     const unread =
-      Boolean(lastAdminAt) &&
-      (!lastUserRead || new Date(lastAdminAt!) > new Date(lastUserRead));
+      lastAdminAt !== null &&
+      (!lastUserRead || new Date(lastAdminAt) > new Date(lastUserRead));
     const replied = Boolean(lastAdminAt);
     // "Waiting on Hunter" means: thread exists but no admin reply yet,
     // OR the last message in the thread is the user's (latestAt > latestAdminAt

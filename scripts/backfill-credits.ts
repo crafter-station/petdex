@@ -67,10 +67,9 @@ function buildCredit(user: ClerkUser): {
   // Email prefix fallback: chefuri2@gmail.com -> "chefuri2"
   let emailPrefix: string | null = null;
   const primary =
-    user.email_addresses?.find(
-      (e) => e && (user.primary_email_address_id ? true : true),
-    )?.email_address ?? user.email_addresses?.[0]?.email_address;
-  if (primary && primary.includes("@")) {
+    user.email_addresses?.find((e) => Boolean(e))?.email_address ??
+    user.email_addresses?.[0]?.email_address;
+  if (primary?.includes("@")) {
     emailPrefix = primary.split("@")[0]?.trim() || null;
   }
 
@@ -109,10 +108,7 @@ async function main() {
         ),
       );
 
-  const rows = await db
-    .select()
-    .from(schema.submittedPets)
-    .where(where);
+  const rows = await db.select().from(schema.submittedPets).where(where);
 
   console.log(
     `${DRY ? "[DRY] " : ""}Backfilling credits for ${rows.length} pets (force=${FORCE})`,

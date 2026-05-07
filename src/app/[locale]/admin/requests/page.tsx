@@ -485,7 +485,7 @@ function CandidateRow({
         rel="noopener noreferrer"
         className="flex items-center gap-3 rounded-xl p-2 transition hover:bg-surface-muted"
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
+        {/* biome-ignore lint/performance/noImgElement: admin thumbnails use already-hosted external pet assets. */}
         <img
           src={candidate.pet.spritesheetUrl}
           alt=""
@@ -511,7 +511,7 @@ function CandidateRow({
 
       <div className="flex items-start gap-3 p-2">
         {candidate.request.imageUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
+          // biome-ignore lint/performance/noImgElement: request thumbnails use already-hosted external pet assets.
           <img
             src={candidate.request.imageUrl}
             alt=""
