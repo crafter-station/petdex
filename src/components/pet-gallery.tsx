@@ -345,15 +345,16 @@ export function PetGallery({
           >
             <SelectTrigger
               aria-label="Sort pets"
-              className="h-11 w-full shrink-0 rounded-full text-sm sm:w-auto sm:min-w-[160px]"
+              className="w-full shrink-0 sm:w-auto sm:min-w-[180px]"
             >
-              <SelectValue />
+              <span className="text-muted-3">Sort:</span>
+              <span className="text-foreground">{SORT_LABELS[sort]}</span>
             </SelectTrigger>
             <SelectContent align="end">
               {(Object.entries(SORT_LABELS) as [SortKey, string][]).map(
                 ([key, label]) => (
                   <SelectItem key={key} value={key}>
-                    Sort: {label}
+                    {label}
                   </SelectItem>
                 ),
               )}
