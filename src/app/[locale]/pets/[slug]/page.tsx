@@ -349,14 +349,14 @@ export default async function PetPage({ params }: PageProps) {
         shuffleHref={shuffleHref}
       />
 
+      <SiteHeader />
       {/* Hero banner — full-width petdex-cloud gradient like /u/[handle].
           Houses the dex nav pills, the title block, the action row, and
           (if the viewer owns the pet) the inline edit button. The
           animated sprite + install command + secondary panels live
           below in their own contained section. */}
-      <section className="petdex-cloud relative z-10 overflow-visible">
-        <div className="relative mx-auto flex w-full max-w-6xl flex-col gap-6 px-5 pt-5 pb-10 md:px-8 md:pb-14">
-          <SiteHeader />
+      <section className="petdex-cloud relative -mt-[84px] overflow-visible pt-[84px]">
+        <div className="relative mx-auto flex w-full max-w-6xl flex-col gap-6 px-5 pb-10 md:px-8 md:pb-14">
 
           {/* Interactive floater pet — drag, click, watch. Renders an
               absolute-positioned sprite over the banner's empty right

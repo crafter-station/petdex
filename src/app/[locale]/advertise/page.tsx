@@ -51,10 +51,11 @@ export default async function AdvertisePage({
   };
 
   return (
-    <main className="petdex-cloud relative min-h-dvh overflow-hidden bg-background text-foreground">
+    <main className="min-h-dvh bg-background text-foreground">
       <JsonLd data={jsonLd} />
-      <section className="relative mx-auto flex w-full max-w-[1440px] flex-col px-5 pt-5 pb-12 md:px-8 md:pb-16">
-        <SiteHeader />
+      <SiteHeader />
+      <section className="petdex-cloud relative -mt-[84px] overflow-clip pt-[84px]">
+        <div className="relative mx-auto flex w-full max-w-[1440px] flex-col px-5 pb-12 md:px-8 md:pb-16">
 
         <div className="mt-12 grid gap-10 lg:grid-cols-[1fr_440px] lg:items-start">
           <div>
@@ -124,6 +125,7 @@ export default async function AdvertisePage({
           </div>
 
           <AdvertiseForm />
+        </div>
         </div>
       </section>
 

@@ -59,9 +59,9 @@ export default async function CollectionsPage() {
   return (
     <main className="min-h-dvh bg-background text-foreground">
       <JsonLd data={jsonLd} />
-      <section className="petdex-cloud relative overflow-clip">
-        <div className="relative mx-auto flex w-full max-w-6xl flex-col px-5 pt-5 pb-12 md:px-8">
-          <SiteHeader />
+      <SiteHeader />
+      <section className="petdex-cloud relative -mt-[84px] overflow-clip pt-[84px]">
+        <div className="relative mx-auto flex w-full max-w-6xl flex-col px-5 pb-12 md:px-8">
           <div className="mt-12 max-w-2xl md:mt-16">
             <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
               Featured collections
