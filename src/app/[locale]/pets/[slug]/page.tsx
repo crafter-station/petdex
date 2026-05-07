@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { Suspense } from "react";
 
 import { auth } from "@clerk/nextjs/server";
 import { and, eq, inArray } from "drizzle-orm";
@@ -157,16 +158,14 @@ export default async function PetPage({ params }: PageProps) {
         }
       : null;
 
-  const [{ userId }, allPets, ownerRow, variants, memberOfCollections] =
-    await Promise.all([
-      auth(),
-      getApprovedPetsWithMetrics(),
-      db.query.submittedPets.findFirst({
-        where: eq(schema.submittedPets.slug, slug),
-      }),
-      getVariantsFor(slug),
-      getCollectionsContainingPet(slug),
-    ]);
+  const [allPets, ownerRow, variants, memberOfCollections] = await Promise.all([
+    getApprovedPetsWithMetrics(),
+    db.query.submittedPets.findFirst({
+      where: eq(schema.submittedPets.slug, slug),
+    }),
+    getVariantsFor(slug),
+    getCollectionsContainingPet(slug),
+  ]);
   const petWithMetrics = allPets.find((candidate) => candidate.slug === slug);
   const metrics = petWithMetrics?.metrics ?? {
     installCount: 0,
@@ -183,16 +182,6 @@ export default async function PetPage({ params }: PageProps) {
       metrics: candidate.metrics,
     })),
   );
-  const initialLiked = userId
-    ? Boolean(
-        await db.query.petLikes.findFirst({
-          where: and(
-            eq(schema.petLikes.userId, userId),
-            eq(schema.petLikes.petSlug, slug),
-          ),
-        }),
-      )
-    : false;
 
   // Resolve the "submitted by" credit live from Clerk so name/url/avatar
   // reflect the user's *current* profile (not the snapshot taken at
@@ -218,45 +207,6 @@ export default async function PetPage({ params }: PageProps) {
         ownerIsProxy: ownerRow.source === "discover",
       })
     : null;
-
-  let ownerEditState: {
-    isOwner: boolean;
-    petId: string;
-    currentTags: string[];
-    pending: {
-      displayName: string | null;
-      description: string | null;
-      tags: string[] | null;
-      submittedAt: string | null;
-    } | null;
-    lastRejection: string | null;
-  } | null = null;
-  if (userId && ownerRow && ownerRow.ownerId === userId) {
-    const hasPending = Boolean(ownerRow.pendingSubmittedAt);
-    ownerEditState = {
-      isOwner: true,
-      petId: ownerRow.id,
-      currentTags: (ownerRow.tags as string[]) ?? [],
-      pending: hasPending
-        ? {
-            displayName: ownerRow.pendingDisplayName,
-            description: ownerRow.pendingDescription,
-            tags: (ownerRow.pendingTags as string[] | null) ?? null,
-            submittedAt: ownerRow.pendingSubmittedAt
-              ? ownerRow.pendingSubmittedAt.toISOString()
-              : null,
-          }
-        : null,
-      lastRejection: ownerRow.pendingRejectionReason,
-    };
-  }
-
-  // Owner-only: candidate featured collections + already-submitted
-  // pending requests for the suggest button.
-  const collectionSuggest =
-    userId && ownerRow && ownerRow.ownerId === userId
-      ? await getCollectionCandidatesForPet(slug, userId)
-      : null;
 
   const url = `${SITE_URL}/pets/${pet.slug}`;
   const jsonLd = [
@@ -390,29 +340,30 @@ export default async function PetPage({ params }: PageProps) {
               <h1 className="text-balance text-[44px] leading-[1] font-semibold tracking-tight text-foreground md:text-[64px]">
                 {pet.displayName}
               </h1>
-              {ownerEditState ? (
-                <OwnerEditPanel
-                  petId={ownerEditState.petId}
-                  slug={pet.slug}
-                  currentDisplayName={pet.displayName}
-                  currentDescription={pet.description}
-                  currentTags={ownerEditState.currentTags}
-                  initialPending={ownerEditState.pending}
-                  initialRejection={ownerEditState.lastRejection}
-                />
-              ) : null}
+              <Suspense fallback={null}>
+                <OwnerEditPanelLeaf ownerRow={ownerRow} pet={pet} />
+              </Suspense>
             </div>
             <p className="max-w-3xl text-balance text-base leading-7 text-muted-1 md:text-lg">
               {pet.description}
             </p>
 
             <div className="flex flex-wrap items-center gap-3">
-              <LikeButton
-                slug={pet.slug}
-                initialCount={metrics.likeCount}
-                initialLiked={initialLiked}
-                signedIn={Boolean(userId)}
-              />
+              <Suspense
+                fallback={
+                  <LikeButton
+                    slug={pet.slug}
+                    initialCount={metrics.likeCount}
+                    initialLiked={false}
+                    signedIn={false}
+                  />
+                }
+              >
+                <LikeButtonLeaf
+                  slug={pet.slug}
+                  initialCount={metrics.likeCount}
+                />
+              </Suspense>
               {pet.soundUrl ? (
                 <PetSoundButton
                   soundUrl={pet.soundUrl}
@@ -466,14 +417,13 @@ export default async function PetPage({ params }: PageProps) {
               </div>
             ) : null}
 
-            {collectionSuggest && collectionSuggest.candidates.length > 0 ? (
-              <SuggestCollectionButton
-                petSlug={slug}
+            <Suspense fallback={null}>
+              <SuggestCollectionButtonLeaf
+                slug={slug}
                 petDisplayName={pet.displayName}
-                candidateCollections={collectionSuggest.candidates}
-                alreadyRequested={collectionSuggest.alreadyRequested}
+                ownerRow={ownerRow}
               />
-            ) : null}
+            </Suspense>
 
             {/* Keyboard hint strip — minimal, mono-spaced, only on
                 pointer-fine media so we don't spam mobile users with
@@ -514,15 +464,17 @@ export default async function PetPage({ params }: PageProps) {
           {ownerCredit ? (
             <div className="space-y-3">
               <SubmittedBy credit={ownerCredit} />
-              {ownerRow?.source === "discover" && !userId ? (
-                <ClaimCTA
-                  petName={pet.displayName}
-                  authorLabel={ownerCredit.name}
-                  githubUrl={
-                    ownerCredit.externals.find((e) => e.provider === "github")
-                      ?.url ?? null
-                  }
-                />
+              {ownerRow?.source === "discover" ? (
+                <Suspense fallback={null}>
+                  <ClaimCTALeaf
+                    petName={pet.displayName}
+                    authorLabel={ownerCredit.name}
+                    githubUrl={
+                      ownerCredit.externals.find((e) => e.provider === "github")
+                        ?.url ?? null
+                    }
+                  />
+                </Suspense>
               ) : null}
             </div>
           ) : null}
@@ -641,5 +593,111 @@ function InfoCard({
         {children}
       </div>
     </div>
+  );
+}
+
+async function LikeButtonLeaf({
+  slug,
+  initialCount,
+}: {
+  slug: string;
+  initialCount: number;
+}) {
+  const { userId } = await auth();
+  const initialLiked = userId
+    ? Boolean(
+        await db.query.petLikes.findFirst({
+          where: and(
+            eq(schema.petLikes.userId, userId),
+            eq(schema.petLikes.petSlug, slug),
+          ),
+        }),
+      )
+    : false;
+  return (
+    <LikeButton
+      slug={slug}
+      initialCount={initialCount}
+      initialLiked={initialLiked}
+      signedIn={Boolean(userId)}
+    />
+  );
+}
+
+async function OwnerEditPanelLeaf({
+  ownerRow,
+  pet,
+}: {
+  ownerRow: typeof schema.submittedPets.$inferSelect | undefined;
+  pet: { slug: string; displayName: string; description: string };
+}) {
+  const { userId } = await auth();
+  if (!userId || !ownerRow || ownerRow.ownerId !== userId) return null;
+  const hasPending = Boolean(ownerRow.pendingSubmittedAt);
+  return (
+    <OwnerEditPanel
+      petId={ownerRow.id}
+      slug={pet.slug}
+      currentDisplayName={pet.displayName}
+      currentDescription={pet.description}
+      currentTags={(ownerRow.tags as string[]) ?? []}
+      initialPending={
+        hasPending
+          ? {
+              displayName: ownerRow.pendingDisplayName,
+              description: ownerRow.pendingDescription,
+              tags: (ownerRow.pendingTags as string[] | null) ?? null,
+              submittedAt: ownerRow.pendingSubmittedAt
+                ? ownerRow.pendingSubmittedAt.toISOString()
+                : null,
+            }
+          : null
+      }
+      initialRejection={ownerRow.pendingRejectionReason}
+    />
+  );
+}
+
+async function SuggestCollectionButtonLeaf({
+  slug,
+  petDisplayName,
+  ownerRow,
+}: {
+  slug: string;
+  petDisplayName: string;
+  ownerRow: typeof schema.submittedPets.$inferSelect | undefined;
+}) {
+  const { userId } = await auth();
+  if (!userId || !ownerRow || ownerRow.ownerId !== userId) return null;
+  const collectionSuggest = await getCollectionCandidatesForPet(slug, userId);
+  if (!collectionSuggest || collectionSuggest.candidates.length === 0)
+    return null;
+  return (
+    <SuggestCollectionButton
+      petSlug={slug}
+      petDisplayName={petDisplayName}
+      candidateCollections={collectionSuggest.candidates}
+      alreadyRequested={collectionSuggest.alreadyRequested}
+    />
+  );
+}
+
+async function ClaimCTALeaf({
+  petName,
+  authorLabel,
+  githubUrl,
+}: {
+  petName: string;
+  authorLabel: string;
+  githubUrl: string | null;
+}) {
+  const { userId } = await auth();
+  if (userId) return null;
+  return (
+    <ClaimCTA
+      petName={petName}
+      authorLabel={authorLabel}
+      githubUrl={githubUrl}
+    />
   );
 }
