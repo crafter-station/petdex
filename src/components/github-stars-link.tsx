@@ -91,12 +91,17 @@ export function GithubStarsLink({
       className={`inline-flex items-center gap-1.5 transition hover:text-foreground ${className}`}
     >
       <GithubIcon className={iconSize} />
-      {stars !== null ? (
-        <span className="inline-flex items-center gap-0.5 font-mono text-[11px] text-muted-2">
-          <Star className="size-3" fill="currentColor" />
-          {compact(stars)}
-        </span>
-      ) : null}
+      <span className="inline-flex min-w-[3ch] items-center gap-0.5 font-mono text-[11px] text-muted-2">
+        <Star className="size-3" fill="currentColor" />
+        {stars !== null ? (
+          compact(stars)
+        ) : (
+          <span
+            aria-hidden
+            className="inline-block h-2 w-6 animate-pulse rounded-full bg-surface-muted"
+          />
+        )}
+      </span>
     </a>
   );
 }

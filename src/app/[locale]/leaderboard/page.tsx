@@ -94,7 +94,7 @@ export default async function LeaderboardPage({
 
   return (
     <main className="min-h-dvh bg-background text-foreground">
-      <section className="petdex-cloud relative overflow-hidden">
+      <section className="petdex-cloud relative overflow-clip">
         <div className="relative mx-auto flex w-full max-w-5xl flex-col px-5 pt-5 pb-10 md:px-8">
           <SiteHeader />
 

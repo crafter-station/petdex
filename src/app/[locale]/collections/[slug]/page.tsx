@@ -116,8 +116,8 @@ export default async function CollectionPage({ params }: PageProps) {
   return (
     <main className="min-h-dvh bg-background text-foreground">
       <JsonLd data={jsonLd} />
-      <section className="petdex-cloud relative overflow-hidden">
-        <div className="relative mx-auto flex w-full max-w-7xl flex-col px-5 pt-5 pb-12 md:px-8">
+      <section className="petdex-cloud relative overflow-clip">
+        <div className="relative mx-auto flex w-full max-w-[1440px] flex-col px-5 pt-5 pb-12 md:px-8">
           <SiteHeader />
           <div className="mt-6">
             <Link

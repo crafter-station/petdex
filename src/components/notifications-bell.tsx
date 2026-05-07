@@ -113,7 +113,7 @@ function relativeTime(iso: string): string {
   });
 }
 
-export function NotificationsBell() {
+export function NotificationsBell({ compact = false }: { compact?: boolean }) {
   const { state, refresh } = useHeaderState();
   const unread = state.notifications.unreadCount;
   const [items, setItems] = useState<Notif[]>([]);
@@ -208,7 +208,7 @@ export function NotificationsBell() {
           unread > 0 ? `${unread} unread notifications` : "Notifications"
         }
         onClick={() => setOpen((v) => !v)}
-        className="relative grid size-11 place-items-center rounded-full border border-border-base bg-surface/70 text-muted-2 backdrop-blur transition hover:bg-white dark:hover:bg-stone-800"
+        className={`relative grid place-items-center rounded-full border border-border-base bg-surface/70 text-muted-2 backdrop-blur transition-[width,height] duration-200 hover:bg-white dark:hover:bg-stone-800 ${compact ? "size-9" : "size-11"}`}
       >
         <Bell className="size-4" />
         {unread > 0 ? (

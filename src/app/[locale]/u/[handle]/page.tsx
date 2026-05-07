@@ -261,8 +261,8 @@ export default async function UserProfilePage({ params }: PageProps) {
         viewerIsOwner={isOwner}
       />
 
-      <section className="petdex-cloud relative overflow-hidden">
-        <div className="relative mx-auto flex w-full max-w-7xl flex-col px-5 pt-5 pb-10 md:px-8">
+      <section className="petdex-cloud relative overflow-clip">
+        <div className="relative mx-auto flex w-full max-w-[1440px] flex-col px-5 pt-5 pb-10 md:px-8">
           <SiteHeader />
 
           <header className="mt-10 grid gap-8 md:mt-14 lg:grid-cols-[auto_1fr_auto] lg:items-start">

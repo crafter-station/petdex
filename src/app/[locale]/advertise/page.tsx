@@ -53,7 +53,7 @@ export default async function AdvertisePage({
   return (
     <main className="petdex-cloud relative min-h-dvh overflow-hidden bg-background text-foreground">
       <JsonLd data={jsonLd} />
-      <section className="relative mx-auto flex w-full max-w-7xl flex-col px-5 pt-5 pb-12 md:px-8 md:pb-16">
+      <section className="relative mx-auto flex w-full max-w-[1440px] flex-col px-5 pt-5 pb-12 md:px-8 md:pb-16">
         <SiteHeader />
 
         <div className="mt-12 grid gap-10 lg:grid-cols-[1fr_440px] lg:items-start">
@@ -127,7 +127,7 @@ export default async function AdvertisePage({
         </div>
       </section>
 
-      <section className="mx-auto grid w-full max-w-7xl gap-5 px-5 pb-14 md:px-8 lg:grid-cols-3">
+      <section className="mx-auto grid w-full max-w-[1440px] gap-5 px-5 pb-14 md:px-8 lg:grid-cols-3">
         <InfoCard title={t("sections.audience.title")}>
           {t("sections.audience.body")}
         </InfoCard>
@@ -139,7 +139,7 @@ export default async function AdvertisePage({
         </InfoCard>
       </section>
 
-      <section className="mx-auto grid w-full max-w-7xl gap-5 px-5 pb-16 md:px-8 lg:grid-cols-2">
+      <section className="mx-auto grid w-full max-w-[1440px] gap-5 px-5 pb-16 md:px-8 lg:grid-cols-2">
         <PolicyCard
           title={t("acceptableUse.title")}
           items={[

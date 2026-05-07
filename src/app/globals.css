@@ -64,6 +64,28 @@
   /* Semantic background <-> foreground mapped via theme below */
   --background: var(--bg-app);
   --foreground: var(--text-default);
+
+  /* shadcn semantic tokens — OKLCH, derived from the Petdex brand seed.
+     Verified for AA contrast against their paired surfaces. The hue (272°)
+     stays constant across primary/ring; destructive picks a separate hue
+     (27° = red). */
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.142 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.142 0 0);
+  --primary: oklch(0.561 0.207 271.8);
+  --primary-foreground: oklch(0.984 0.009 271.7);
+  --secondary: oklch(0.949 0.008 271.7);
+  --secondary-foreground: oklch(0.235 0.009 277.1);
+  --muted: oklch(0.949 0.008 271.7);
+  --muted-foreground: oklch(0.475 0.024 273.7);
+  --accent: oklch(0.949 0.019 269);
+  --accent-foreground: oklch(0.235 0.009 277.1);
+  --destructive: oklch(0.55 0.22 27);
+  --destructive-foreground: oklch(0.984 0.009 271.7);
+  --border: oklch(0.142 0 0 / 0.1);
+  --input: oklch(0.142 0 0 / 0.15);
+  --ring: oklch(0.561 0.207 271.8);
 }
 
 .dark {
@@ -121,6 +143,28 @@
 
   --background: var(--bg-app);
   --foreground: var(--text-default);
+
+  /* shadcn semantic tokens — dark mode. L values are flipped relative to
+     light mode (card/popover use --surface; foregrounds become near-white).
+     --primary is brightened (0.745) so chrome on near-black surfaces stays
+     readable. --muted-foreground bumped to L=0.7 to clear AA normal text. */
+  --card: oklch(0.215 0.005 285.7);
+  --card-foreground: oklch(0.949 0.002 286.2);
+  --popover: oklch(0.215 0.005 285.7);
+  --popover-foreground: oklch(0.949 0.002 286.2);
+  --primary: oklch(0.745 0.165 272);
+  --primary-foreground: oklch(0.157 0.004 285.7);
+  --secondary: oklch(0.3 0.005 285.7);
+  --secondary-foreground: oklch(0.88 0.01 277);
+  --muted: oklch(0.3 0.005 285.7);
+  --muted-foreground: oklch(0.7 0.015 277);
+  --accent: oklch(0.243 0.075 274.3);
+  --accent-foreground: oklch(0.88 0.01 277);
+  --destructive: oklch(0.7 0.18 27);
+  --destructive-foreground: oklch(0.157 0.004 285.7);
+  --border: oklch(1 0 0 / 0.1);
+  --input: oklch(1 0 0 / 0.15);
+  --ring: oklch(0.745 0.165 272);
 }
 
 @theme inline {
@@ -156,6 +200,26 @@
   --color-chip-danger-fg: var(--chip-danger-fg);
   --color-chip-info-bg: var(--chip-info-bg);
   --color-chip-info-fg: var(--chip-info-fg);
+
+  /* shadcn semantic color expansions for Tailwind v4. These let
+     primitives use bg-card, text-primary-foreground, ring-ring, etc. */
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
 
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);

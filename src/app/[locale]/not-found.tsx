@@ -40,8 +40,8 @@ export default async function NotFound() {
 
   return (
     <main className="min-h-dvh bg-background text-foreground">
-      <section className="petdex-cloud relative overflow-hidden">
-        <div className="relative mx-auto flex w-full max-w-7xl flex-col px-5 pt-5 pb-10 md:px-8">
+      <section className="petdex-cloud relative overflow-clip">
+        <div className="relative mx-auto flex w-full max-w-[1440px] flex-col px-5 pt-5 pb-10 md:px-8">
           <SiteHeader />
 
           <div className="mt-10 flex flex-col items-center text-center md:mt-14">
