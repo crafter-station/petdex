@@ -14,7 +14,6 @@ import { track } from "@vercel/analytics";
 import {
   Check,
   CheckCircle2,
-  ChevronDown,
   Loader2,
   Plus,
   Search,
@@ -35,6 +34,28 @@ import { useHeaderState } from "@/components/header-state-provider";
 import { PetActionMenu } from "@/components/pet-action-menu";
 import { PetCardFooter } from "@/components/pet-card-footer";
 import { PetSprite } from "@/components/pet-sprite";
+import { Button } from "@/components/ui/button";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/components/ui/input-group";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
+import { Toggle } from "@/components/ui/toggle";
 
 type Facets = {
   kinds: Record<string, number>;
@@ -102,7 +123,6 @@ export function PetGallery({
   caughtSlugs,
   ads = [],
 }: PetGalleryProps) {
-  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [query, setQuery] = useState("");
   const trimmedQuery = query.trim();
   const [activeKinds, setActiveKinds] = useState<Set<PetKind>>(new Set());
@@ -192,14 +212,6 @@ export function PetGallery({
     }, 250);
     return () => window.clearTimeout(handle);
   }, [buildParams, trimmedQuery]);
-
-  useEffect(() => {
-    if (!mobileFiltersOpen) return;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = "";
-    };
-  }, [mobileFiltersOpen]);
 
   const loadMore = useCallback(async () => {
     if (nextCursor == null || loadingMore || loadingPage) return;
@@ -293,153 +305,88 @@ export function PetGallery({
         ) : null}
       </div>
 
-      {/* Unified control bar: search input takes full width, sort sits to the
- right, filter chips wrap below. Whole thing gets the same subtle
- shadow as the announcement modal so it reads as one cohesive
- surface and the search bar feels like a primary action. */}
-      <div className="space-y-3 rounded-3xl border border-black/[0.06] bg-surface px-3 py-3 shadow-[0_8px_24px_-12px_rgba(56,71,245,0.18)] md:px-4 md:py-4 dark:border-white/[0.06]">
+      {/* Unified control bar: search input takes full width, sort sits
+ to the right, filter chips wrap below. The whole surface gets the
+ same subtle elevation as the announcement modal so it reads as a
+ single primary action region. */}
+      <div className="rounded-3xl border border-black/[0.06] bg-surface p-3 shadow-[0_8px_24px_-12px_rgba(56,71,245,0.18)] md:p-4 dark:border-white/[0.06]">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <label className="relative block w-full flex-1">
-            <Search className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-4 size-4 text-muted-3" />
-            <input
+          <InputGroup className="h-11 flex-1 rounded-full bg-background/40">
+            <InputGroupAddon align="inline-start">
+              <Search className="size-4 text-muted-3" />
+            </InputGroupAddon>
+            <InputGroupInput
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Try 'cozy night programmer' or 'fierce dragon'"
-              className="h-11 w-full rounded-full border border-border-base bg-surface pr-10 pl-11 text-sm text-foreground outline-none transition placeholder:text-muted-3 focus:border-brand/60 focus:ring-2 focus:ring-brand/15"
+              aria-label="Search pets"
+              className="text-sm placeholder:text-muted-3"
             />
             {query.length > 0 ? (
-              <button
-                type="button"
-                onClick={() => setQuery("")}
-                aria-label="Clear search"
-                className="-translate-y-1/2 absolute top-1/2 right-3 grid size-6 place-items-center rounded-full text-muted-4 transition hover:bg-surface-muted hover:text-foreground"
-              >
-                <X className="size-3.5" />
-              </button>
+              <InputGroupAddon align="inline-end">
+                <button
+                  type="button"
+                  onClick={() => setQuery("")}
+                  aria-label="Clear search"
+                  className="grid size-6 place-items-center rounded-full text-muted-4 transition hover:bg-surface-muted hover:text-foreground"
+                >
+                  <X className="size-3.5" />
+                </button>
+              </InputGroupAddon>
             ) : null}
-          </label>
-          <div className="relative shrink-0">
-            <select
-              value={sort}
-              onChange={(e) => {
-                const next = e.target.value as SortKey;
-                track("sort_changed", { sort: next });
-                setSort(next);
-              }}
+          </InputGroup>
+
+          <Select
+            value={sort}
+            onValueChange={(next) => {
+              track("sort_changed", { sort: next });
+              setSort(next as SortKey);
+            }}
+          >
+            <SelectTrigger
               aria-label="Sort pets"
-              className="h-11 w-full cursor-pointer appearance-none rounded-full border border-border-base bg-surface pr-9 pl-4 text-sm text-foreground outline-none transition hover:border-border-strong focus:border-brand/60 focus:ring-2 focus:ring-brand/15 sm:w-auto sm:min-w-[160px]"
+              className="h-11 w-full shrink-0 rounded-full text-sm sm:w-auto sm:min-w-[160px]"
             >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent align="end">
               {(Object.entries(SORT_LABELS) as [SortKey, string][]).map(
                 ([key, label]) => (
-                  <option key={key} value={key}>
+                  <SelectItem key={key} value={key}>
                     Sort: {label}
-                  </option>
+                  </SelectItem>
                 ),
               )}
-            </select>
-            <ChevronDown className="-translate-y-1/2 pointer-events-none absolute top-1/2 right-3 size-4 text-muted-3" />
-          </div>
+            </SelectContent>
+          </Select>
         </div>
 
-        {/* Filter chips: kind + vibe in one continuous wrap row. Saves a
- whole horizontal label column and roughly half the height vs
- the previous two-row layout. */}
-        <div className="flex items-center gap-2 md:hidden">
-          <button
-            type="button"
-            onClick={() => setMobileFiltersOpen(true)}
-            className="inline-flex h-10 flex-1 items-center justify-center rounded-full border border-border-base bg-surface px-4 text-sm font-medium text-foreground transition hover:border-border-strong"
-          >
-            Filters
-            {activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
-          </button>
-          {filtersActive ? (
-            <button
-              type="button"
-              onClick={() => {
-                track("filters_cleared");
-                clearFilters();
-              }}
-              className="inline-flex h-10 items-center justify-center rounded-full border border-border-base bg-surface px-4 text-sm font-medium text-muted-2 transition hover:border-border-strong"
+        {/* Mobile: collapse all filter chips into a Sheet so the bar stays
+ short on phones. The chips themselves are reused inside the sheet
+ below to avoid divergent UIs across breakpoints. */}
+        <div className="mt-3 flex items-center gap-2 md:hidden">
+          <Sheet>
+            <SheetTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="petdex-pill"
+                  className="h-10 flex-1 px-4 text-sm font-medium text-foreground"
+                >
+                  Filters
+                  {activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
+                </Button>
+              }
+            />
+            <SheetContent
+              side="bottom"
+              className="max-h-[75dvh] overflow-y-auto"
             >
-              Clear
-            </button>
-          ) : null}
-        </div>
-
-        <div className="hidden flex-wrap gap-1.5 border-t border-black/[0.05] pt-3 md:flex dark:border-white/[0.05]">
-          <FilterChips
-            options={PET_KINDS}
-            counts={facets.kinds}
-            active={activeKinds}
-            onToggle={(v) => toggleKind(v as PetKind)}
-            tone="kind"
-          />
-          <FilterChips
-            options={PET_VIBES}
-            counts={facets.vibes}
-            active={activeVibes}
-            onToggle={(v) => toggleVibe(v as PetVibe)}
-            tone="vibe"
-          />
-        </div>
-        <div className="hidden flex-wrap gap-1.5 border-t border-black/[0.05] pt-3 md:flex dark:border-white/[0.05]">
-          <FilterChips
-            options={COLOR_FAMILIES}
-            counts={facets.colors}
-            active={activeColors}
-            onToggle={(v) => toggleColor(v as ColorFamily)}
-            tone="color"
-            dotColors={FAMILY_DOT}
-          />
-        </div>
-        <div className="hidden flex-wrap gap-1.5 border-t border-black/[0.05] pt-3 md:flex dark:border-white/[0.05]">
-          <FilterChips
-            options={facets.batches.map((batch) => batch.key)}
-            counts={Object.fromEntries(
-              facets.batches.map((batch) => [batch.key, batch.count]),
-            )}
-            labels={Object.fromEntries(
-              facets.batches.map((batch) => [batch.key, batch.label]),
-            )}
-            active={activeBatches}
-            onToggle={toggleBatch}
-            tone="batch"
-          />
-        </div>
-      </div>
-
-      {mobileFiltersOpen ? (
-        <div
-          className="fixed inset-0 z-50 md:hidden"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Pet filters"
-        >
-          <button
-            type="button"
-            aria-label="Close filters"
-            onClick={() => setMobileFiltersOpen(false)}
-            className="absolute inset-0 bg-black/30 backdrop-blur-sm"
-          />
-          <div className="absolute inset-x-0 bottom-0 max-h-[75dvh] overflow-y-auto rounded-t-[28px] border border-border-base bg-background px-4 pt-4 pb-6 shadow-2xl">
-            <div className="mx-auto mb-4 h-1.5 w-14 rounded-full bg-black/10 dark:bg-white/10" />
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-base font-semibold text-foreground">Filters</p>
-              <button
-                type="button"
-                onClick={() => setMobileFiltersOpen(false)}
-                className="inline-flex h-9 items-center justify-center rounded-full border border-border-base bg-surface px-4 text-sm font-medium text-muted-2"
-              >
-                Done
-              </button>
-            </div>
-            <div className="mt-4 space-y-4">
-              <div className="space-y-2">
-                <p className="font-mono text-[11px] tracking-[0.18em] text-muted-3 uppercase">
-                  Kind + vibe
-                </p>
-                <div className="flex flex-wrap gap-1.5">
+              <SheetHeader>
+                <SheetTitle>Filters</SheetTitle>
+              </SheetHeader>
+              <div className="space-y-5 px-4 pb-6">
+                <FilterGroup label="Type">
                   <FilterChips
                     options={PET_KINDS}
                     counts={facets.kinds}
@@ -447,6 +394,9 @@ export function PetGallery({
                     onToggle={(v) => toggleKind(v as PetKind)}
                     tone="kind"
                   />
+                </FilterGroup>
+                <Separator className="bg-border-base" />
+                <FilterGroup label="Vibe">
                   <FilterChips
                     options={PET_VIBES}
                     counts={facets.vibes}
@@ -454,13 +404,9 @@ export function PetGallery({
                     onToggle={(v) => toggleVibe(v as PetVibe)}
                     tone="vibe"
                   />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <p className="font-mono text-[11px] tracking-[0.18em] text-muted-3 uppercase">
-                  Color
-                </p>
-                <div className="flex flex-wrap gap-1.5">
+                </FilterGroup>
+                <Separator className="bg-border-base" />
+                <FilterGroup label="Color">
                   <FilterChips
                     options={COLOR_FAMILIES}
                     counts={facets.colors}
@@ -469,52 +415,101 @@ export function PetGallery({
                     tone="color"
                     dotColors={FAMILY_DOT}
                   />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <p className="font-mono text-[11px] tracking-[0.18em] text-muted-3 uppercase">
-                  Batch
-                </p>
-                <div className="flex flex-wrap gap-1.5">
-                  <FilterChips
-                    options={facets.batches.map((batch) => batch.key)}
-                    counts={Object.fromEntries(
-                      facets.batches.map((batch) => [batch.key, batch.count]),
-                    )}
-                    labels={Object.fromEntries(
-                      facets.batches.map((batch) => [batch.key, batch.label]),
-                    )}
-                    active={activeBatches}
-                    onToggle={toggleBatch}
-                    tone="batch"
-                  />
-                </div>
-              </div>
-              <div className="flex items-center gap-2 pt-2">
-                {filtersActive ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      track("filters_cleared");
-                      clearFilters();
-                    }}
-                    className="inline-flex h-10 flex-1 items-center justify-center rounded-full border border-border-base bg-surface px-4 text-sm font-medium text-muted-2"
-                  >
-                    Clear all
-                  </button>
+                </FilterGroup>
+                {facets.batches.length > 0 ? (
+                  <>
+                    <Separator className="bg-border-base" />
+                    <FilterGroup label="Era">
+                      <FilterChips
+                        options={facets.batches.map((batch) => batch.key)}
+                        counts={Object.fromEntries(
+                          facets.batches.map((batch) => [
+                            batch.key,
+                            batch.count,
+                          ]),
+                        )}
+                        labels={Object.fromEntries(
+                          facets.batches.map((batch) => [
+                            batch.key,
+                            batch.label,
+                          ]),
+                        )}
+                        active={activeBatches}
+                        onToggle={toggleBatch}
+                        tone="batch"
+                      />
+                    </FilterGroup>
+                  </>
                 ) : null}
-                <button
-                  type="button"
-                  onClick={() => setMobileFiltersOpen(false)}
-                  className="inline-flex h-10 flex-1 items-center justify-center rounded-full bg-inverse px-4 text-sm font-medium text-on-inverse"
-                >
-                  Show pets
-                </button>
               </div>
-            </div>
-          </div>
+            </SheetContent>
+          </Sheet>
+          {filtersActive ? (
+            <Button
+              type="button"
+              variant="petdex-pill"
+              onClick={() => {
+                track("filters_cleared");
+                clearFilters();
+              }}
+              className="h-10 px-4 text-sm font-medium text-muted-2"
+            >
+              Clear
+            </Button>
+          ) : null}
         </div>
-      ) : null}
+
+        {/* Desktop: filters grouped by category with Type · Vibe · Color
+ · Era separators. Eyebrow labels mark each cluster for scan-
+ ability without losing the wrap-row density. */}
+        <div className="mt-3 hidden flex-col gap-3 border-t border-black/[0.05] pt-3 md:flex dark:border-white/[0.05]">
+          <FilterRow label="Type">
+            <FilterChips
+              options={PET_KINDS}
+              counts={facets.kinds}
+              active={activeKinds}
+              onToggle={(v) => toggleKind(v as PetKind)}
+              tone="kind"
+            />
+            <span aria-hidden className="px-1 text-muted-4">
+              ·
+            </span>
+            <FilterChips
+              options={PET_VIBES}
+              counts={facets.vibes}
+              active={activeVibes}
+              onToggle={(v) => toggleVibe(v as PetVibe)}
+              tone="vibe"
+            />
+          </FilterRow>
+          <FilterRow label="Color">
+            <FilterChips
+              options={COLOR_FAMILIES}
+              counts={facets.colors}
+              active={activeColors}
+              onToggle={(v) => toggleColor(v as ColorFamily)}
+              tone="color"
+              dotColors={FAMILY_DOT}
+            />
+          </FilterRow>
+          {facets.batches.length > 0 ? (
+            <FilterRow label="Era">
+              <FilterChips
+                options={facets.batches.map((batch) => batch.key)}
+                counts={Object.fromEntries(
+                  facets.batches.map((batch) => [batch.key, batch.count]),
+                )}
+                labels={Object.fromEntries(
+                  facets.batches.map((batch) => [batch.key, batch.label]),
+                )}
+                active={activeBatches}
+                onToggle={toggleBatch}
+                tone="batch"
+              />
+            </FilterRow>
+          ) : null}
+        </div>
+      </div>
 
       {searchMode === "vibe" && pets.length > 0 ? (
         <div className="flex items-center gap-2 rounded-2xl border border-brand-light/35 bg-brand-tint/70 px-4 py-2.5 text-sm text-muted-1">
@@ -617,19 +612,21 @@ function FilterChips({
         const isActive = active.has(value);
         const dotClass =
           tone === "kind"
-            ? "bg-[#0a0a0a]/70"
+            ? "bg-[#0a0a0a]/70 group-aria-pressed/toggle:bg-on-inverse/70"
             : tone === "vibe"
-              ? "bg-brand"
+              ? "bg-brand group-aria-pressed/toggle:bg-on-inverse"
               : tone === "color"
                 ? ""
-                : "bg-sky-500";
+                : "bg-sky-500 group-aria-pressed/toggle:bg-on-inverse";
         const dotColor = dotColors?.[value];
         const label = labels?.[value] ?? value;
         return (
-          <button
+          <Toggle
             key={value}
-            type="button"
-            onClick={() => {
+            variant="chip"
+            size="chip"
+            pressed={isActive}
+            onPressedChange={() => {
               track("filter_toggled", {
                 tone,
                 value,
@@ -637,33 +634,56 @@ function FilterChips({
               });
               onToggle(value);
             }}
-            aria-pressed={isActive}
-            className={`inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-[11px] capitalize transition ${
-              isActive
-                ? "border-inverse bg-inverse text-on-inverse"
-                : "border-border-base bg-surface text-muted-2 hover:border-border-strong"
-            }`}
+            className={tone === "batch" ? "" : "capitalize"}
           >
-            {!isActive || dotColor ? (
-              <span
-                className={`size-1.5 shrink-0 rounded-full ${dotClass}`}
-                style={dotColor ? { backgroundColor: dotColor } : undefined}
-              />
-            ) : null}
-            <span className={tone === "batch" ? "" : "capitalize"}>
-              {label}
-            </span>
             <span
-              className={`font-mono text-[9px] ${
-                isActive ? "text-on-inverse/60" : "text-muted-3"
-              }`}
-            >
+              className={`size-1.5 shrink-0 rounded-full ${dotClass}`}
+              style={dotColor ? { backgroundColor: dotColor } : undefined}
+            />
+            <span>{label}</span>
+            <span className="font-mono text-[9px] text-muted-3 group-aria-pressed/toggle:text-on-inverse/60">
               {count}
             </span>
-          </button>
+          </Toggle>
         );
       })}
     </>
+  );
+}
+
+function FilterRow({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-1.5 sm:flex-row sm:items-start">
+      <span className="shrink-0 pt-1.5 font-mono text-[10px] tracking-[0.18em] text-muted-3 uppercase sm:w-12">
+        {label}
+      </span>
+      <div className="flex flex-1 flex-wrap items-center gap-1.5">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function FilterGroup({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-2">
+      <p className="font-mono text-[11px] tracking-[0.18em] text-muted-3 uppercase">
+        {label}
+      </p>
+      <div className="flex flex-wrap gap-1.5">{children}</div>
+    </div>
   );
 }
 
