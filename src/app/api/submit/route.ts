@@ -1,4 +1,4 @@
-import { revalidateTag } from "next/cache";
+import { updateTag } from "next/cache";
 import { NextResponse } from "next/server";
 
 import { auth, currentUser } from "@clerk/nextjs/server";
@@ -87,10 +87,10 @@ export async function POST(req: Request) {
     const { status, ...rest } = result;
     return NextResponse.json(rest, { status });
   }
-  revalidateTag("gallery", "max");
-  revalidateTag(`profile:${result.profileHandle}`, "max");
+  updateTag("gallery");
+  updateTag(`profile:${result.profileHandle}`);
   if (result.status === "approved") {
-    revalidateTag(`pet:${result.slug}`, "max");
+    updateTag(`pet:${result.slug}`);
   }
   return NextResponse.json(result, { status: 201 });
 }
