@@ -7,6 +7,7 @@ import { Dice5, ExternalLink, PackageOpen, X } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { withLocale } from "@/lib/locale-routing";
+import { safeGetItem, safeSetItem } from "@/lib/utils";
 
 import { PetSprite } from "@/components/pet-sprite";
 
@@ -50,9 +51,9 @@ export function SurprisePetCard() {
   useEffect(() => {
     const today = new Date().toISOString().slice(0, 10);
     const key = `${BASE_KEY}_${today}`;
-    if (window.localStorage.getItem(key) === "1") return;
+    if (safeGetItem(key) === "1") return;
     const timeout = window.setTimeout(() => {
-      window.localStorage.setItem(key, "1");
+      safeSetItem(key, "1");
       void loadPet();
     }, 2200);
     return () => window.clearTimeout(timeout);

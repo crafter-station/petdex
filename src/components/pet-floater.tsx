@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import type { PetStateId } from "@/lib/pet-states";
+import { safeGetItem, safeSetItem } from "@/lib/utils";
 
 import { PetSprite } from "@/components/pet-sprite";
 
@@ -167,7 +168,7 @@ export function PetFloater({ src, petName }: PetFloaterProps) {
   useEffect(() => {
     if (!enabled) return;
     if (typeof window === "undefined") return;
-    const seen = window.localStorage.getItem(HINT_STORAGE_KEY);
+    const seen = safeGetItem(HINT_STORAGE_KEY);
     if (seen === "1") return;
     setShowHint(true);
     const fade = window.setTimeout(() => setShowHint(false), HINT_DURATION_MS);
@@ -178,7 +179,7 @@ export function PetFloater({ src, petName }: PetFloaterProps) {
     if (!showHint) return;
     setShowHint(false);
     if (typeof window !== "undefined") {
-      window.localStorage.setItem(HINT_STORAGE_KEY, "1");
+      safeSetItem(HINT_STORAGE_KEY, "1");
     }
   }, [showHint]);
 

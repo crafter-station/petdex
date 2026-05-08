@@ -14,6 +14,8 @@ import {
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 
+import { safeGetItem, safeSetItem } from "@/lib/utils";
+
 type Kind = "suggestion" | "bug" | "praise" | "other";
 
 const DRAG_THRESHOLD_PX = 6;
@@ -82,7 +84,7 @@ export function FeedbackWidget() {
   );
 
   useEffect(() => {
-    const stored = window.localStorage.getItem(FEEDBACK_POSITION_KEY);
+    const stored = safeGetItem(FEEDBACK_POSITION_KEY);
     const parsed = stored === null ? NaN : Number(stored);
     setClampedBottom(Number.isFinite(parsed) ? parsed : getDefaultBottom());
   }, [getDefaultBottom, setClampedBottom]);
@@ -214,7 +216,7 @@ export function FeedbackWidget() {
           const nextBottom = clampBottom(startBottom - (ev.clientY - startY));
           setBottomOffset(nextBottom);
           suppressClickUntilRef.current = Date.now() + 350;
-          window.localStorage.setItem(
+          safeSetItem(
             FEEDBACK_POSITION_KEY,
             String(nextBottom),
           );
