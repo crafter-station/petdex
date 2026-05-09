@@ -1140,12 +1140,24 @@ function printDesktopHelp() {
 
 function cmdTelemetry(args: string[]): void {
   const sub = args[0];
-  if (sub === "on") {
-    setEnabled(true);
-    console.log("Telemetry enabled");
-  } else if (sub === "off") {
-    setEnabled(false);
-    console.log("Telemetry disabled");
+  if (sub === "on" || sub === "off") {
+    // setEnabled returns false when ~/.petdex/telemetry.json can't be
+    // written (read-only HOME, disk full, perms changed). Without
+    // checking it we'd report "Telemetry disabled" while the live
+    // config still reads enabled=true — the worst possible outcome
+    // for a privacy toggle. Surface the failure and exit 1 so scripts
+    // can detect it.
+    const desired = sub === "on";
+    if (setEnabled(desired)) {
+      console.log(desired ? "Telemetry enabled" : "Telemetry disabled");
+    } else {
+      console.error(
+        pc.red(
+          `${pc.bold("Failed to persist preference.")} ~/.petdex/telemetry.json is not writable. Check filesystem permissions, then run \`petdex telemetry ${sub}\` again.`,
+        ),
+      );
+      process.exit(1);
+    }
   } else if (sub === "status" || !sub) {
     const status = getStatus();
     console.log(`Status: ${status.enabled ? "enabled" : "disabled"}`);
