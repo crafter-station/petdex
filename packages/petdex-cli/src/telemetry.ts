@@ -8,8 +8,9 @@
  * - Notice shown once on first run (notice_seen flag).
  * - PETDEX_TELEMETRY=0 env var also disables.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+
 import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 

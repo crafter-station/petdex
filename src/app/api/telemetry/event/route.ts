@@ -1,5 +1,4 @@
-import { db } from "@/lib/db/client";
-import { schema } from "@/lib/db/client";
+import { db, schema } from "@/lib/db/client";
 import { telemetryRatelimit } from "@/lib/ratelimit";
 
 export const runtime = "nodejs";
