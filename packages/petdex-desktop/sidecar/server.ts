@@ -329,16 +329,25 @@ function logUpdate(line: string) {
   }
 }
 
+// Track the in-flight updater child so the parent watchdog and
+// SIGTERM handlers can wait for it before tearing down the sidecar.
+// The updater runs `petdex update --silent`, which itself stops the
+// desktop binary mid-flight; that triggers the parent watchdog and
+// could otherwise reap this process before the child writes its
+// terminal status, leaving update.json stuck on "running".
+let currentUpdateChild: ReturnType<typeof spawn> | null = null;
+
 function spawnUpdate(): void {
   // npx so the host machine can pin its own petdex-cli version. The
-  // child runs detached + ignored stdio so the sidecar exits cleanly
-  // if it gets SIGTERM mid-update; npm waits for the install
-  // transaction itself to finish.
+  // child runs detached + ignored-stdin so the sidecar exits cleanly
+  // if it gets SIGTERM mid-update; we keep stdout/stderr piped to
+  // log progress.
   const child = spawn("npx", ["-y", "petdex@latest", "update", "--silent"], {
     detached: true,
     stdio: ["ignore", "pipe", "pipe"],
     env: process.env,
   });
+  currentUpdateChild = child;
   child.stdout?.on("data", (chunk: Buffer) => {
     logUpdate(chunk.toString("utf8").trimEnd());
   });
@@ -346,6 +355,7 @@ function spawnUpdate(): void {
     logUpdate(`stderr: ${chunk.toString("utf8").trimEnd()}`);
   });
   child.on("exit", (code) => {
+    currentUpdateChild = null;
     const info = readUpdateInfo();
     if (code === 0) {
       const newCurrent = readCurrentVersion();
@@ -370,6 +380,7 @@ function spawnUpdate(): void {
     }
   });
   child.on("error", (err) => {
+    currentUpdateChild = null;
     const info = readUpdateInfo();
     writeUpdateInfo({
       ...info,
@@ -379,7 +390,10 @@ function spawnUpdate(): void {
     });
     logUpdate(`spawn error: ${err.message}`);
   });
-  child.unref();
+  // Note: deliberately NOT calling child.unref() here. The whole
+  // point of tracking currentUpdateChild is to keep the sidecar
+  // alive until the updater finishes; unref'ing would let the
+  // process die early on its own.
 }
 
 const server = http.createServer(async (req, res) => {
@@ -496,7 +510,47 @@ server.on("error", (err) => {
   process.exit(1);
 });
 
+// Hard cap on how long we'll wait for the updater child to finish
+// before the sidecar gives up and exits anyway. npm install + a
+// fresh download usually finishes well under this; if it doesn't,
+// the user can re-trigger the update next launch.
+const UPDATE_CHILD_GRACE_MS = 60_000;
+
 function shutdown(signal: string) {
+  // If we're mid-update, give the child a chance to write its
+  // terminal status to update.json. Without this the sidecar's
+  // own death (triggered by the desktop dying inside `petdex update
+  // --silent`) can kill the npm child before it commits the rename,
+  // and update.json stays stuck on "running" forever.
+  if (currentUpdateChild) {
+    log(`sidecar received ${signal}; waiting for updater child to exit`);
+    const start = Date.now();
+    const giveUp = setTimeout(() => {
+      log(
+        `updater child still running after ${UPDATE_CHILD_GRACE_MS}ms; forcing exit`,
+      );
+      // Mark the row as error so the WebView doesn't get stuck.
+      const info = readUpdateInfo();
+      if (info.status === "running") {
+        writeUpdateInfo({
+          ...info,
+          status: "error",
+          message:
+            "Sidecar shut down before update finished. Re-launch Petdex and try again.",
+          checkedAt: Date.now(),
+        });
+      }
+      server.close(() => process.exit(0));
+      setTimeout(() => process.exit(0), 1000).unref();
+    }, UPDATE_CHILD_GRACE_MS);
+    currentUpdateChild.on("exit", () => {
+      clearTimeout(giveUp);
+      log(`updater child exited after ${Date.now() - start}ms; shutting down`);
+      server.close(() => process.exit(0));
+      setTimeout(() => process.exit(0), 1000).unref();
+    });
+    return;
+  }
   log(`sidecar received ${signal}, shutting down`);
   server.close(() => process.exit(0));
   // hard-exit if close hangs
@@ -521,7 +575,12 @@ initialUpdateTimer.unref();
 
 // Parent watchdog: if petdex-desktop spawned us with PETDEX_PARENT_PID,
 // poll the parent every 2s and exit cleanly when it disappears. This
-// prevents zombie sidecars after `petdex desktop stop` or a desktop crash.
+// prevents zombie sidecars after `petdex desktop stop` or a desktop
+// crash. While an update is in flight we deliberately ignore the
+// parent-gone signal: the updater itself stops the desktop (so the
+// new binary can be renamed into place), so the parent-gone signal is
+// expected and shutting down here would orphan the npm install
+// before it writes its terminal status.
 const parentPid = Number(process.env.PETDEX_PARENT_PID);
 if (Number.isFinite(parentPid) && parentPid > 0) {
   log(`sidecar watching parent pid ${parentPid}`);
@@ -529,6 +588,13 @@ if (Number.isFinite(parentPid) && parentPid > 0) {
     try {
       process.kill(parentPid, 0);
     } catch {
+      if (currentUpdateChild) {
+        // Don't shut down mid-update. The updater's exit handler will
+        // call shutdown via... actually no, the exit handler only
+        // updates update.json. Trigger shutdown here once the child
+        // is done; until then, sleep through this watchdog tick.
+        return;
+      }
       log(`parent ${parentPid} gone, exiting`);
       clearInterval(timer);
       shutdown("parent-gone");
