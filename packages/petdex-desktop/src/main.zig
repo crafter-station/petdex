@@ -714,10 +714,16 @@ const PetdexState = struct {
     fn setActiveCmd(context: *anyopaque, invocation: zero_native.bridge.Invocation, output: []u8) anyerror![]const u8 {
         const self: *PetdexState = @ptrCast(@alignCast(context));
         const slug = jsonStringField(invocation.request.payload, "slug") orelse return error.MissingSlug;
-        try writeActiveSlug(self.io, self.config_dir, slug);
 
+        // Load BEFORE persisting active.json. Reversed order would
+        // poison the stored slug if the sprite is unreadable: the
+        // file would point at a broken pet, and every subsequent
+        // launch would crash in main()'s loadSpritesheet call until
+        // the user manually edited active.json. Validating first
+        // means a failed selection leaves the previous active intact.
         const sprite = try loadSpritesheet(self.allocator, self.io, self.pets_dir, slug);
         defer self.allocator.free(sprite.bytes);
+
         var root_dir = try std.Io.Dir.openDirAbsolute(self.io, self.asset_root, .{});
         defer root_dir.close(self.io);
         try writeFileAll(self.io, root_dir, "spritesheet.webp", sprite.bytes);
@@ -725,6 +731,11 @@ const PetdexState = struct {
             const sprite_name = if (std.mem.eql(u8, sprite.ext, "png")) "spritesheet.png" else "spritesheet.webp";
             try writeFileAll(self.io, root_dir, sprite_name, sprite.bytes);
         }
+
+        // Persist last — by here we've proven the pet is loadable
+        // AND we've successfully written the sprite into asset_root.
+        try writeActiveSlug(self.io, self.config_dir, slug);
+
         return std.fmt.bufPrint(output, "{{\"ok\":true}}", .{});
     }
 
@@ -850,6 +861,30 @@ fn ensureDir(io: std.Io, path: []const u8) !void {
     };
 }
 
+// Same as ensureDir but with mode 0700 (rwx for owner only). Used for
+// directories that hold WebView assets / runtime state we don't want
+// other local users reading or pre-staging symlinks into. On Windows
+// the mode is ignored; per-user isolation comes from the parent
+// directory living under %USERPROFILE%.
+fn ensurePrivateDir(allocator: std.mem.Allocator, io: std.Io, path: []const u8) !void {
+    const private_perms = std.Io.File.Permissions.fromMode(0o700);
+    std.Io.Dir.createDirAbsolute(io, path, private_perms) catch |err| switch (err) {
+        // If it already exists, tighten the mode in case a previous
+        // version created it with a wider default. chmod is a no-op
+        // on Windows (mode_t is u0 there). std.Io.Dir doesn't expose
+        // chmod directly, so we go through libc with a NUL-terminated
+        // path.
+        error.PathAlreadyExists => {
+            if (@sizeOf(std.posix.mode_t) > 0) {
+                const path_z = try allocator.dupeZ(u8, path);
+                defer allocator.free(path_z);
+                _ = std.c.chmod(path_z.ptr, 0o700);
+            }
+        },
+        else => return err,
+    };
+}
+
 fn pathExists(io: std.Io, absolute_path: []const u8) bool {
     var dir = std.Io.Dir.openDirAbsolute(io, absolute_path, .{}) catch return false;
     defer dir.close(io);
@@ -903,7 +938,37 @@ fn writeActiveSlug(io: std.Io, config_dir: []const u8, slug: []const u8) !void {
     try writeFileAll(io, dir, "active.json", json_text);
 }
 
+// True only if the pet directory contains a readable sprite file.
+// listPets() and the bridge picker rely on this so that an incomplete
+// install (e.g. an aborted `petdex install` that left a slug folder
+// without a spritesheet) is filtered out instead of becoming a
+// startup-killing default. Without this guard, sorting by slug could
+// pick the broken pet first; setActiveCmd would also persist it to
+// active.json before loadSpritesheet failed, poisoning future
+// launches until the user manually edited the file.
+fn hasSpritesheet(io: std.Io, parent: std.Io.Dir, slug: []const u8) bool {
+    var pet_dir = parent.openDir(io, slug, .{}) catch return false;
+    defer pet_dir.close(io);
+    inline for (.{ "spritesheet.webp", "spritesheet.png" }) |name| {
+        if (pet_dir.openFile(io, name, .{})) |file| {
+            file.close(io);
+            return true;
+        } else |_| {}
+    }
+    return false;
+}
+
 fn listPets(allocator: std.mem.Allocator, io: std.Io, pets_dir: []const u8) !std.ArrayList(Pet) {
+    var dir = try std.Io.Dir.openDirAbsolute(io, pets_dir, .{ .iterate = true });
+    defer dir.close(io);
+    return listPetsFromDir(allocator, io, dir);
+}
+
+// Same as listPets but takes an already-open Dir. Split out so tests
+// can drive it against a tmpDir without going through realpath() to
+// recover an absolute path. Production code paths through listPets;
+// the picker filtering and skip-logging behavior live here.
+fn listPetsFromDir(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir) !std.ArrayList(Pet) {
     var pets: std.ArrayList(Pet) = .empty;
     errdefer {
         for (pets.items) |p| {
@@ -913,12 +978,19 @@ fn listPets(allocator: std.mem.Allocator, io: std.Io, pets_dir: []const u8) !std
         pets.deinit(allocator);
     }
 
-    var dir = try std.Io.Dir.openDirAbsolute(io, pets_dir, .{ .iterate = true });
-    defer dir.close(io);
-
     var iter = dir.iterate();
     while (try iter.next(io)) |entry| {
         if (entry.kind != .directory) continue;
+        // Skip entries without a usable sprite. Logging the skip is
+        // helpful when a user wonders why their freshly-installed pet
+        // doesn't show up in the picker.
+        if (!hasSpritesheet(io, dir, entry.name)) {
+            std.debug.print(
+                "Skipping pet '{s}': no spritesheet.webp or spritesheet.png\n",
+                .{entry.name},
+            );
+            continue;
+        }
         const slug = try allocator.dupe(u8, entry.name);
         const display_name = try readDisplayName(allocator, io, dir, entry.name) orelse try allocator.dupe(u8, entry.name);
         try pets.append(allocator, .{ .slug = slug, .display_name = display_name });
@@ -1090,18 +1162,27 @@ fn buildHtml(allocator: std.mem.Allocator, petdex_json: []const u8) ![]u8 {
 fn prepareAssetRoot(
     allocator: std.mem.Allocator,
     io: std.Io,
-    env_map: *std.process.Environ.Map,
+    config_dir: []const u8,
     html: []const u8,
     sprite_ext: []const u8,
     sprite_bytes: []const u8,
 ) ![]u8 {
-    const tmp = env_map.get("TMPDIR") orelse "/tmp/";
-    var trimmed_end: usize = tmp.len;
-    while (trimmed_end > 0 and tmp[trimmed_end - 1] == '/') trimmed_end -= 1;
-    const trimmed = tmp[0..trimmed_end];
-    const root = try std.fmt.allocPrint(allocator, "{s}/petdex-desktop", .{trimmed});
+    // Anchor WebView assets under ~/.petdex/runtime/webview, not
+    // $TMPDIR/petdex-desktop. The TMPDIR path was shared (predictable
+    // name, world-writable parent on most setups) and let another
+    // local user pre-create it with symlinks like
+    // index.html -> /victim/important.txt; the truncate=true write
+    // here would then nuke whatever the symlink pointed to. HOME is
+    // per-user, and runtime/ is created with mode 0700 so the assets
+    // can't be read or replaced by anyone else either.
+    const runtime = try std.fs.path.join(allocator, &.{ config_dir, "runtime" });
+    defer allocator.free(runtime);
+    try ensurePrivateDir(allocator, io, runtime);
 
-    try ensureDir(io, root);
+    const root = try std.fs.path.join(allocator, &.{ config_dir, "runtime", "webview" });
+    errdefer allocator.free(root);
+    try ensurePrivateDir(allocator, io, root);
+
     var root_dir = try std.Io.Dir.openDirAbsolute(io, root, .{});
     defer root_dir.close(io);
 
@@ -1182,7 +1263,7 @@ pub fn main(init: std.process.Init) !void {
     const html_doc = try buildHtml(allocator, petdex_json);
     defer allocator.free(html_doc);
 
-    const asset_root = try prepareAssetRoot(allocator, init.io, init.environ_map, html_doc, sprite.ext, sprite.bytes);
+    const asset_root = try prepareAssetRoot(allocator, init.io, config_dir, html_doc, sprite.ext, sprite.bytes);
     defer allocator.free(asset_root);
 
     try copyAllSpritesheets(allocator, init.io, pets_dir, asset_root, pets.items);
@@ -1232,4 +1313,142 @@ pub fn main(init: std.process.Init) !void {
         .js_window_api = true,
         .bridge = state.bridge(),
     }, init);
+}
+
+// ---- tests ----------------------------------------------------------
+//
+// These pin the opencode-bot review fixes:
+//   - listPets must skip pet directories that don't have a sprite,
+//     so a half-installed pet can't become the sorted default and
+//     crash startup.
+//   - hasSpritesheet must answer false for empty dirs and true for
+//     either supported extension.
+//   - ensurePrivateDir must create the directory with mode 0700 and
+//     tighten an existing wider-mode dir back to 0700.
+//
+// We use std.testing.tmpDir for a per-test isolated workspace and the
+// global std.testing.io runtime.
+
+const testing = std.testing;
+const testing_io = std.testing.io;
+
+fn writeTestFile(dir: std.Io.Dir, name: []const u8, contents: []const u8) !void {
+    var f = try dir.createFile(testing_io, name, .{ .truncate = true });
+    defer f.close(testing_io);
+    try f.writePositionalAll(testing_io, contents, 0);
+}
+
+test "hasSpritesheet: false when pet dir has neither png nor webp" {
+    var tmp = testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+
+    try tmp.dir.createDirPath(testing_io, "broken");
+    try testing.expect(!hasSpritesheet(testing_io, tmp.dir, "broken"));
+}
+
+test "hasSpritesheet: true when only spritesheet.webp exists" {
+    var tmp = testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+
+    try tmp.dir.createDirPath(testing_io, "good");
+    var sub = try tmp.dir.openDir(testing_io, "good", .{});
+    defer sub.close(testing_io);
+    try writeTestFile(sub, "spritesheet.webp", "PRETEND-WEBP");
+
+    try testing.expect(hasSpritesheet(testing_io, tmp.dir, "good"));
+}
+
+test "hasSpritesheet: true when only spritesheet.png exists" {
+    var tmp = testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+
+    try tmp.dir.createDirPath(testing_io, "png-only");
+    var sub = try tmp.dir.openDir(testing_io, "png-only", .{});
+    defer sub.close(testing_io);
+    try writeTestFile(sub, "spritesheet.png", "PRETEND-PNG");
+
+    try testing.expect(hasSpritesheet(testing_io, tmp.dir, "png-only"));
+}
+
+test "listPetsFromDir: filters out pet dirs without a spritesheet" {
+    var tmp = testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+
+    // Pet a is broken (no sprite) — must NOT appear in the result.
+    try tmp.dir.createDirPath(testing_io, "aa-broken");
+
+    // Pet b has a webp — must appear.
+    try tmp.dir.createDirPath(testing_io, "bb-good");
+    {
+        var sub = try tmp.dir.openDir(testing_io, "bb-good", .{});
+        defer sub.close(testing_io);
+        try writeTestFile(sub, "spritesheet.webp", "WEBP");
+    }
+
+    // Pet c has a png — must appear.
+    try tmp.dir.createDirPath(testing_io, "cc-png");
+    {
+        var sub = try tmp.dir.openDir(testing_io, "cc-png", .{});
+        defer sub.close(testing_io);
+        try writeTestFile(sub, "spritesheet.png", "PNG");
+    }
+
+    var pets = try listPetsFromDir(testing.allocator, testing_io, tmp.dir);
+    defer {
+        for (pets.items) |p| {
+            testing.allocator.free(p.slug);
+            testing.allocator.free(p.display_name);
+        }
+        pets.deinit(testing.allocator);
+    }
+
+    try testing.expectEqual(@as(usize, 2), pets.items.len);
+    // Sort is alphabetical, so bb-good < cc-png. The aa-broken entry
+    // — which would have sorted FIRST and become the startup-killing
+    // default in the unfiltered version — must not appear at all.
+    try testing.expectEqualStrings("bb-good", pets.items[0].slug);
+    try testing.expectEqualStrings("cc-png", pets.items[1].slug);
+}
+
+test "listPetsFromDir: returns empty list when every pet dir is broken" {
+    var tmp = testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+
+    try tmp.dir.createDirPath(testing_io, "broken-a");
+    try tmp.dir.createDirPath(testing_io, "broken-b");
+
+    var pets = try listPetsFromDir(testing.allocator, testing_io, tmp.dir);
+    defer {
+        for (pets.items) |p| {
+            testing.allocator.free(p.slug);
+            testing.allocator.free(p.display_name);
+        }
+        pets.deinit(testing.allocator);
+    }
+
+    try testing.expectEqual(@as(usize, 0), pets.items.len);
+}
+
+test "listPetsFromDir: prefers pet.json display_name over slug" {
+    var tmp = testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+
+    try tmp.dir.createDirPath(testing_io, "fox");
+    var sub = try tmp.dir.openDir(testing_io, "fox", .{});
+    defer sub.close(testing_io);
+    try writeTestFile(sub, "spritesheet.webp", "WEBP");
+    try writeTestFile(sub, "pet.json", "{\"displayName\":\"Foxy\"}");
+
+    var pets = try listPetsFromDir(testing.allocator, testing_io, tmp.dir);
+    defer {
+        for (pets.items) |p| {
+            testing.allocator.free(p.slug);
+            testing.allocator.free(p.display_name);
+        }
+        pets.deinit(testing.allocator);
+    }
+
+    try testing.expectEqual(@as(usize, 1), pets.items.len);
+    try testing.expectEqualStrings("fox", pets.items[0].slug);
+    try testing.expectEqualStrings("Foxy", pets.items[0].display_name);
 }
