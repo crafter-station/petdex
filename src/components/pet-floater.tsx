@@ -11,6 +11,21 @@ import { PetSprite } from "@/components/pet-sprite";
 type PetFloaterProps = {
   src: string;
   petName: string;
+  /**
+   * Pixel size of the sprite container. Defaults to 110px (small,
+   * playful banner companion). Pass larger values when the floater is
+   * the hero subject — the bounds clamp logic and momentum physics
+   * adapt automatically.
+   */
+  size?: number;
+  /**
+   * Where the pet sits on first paint, expressed as fractions of the
+   * stage's width and height (0..1). Defaults to {x: 0.55, y: 0.4}
+   * which works on wide horizontal banners. For square hero stages
+   * a value like {x: 0.1, y: 0.1} keeps the pet upper-left so the
+   * sidebar info doesn't visually fight with it.
+   */
+  initialFraction?: { x: number; y: number };
 };
 
 const IDLE_CYCLE: PetStateId[] = [
@@ -31,7 +46,7 @@ const REACTION_MS = 1100;
 const RUN_TAIL_MS = 600;
 const SAFE_MARGIN_PX = 12;
 const DRAG_THRESHOLD_PX = 4;
-const SPRITE_SIZE_PX = 110;
+const DEFAULT_SPRITE_SIZE_PX = 110;
 const THROW_MIN_VELOCITY = 0.05;
 const THROW_FRICTION_PER_FRAME = 0.92;
 const THROW_BOUNCE_DAMPING = -0.5;
@@ -60,7 +75,12 @@ type DragSample = {
 // sibling/child stacking context for its descendants. Without a portal
 // the pet either gets clipped by overflow:hidden or has its pointer
 // events blocked by the content above it. The portal sidesteps both.
-export function PetFloater({ src, petName }: PetFloaterProps) {
+export function PetFloater({
+  src,
+  petName,
+  size: SPRITE_SIZE_PX = DEFAULT_SPRITE_SIZE_PX,
+  initialFraction = { x: 0.55, y: 0.4 },
+}: PetFloaterProps) {
   const anchorRef = useRef<HTMLSpanElement | null>(null);
 
   const [enabled, setEnabled] = useState(false);
@@ -191,7 +211,13 @@ export function PetFloater({ src, petName }: PetFloaterProps) {
     if (!mounted) return;
     const anchor = anchorRef.current;
     if (!anchor) return;
-    const banner = anchor.closest(".petdex-cloud") as HTMLElement | null;
+    // Prefer a tighter, opt-in stage (.petdex-floater-stage) so the
+    // pet roams only inside that container — useful when the floater
+    // is the hero and shouldn't drift over headings or CTAs. Falls
+    // back to .petdex-cloud (the wide gradient banner) for the legacy
+    // small-banner usage.
+    const banner = (anchor.closest(".petdex-floater-stage") ??
+      anchor.closest(".petdex-cloud")) as HTMLElement | null;
     if (!banner) return;
 
     function measure() {
@@ -228,15 +254,15 @@ export function PetFloater({ src, petName }: PetFloaterProps) {
     if (pos !== null) return;
     if (!bounds) return;
     const initialX = Math.min(
-      Math.max(bounds.width * 0.55, SAFE_MARGIN_PX),
+      Math.max(bounds.width * initialFraction.x, SAFE_MARGIN_PX),
       bounds.width - SPRITE_SIZE_PX - SAFE_MARGIN_PX,
     );
     const initialY = Math.min(
-      Math.max(bounds.height * 0.4, SAFE_MARGIN_PX),
+      Math.max(bounds.height * initialFraction.y, SAFE_MARGIN_PX),
       bounds.height - SPRITE_SIZE_PX - SAFE_MARGIN_PX,
     );
     setPos({ x: initialX, y: initialY });
-  }, [enabled, bounds, pos]);
+  }, [enabled, bounds, pos, SPRITE_SIZE_PX, initialFraction]);
 
   // Idle-cycle ticker — paused while dragging.
   useEffect(() => {
@@ -474,6 +500,7 @@ export function PetFloater({ src, petName }: PetFloaterProps) {
       scheduleIdle,
       triggerReaction,
       updatePos,
+      SPRITE_SIZE_PX,
     ],
   );
 
@@ -526,7 +553,7 @@ export function PetFloater({ src, petName }: PetFloaterProps) {
         <PetSprite
           src={src}
           state={state}
-          scale={0.55}
+          scale={(SPRITE_SIZE_PX / DEFAULT_SPRITE_SIZE_PX) * 0.55}
           label={`${petName} interactive sprite`}
         />
       </button>,

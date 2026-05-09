@@ -17,14 +17,17 @@ import { getVariantsFor } from "@/lib/variants";
 
 import { ClaimCTA } from "@/components/claim-cta";
 import { InstallCommand } from "@/components/install-command";
+import { InstallCommandCompact } from "@/components/install-command-compact";
 import { JsonLd } from "@/components/json-ld";
 import { LikeButton } from "@/components/like-button";
+import { OpenInPetdexButton } from "@/components/open-in-petdex-button";
 import { OwnerPetControls } from "@/components/owner-pet-controls";
 import { PetActionMenu } from "@/components/pet-action-menu";
 import { PetFloater } from "@/components/pet-floater";
 import { PetKeyboardNav } from "@/components/pet-keyboard-nav";
 import { PetRadar } from "@/components/pet-radar";
 import { PetSoundButton } from "@/components/pet-sound-button";
+import { PetSprite } from "@/components/pet-sprite";
 import { PetStateViewer } from "@/components/pet-state-viewer";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
@@ -282,23 +285,13 @@ export default async function PetPage({ params }: PageProps) {
       />
 
       <SiteHeader />
-      {/* Hero banner — full-width petdex-cloud gradient like /u/[handle].
-          Houses the dex nav pills, the title block, the action row, and
-          (if the viewer owns the pet) the inline edit button. The
-          animated sprite + install command + secondary panels live
-          below in their own contained section. */}
+      {/* Hero — single full-width section with petdex-cloud gradient.
+          Two-column lockup on lg+: animated sprite (the product) on the
+          left, identity + CTAs on the right. Mobile collapses to a
+          natural vertical stack: dex nav, sprite, info+CTAs. */}
       <section className="petdex-cloud relative -mt-[84px] overflow-visible pt-[84px]">
-        <div className="relative mx-auto flex w-full max-w-6xl flex-col gap-6 px-5 pb-10 md:px-8 md:pb-14">
-          {/* Interactive floater pet — drag, click, watch. Renders an
-              absolute-positioned sprite over the banner's empty right
-              side. Mounted INSIDE the max-w-6xl content wrapper so it
-              shares the same coordinate space and z-index as the rest
-              of the banner. Only rendered on md+ where there's enough
-              room; on mobile the banner is too cramped. */}
-          <PetFloater src={pet.spritesheetPath} petName={pet.displayName} />
-
-          {/* Dex nav pills + shuffle. Sit at the top edge of the banner
-              so they read like a Pokédex chrome strip, not page content. */}
+        <div className="relative mx-auto flex w-full max-w-6xl flex-col gap-4 px-5 pb-8 md:gap-6 md:px-8 md:pb-14">
+          {/* Dex nav strip — Pokédex chrome at the top. */}
           <nav
             aria-label={tPet("navigation.ariaLabel")}
             className="flex flex-wrap items-center justify-between gap-3"
@@ -318,143 +311,216 @@ export default async function PetPage({ params }: PageProps) {
             <DexNavPill pet={nextPet} direction="next" />
           </nav>
 
-          <header className="mt-6 flex flex-col gap-5">
-            <div className="flex flex-wrap items-baseline gap-x-4 gap-y-2">
-              <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
-                {pet.featured ? "Featured" : "Petdex entry"}
-              </p>
-              {currentDexNumber != null ? (
-                <p className="font-mono text-xs tracking-[0.22em] text-muted-3 uppercase">
-                  No. {formatDexNumber(currentDexNumber)}
-                </p>
-              ) : null}
-              <p className="font-mono text-xs tracking-[0.22em] text-muted-3 uppercase">
-                {pet.kind}
-              </p>
-            </div>
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <h1 className="text-balance text-[44px] leading-[1] font-semibold tracking-tight text-foreground md:text-[64px]">
-                {pet.displayName}
-              </h1>
-              <OwnerPetControls
-                slug={pet.slug}
-                currentDisplayName={pet.displayName}
-                currentDescription={pet.description}
-              />
-            </div>
-            <p className="max-w-3xl text-balance text-base leading-7 text-muted-1 md:text-lg">
-              {pet.description}
-            </p>
-
-            <div className="flex flex-wrap items-center gap-3">
-              <LikeButton slug={pet.slug} initialCount={metrics.likeCount} />
-              {pet.soundUrl ? (
-                <PetSoundButton
-                  soundUrl={pet.soundUrl}
-                  displayName={pet.displayName}
-                  labelPrefix="Play signature sound for"
-                />
-              ) : null}
-              <PetActionMenu
-                pet={{
-                  slug: pet.slug,
-                  displayName: pet.displayName,
-                  zipUrl: pet.zipUrl,
-                  description: pet.description,
-                }}
-                variant="detail"
-              />
-              <span className="font-mono text-[11px] tracking-[0.18em] text-muted-3 uppercase">
-                {metrics.installCount} installs · {metrics.zipDownloadCount}{" "}
-                downloads
-              </span>
-            </div>
-
-            {pet.tags.length > 0 ? (
-              <div className="flex flex-wrap gap-2">
-                {pet.tags.map((tag) => (
-                  <span
-                    key={tag}
-                    className="rounded-full bg-brand-tint px-2.5 py-1 text-xs font-medium text-brand dark:bg-brand-tint-dark"
-                  >
-                    {tag}
-                  </span>
-                ))}
-              </div>
-            ) : null}
-
-            {memberOfCollections.length > 0 ? (
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="inline-flex items-center gap-1.5 font-mono text-[11px] tracking-[0.18em] text-muted-3 uppercase">
-                  <Layers className="size-3.5" />
-                  Part of
+          {/* Two-column hero. lg breakpoint splits sprite and info
+              side-by-side; on mobile the floater stage shrinks to a
+              short banner above the info so the title isn't pushed
+              off-screen. The full state viewer (sprite + state tabs)
+              renders below the hero. */}
+          <div className="mt-4 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-start lg:gap-10">
+            {/* Left column: pet sprite stage.
+                - Mobile: a static centered PetSprite (PetFloater
+                  disables itself below 768px because the drag/portal
+                  logic doesn't make sense on a phone).
+                - md+: interactive PetFloater that wanders, idle-cycles
+                  states, and reacts to drag inside this card.
+                .petdex-floater-stage scopes the floater's bounds.
+                Sticky on lg+ so it stays visible while the right
+                column scrolls. */}
+            <div className="lg:sticky lg:top-24">
+              <div className="petdex-floater-stage relative h-56 w-full overflow-hidden rounded-3xl sm:h-72 lg:aspect-square lg:h-auto">
+                {/* Static fallback for mobile + first paint. Anchored
+                    upper-left so the pet reads like a peeking
+                    character, not a centered specimen photo. Hidden
+                    on md+ where the floater takes over. */}
+                <span className="absolute top-2 left-3 md:hidden">
+                  <PetSprite
+                    src={pet.spritesheetPath}
+                    state="idle"
+                    scale={0.95}
+                    label={`${pet.displayName} idle`}
+                  />
                 </span>
-                {memberOfCollections.map((col) => (
-                  <Link
-                    key={col.slug}
-                    href={`/collections/${col.slug}`}
-                    className="rounded-full border border-border-base bg-surface px-2.5 py-1 text-xs font-medium text-muted-2 transition hover:border-border-strong hover:text-foreground"
-                  >
-                    {col.title}
-                  </Link>
-                ))}
+                {/* Interactive floater on md+ only. PetFloater
+                    self-positions inside the stage. */}
+                <span className="hidden md:block">
+                  <PetFloater
+                    src={pet.spritesheetPath}
+                    petName={pet.displayName}
+                    size={180}
+                    initialFraction={{ x: 0.25, y: 0.3 }}
+                  />
+                </span>
               </div>
-            ) : null}
+            </div>
 
-            {/* Keyboard hint strip — minimal, mono-spaced, only on
-                pointer-fine media so we don't spam mobile users with
-                Esc/arrow chrome. */}
-            <p className="hidden flex-wrap items-center gap-3 font-mono text-[11px] tracking-[0.18em] text-muted-3 uppercase md:flex">
-              <span>{tPet("keyboardHint.tip")}</span>
-              <span className="inline-flex items-center gap-1">
-                <kbd className="rounded border border-border-base bg-surface px-1.5 py-0.5 text-[10px] text-muted-2">
-                  ←
-                </kbd>
-                <kbd className="rounded border border-border-base bg-surface px-1.5 py-0.5 text-[10px] text-muted-2">
-                  →
-                </kbd>
-                {tPet("keyboardHint.browse")}
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <kbd className="rounded border border-border-base bg-surface px-1.5 py-0.5 text-[10px] text-muted-2">
-                  Space
-                </kbd>
-                {tPet("keyboardHint.shuffle")}
-              </span>
-            </p>
-          </header>
+            {/* Right column: identity + CTAs + meta. Order is intentional:
+                eyebrow → name → description → primary CTA (Open in
+                Petdex) → secondary CTA (install command) → quick
+                actions (like/sound/menu + stats) → tags → collections. */}
+            <header className="flex flex-col gap-5">
+              <div className="flex flex-wrap items-baseline gap-x-4 gap-y-2">
+                <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
+                  {pet.featured ? "Featured" : "Petdex entry"}
+                </p>
+                {currentDexNumber != null ? (
+                  <p className="font-mono text-xs tracking-[0.22em] text-muted-3 uppercase">
+                    No. {formatDexNumber(currentDexNumber)}
+                  </p>
+                ) : null}
+                <p className="font-mono text-xs tracking-[0.22em] text-muted-3 uppercase">
+                  {pet.kind}
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <h1 className="text-balance text-[34px] leading-[0.95] font-semibold tracking-tight text-foreground sm:text-[40px] md:text-[56px]">
+                  {pet.displayName}
+                </h1>
+                <OwnerPetControls
+                  slug={pet.slug}
+                  currentDisplayName={pet.displayName}
+                  currentDescription={pet.description}
+                />
+              </div>
+
+              <p className="text-balance text-base leading-7 text-muted-1 md:text-lg">
+                {pet.description}
+              </p>
+
+              {/* Primary CTA. macOS-only; Linux/Windows users get nothing
+                  here and the compact command below carries the load. */}
+              <OpenInPetdexButton slug={pet.slug} />
+
+              {/* Secondary CTA: single-line npx command + link to the
+                  full install guide. The verbose tabs/instructions
+                  live under the state viewer so they don't crowd the
+                  hero — anyone who needs them is already scrolling. */}
+              <InstallCommandCompact slug={pet.slug} />
+
+              {/* Quick actions row + stats. */}
+              <div className="flex flex-wrap items-center gap-3 pt-1">
+                <LikeButton slug={pet.slug} initialCount={metrics.likeCount} />
+                {pet.soundUrl ? (
+                  <PetSoundButton
+                    soundUrl={pet.soundUrl}
+                    displayName={pet.displayName}
+                    labelPrefix="Play signature sound for"
+                  />
+                ) : null}
+                <PetActionMenu
+                  pet={{
+                    slug: pet.slug,
+                    displayName: pet.displayName,
+                    zipUrl: pet.zipUrl,
+                    description: pet.description,
+                  }}
+                  variant="detail"
+                />
+                <span className="font-mono text-[11px] tracking-[0.18em] text-muted-3 uppercase">
+                  {metrics.installCount} installs · {metrics.zipDownloadCount}{" "}
+                  downloads
+                </span>
+              </div>
+
+              {/* Tags + collections collapsed into compact metadata. */}
+              {pet.tags.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {pet.tags.map((tag) => (
+                    <span
+                      key={tag}
+                      className="rounded-full bg-brand-tint px-2.5 py-1 text-xs font-medium text-brand dark:bg-brand-tint-dark"
+                    >
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+
+              {memberOfCollections.length > 0 ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center gap-1.5 font-mono text-[11px] tracking-[0.18em] text-muted-3 uppercase">
+                    <Layers className="size-3.5" />
+                    Part of
+                  </span>
+                  {memberOfCollections.map((col) => (
+                    <Link
+                      key={col.slug}
+                      href={`/collections/${col.slug}`}
+                      className="rounded-full border border-border-base bg-surface px-2.5 py-1 text-xs font-medium text-muted-2 transition hover:border-border-strong hover:text-foreground"
+                    >
+                      {col.title}
+                    </Link>
+                  ))}
+                </div>
+              ) : null}
+            </header>
+          </div>
+
+          {/* Keyboard hint strip — full-width footer of the hero, only
+              on pointer-fine media. */}
+          <p className="mt-2 hidden flex-wrap items-center gap-3 font-mono text-[11px] tracking-[0.18em] text-muted-3 uppercase md:flex">
+            <span>{tPet("keyboardHint.tip")}</span>
+            <span className="inline-flex items-center gap-1">
+              <kbd className="rounded border border-border-base bg-surface px-1.5 py-0.5 text-[10px] text-muted-2">
+                ←
+              </kbd>
+              <kbd className="rounded border border-border-base bg-surface px-1.5 py-0.5 text-[10px] text-muted-2">
+                →
+              </kbd>
+              {tPet("keyboardHint.browse")}
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <kbd className="rounded border border-border-base bg-surface px-1.5 py-0.5 text-[10px] text-muted-2">
+                Space
+              </kbd>
+              {tPet("keyboardHint.shuffle")}
+            </span>
+          </p>
         </div>
       </section>
 
       <section className="mx-auto flex w-full max-w-6xl flex-col gap-10 px-5 py-12 md:px-8 md:py-16">
-        {/* The animated sprite is the product. Lives right after the
-            banner so it lands above the fold on most screens. */}
+        {/* Full state viewer — sprite + state tabs lockup. Lives below
+            the hero so its internal 2-column layout has the full content
+            width to breathe. The hero idle preview keeps users grounded
+            while they scroll into the state grid. */}
         <PetStateViewer src={pet.spritesheetPath} petName={pet.displayName} />
 
-        {/* Two-column lockup: install command + owner credit aside.
-            Stats radar + variants live below so the install never
-            gets pushed out of the first viewport. */}
-        <div className="grid gap-6 lg:grid-cols-[1fr_360px] lg:items-start">
+        {/* Full install guide. CLI + Curl tabs, platform-specific
+            terminal instructions, "Activate in Codex" steps. Lives
+            under the state viewer so it doesn't crowd the hero where
+            the primary CTA (Open in Petdex Desktop) plus a compact
+            one-line npx command already cover the common path. */}
+        <div id="install" className="scroll-mt-24">
           <InstallCommand slug={pet.slug} displayName={pet.displayName} />
-
-          {ownerCredit ? (
-            <div className="space-y-3">
-              <SubmittedBy credit={ownerCredit} />
-              {ownerRow?.source === "discover" ? (
-                <ClaimCTA
-                  petName={pet.displayName}
-                  authorLabel={ownerCredit.name}
-                  githubUrl={
-                    ownerCredit.externals.find((e) => e.provider === "github")
-                      ?.url ?? null
-                  }
-                />
-              ) : null}
-            </div>
-          ) : null}
         </div>
 
-        <div className="grid gap-6 md:grid-cols-2">
+        {/* Owner credit + claim CTA. Compact row that wraps cleanly on
+            small screens. */}
+        {ownerCredit ? (
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <SubmittedBy credit={ownerCredit} />
+            {ownerRow?.source === "discover" ? (
+              <ClaimCTA
+                petName={pet.displayName}
+                authorLabel={ownerCredit.name}
+                githubUrl={
+                  ownerCredit.externals.find((e) => e.provider === "github")
+                    ?.url ?? null
+                }
+              />
+            ) : null}
+          </div>
+        ) : null}
+
+        {/* Stats + variants. Single column when no variants exist (so
+            the radar doesn't sit in a half-empty grid); 2-column when
+            variants are available. */}
+        <div
+          className={
+            variants.length > 0 ? "grid gap-6 md:grid-cols-2" : "grid gap-6"
+          }
+        >
           <InfoCard
             title={tPet("stats.title")}
             icon={<Sparkles className="size-4" />}

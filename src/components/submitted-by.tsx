@@ -105,14 +105,16 @@ export function SubmittedBy({ credit }: SubmittedByProps) {
                 e.stopPropagation();
                 window.open(ext.url, "_blank", "noopener,noreferrer");
               }}
-              className="inline-flex h-7 items-center gap-1.5 rounded-full border border-border-base bg-surface px-2.5 font-mono text-[11px] tracking-[0.04em] text-muted-2 transition hover:border-border-strong hover:bg-surface-muted"
+              className="inline-flex h-7 max-w-full items-center gap-1.5 rounded-full border border-border-base bg-surface px-2.5 font-mono text-[11px] tracking-[0.04em] text-muted-2 transition hover:border-border-strong hover:bg-surface-muted"
             >
               {ext.provider === "github" ? (
-                <GithubIcon className="size-3.5" />
+                <GithubIcon className="size-3.5 shrink-0" />
               ) : (
-                <XIcon className="size-3" />
+                <XIcon className="size-3 shrink-0" />
               )}
-              {ext.username}
+              <span className="truncate whitespace-nowrap">
+                {ext.username}
+              </span>
             </button>
           ))}
         </div>

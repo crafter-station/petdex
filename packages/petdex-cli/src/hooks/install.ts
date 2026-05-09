@@ -41,7 +41,16 @@ async function pathExists(p: string): Promise<boolean> {
   }
 }
 
-export async function runInstall(): Promise<void> {
+export type HooksInstallResult = {
+  /**
+   * Agent IDs that were written successfully. Empty array means the
+   * user cancelled or every agent threw — caller should NOT emit a
+   * success telemetry event in that case.
+   */
+  installedAgents: string[];
+};
+
+export async function runInstall(): Promise<HooksInstallResult> {
   p.intro(pc.bgMagenta(pc.white(" petdex hooks install ")));
 
   const detections = await detectAgents();
@@ -72,16 +81,18 @@ export async function runInstall(): Promise<void> {
 
   if (p.isCancel(selected) || selected.length === 0) {
     p.cancel("No agents selected. Bye.");
-    return;
+    return { installedAgents: [] };
   }
 
   const summary: string[] = [];
   const followUps: { agent: string; notes: PostInstallNote[] }[] = [];
+  const installedAgents: string[] = [];
   for (const id of selected) {
     const agent = AGENTS.find((a) => a.id === id);
     if (!agent) continue;
     try {
       const result = await installForAgent(agent);
+      installedAgents.push(agent.id);
       summary.push(
         `  ${pc.green("✓")} ${pc.bold(agent.displayName)} ${pc.dim(`→ ${tildeify(agent.configFile)}`)}${result.backupPath ? pc.dim(` (backup: ${path.basename(result.backupPath)})`) : ""}`,
       );
@@ -168,6 +179,8 @@ export async function runInstall(): Promise<void> {
   );
 
   p.outro(pc.dim(`Restart your agent for the hooks to load.`));
+
+  return { installedAgents };
 }
 
 type InstallResult = { backupPath: string | null };

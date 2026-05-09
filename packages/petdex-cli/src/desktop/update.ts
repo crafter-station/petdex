@@ -25,7 +25,11 @@ import path from "node:path";
 import * as p from "@clack/prompts";
 import pc from "picocolors";
 
-import { downloadDesktopAssets, fetchLatestRelease } from "./install.js";
+import {
+  commitDesktopAssets,
+  fetchLatestRelease,
+  stageDesktopAssets,
+} from "./install.js";
 import { desktopStatus, startDesktop, stopDesktop } from "./process.js";
 
 const VERSION_FILE = path.join(homedir(), ".petdex", "version");
@@ -41,76 +45,146 @@ function readInstalledVersion(): string | null {
 
 export async function runUpdate(args: string[] = []): Promise<void> {
   const force = args.includes("--force");
-  p.intro(pc.bgMagenta(pc.white(" petdex update ")));
+  // --silent skips the @clack/prompts UI (intro/spinner/outro) and uses
+  // plain console.log instead. Designed to be invoked by the desktop
+  // sidecar's POST /update endpoint; the sidecar pipes stdout/stderr
+  // into ~/.petdex/runtime/update.log.
+  const silent = args.includes("--silent");
+
+  // Logging shims. In silent mode the spinner becomes a no-op so we
+  // don't render terminal escape sequences into the sidecar's log file.
+  const intro = (label: string) => {
+    if (silent) console.log(`[petdex update] ${label}`);
+    else p.intro(pc.bgMagenta(pc.white(` ${label} `)));
+  };
+  const info = (msg: string) => {
+    if (silent) console.log(msg);
+    else p.log.info(msg);
+  };
+  const warn = (msg: string) => {
+    if (silent) console.warn(msg);
+    else p.log.warn(msg);
+  };
+  const outro = (msg: string) => {
+    if (silent) console.log(msg);
+    else p.outro(msg);
+  };
+  type Spinner = { start: (msg: string) => void; stop: (msg: string) => void };
+  const makeSpinner = (): Spinner => {
+    if (silent) {
+      return {
+        start: (m) => console.log(m),
+        stop: (m) => console.log(m),
+      };
+    }
+    const s = p.spinner();
+    return {
+      start: (m) => s.start(m),
+      stop: (m) => s.stop(m),
+    };
+  };
+
+  intro("petdex update");
 
   const installed = readInstalledVersion();
-  if (installed) {
-    p.log.info(`Installed: ${pc.cyan(installed)}`);
-  } else {
-    p.log.info("No installed version recorded - treating as fresh install.");
-  }
+  info(
+    installed
+      ? `Installed: ${silent ? installed : pc.cyan(installed)}`
+      : "No installed version recorded - treating as fresh install.",
+  );
 
-  const s = p.spinner();
+  const s = makeSpinner();
   s.start("Checking GitHub for the latest release");
   let release: Awaited<ReturnType<typeof fetchLatestRelease>>;
   try {
     release = await fetchLatestRelease();
   } catch (err) {
-    s.stop(pc.red("failed"));
+    s.stop(silent ? "failed" : pc.red("failed"));
     throw new Error(
       `Could not reach GitHub. Check your connection.\n   ${(err as Error).message}`,
     );
   }
-  s.stop(`${pc.green("✓")} Latest: ${pc.bold(release.tag_name)}`);
+  s.stop(
+    silent
+      ? `Latest: ${release.tag_name}`
+      : `${pc.green("✓")} Latest: ${pc.bold(release.tag_name)}`,
+  );
 
   if (!force && installed && installed === release.tag_name) {
-    p.outro(`${pc.green("✓")} Already up to date.`);
+    outro(
+      silent ? "Already up to date." : `${pc.green("✓")} Already up to date.`,
+    );
     return;
   }
 
-  // Phase 1: download to .tmp staging files. Safe to bail at any point.
-  const dl = p.spinner();
+  // Phase 1: download into .tmp staging files. NOTHING has been
+  // renamed into place yet — the running desktop binary on disk is
+  // untouched. Safe to bail at any point.
+  const dl = makeSpinner();
   dl.start(`Downloading ${release.tag_name}`);
-  let result: Awaited<ReturnType<typeof downloadDesktopAssets>>;
+  let staged: Awaited<ReturnType<typeof stageDesktopAssets>>;
   try {
-    // downloadDesktopAssets writes via {dest}.tmp + atomic rename. After
-    // this returns successfully, both the binary and sidecar are in place.
-    result = await downloadDesktopAssets(release);
+    staged = await stageDesktopAssets(release);
   } catch (err) {
-    dl.stop(pc.red("failed"));
+    dl.stop(silent ? "failed" : pc.red("failed"));
     throw err;
   }
   dl.stop(
-    `${pc.green("✓")} Downloaded ${pc.bold(release.tag_name)} (${formatBytes(result.binAsset.size)})`,
+    silent
+      ? `Downloaded ${release.tag_name} (${formatBytes(staged.binAsset.size)})`
+      : `${pc.green("✓")} Downloaded ${pc.bold(release.tag_name)} (${formatBytes(staged.binAsset.size)})`,
   );
 
-  // Phase 2: stop running desktop AFTER download succeeded. The window where
-  // the mascot is offline is now bounded by stop + start, not by network.
+  // Phase 2: stop running desktop BEFORE the rename. On Windows and
+  // some Linux setups, renaming over a running executable fails with
+  // EBUSY/ETXTBSY; the previous flow committed first and could fail
+  // before stopDesktop() ever ran. Stopping here also bounds the
+  // mascot-offline window to (rename + restart), not (download +
+  // rename + restart).
   const wasRunning = desktopStatus().state === "running";
   if (wasRunning) {
-    p.log.info(`${pc.dim("•")} Stopping running petdex-desktop`);
+    info(
+      silent
+        ? "Stopping running petdex-desktop"
+        : `${pc.dim("•")} Stopping running petdex-desktop`,
+    );
     stopDesktop();
   }
+
+  // Phase 3: commit. commitDesktopAssets rolls back from .prev
+  // snapshots if any rename fails; we still have the previous
+  // coherent install on disk. We let the throw bubble up as-is so
+  // the caller's outer error handler reports it.
+  await commitDesktopAssets(staged);
 
   await writeFile(VERSION_FILE, `${release.tag_name}\n`);
 
   // Phase 3: restart so the user picks up the new binary + sidecar.
-  if (wasRunning) {
-    p.log.info(`${pc.dim("•")} Restarting petdex-desktop`);
+  // In --silent mode we skip the restart: when the sidecar that
+  // triggered this update gets killed by stopDesktop, child npm
+  // processes also get reaped if the user ran us under the desktop
+  // process tree. Leaving restart to the user (or to a follow-up
+  // notification) keeps the update predictable.
+  if (wasRunning && !silent) {
+    info(`${pc.dim("•")} Restarting petdex-desktop`);
     const startResult = await startDesktop();
     if (startResult.ok) {
-      p.log.info(`${pc.green("✓")} Restarted (pid ${startResult.pid})`);
+      info(`${pc.green("✓")} Restarted (pid ${startResult.pid})`);
     } else {
-      p.log.warn(
+      warn(
         `${pc.yellow("!")} Could not restart: ${startResult.reason}. Run \`petdex desktop start\` manually.`,
       );
     }
+  } else if (wasRunning && silent) {
+    info(
+      "Desktop was running; restart manually after the next launch notification.",
+    );
   }
 
   const note = installed
     ? `${installed}  →  ${release.tag_name}`
     : release.tag_name;
-  p.outro(`${pc.green("✓")} ${note}`);
+  outro(silent ? note : `${pc.green("✓")} ${note}`);
 }
 
 function formatBytes(bytes: number): string {

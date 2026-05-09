@@ -378,7 +378,8 @@
       "campaigns": "Campañas",
       "mailing": "Mailing",
       "manifest": "Manifest",
-      "insights": "Métricas"
+      "insights": "Métricas",
+      "telemetry": "Telemetria"
     },
     "status": {
       "pending": "Pendiente",
@@ -579,6 +580,33 @@
     },
     "threadPage": {
       "back": "← Inbox"
+    },
+    "telemetry": {
+      "eyebrow": "Telemetria",
+      "title": "Telemetria de uso del CLI",
+      "description": "Volumen de instalaciones, distribucion de SO y adopcion de agentes de forma anonima.",
+      "stats": {
+        "totalInstalls": "Total instalaciones",
+        "weeklyActive": "Instalaciones activas (semana)",
+        "totalEvents": "Total eventos"
+      },
+      "sections": {
+        "adoptionCurve": "Adopcion en 30 dias",
+        "osDistribution": "Distribucion de SO",
+        "archDistribution": "Distribucion de arquitectura",
+        "versionAdoption": "Adopcion de versiones",
+        "topAgents": "Agentes mas usados",
+        "funnel": "Embudo de conversion",
+        "geoTop10": "Top 10 paises"
+      },
+      "funnel": {
+        "install": "Instalar desktop",
+        "hooks": "Instalar hooks",
+        "start": "Iniciar desktop",
+        "firstEvent": "Primer estado"
+      },
+      "empty": "Sin eventos de telemetria aun.",
+      "noData": "Sin datos"
     }
   },
   "submit": {
@@ -1230,6 +1258,22 @@
       },
       "footer": "¿Quieres un lanzamiento mas rapido en Linux o Windows? Dale una estrella al repo o abre un issue."
     },
-    "docsLink": "Leer la documentacion"
+    "docsLink": "Leer la documentacion",
+    "pendingPet": {
+      "eyebrow": "Casi listo.",
+      "messageBefore": "Instala Petdex Desktop para probar",
+      "messageAfter": "en 1 clic.",
+      "hint": "Solo macOS por ahora"
+    }
+  },
+  "openInPetdex": {
+    "eyebrow": "Instalacion en 1 clic",
+    "label": "Abrir en Petdex Desktop",
+    "subtitle": "Que esta mascota flote junto a tu agente",
+    "opening": "Abriendo Petdex...",
+    "ariaLabel": "Abrir {slug} en Petdex Desktop"
+  },
+  "installCompact": {
+    "seeGuide": "Ver guia de instalacion completa"
   }
 }
