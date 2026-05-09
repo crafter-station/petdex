@@ -256,9 +256,12 @@ async function cmdInstall(args: string[]) {
       cli_version: VERSION,
       os: process.platform,
       arch: process.arch,
-      // Forward the release tag so the dashboard's version adoption
-      // chart isn't always empty.
-      binary_version: tag,
+      // Strip the `desktop-v` prefix from the release tag (e.g.
+      // `desktop-v0.1.4` -> `0.1.4`) so it matches the telemetry
+      // endpoint's semver-only validator. Without this the value
+      // gets dropped server-side and the version adoption chart
+      // stays empty.
+      binary_version: tag.replace(/^desktop-v/, ""),
     });
     return;
   }
