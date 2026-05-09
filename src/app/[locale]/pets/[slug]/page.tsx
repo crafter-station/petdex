@@ -19,6 +19,7 @@ import { ClaimCTA } from "@/components/claim-cta";
 import { InstallCommand } from "@/components/install-command";
 import { JsonLd } from "@/components/json-ld";
 import { LikeButton } from "@/components/like-button";
+import { OpenInPetdexButton } from "@/components/open-in-petdex-button";
 import { OwnerPetControls } from "@/components/owner-pet-controls";
 import { PetActionMenu } from "@/components/pet-action-menu";
 import { PetFloater } from "@/components/pet-floater";
@@ -435,7 +436,10 @@ export default async function PetPage({ params }: PageProps) {
             Stats radar + variants live below so the install never
             gets pushed out of the first viewport. */}
         <div className="grid gap-6 lg:grid-cols-[1fr_360px] lg:items-start">
-          <InstallCommand slug={pet.slug} displayName={pet.displayName} />
+          <div className="flex flex-col gap-4">
+            <OpenInPetdexButton slug={pet.slug} />
+            <InstallCommand slug={pet.slug} displayName={pet.displayName} />
+          </div>
 
           {ownerCredit ? (
             <div className="space-y-3">
