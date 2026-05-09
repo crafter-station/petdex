@@ -141,24 +141,53 @@ async function installForAgent(agent: Agent): Promise<InstallResult> {
   }
 
   // JSON-based agents: merge our hooks into existing settings.
+  // readJson distinguishes "missing" (treat as fresh config) from
+  // "exists but unreadable / unparseable" (refuse to write — would
+  // silently overwrite the user's data otherwise). We always back up
+  // the raw bytes before writing if the file existed.
   const existing = await readJson(agent.configFile);
+  if (existing.kind === "error") {
+    throw new Error(
+      `Refusing to overwrite ${agent.configFile}: ${existing.message}.\n   Fix the file (or rename it) and run \`petdex hooks install\` again.`,
+    );
+  }
   const backupPath =
-    existing != null ? await maybeBackup(agent.configFile) : null;
-  const merged = mergeHooks(existing ?? {}, config as Record<string, unknown>);
+    existing.kind === "ok" ? await maybeBackup(agent.configFile) : null;
+  const base =
+    existing.kind === "ok" ? (existing.value as Record<string, unknown>) : {};
+  const merged = mergeHooks(base, config as Record<string, unknown>);
   await writeFile(
     agent.configFile,
-    JSON.stringify(merged, null, 2) + "\n",
+    `${JSON.stringify(merged, null, 2)}\n`,
     "utf8",
   );
   return { backupPath };
 }
 
-async function readJson(file: string): Promise<unknown | null> {
+type ReadJsonResult =
+  | { kind: "missing" }
+  | { kind: "ok"; value: unknown }
+  | { kind: "error"; message: string };
+
+async function readJson(file: string): Promise<ReadJsonResult> {
+  let text: string;
   try {
-    const text = await readFile(file, "utf8");
-    return JSON.parse(text);
-  } catch {
-    return null;
+    text = await readFile(file, "utf8");
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return { kind: "missing" };
+    return {
+      kind: "error",
+      message: `read failed (${code ?? (err as Error).name}): ${(err as Error).message}`,
+    };
+  }
+  try {
+    return { kind: "ok", value: JSON.parse(text) };
+  } catch (err) {
+    return {
+      kind: "error",
+      message: `JSON parse failed: ${(err as Error).message}`,
+    };
   }
 }
 
