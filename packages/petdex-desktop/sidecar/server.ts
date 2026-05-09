@@ -38,8 +38,16 @@ const UPDATE_TOKEN_PATH = join(RUNTIME_DIR, "update-token");
 const VERSION_FILE = join(homedir(), ".petdex", "version");
 const LOG_PATH = join(RUNTIME_DIR, "sidecar.log");
 const MAX_BODY_BYTES = 64 * 1024;
+// Listing the last N releases instead of `/releases/latest` because
+// the petdex repo publishes multiple release lineages (desktop-v*,
+// web-v*, sidecar-v*) under the same tag namespace. `latest` returns
+// whichever was published last regardless of prefix, so a non-desktop
+// release would make the sidecar surface a bogus update prompt and
+// the eventual fetch would 404 because the asset doesn't exist on
+// that tag. We pull the recent slice and pick the newest desktop-v*.
 const RELEASE_API =
-  "https://api.github.com/repos/crafter-station/petdex/releases/latest";
+  "https://api.github.com/repos/crafter-station/petdex/releases?per_page=20";
+const DESKTOP_TAG_PREFIX = "desktop-v";
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
 const UPDATE_CHECK_INITIAL_DELAY_MS = 30 * 1000; // 30s after launch
 const UPDATE_TOKEN_HEADER = "x-petdex-update-token";
@@ -306,8 +314,25 @@ async function checkForUpdate(): Promise<void> {
       log(`update check: GH API ${res.status}`);
       return;
     }
-    const data = (await res.json()) as { tag_name?: string };
-    latest = typeof data.tag_name === "string" ? data.tag_name : null;
+    const data = (await res.json()) as Array<{
+      tag_name?: string;
+      draft?: boolean;
+      prerelease?: boolean;
+    }>;
+    // GitHub returns the list newest-first by published_at, so the
+    // first desktop-v* hit IS the newest desktop release. Skip
+    // drafts (not visible to users) and prereleases (we don't ship
+    // those for desktop yet; revisit if/when we do).
+    const desktopRelease = Array.isArray(data)
+      ? data.find(
+          (r) =>
+            !r.draft &&
+            !r.prerelease &&
+            typeof r.tag_name === "string" &&
+            r.tag_name.startsWith(DESKTOP_TAG_PREFIX),
+        )
+      : null;
+    latest = desktopRelease?.tag_name ?? null;
   } catch (err) {
     log(`update check failed: ${(err as Error).message}`);
     return;

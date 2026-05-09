@@ -26,8 +26,12 @@ export const metadata = {
   alternates: buildLocaleAlternates("/download"),
 };
 
-const RELEASES_URL =
-  "https://github.com/crafter-station/petdex/releases/latest";
+// Resolves to the newest desktop-v* GitHub release via 307 redirect.
+// Goes through our API rather than linking GH's /releases/latest
+// directly because /releases/latest returns whichever lineage shipped
+// most recently — a web-v* or sidecar-v* release would point users to
+// a tag that doesn't have desktop assets attached.
+const RELEASES_URL = "/api/desktop/latest-release";
 
 type DownloadPageProps = {
   searchParams: Promise<{ next?: string | string[] }>;
