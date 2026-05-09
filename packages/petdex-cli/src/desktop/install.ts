@@ -100,16 +100,18 @@ export function findSidecarAsset(release: Release): ReleaseAsset | null {
   return release.assets.find((a) => a.name === SIDECAR_ASSET_NAME) ?? null;
 }
 
+type StagedFile = { tmpPath: string; destPath: string };
+
 /**
- * Atomic download: stream to {dest}.tmp, fsync via writeFile-buffer, rename
- * over dest. A failed download leaves a stale .tmp behind (we clean up) but
- * never corrupts the existing dest.
+ * Stage: download URL to {dest}.tmp, set mode/xattr if needed. Returns the
+ * tmp path so a caller can commit (rename) several files together once all
+ * downloads succeed. If staging fails the .tmp is cleaned up.
  */
-async function downloadAtomic(
+async function stageDownload(
   url: string,
   destPath: string,
   mode?: number,
-): Promise<void> {
+): Promise<StagedFile> {
   const res = await fetch(url);
   if (!res.ok || !res.body) {
     throw new Error(`download ${url} → ${res.status}`);
@@ -131,7 +133,7 @@ async function downloadAtomic(
         // quarantine xattr may not exist on locally-built binaries; ignore
       }
     }
-    await rename(tmpPath, destPath);
+    return { tmpPath, destPath };
   } catch (err) {
     try {
       await rm(tmpPath, { force: true });
@@ -143,8 +145,64 @@ async function downloadAtomic(
 }
 
 /**
- * Download both the binary and the sidecar to a staging area, then move
- * them into place atomically. Used by both `install desktop` and `update`.
+ * Commit: rename all staged files into place. Best-effort rollback on the
+ * already-renamed entries if a later rename fails — at worst the user ends
+ * up with the previous coherent state.
+ */
+async function commitStaged(staged: StagedFile[]): Promise<void> {
+  const renamed: { from: string; backup: string }[] = [];
+  for (const file of staged) {
+    let backup: string | null = null;
+    try {
+      // Snapshot current dest to .prev so we can roll back if a later
+      // rename fails. Skipped silently if no current file exists.
+      const prevPath = `${file.destPath}.prev`;
+      try {
+        await rename(file.destPath, prevPath);
+        backup = prevPath;
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code !== "ENOENT") throw err;
+      }
+      await rename(file.tmpPath, file.destPath);
+      renamed.push({ from: file.destPath, backup: backup ?? "" });
+    } catch (err) {
+      // Roll back already-committed renames using their .prev snapshots.
+      for (const r of renamed.reverse()) {
+        if (!r.backup) continue;
+        try {
+          await rm(r.from, { force: true });
+          await rename(r.backup, r.from);
+        } catch {
+          // best-effort
+        }
+      }
+      // Clean up remaining .tmp files
+      for (const f of staged) {
+        try {
+          await rm(f.tmpPath, { force: true });
+        } catch {
+          // best-effort
+        }
+      }
+      throw err;
+    }
+  }
+  // All renames succeeded — drop the .prev snapshots.
+  for (const r of renamed) {
+    if (!r.backup) continue;
+    try {
+      await rm(r.backup, { force: true });
+    } catch {
+      // best-effort
+    }
+  }
+}
+
+/**
+ * Download binary AND sidecar to staging, then commit (rename) them
+ * together. Either both files end up updated or none do — a failed sidecar
+ * download never leaves a new binary paired with an old/missing sidecar.
  */
 export async function downloadDesktopAssets(release: Release): Promise<{
   binAsset: ReleaseAsset;
@@ -159,11 +217,32 @@ export async function downloadDesktopAssets(release: Release): Promise<{
   await mkdir(path.dirname(binPath), { recursive: true });
   await mkdir(path.dirname(sidecar), { recursive: true });
 
-  await downloadAtomic(binAsset.browser_download_url, binPath, 0o755);
-
-  if (sidecarAsset) {
-    await downloadAtomic(sidecarAsset.browser_download_url, sidecar);
+  // Phase 1: stage all downloads. If any fails, .tmp files are cleaned up
+  // and nothing on disk has changed.
+  const staged: StagedFile[] = [];
+  try {
+    staged.push(
+      await stageDownload(binAsset.browser_download_url, binPath, 0o755),
+    );
+    if (sidecarAsset) {
+      staged.push(
+        await stageDownload(sidecarAsset.browser_download_url, sidecar),
+      );
+    }
+  } catch (err) {
+    // Clean up any tmp files from earlier successful stages.
+    for (const f of staged) {
+      try {
+        await rm(f.tmpPath, { force: true });
+      } catch {
+        // best-effort
+      }
+    }
+    throw err;
   }
+
+  // Phase 2: commit (rename) all staged files. Rolls back on failure.
+  await commitStaged(staged);
 
   return { binAsset, sidecarAsset };
 }
