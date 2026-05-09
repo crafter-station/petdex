@@ -169,12 +169,13 @@ const html_head =
     \\</head>
     \\<body>
     \\<div class="stage"><div class="pet" id="pet" data-state="idle"></div></div>
-    \\<script>
-    \\window.__PETDEX__ =
+    \\<script type="application/json" id="petdex-data">
 ;
 
 const html_tail =
-    \\;
+    \\</script>
+    \\<script>
+    \\window.__PETDEX__ = JSON.parse(document.getElementById("petdex-data").textContent);
     \\(() => {
     \\  const COLS = 8, ROWS = 9;
     \\  const STATES = {
@@ -908,13 +909,39 @@ fn buildPetdexJson(allocator: std.mem.Allocator, pets: []const Pet, active_slug:
 }
 
 fn appendJsonEscaped(buf: *std.ArrayList(u8), allocator: std.mem.Allocator, s: []const u8) !void {
-    for (s) |c| {
+    // JSON-escape plus HTML/script-context defenses:
+    //   - `<` becomes `<` so `</script>` inside a string can never close
+    //     the surrounding <script type="application/json"> tag.
+    //   - `>` becomes `>` for symmetry against `]]>`-style breakouts.
+    //   - U+2028 (LS) and U+2029 (PS) become  /  because some
+    //     JS parsers historically treated them as line terminators in
+    //     string literals.
+    // Pet display names come from user-installed pet.json files so we
+    // treat them as untrusted.
+    var i: usize = 0;
+    while (i < s.len) : (i += 1) {
+        const c = s[i];
         switch (c) {
             '"' => try buf.appendSlice(allocator, "\\\""),
             '\\' => try buf.appendSlice(allocator, "\\\\"),
             '\n' => try buf.appendSlice(allocator, "\\n"),
             '\r' => try buf.appendSlice(allocator, "\\r"),
             '\t' => try buf.appendSlice(allocator, "\\t"),
+            '<' => try buf.appendSlice(allocator, "\\u003c"),
+            '>' => try buf.appendSlice(allocator, "\\u003e"),
+            // U+2028 in UTF-8 is 0xE2 0x80 0xA8; U+2029 is 0xE2 0x80 0xA9.
+            0xE2 => {
+                if (i + 2 < s.len and s[i + 1] == 0x80 and (s[i + 2] == 0xA8 or s[i + 2] == 0xA9)) {
+                    if (s[i + 2] == 0xA8) {
+                        try buf.appendSlice(allocator, "\\u2028");
+                    } else {
+                        try buf.appendSlice(allocator, "\\u2029");
+                    }
+                    i += 2;
+                } else {
+                    try buf.append(allocator, c);
+                }
+            },
             else => try buf.append(allocator, c),
         }
     }
