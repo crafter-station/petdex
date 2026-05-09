@@ -143,13 +143,14 @@ export const AGENTS: Agent[] = [
       { event: "Stop", kind: "session.end" },
     ],
     async postInstallChecks() {
-      // Codex only loads hooks.json when `[features] codex_hooks = true`
-      // is present in ~/.codex/config.toml. We surface the requirement and
-      // offer an opt-in auto-fix that appends safely without touching the
-      // user's existing comments or formatting.
+      // Codex only loads hooks.json when [features] codex_hooks = true is
+      // present in ~/.codex/config.toml. The detect + edit pair below is
+      // section-aware: a top-level codex_hooks or a codex_hooks under a
+      // different table doesn't count, and an existing
+      // [features].codex_hooks gets its value rewritten in place rather
+      // than appended (which would produce ambiguous TOML).
       const { readFile } = await import("node:fs/promises");
       const tomlPath = path.join(HOME, ".codex", "config.toml");
-      const enabledRe = /^\s*codex_hooks\s*=\s*true\b/m;
       let exists = true;
       let text = "";
       try {
@@ -167,46 +168,32 @@ export const AGENTS: Agent[] = [
           ];
         }
       }
-      if (exists && enabledRe.test(text)) return [];
+
+      const inspection = exists
+        ? inspectFeaturesCodexHooks(text)
+        : { state: "missing-file" as const };
+      if (inspection.state === "enabled") return [];
 
       const fix = {
-        prompt: exists
-          ? `Append [features] codex_hooks = true to ${tildePath(tomlPath)}? (a .bak of the current file is created first)`
-          : `Create ${tildePath(tomlPath)} with [features] codex_hooks = true?`,
+        prompt:
+          inspection.state === "missing-file"
+            ? `Create ${tildePath(tomlPath)} with [features] codex_hooks = true?`
+            : inspection.state === "wrong-value"
+              ? `Set codex_hooks = true under [features] in ${tildePath(tomlPath)}? (a .bak of the current file is created first)`
+              : `Add codex_hooks = true under [features] in ${tildePath(tomlPath)}? (a .bak of the current file is created first)`,
         apply: async () => {
           const { writeFile, mkdir } = await import("node:fs/promises");
           await mkdir(path.dirname(tomlPath), { recursive: true });
-          if (exists) {
-            // Back up first.
-            const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-            const backup = `${tomlPath}.${stamp}.bak`;
+          if (!exists) {
             try {
-              await writeFile(backup, text);
-            } catch (err) {
-              return {
-                ok: false,
-                message: `Backup failed: ${(err as Error).message}`,
-              };
-            }
-            // Append-safe edit: never rewrites existing lines. If [features]
-            // already exists, insert codex_hooks = true right after the
-            // header. Otherwise append the whole block at the end.
-            const featuresHeader = /^\s*\[features\]\s*$/m;
-            let next: string;
-            if (featuresHeader.test(text)) {
-              next = text.replace(
-                featuresHeader,
-                (m) => `${m}\ncodex_hooks = true`,
+              await writeFile(
+                tomlPath,
+                "[features]\ncodex_hooks = true\n",
+                "utf8",
               );
-            } else {
-              const sep = text.endsWith("\n") || text.length === 0 ? "" : "\n";
-              next = `${text}${sep}\n[features]\ncodex_hooks = true\n`;
-            }
-            try {
-              await writeFile(tomlPath, next, "utf8");
               return {
                 ok: true,
-                message: `codex_hooks = true added to ${tildePath(tomlPath)} (backup: ${path.basename(backup)})`,
+                message: `Created ${tildePath(tomlPath)} with [features] codex_hooks = true`,
               };
             } catch (err) {
               return {
@@ -215,16 +202,22 @@ export const AGENTS: Agent[] = [
               };
             }
           }
-          // File doesn't exist: create fresh.
+          const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+          const backup = `${tomlPath}.${stamp}.bak`;
           try {
-            await writeFile(
-              tomlPath,
-              `[features]\ncodex_hooks = true\n`,
-              "utf8",
-            );
+            await writeFile(backup, text);
+          } catch (err) {
+            return {
+              ok: false,
+              message: `Backup failed: ${(err as Error).message}`,
+            };
+          }
+          const next = applyCodexHooksFix(text, inspection);
+          try {
+            await writeFile(tomlPath, next, "utf8");
             return {
               ok: true,
-              message: `Created ${tildePath(tomlPath)} with [features] codex_hooks = true`,
+              message: `codex_hooks = true set in ${tildePath(tomlPath)} (backup: ${path.basename(backup)})`,
             };
           } catch (err) {
             return {
@@ -390,4 +383,82 @@ export const PetdexPlugin = async () => ({
 function tildePath(p: string): string {
   if (p.startsWith(HOME)) return `~${p.slice(HOME.length)}`;
   return p;
+}
+
+// ─── TOML helpers (codex config.toml only) ─────────────────────────────
+//
+// We avoid pulling a TOML parser dependency for a single key. Instead we
+// walk the file line by line tracking the current section. This is
+// deliberately conservative: it only recognizes top-level standard tables
+// like [features] and [features.something], and it won't try to handle
+// inline tables, dotted keys at the top level (e.g. features.codex_hooks),
+// or array-of-tables — Codex's own config doesn't use those for this flag,
+// and refusing to act is safer than rewriting structure we don't fully
+// understand.
+
+type CodexHooksInspection =
+  | { state: "missing-file" }
+  | { state: "enabled" }
+  | { state: "no-features-section" }
+  | { state: "no-key"; insertAfterLine: number }
+  | { state: "wrong-value"; replaceLine: number };
+
+function inspectFeaturesCodexHooks(text: string): CodexHooksInspection {
+  const lines = text.split("\n");
+  const sectionHeaderRe = /^\s*\[([^[\]]+)\]\s*(?:#.*)?$/;
+  const keyRe = /^\s*codex_hooks\s*=\s*(.+?)\s*(?:#.*)?$/;
+  let currentSection: string | null = null;
+  let featuresHeaderLine: number | null = null;
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const sectionMatch = line.match(sectionHeaderRe);
+    if (sectionMatch) {
+      currentSection = sectionMatch[1].trim();
+      if (currentSection === "features" && featuresHeaderLine === null) {
+        featuresHeaderLine = i;
+      }
+      continue;
+    }
+    if (currentSection !== "features") continue;
+    const keyMatch = line.match(keyRe);
+    if (!keyMatch) continue;
+    const value = keyMatch[1].trim();
+    if (value === "true") return { state: "enabled" };
+    return { state: "wrong-value", replaceLine: i };
+  }
+
+  if (featuresHeaderLine === null) return { state: "no-features-section" };
+  return { state: "no-key", insertAfterLine: featuresHeaderLine };
+}
+
+function applyCodexHooksFix(
+  text: string,
+  inspection: CodexHooksInspection,
+): string {
+  if (inspection.state === "enabled" || inspection.state === "missing-file") {
+    // Caller should not reach here for these states, but be conservative.
+    return text;
+  }
+
+  const lines = text.split("\n");
+  if (inspection.state === "wrong-value") {
+    // Preserve indentation and any trailing comment by replacing only the
+    // value portion of the matched line.
+    const original = lines[inspection.replaceLine];
+    const valueRe = /^(\s*codex_hooks\s*=\s*)([^#\n]+?)(\s*(?:#.*)?)$/;
+    const m = original.match(valueRe);
+    lines[inspection.replaceLine] = m
+      ? `${m[1]}true${m[3]}`
+      : "codex_hooks = true";
+    return lines.join("\n");
+  }
+  if (inspection.state === "no-key") {
+    lines.splice(inspection.insertAfterLine + 1, 0, "codex_hooks = true");
+    return lines.join("\n");
+  }
+  // no-features-section: append a fresh [features] block at EOF without
+  // collapsing existing trailing content.
+  const sep = text.endsWith("\n") || text.length === 0 ? "" : "\n";
+  return `${text}${sep}\n[features]\ncodex_hooks = true\n`;
 }
