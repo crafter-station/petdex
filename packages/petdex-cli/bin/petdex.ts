@@ -109,7 +109,16 @@ async function main() {
     return;
   }
 
-  maybeShowFirstRunNotice();
+  // Meta commands must produce machine-readable output. `petdex --version`
+  // is parsed by package managers and CI scripts; the multi-line telemetry
+  // notice would corrupt that. `telemetry on|off|status` manages the
+  // notice itself, so triggering it there creates a confusing UX. The
+  // notice still fires on the first real command (install / submit /
+  // hooks / desktop / update).
+  const META_COMMANDS = new Set(["version", "--version", "-v", "telemetry"]);
+  if (!META_COMMANDS.has(cmd)) {
+    maybeShowFirstRunNotice();
+  }
 
   switch (cmd) {
     case "login":
