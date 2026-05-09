@@ -59,6 +59,10 @@ seed/
 # Script output / rescue results — local only
 .rescue-results.json
 
+# Franchise classification working files — derived from prod DB + codex
+scripts/.franchise-buckets.json
+scripts/.franchise-cache.json
+
 # End-of-session handoff doc — local only, not committed
 HANDOFF.md
 .handoff-archive/
