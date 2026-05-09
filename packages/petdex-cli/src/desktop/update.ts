@@ -25,7 +25,11 @@ import path from "node:path";
 import * as p from "@clack/prompts";
 import pc from "picocolors";
 
-import { downloadDesktopAssets, fetchLatestRelease } from "./install.js";
+import {
+  commitDesktopAssets,
+  fetchLatestRelease,
+  stageDesktopAssets,
+} from "./install.js";
 import { desktopStatus, startDesktop, stopDesktop } from "./process.js";
 
 const VERSION_FILE = path.join(homedir(), ".petdex", "version");
@@ -113,26 +117,30 @@ export async function runUpdate(args: string[] = []): Promise<void> {
     return;
   }
 
-  // Phase 1: download to .tmp staging files. Safe to bail at any point.
+  // Phase 1: download into .tmp staging files. NOTHING has been
+  // renamed into place yet — the running desktop binary on disk is
+  // untouched. Safe to bail at any point.
   const dl = makeSpinner();
   dl.start(`Downloading ${release.tag_name}`);
-  let result: Awaited<ReturnType<typeof downloadDesktopAssets>>;
+  let staged: Awaited<ReturnType<typeof stageDesktopAssets>>;
   try {
-    // downloadDesktopAssets writes via {dest}.tmp + atomic rename. After
-    // this returns successfully, both the binary and sidecar are in place.
-    result = await downloadDesktopAssets(release);
+    staged = await stageDesktopAssets(release);
   } catch (err) {
     dl.stop(silent ? "failed" : pc.red("failed"));
     throw err;
   }
   dl.stop(
     silent
-      ? `Downloaded ${release.tag_name} (${formatBytes(result.binAsset.size)})`
-      : `${pc.green("✓")} Downloaded ${pc.bold(release.tag_name)} (${formatBytes(result.binAsset.size)})`,
+      ? `Downloaded ${release.tag_name} (${formatBytes(staged.binAsset.size)})`
+      : `${pc.green("✓")} Downloaded ${pc.bold(release.tag_name)} (${formatBytes(staged.binAsset.size)})`,
   );
 
-  // Phase 2: stop running desktop AFTER download succeeded. The window where
-  // the mascot is offline is now bounded by stop + start, not by network.
+  // Phase 2: stop running desktop BEFORE the rename. On Windows and
+  // some Linux setups, renaming over a running executable fails with
+  // EBUSY/ETXTBSY; the previous flow committed first and could fail
+  // before stopDesktop() ever ran. Stopping here also bounds the
+  // mascot-offline window to (rename + restart), not (download +
+  // rename + restart).
   const wasRunning = desktopStatus().state === "running";
   if (wasRunning) {
     info(
@@ -142,6 +150,12 @@ export async function runUpdate(args: string[] = []): Promise<void> {
     );
     stopDesktop();
   }
+
+  // Phase 3: commit. commitDesktopAssets rolls back from .prev
+  // snapshots if any rename fails; we still have the previous
+  // coherent install on disk. We let the throw bubble up as-is so
+  // the caller's outer error handler reports it.
+  await commitDesktopAssets(staged);
 
   await writeFile(VERSION_FILE, `${release.tag_name}\n`);
 

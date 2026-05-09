@@ -213,15 +213,23 @@ async function commitStaged(staged: StagedFile[]): Promise<void> {
   }
 }
 
-/**
- * Download binary AND sidecar to staging, then commit (rename) them
- * together. Either both files end up updated or none do — a failed sidecar
- * download never leaves a new binary paired with an old/missing sidecar.
- */
-export async function downloadDesktopAssets(release: Release): Promise<{
+export type StagedDesktopAssets = {
   binAsset: ReleaseAsset;
   sidecarAsset: ReleaseAsset | null;
-}> {
+  staged: StagedFile[];
+};
+
+/**
+ * Download binary + sidecar to .tmp staging files. NOTHING has been
+ * renamed yet — the .tmp files live next to their final destinations
+ * but the live binary on disk is untouched. Exists separately from
+ * commit so a caller can stop the running desktop between stage and
+ * commit on platforms (Windows, some Linux setups) that lock running
+ * executables and would otherwise refuse the rename.
+ */
+export async function stageDesktopAssets(
+  release: Release,
+): Promise<StagedDesktopAssets> {
   const target = detectTarget();
   const binAsset = findBinaryAsset(release, target.assetSuffix);
   const sidecarAsset = findSidecarAsset(release);
@@ -231,8 +239,6 @@ export async function downloadDesktopAssets(release: Release): Promise<{
   await mkdir(path.dirname(binPath), { recursive: true });
   await mkdir(path.dirname(sidecar), { recursive: true });
 
-  // Phase 1: stage all downloads. If any fails, .tmp files are cleaned up
-  // and nothing on disk has changed.
   const staged: StagedFile[] = [];
   try {
     staged.push(
@@ -255,10 +261,34 @@ export async function downloadDesktopAssets(release: Release): Promise<{
     throw err;
   }
 
-  // Phase 2: commit (rename) all staged files. Rolls back on failure.
-  await commitStaged(staged);
+  return { binAsset, sidecarAsset, staged };
+}
 
-  return { binAsset, sidecarAsset };
+/**
+ * Rename the staged .tmp files into their final paths. All-or-nothing:
+ * if any rename fails the previously committed entries roll back from
+ * their .prev snapshots. Exists separately from stage so the caller
+ * can stop the running desktop first.
+ */
+export async function commitDesktopAssets(
+  assets: Pick<StagedDesktopAssets, "staged">,
+): Promise<void> {
+  await commitStaged(assets.staged);
+}
+
+/**
+ * Convenience wrapper for first-time installs (no running desktop to
+ * worry about): stage, then immediately commit. Update flows should
+ * call stageDesktopAssets + commitDesktopAssets separately so they
+ * can stopDesktop() between the two phases.
+ */
+export async function downloadDesktopAssets(release: Release): Promise<{
+  binAsset: ReleaseAsset;
+  sidecarAsset: ReleaseAsset | null;
+}> {
+  const result = await stageDesktopAssets(release);
+  await commitDesktopAssets(result);
+  return { binAsset: result.binAsset, sidecarAsset: result.sidecarAsset };
 }
 
 export type RunInstallDesktopResult = {
