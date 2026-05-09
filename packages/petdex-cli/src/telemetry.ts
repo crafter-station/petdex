@@ -23,7 +23,17 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 
-const TELEMETRY_FILE = path.join(homedir(), ".petdex", "telemetry.json");
+// Lazy lookup so tests (and any sandboxed flow that mutates HOME at
+// runtime) see the current value rather than whatever HOME happened
+// to be when this module was first imported.
+//
+// We prefer process.env.HOME over os.homedir() so a test setting HOME
+// to a tmpdir actually redirects the read/write. On macOS,
+// os.homedir() resolves via getpwuid() and ignores HOME entirely.
+function telemetryFile(): string {
+  const home = process.env.HOME ?? homedir();
+  return path.join(home, ".petdex", "telemetry.json");
+}
 const ENDPOINT =
   process.env.PETDEX_TELEMETRY_URL ??
   "https://petdex.crafter.run/api/telemetry/event";
@@ -60,10 +70,10 @@ type ReadConfigResult =
   | { kind: "error"; reason: string };
 
 function readConfig(): ReadConfigResult {
-  if (!existsSync(TELEMETRY_FILE)) return { kind: "missing" };
+  if (!existsSync(telemetryFile())) return { kind: "missing" };
   let raw: string;
   try {
-    raw = readFileSync(TELEMETRY_FILE, "utf8");
+    raw = readFileSync(telemetryFile(), "utf8");
   } catch (err) {
     return {
       kind: "error",
@@ -82,8 +92,8 @@ function readConfig(): ReadConfigResult {
 
 function writeConfigSafe(config: TelemetryConfig): boolean {
   try {
-    mkdirSync(path.dirname(TELEMETRY_FILE), { recursive: true });
-    writeFileSync(TELEMETRY_FILE, `${JSON.stringify(config, null, 2)}\n`);
+    mkdirSync(path.dirname(telemetryFile()), { recursive: true });
+    writeFileSync(telemetryFile(), `${JSON.stringify(config, null, 2)}\n`);
     return true;
   } catch {
     // HOME unwritable, disk full, etc. Telemetry must never crash the

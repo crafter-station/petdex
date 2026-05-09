@@ -100,7 +100,7 @@ export function findSidecarAsset(release: Release): ReleaseAsset | null {
   return release.assets.find((a) => a.name === SIDECAR_ASSET_NAME) ?? null;
 }
 
-type StagedFile = { tmpPath: string; destPath: string };
+export type StagedFile = { tmpPath: string; destPath: string };
 
 /**
  * Stage: download URL to {dest}.tmp, set mode/xattr if needed. Returns the
@@ -149,6 +149,14 @@ async function stageDownload(
  * already-renamed entries if a later rename fails — at worst the user ends
  * up with the previous coherent state.
  */
+// Exported for tests so we can exercise the rollback branches
+// without mocking GitHub Releases or the network layer.
+export async function _commitStagedForTest(
+  staged: StagedFile[],
+): Promise<void> {
+  return commitStaged(staged);
+}
+
 async function commitStaged(staged: StagedFile[]): Promise<void> {
   // Each renamed entry tracks whether there was a previous file at
   // dest. If yes, rollback restores from .prev. If no (fresh install),
