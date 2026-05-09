@@ -41,7 +41,22 @@ export function OpenInPetdexButton({ slug }: OpenInPetdexButtonProps) {
     const ua = navigator.userAgent ?? "";
     const platform =
       (navigator as Navigator & { platform?: string }).platform ?? "";
-    setIsMac(/Mac|iPhone|iPad|iPod/i.test(platform) || /Mac OS X/i.test(ua));
+    // Desktop macOS only. The download flow only ships a macOS
+    // desktop binary (no iOS app exists), so showing this CTA on
+    // iPhone/iPad would dead-end at /download. iPadOS reports as
+    // "MacIntel" on Safari so we also need to rule out touch +
+    // small viewport heuristics used by iPadOS in desktop mode.
+    const isIos =
+      /iPhone|iPad|iPod/i.test(platform) || /iPhone|iPad|iPod/i.test(ua);
+    const looksLikeIpadDesktopMode =
+      platform === "MacIntel" &&
+      typeof navigator.maxTouchPoints === "number" &&
+      navigator.maxTouchPoints > 1;
+    if (isIos || looksLikeIpadDesktopMode) {
+      setIsMac(false);
+      return;
+    }
+    setIsMac(/^Mac/i.test(platform) || /Mac OS X/i.test(ua));
   }, []);
 
   if (!mounted || !isMac) return null;
