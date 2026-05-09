@@ -346,7 +346,16 @@ function curlCommand(state: PetState, duration?: number): string {
     duration != null
       ? `{\\"state\\":\\"${state}\\",\\"duration\\":${duration}}`
       : `{\\"state\\":\\"${state}\\"}`;
-  return `curl -s -m 1 -X POST ${SIDECAR_URL} -H 'Content-Type: application/json' -d "${body}" >/dev/null 2>&1 || true`;
+  // Read the per-session token from ~/.petdex/runtime/update-token
+  // at hook execution time. Without this header any website the user
+  // visits could fire a no-cors POST to localhost:7777/state and
+  // manipulate the mascot, spam the log, and trigger the
+  // desktop_first_state_received telemetry event. The hook silently
+  // no-ops when the token is missing (sidecar not running yet) — the
+  // mascot just doesn't react that one time, no error noise.
+  const tokenRead =
+    '"$(cat \\"$HOME/.petdex/runtime/update-token\\" 2>/dev/null)"';
+  return `T=${tokenRead}; [ -n "$T" ] && curl -s -m 1 -X POST ${SIDECAR_URL} -H "Content-Type: application/json" -H "X-Petdex-Update-Token: $T" -d "${body}" >/dev/null 2>&1 || true`;
 }
 
 function openCodePluginSource(): string {
@@ -354,13 +363,34 @@ function openCodePluginSource(): string {
 // Forwards OpenCode lifecycle events to the petdex desktop mascot via HTTP.
 // Edit STATE_MAP below to customize which state each event triggers.
 
+import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
 const SIDECAR_URL = ${JSON.stringify(SIDECAR_URL)};
+const TOKEN_PATH = join(homedir(), ".petdex", "runtime", "update-token");
+
+async function readToken() {
+  try {
+    return (await readFile(TOKEN_PATH, "utf8")).trim();
+  } catch {
+    return null;
+  }
+}
 
 async function setState(state, duration) {
+  // Token gate defends against drive-by no-cors POSTs from any site
+  // the user visits. The token rotates per sidecar session and lives
+  // at mode 0600, so only this user can read it.
+  const token = await readToken();
+  if (!token) return; // sidecar offline or missing — silently no-op
   try {
     await fetch(SIDECAR_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "X-Petdex-Update-Token": token,
+      },
       body: JSON.stringify(duration != null ? { state, duration } : { state }),
       signal: AbortSignal.timeout(1000),
     });
