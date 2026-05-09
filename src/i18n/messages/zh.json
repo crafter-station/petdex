@@ -1471,15 +1471,15 @@
     }
   },
   "openInPetdex": {
-    "eyebrow": "一键安装",
+    "eyebrow": "macOS 桌面应用",
     "eyebrow__fixme": true,
-    "label": "在 Petdex Desktop 中打开",
+    "label": "获取 Petdex Desktop",
     "label__fixme": true,
     "subtitle": "让这只宠物漂浮在你的编程助手旁",
     "subtitle__fixme": true,
     "opening": "正在打开 Petdex...",
     "opening__fixme": true,
-    "ariaLabel": "在 Petdex Desktop 中打开 {slug}",
+    "ariaLabel": "获取 Petdex Desktop 并安装 {slug}",
     "ariaLabel__fixme": true
   },
   "installCompact": {

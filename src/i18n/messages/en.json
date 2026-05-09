@@ -1267,11 +1267,11 @@
     }
   },
   "openInPetdex": {
-    "eyebrow": "One-click install",
-    "label": "Open in Petdex Desktop",
+    "eyebrow": "macOS desktop app",
+    "label": "Get Petdex Desktop",
     "subtitle": "Float this pet beside your coding agent",
     "opening": "Opening Petdex...",
-    "ariaLabel": "Open {slug} in Petdex Desktop"
+    "ariaLabel": "Get Petdex Desktop and install {slug}"
   },
   "installCompact": {
     "seeGuide": "See full install guide"
