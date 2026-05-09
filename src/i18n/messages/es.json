@@ -1267,11 +1267,11 @@
     }
   },
   "openInPetdex": {
-    "eyebrow": "Instalacion en 1 clic",
-    "label": "Abrir en Petdex Desktop",
+    "eyebrow": "App de escritorio macOS",
+    "label": "Descargar Petdex Desktop",
     "subtitle": "Que esta mascota flote junto a tu agente",
     "opening": "Abriendo Petdex...",
-    "ariaLabel": "Abrir {slug} en Petdex Desktop"
+    "ariaLabel": "Descargar Petdex Desktop e instalar {slug}"
   },
   "installCompact": {
     "seeGuide": "Ver guia de instalacion completa"

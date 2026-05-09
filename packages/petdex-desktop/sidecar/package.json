@@ -2,12 +2,12 @@
   "name": "petdex-desktop-sidecar",
   "version": "0.1.4",
   "private": true,
-  "type": "module",
   "engines": {
     "node": ">=18"
   },
   "scripts": {
-    "build": "bun build server.ts --target=node --outfile=server.js --minify",
+    "_comment_build": "We bundle as CJS because the sidecar ships as a bare ~/.petdex/sidecar/server.js with no neighboring package.json to set type=module. Without a package.json or .mjs extension Node treats .js as CJS by default, so an ESM bundle would fail to load.",
+    "build": "bun build server.ts --target=node --format=cjs --outfile=server.js --minify",
     "start": "node server.js"
   }
 }

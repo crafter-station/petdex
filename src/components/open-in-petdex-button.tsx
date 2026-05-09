@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { ArrowRight } from "lucide-react";
@@ -11,27 +12,28 @@ type OpenInPetdexButtonProps = {
 };
 
 /**
- * Hero CTA on /pets/<slug> that one-click installs the pet into Petdex
- * Desktop. macOS-only for now since the desktop binary is mac-first.
+ * Hero CTA on /pets/<slug> that points the user at /download with a
+ * pendingPet hint so the install banner picks the slug back up. macOS-
+ * only for now since the desktop binary is mac-first.
+ *
+ * Why a plain link (not a `petdex://` scheme attempt yet):
+ *
+ * The desktop binary is currently shipped as a bare executable, not a
+ * macOS .app bundle. macOS only registers URL schemes for bundles
+ * declared via CFBundleURLTypes in Info.plist, so a `petdex://` link
+ * would always fall through to the fallback redirect anyway. Skipping
+ * the scheme attempt keeps the click predictable, avoids a confusing
+ * 1500ms delay, and the copy stays honest. When we ship a real .app
+ * bundle this component will gain back the scheme attempt path.
  *
  * Render rules:
  * - Server-renders nothing. The client detects platform after hydration
- *   and unhides on macOS so Linux/Windows users don't see a CTA that
- *   would dead-end at /download for a binary they can't install.
- *
- * Behavior:
- * - Click triggers `petdex://install/<slug>`. macOS hands the URL to
- *   Petdex.app if the URL scheme is registered. Window loses focus on
- *   a successful launch, so the blur listener clears the fallback timer.
- * - If 1500ms passes and we're still focused, the desktop isn't
- *   installed. Redirect to /download?next=install/<slug> so the user
- *   can grab the binary; the download page shows a banner naming the
- *   pet they were trying to install.
+ *   and unhides on macOS so Linux/Windows/iOS users don't see a CTA
+ *   that would dead-end at a binary they can't install.
  */
 export function OpenInPetdexButton({ slug }: OpenInPetdexButtonProps) {
   const [mounted, setMounted] = useState(false);
   const [isMac, setIsMac] = useState(false);
-  const [pending, setPending] = useState(false);
   const t = useTranslations("openInPetdex");
   const locale = useLocale();
 
@@ -61,35 +63,13 @@ export function OpenInPetdexButton({ slug }: OpenInPetdexButtonProps) {
 
   if (!mounted || !isMac) return null;
 
-  const handleClick = () => {
-    if (pending) return;
-    setPending(true);
-
-    const downloadHref = `/${locale}/download?next=${encodeURIComponent(`install/${slug}`)}`;
-    const fallbackTimer = window.setTimeout(() => {
-      if (document.hasFocus()) {
-        window.location.href = downloadHref;
-      }
-      setPending(false);
-    }, 1500);
-
-    const onBlur = () => {
-      window.clearTimeout(fallbackTimer);
-      window.removeEventListener("blur", onBlur);
-      setPending(false);
-    };
-    window.addEventListener("blur", onBlur);
-
-    window.location.href = `petdex://install/${slug}`;
-  };
+  const downloadHref = `/${locale}/download?next=${encodeURIComponent(`install/${slug}`)}`;
 
   return (
-    <button
-      type="button"
-      onClick={handleClick}
-      disabled={pending}
+    <Link
+      href={downloadHref}
       aria-label={t("ariaLabel", { slug })}
-      className="group relative isolate inline-flex w-full items-center gap-3 overflow-hidden rounded-2xl border border-brand/30 bg-gradient-to-br from-brand/15 via-brand-light/10 to-brand-deep/15 p-3 text-left shadow-[0_8px_32px_-8px_oklch(from_var(--brand)_l_c_h/0.35)] transition-all hover:border-brand/50 hover:shadow-[0_12px_40px_-8px_oklch(from_var(--brand)_l_c_h/0.45)] active:scale-[0.99] disabled:opacity-70 disabled:active:scale-100"
+      className="group relative isolate inline-flex w-full items-center gap-3 overflow-hidden rounded-2xl border border-brand/30 bg-gradient-to-br from-brand/15 via-brand-light/10 to-brand-deep/15 p-3 text-left shadow-[0_8px_32px_-8px_oklch(from_var(--brand)_l_c_h/0.35)] transition-all hover:border-brand/50 hover:shadow-[0_12px_40px_-8px_oklch(from_var(--brand)_l_c_h/0.45)] active:scale-[0.99]"
     >
       <span
         aria-hidden="true"
@@ -117,7 +97,7 @@ export function OpenInPetdexButton({ slug }: OpenInPetdexButtonProps) {
           </span>
         </span>
         <span className="font-semibold text-foreground text-sm leading-tight">
-          {pending ? t("opening") : t("label")}
+          {t("label")}
         </span>
         <span className="text-muted-2 text-xs leading-tight">
           {t("subtitle")}
@@ -125,6 +105,6 @@ export function OpenInPetdexButton({ slug }: OpenInPetdexButtonProps) {
       </span>
 
       <ArrowRight className="relative size-4 shrink-0 text-brand transition-transform group-hover:translate-x-0.5" />
-    </button>
+    </Link>
   );
 }
