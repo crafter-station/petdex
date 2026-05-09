@@ -58,30 +58,43 @@ const VALID_STATES = new Set([
 
 mkdirSync(RUNTIME_DIR, { recursive: true });
 
-// Generate a fresh per-session token for POST /update. Without this any
-// website the user visits could fire `fetch("http://127.0.0.1:7777/update",
-// { method: "POST", mode: "no-cors" })` and trigger a silent npm install
-// of arbitrary `petdex@latest` code — CORS only blocks the response,
-// never the request itself.
+// Generate a fresh per-session token for POST /update + POST /state.
+// Without this any website the user visits could fire
+// `fetch("http://127.0.0.1:7777/update", { method: "POST",
+// mode: "no-cors" })` and trigger a silent npm install of arbitrary
+// `petdex@latest` code — CORS only blocks the response, never the
+// request itself.
 //
-// The token is written to ~/.petdex/runtime/update-token (mode 0600 so
-// only the user can read it). The Zig bridge reads it from disk and
-// forwards it as a header when curl-ing the sidecar; remote websites
-// can't read user files, so they can't forge the header.
+// The token lives in memory now and only gets persisted to disk
+// AFTER server.listen succeeds. That avoids a nasty failure mode:
+// if a stale sidecar is already bound to :7777, the second instance
+// would otherwise overwrite the token file before crashing on
+// EADDRINUSE, leaving the live sidecar with the old in-memory token
+// and the file holding a token nothing accepts. Hooks/update would
+// silently 401 until the live process restarts.
+//
+// File mode is 0600 so only the user can read it. The Zig bridge
+// reads it from disk and forwards it as a header when curl-ing the
+// sidecar; remote websites can't read user files, so they can't
+// forge the header.
 const UPDATE_TOKEN = randomBytes(32).toString("hex");
-try {
-  writeFileSync(UPDATE_TOKEN_PATH, UPDATE_TOKEN, { mode: 0o600 });
-  // writeFile mode applies on create only — chmod again so a leftover
-  // token from a previous session can't widen the permissions.
-  chmodSync(UPDATE_TOKEN_PATH, 0o600);
-} catch (err) {
-  // If we can't persist the token, /update is effectively disabled
-  // because the bridge has nothing to send. That's an acceptable
-  // failure mode (auto-update is off; user can still run `petdex
-  // update` manually).
-  process.stderr.write(
-    `petdex sidecar: could not persist update token: ${(err as Error).message}\n`,
-  );
+
+function persistUpdateToken() {
+  try {
+    writeFileSync(UPDATE_TOKEN_PATH, UPDATE_TOKEN, { mode: 0o600 });
+    // writeFile mode applies on create only — chmod again so a
+    // leftover token from a previous session can't widen the
+    // permissions.
+    chmodSync(UPDATE_TOKEN_PATH, 0o600);
+  } catch (err) {
+    // If we can't persist the token, /update is effectively disabled
+    // because the bridge has nothing to send. That's an acceptable
+    // failure mode (auto-update is off; user can still run `petdex
+    // update` manually).
+    process.stderr.write(
+      `petdex sidecar: could not persist update token: ${(err as Error).message}\n`,
+    );
+  }
 }
 
 // ─── Telemetry: desktop_first_state_received ─────────────────────────
@@ -516,10 +529,18 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, "127.0.0.1", () => {
+  // Persist the token only after we've successfully bound the port.
+  // If a stale sidecar already owns :7777 the listen will fail and
+  // server.on('error') exits below — at which point the on-disk
+  // token still belongs to whoever was running first, which is the
+  // process actually serving requests.
+  persistUpdateToken();
   log(`petdex sidecar listening on http://127.0.0.1:${PORT}`);
 });
 
 server.on("error", (err) => {
+  // EADDRINUSE means another sidecar is already bound. Don't touch
+  // the token file — the live process needs its existing one.
   log(`server.error: ${err.message}`);
   process.exit(1);
 });
