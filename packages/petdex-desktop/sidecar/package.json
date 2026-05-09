@@ -1,0 +1,13 @@
+{
+  "name": "petdex-desktop-sidecar",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "bun build server.ts --target=node --outfile=server.js --minify",
+    "start": "node server.js"
+  }
+}

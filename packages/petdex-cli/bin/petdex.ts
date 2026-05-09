@@ -7,6 +7,14 @@ import JSZip from "jszip";
 import pc from "picocolors";
 
 import { ClerkCliAuth } from "../src/cli-auth/index.js";
+import { runInstallDesktop } from "../src/desktop/install.js";
+import {
+  cmdDesktopStart,
+  cmdDesktopStatus,
+  cmdDesktopStop,
+} from "../src/desktop/process.js";
+import { runUpdate } from "../src/desktop/update.js";
+import { runInstall as runHooksInstall } from "../src/hooks/install.js";
 
 // ─── config ────────────────────────────────────────────────────────────────
 const PETDEX_URL = process.env.PETDEX_URL ?? "https://petdex.crafter.run";
@@ -114,6 +122,15 @@ async function main() {
     case "list":
       await cmdList();
       break;
+    case "hooks":
+      await cmdHooks(args.slice(1));
+      break;
+    case "desktop":
+      await cmdDesktop(args.slice(1));
+      break;
+    case "update":
+      await runUpdate(args.slice(1));
+      break;
     case "version":
     case "--version":
     case "-v":
@@ -143,7 +160,11 @@ function printHelp() {
       `    ${pc.bold("whoami")}             Show signed-in user`,
       `    ${pc.bold("submit")} <path>      Submit a pet folder, zip, or parent of pets (bulk)`,
       `    ${pc.bold("install")} <slug>     Install a pet into ~/.codex/pets/<slug>`,
+      `    ${pc.bold("install desktop")}    Install the petdex-desktop binary for your platform`,
       `    ${pc.bold("list")}               List approved pets`,
+      `    ${pc.bold("hooks install")}      Wire petdex-desktop into your coding agents`,
+      `    ${pc.bold("desktop")} <cmd>      Manage petdex-desktop (start | stop | status)`,
+      `    ${pc.bold("update")}             Pull the latest petdex-desktop release and restart`,
       "",
       `  ${c("Examples")}`,
       `    ${dim("$")} petdex login`,
@@ -151,6 +172,10 @@ function printHelp() {
       `    ${dim("$")} petdex submit ~/Downloads/boba.zip     ${dim("# zip file")}`,
       `    ${dim("$")} petdex submit ~/.codex/pets            ${dim("# bulk all subfolders")}`,
       `    ${dim("$")} petdex install boba`,
+      `    ${dim("$")} petdex install desktop                 ${dim("# fetch the latest binary")}`,
+      `    ${dim("$")} petdex hooks install                   ${dim("# pick agents, write hooks")}`,
+      `    ${dim("$")} petdex desktop start                   ${dim("# launch the mascot")}`,
+      `    ${dim("$")} petdex update                          ${dim("# pull latest release")}`,
       "",
       `  ${dim("Gallery & docs:")} ${pc.underline(PETDEX_URL)}`,
       "",
@@ -210,8 +235,12 @@ async function cmdWhoami() {
 async function cmdInstall(args: string[]) {
   const slug = args[0];
   if (!slug) {
-    p.cancel(`Usage: ${pc.cyan("petdex install <slug>")}`);
+    p.cancel(`Usage: ${pc.cyan("petdex install <slug|desktop>")}`);
     process.exit(1);
+  }
+  if (slug === "desktop") {
+    await runInstallDesktop();
+    return;
   }
 
   // Cross-platform install implemented in Node. Earlier versions piped a
@@ -941,4 +970,94 @@ function parseImageDims(buf: Buffer): { width: number; height: number } {
     }
   }
   return { width: 0, height: 0 };
+}
+
+// ─── hooks ─────────────────────────────────────────────────────────────────
+
+async function cmdHooks(args: string[]) {
+  const sub = args[0];
+  if (!sub || sub === "--help" || sub === "-h" || sub === "help") {
+    printHooksHelp();
+    return;
+  }
+  switch (sub) {
+    case "install":
+      await runHooksInstall();
+      break;
+    default:
+      console.error(pc.red(`Unknown hooks command: ${sub}`));
+      printHooksHelp();
+      process.exit(1);
+  }
+}
+
+function printHooksHelp() {
+  const c = pc.cyan;
+  const dim = pc.dim;
+  console.log(
+    [
+      "",
+      `  ${pc.bold(pc.magenta("petdex hooks"))}`,
+      "",
+      `  ${c("Usage")}`,
+      `    petdex hooks <command>`,
+      "",
+      `  ${c("Commands")}`,
+      `    ${pc.bold("install")}    Wire petdex into your coding agents (Claude Code, Codex, Gemini, OpenCode)`,
+      "",
+      `  ${c("Examples")}`,
+      `    ${dim("$")} petdex hooks install`,
+      "",
+    ].join("\n"),
+  );
+}
+
+// ─── desktop ───────────────────────────────────────────────────────────────
+
+async function cmdDesktop(args: string[]) {
+  const sub = args[0];
+  if (!sub || sub === "--help" || sub === "-h" || sub === "help") {
+    printDesktopHelp();
+    return;
+  }
+  switch (sub) {
+    case "start":
+      await cmdDesktopStart();
+      break;
+    case "stop":
+      cmdDesktopStop();
+      break;
+    case "status":
+      cmdDesktopStatus();
+      break;
+    default:
+      console.error(pc.red(`Unknown desktop command: ${sub}`));
+      printDesktopHelp();
+      process.exit(1);
+  }
+}
+
+function printDesktopHelp() {
+  const c = pc.cyan;
+  const dim = pc.dim;
+  console.log(
+    [
+      "",
+      `  ${pc.bold(pc.magenta("petdex desktop"))}`,
+      "",
+      `  ${c("Usage")}`,
+      `    petdex desktop <command>`,
+      "",
+      `  ${c("Commands")}`,
+      `    ${pc.bold("start")}     Launch petdex-desktop in the background`,
+      `    ${pc.bold("stop")}      Terminate the running petdex-desktop process`,
+      `    ${pc.bold("status")}    Show whether petdex-desktop is running`,
+      "",
+      `  ${c("Examples")}`,
+      `    ${dim("$")} petdex desktop start`,
+      `    ${dim("$")} petdex desktop status`,
+      `    ${dim("$")} petdex desktop stop`,
+      "",
+    ].join("\n"),
+  );
 }

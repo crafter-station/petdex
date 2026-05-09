@@ -1,0 +1,106 @@
+name: petdex-desktop release
+
+on:
+  push:
+    tags:
+      - "desktop-v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. desktop-v0.1.0)"
+        required: true
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - target: darwin-arm64
+            runner: macos-14
+          - target: darwin-x64
+            runner: macos-13
+
+    steps:
+      - name: Checkout petdex
+        uses: actions/checkout@v4
+
+      - name: Resolve zero-native source
+        # The desktop project lives at packages/petdex-desktop and points to a
+        # checkout of zero-native via build.zig's default_zero_native_path.
+        # CI clones a working zero-native into a workspace-local directory
+        # and patches build.zig to point at it.
+        #
+        # Source defaults to Railly/zero-native:feature/window-resize because
+        # the floating-window options + window.resize + focusable flag aren't
+        # in vercel-labs/main yet. The feature/window-resize branch builds on
+        # top of feature/floating-window (the PR currently in review). Update
+        # ZERO_NATIVE_REMOTE / ZERO_NATIVE_BRANCH once everything merges
+        # upstream so CI can switch to vercel-labs/main.
+        env:
+          ZERO_NATIVE_REMOTE: "https://github.com/Railly/zero-native.git"
+          ZERO_NATIVE_BRANCH: "feature/window-resize"
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch "$ZERO_NATIVE_BRANCH" "$ZERO_NATIVE_REMOTE" "$GITHUB_WORKSPACE/zero-native"
+          ZN_PATH="$GITHUB_WORKSPACE/zero-native/"
+          python3 - <<PYEOF
+          import re, pathlib, os
+          zn_path = os.environ["GITHUB_WORKSPACE"] + "/zero-native/"
+          p = pathlib.Path("packages/petdex-desktop/build.zig")
+          src = p.read_text()
+          src = re.sub(
+              r'const default_zero_native_path = "[^"]*";',
+              f'const default_zero_native_path = "{zn_path}";',
+              src,
+          )
+          p.write_text(src)
+          PYEOF
+
+      - name: Install Zig 0.16.0
+        uses: mlugg/setup-zig@v1
+        with:
+          version: "0.16.0"
+
+      - name: Build petdex-desktop
+        working-directory: packages/petdex-desktop
+        run: |
+          zig build -Doptimize=ReleaseSafe
+          mv zig-out/bin/petdex-desktop "petdex-desktop-${{ matrix.target }}"
+          ls -lh "petdex-desktop-${{ matrix.target }}"
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: petdex-desktop-${{ matrix.target }}
+          path: packages/petdex-desktop/petdex-desktop-${{ matrix.target }}
+
+  release:
+    name: publish github release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout petdex
+        uses: actions/checkout@v4
+
+      - name: Download all binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Stage release assets
+        run: |
+          mkdir -p release
+          find artifacts -type f -name "petdex-desktop-*" -exec cp {} release/ \;
+          ls -lh release/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name == '' && inputs.tag || github.ref_name }}
+          files: release/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
