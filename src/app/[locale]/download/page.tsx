@@ -114,7 +114,7 @@ export default async function DownloadPage() {
               </a>
 
               <CommandLine
-                command="bunx petdex install desktop"
+                command="npx petdex install desktop"
                 source="download-hero"
                 className="!h-12 w-full !rounded-full !px-5 !text-[13px] sm:w-auto sm:min-w-[280px]"
               />
@@ -184,7 +184,7 @@ export default async function DownloadPage() {
                   {t("setup.step1.title")}
                 </p>
                 <CommandLine
-                  command="bunx petdex install desktop"
+                  command="npx petdex install desktop"
                   source="download-step1"
                   className="w-full max-w-sm"
                 />
