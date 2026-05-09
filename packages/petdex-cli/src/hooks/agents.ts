@@ -45,6 +45,20 @@ export type HookEntry = {
   matcher?: string;
 };
 
+export type PostInstallNote = {
+  level: "info" | "warn" | "action";
+  message: string;
+  /**
+   * Optional auto-fix the wizard offers to apply after asking the user.
+   * The closure must be idempotent and surface its own success/failure
+   * via the returned message; we do not retry or roll back automatically.
+   */
+  fix?: {
+    prompt: string;
+    apply: () => Promise<{ ok: boolean; message: string }>;
+  };
+};
+
 export type Agent = {
   id: "claude-code" | "codex" | "gemini" | "opencode";
   displayName: string;
@@ -57,6 +71,13 @@ export type Agent = {
    * Returns the whole settings object so we can merge into existing files.
    */
   build(): unknown;
+  /**
+   * Optional follow-up checks the wizard runs after writing the config.
+   * Used to surface agent-specific feature flags or steps the user must
+   * still take (e.g. Codex requires `[features] codex_hooks = true` in
+   * config.toml before hooks load).
+   */
+  postInstallChecks?(): Promise<PostInstallNote[]>;
 };
 
 const HOME = homedir();
@@ -121,6 +142,107 @@ export const AGENTS: Agent[] = [
       { event: "PostToolUse", kind: "tool.after" },
       { event: "Stop", kind: "session.end" },
     ],
+    async postInstallChecks() {
+      // Codex only loads hooks.json when `[features] codex_hooks = true`
+      // is present in ~/.codex/config.toml. We surface the requirement and
+      // offer an opt-in auto-fix that appends safely without touching the
+      // user's existing comments or formatting.
+      const { readFile } = await import("node:fs/promises");
+      const tomlPath = path.join(HOME, ".codex", "config.toml");
+      const enabledRe = /^\s*codex_hooks\s*=\s*true\b/m;
+      let exists = true;
+      let text = "";
+      try {
+        text = await readFile(tomlPath, "utf8");
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === "ENOENT") {
+          exists = false;
+        } else {
+          return [
+            {
+              level: "warn",
+              message: `Could not read ${tomlPath} (${code ?? "io_error"}). Make sure [features] codex_hooks = true is set there before Codex picks up the hooks.`,
+            },
+          ];
+        }
+      }
+      if (exists && enabledRe.test(text)) return [];
+
+      const fix = {
+        prompt: exists
+          ? `Append [features] codex_hooks = true to ${tildePath(tomlPath)}? (a .bak of the current file is created first)`
+          : `Create ${tildePath(tomlPath)} with [features] codex_hooks = true?`,
+        apply: async () => {
+          const { writeFile, mkdir } = await import("node:fs/promises");
+          await mkdir(path.dirname(tomlPath), { recursive: true });
+          if (exists) {
+            // Back up first.
+            const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+            const backup = `${tomlPath}.${stamp}.bak`;
+            try {
+              await writeFile(backup, text);
+            } catch (err) {
+              return {
+                ok: false,
+                message: `Backup failed: ${(err as Error).message}`,
+              };
+            }
+            // Append-safe edit: never rewrites existing lines. If [features]
+            // already exists, insert codex_hooks = true right after the
+            // header. Otherwise append the whole block at the end.
+            const featuresHeader = /^\s*\[features\]\s*$/m;
+            let next: string;
+            if (featuresHeader.test(text)) {
+              next = text.replace(
+                featuresHeader,
+                (m) => `${m}\ncodex_hooks = true`,
+              );
+            } else {
+              const sep = text.endsWith("\n") || text.length === 0 ? "" : "\n";
+              next = `${text}${sep}\n[features]\ncodex_hooks = true\n`;
+            }
+            try {
+              await writeFile(tomlPath, next, "utf8");
+              return {
+                ok: true,
+                message: `codex_hooks = true added to ${tildePath(tomlPath)} (backup: ${path.basename(backup)})`,
+              };
+            } catch (err) {
+              return {
+                ok: false,
+                message: `Write failed: ${(err as Error).message}`,
+              };
+            }
+          }
+          // File doesn't exist: create fresh.
+          try {
+            await writeFile(
+              tomlPath,
+              `[features]\ncodex_hooks = true\n`,
+              "utf8",
+            );
+            return {
+              ok: true,
+              message: `Created ${tildePath(tomlPath)} with [features] codex_hooks = true`,
+            };
+          } catch (err) {
+            return {
+              ok: false,
+              message: `Write failed: ${(err as Error).message}`,
+            };
+          }
+        },
+      };
+
+      return [
+        {
+          level: "action",
+          message: `Codex needs codex_hooks = true under [features] in ${tildePath(tomlPath)} before it loads ${tildePath(path.join(HOME, ".codex", "hooks.json"))}.`,
+          fix,
+        },
+      ];
+    },
     build() {
       return {
         hooks: {
@@ -263,4 +385,9 @@ export const PetdexPlugin = async () => ({
   },
 });
 `;
+}
+
+function tildePath(p: string): string {
+  if (p.startsWith(HOME)) return `~${p.slice(HOME.length)}`;
+  return p;
 }

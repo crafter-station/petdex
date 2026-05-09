@@ -13,7 +13,13 @@ import * as p from "@clack/prompts";
 import pc from "picocolors";
 
 import { desktopStatus, startDesktop } from "../desktop/process.js";
-import { AGENTS, type Agent, PETDEX_PORT, SIDECAR_URL } from "./agents.js";
+import {
+  AGENTS,
+  type Agent,
+  PETDEX_PORT,
+  type PostInstallNote,
+  SIDECAR_URL,
+} from "./agents.js";
 
 type Detection = { agent: Agent; installed: boolean };
 
@@ -70,6 +76,7 @@ export async function runInstall(): Promise<void> {
   }
 
   const summary: string[] = [];
+  const followUps: { agent: string; notes: PostInstallNote[] }[] = [];
   for (const id of selected) {
     const agent = AGENTS.find((a) => a.id === id);
     if (!agent) continue;
@@ -78,6 +85,16 @@ export async function runInstall(): Promise<void> {
       summary.push(
         `  ${pc.green("✓")} ${pc.bold(agent.displayName)} ${pc.dim(`→ ${tildeify(agent.configFile)}`)}${result.backupPath ? pc.dim(` (backup: ${path.basename(result.backupPath)})`) : ""}`,
       );
+      if (agent.postInstallChecks) {
+        try {
+          const notes = await agent.postInstallChecks();
+          if (notes.length > 0) {
+            followUps.push({ agent: agent.displayName, notes });
+          }
+        } catch {
+          // Post-install checks are best-effort; don't fail the whole flow.
+        }
+      }
     } catch (err) {
       summary.push(
         `  ${pc.red("✗")} ${pc.bold(agent.displayName)} ${pc.red(err instanceof Error ? err.message : String(err))}`,
@@ -86,6 +103,33 @@ export async function runInstall(): Promise<void> {
   }
 
   p.note(summary.join("\n"), "Done");
+
+  for (const { agent, notes } of followUps) {
+    for (const note of notes) {
+      const tag =
+        note.level === "action"
+          ? pc.bgYellow(pc.black(" action needed "))
+          : note.level === "warn"
+            ? pc.yellow("!")
+            : pc.cyan("i");
+      p.log.warn(`${tag} ${pc.bold(agent)}\n${note.message}`);
+
+      if (note.fix) {
+        const apply = await p.confirm({
+          message: note.fix.prompt,
+          initialValue: true,
+        });
+        if (!p.isCancel(apply) && apply) {
+          const result = await note.fix.apply();
+          if (result.ok) {
+            p.log.info(`${pc.green("✓")} ${result.message}`);
+          } else {
+            p.log.warn(`${pc.red("✗")} ${result.message}`);
+          }
+        }
+      }
+    }
+  }
 
   const status = desktopStatus();
   if (status.state === "running") {
