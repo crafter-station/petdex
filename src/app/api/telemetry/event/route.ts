@@ -18,15 +18,16 @@ const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SEMVER_RE = /^\d+\.\d+\.\d+/;
 
-type RawBody = Record<string, unknown>;
+// Hard caps so a malicious payload can't blow up storage or downstream
+// summary queries. The endpoint is public + unauthenticated.
+const MAX_VERSION_LEN = 64;
+const MAX_AGENTS = 8;
+const MAX_AGENT_LEN = 64;
+const MAX_STATE_LEN = 64;
+const MAX_AGENT_SOURCE_LEN = 64;
+const MAX_BODY_BYTES = 4096;
 
-function getIp(req: Request): string {
-  return (
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-    req.headers.get("x-real-ip") ??
-    "unknown"
-  );
-}
+type RawBody = Record<string, unknown>;
 
 function getCountry(req: Request): string | null {
   return (
@@ -36,7 +37,17 @@ function getCountry(req: Request): string | null {
   );
 }
 
-function validate(body: RawBody):
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function clipString(value: unknown, max: number): string | null {
+  return typeof value === "string" && value.length > 0
+    ? value.slice(0, max)
+    : null;
+}
+
+function validate(body: unknown):
   | {
       ok: true;
       data: {
@@ -52,6 +63,10 @@ function validate(body: RawBody):
       };
     }
   | { ok: false; error: string } {
+  if (!isPlainObject(body)) {
+    return { ok: false, error: "body must be a JSON object" };
+  }
+
   const installId = body.install_id;
   if (typeof installId !== "string" || !UUID_RE.test(installId)) {
     return { ok: false, error: "install_id must be a UUID v4" };
@@ -65,20 +80,21 @@ function validate(body: RawBody):
     };
   }
 
+  // Versions must be semver-shaped AND short. The regex caps the prefix
+  // but a string like "1.2.3" + 1 MB of trailing garbage still matches
+  // the prefix; clip explicitly.
+  const cliVersionRaw = clipString(body.cli_version, MAX_VERSION_LEN);
   const cliVersion =
-    typeof body.cli_version === "string" && SEMVER_RE.test(body.cli_version)
-      ? body.cli_version
-      : null;
+    cliVersionRaw && SEMVER_RE.test(cliVersionRaw) ? cliVersionRaw : null;
 
+  const binaryVersionRaw = clipString(body.binary_version, MAX_VERSION_LEN);
   const binaryVersion =
-    typeof body.binary_version === "string" &&
-    SEMVER_RE.test(body.binary_version)
-      ? body.binary_version
+    binaryVersionRaw && SEMVER_RE.test(binaryVersionRaw)
+      ? binaryVersionRaw
       : null;
 
   const os =
     typeof body.os === "string" && VALID_OS.has(body.os) ? body.os : null;
-
   const arch =
     typeof body.arch === "string" && VALID_ARCH.has(body.arch)
       ? body.arch
@@ -86,16 +102,15 @@ function validate(body: RawBody):
 
   let agents: string[] | null = null;
   if (Array.isArray(body.agents)) {
-    agents = body.agents.filter((a): a is string => typeof a === "string");
+    agents = body.agents
+      .filter((a): a is string => typeof a === "string")
+      .slice(0, MAX_AGENTS)
+      .map((a) => a.slice(0, MAX_AGENT_LEN));
+    if (agents.length === 0) agents = null;
   }
 
-  const state =
-    typeof body.state === "string" ? body.state.slice(0, 256) : null;
-
-  const agentSource =
-    typeof body.agent_source === "string"
-      ? body.agent_source.slice(0, 128)
-      : null;
+  const state = clipString(body.state, MAX_STATE_LEN);
+  const agentSource = clipString(body.agent_source, MAX_AGENT_SOURCE_LEN);
 
   return {
     ok: true,
@@ -114,27 +129,39 @@ function validate(body: RawBody):
 }
 
 export async function POST(req: Request): Promise<Response> {
-  const ip = getIp(req);
+  // Rate-limit by IP. We never store the IP itself or log it — the
+  // privacy page promises country-only.
+  const xff = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  const rateLimitKey =
+    xff ?? req.headers.get("x-real-ip") ?? "unknown-anonymous";
 
-  const rl = await telemetryRatelimit.limit(ip);
+  const rl = await telemetryRatelimit.limit(rateLimitKey);
   if (!rl.success) {
     return new Response(null, { status: 429 });
   }
 
-  let body: RawBody;
+  // Reject obviously oversized bodies before reading them. Express
+  // through both Content-Length and a fallback streaming length cap.
+  const contentLength = Number(req.headers.get("content-length") ?? "0");
+  if (contentLength > MAX_BODY_BYTES) {
+    return new Response(JSON.stringify({ error: "payload_too_large" }), {
+      status: 413,
+      headers: { "content-type": "application/json" },
+    });
+  }
+
+  let parsed: unknown;
   try {
-    body = (await req.json()) as RawBody;
+    parsed = await req.json();
   } catch {
-    console.warn("[telemetry] invalid JSON from", ip);
     return new Response(JSON.stringify({ error: "invalid_json" }), {
       status: 400,
       headers: { "content-type": "application/json" },
     });
   }
 
-  const result = validate(body);
+  const result = validate(parsed);
   if (!result.ok) {
-    console.warn("[telemetry] validation failed:", result.error, "ip:", ip);
     return new Response(JSON.stringify({ error: result.error }), {
       status: 400,
       headers: { "content-type": "application/json" },
@@ -157,7 +184,12 @@ export async function POST(req: Request): Promise<Response> {
       country,
     });
   } catch (err) {
-    console.error("[telemetry] insert failed:", err);
+    // Swallow DB errors but log a sanitized message — never the IP, and
+    // never the raw body (which could carry user-controlled strings).
+    console.error(
+      "[telemetry] insert failed:",
+      err instanceof Error ? err.message : "unknown error",
+    );
     return new Response(null, { status: 204 });
   }
 
