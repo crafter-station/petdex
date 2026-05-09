@@ -2,7 +2,7 @@
     .id = "run.crafter.petdex-desktop",
     .name = "petdex-desktop",
     .display_name = "Petdex",
-    .version = "0.1.2",
+    .version = "0.1.3",
     .platforms = .{ "macos" },
     .permissions = .{ "window" },
     .capabilities = .{ "webview", "js_bridge" },
