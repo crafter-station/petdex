@@ -16,8 +16,10 @@
  */
 
 import { spawn } from "node:child_process";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import {
   appendFileSync,
+  chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -32,6 +34,7 @@ const RUNTIME_DIR = join(homedir(), ".petdex", "runtime");
 const STATE_PATH = join(RUNTIME_DIR, "state.json");
 const UPDATE_PATH = join(RUNTIME_DIR, "update.json");
 const UPDATE_LOG_PATH = join(RUNTIME_DIR, "update.log");
+const UPDATE_TOKEN_PATH = join(RUNTIME_DIR, "update-token");
 const VERSION_FILE = join(homedir(), ".petdex", "version");
 const LOG_PATH = join(RUNTIME_DIR, "sidecar.log");
 const MAX_BODY_BYTES = 64 * 1024;
@@ -39,6 +42,7 @@ const RELEASE_API =
   "https://api.github.com/repos/crafter-station/petdex/releases/latest";
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
 const UPDATE_CHECK_INITIAL_DELAY_MS = 30 * 1000; // 30s after launch
+const UPDATE_TOKEN_HEADER = "x-petdex-update-token";
 
 const VALID_STATES = new Set([
   "idle",
@@ -53,6 +57,102 @@ const VALID_STATES = new Set([
 ]);
 
 mkdirSync(RUNTIME_DIR, { recursive: true });
+
+// Generate a fresh per-session token for POST /update. Without this any
+// website the user visits could fire `fetch("http://127.0.0.1:7777/update",
+// { method: "POST", mode: "no-cors" })` and trigger a silent npm install
+// of arbitrary `petdex@latest` code — CORS only blocks the response,
+// never the request itself.
+//
+// The token is written to ~/.petdex/runtime/update-token (mode 0600 so
+// only the user can read it). The Zig bridge reads it from disk and
+// forwards it as a header when curl-ing the sidecar; remote websites
+// can't read user files, so they can't forge the header.
+const UPDATE_TOKEN = randomBytes(32).toString("hex");
+try {
+  writeFileSync(UPDATE_TOKEN_PATH, UPDATE_TOKEN, { mode: 0o600 });
+  // writeFile mode applies on create only — chmod again so a leftover
+  // token from a previous session can't widen the permissions.
+  chmodSync(UPDATE_TOKEN_PATH, 0o600);
+} catch (err) {
+  // If we can't persist the token, /update is effectively disabled
+  // because the bridge has nothing to send. That's an acceptable
+  // failure mode (auto-update is off; user can still run `petdex
+  // update` manually).
+  process.stderr.write(
+    `petdex sidecar: could not persist update token: ${(err as Error).message}\n`,
+  );
+}
+
+// ─── Telemetry: desktop_first_state_received ─────────────────────────
+//
+// The dashboard's funnel ends with "first hook event reached the
+// mascot". The sidecar is the single source of truth for that — every
+// hook curl-POSTs /state. Emit once per sidecar session, keyed off
+// the same install_id the CLI uses.
+
+const TELEMETRY_FILE = join(homedir(), ".petdex", "telemetry.json");
+const TELEMETRY_ENDPOINT =
+  process.env.PETDEX_TELEMETRY_URL ??
+  "https://petdex.crafter.run/api/telemetry/event";
+let firstStateEmitted = false;
+
+function readTelemetryConfig(): {
+  install_id: string;
+  enabled: boolean;
+} | null {
+  if (process.env.PETDEX_TELEMETRY === "0") return null;
+  if (!existsSync(TELEMETRY_FILE)) return null;
+  try {
+    const raw = JSON.parse(readFileSync(TELEMETRY_FILE, "utf8")) as {
+      install_id?: unknown;
+      enabled?: unknown;
+    };
+    if (typeof raw.install_id !== "string") return null;
+    if (raw.enabled === false) return null;
+    return { install_id: raw.install_id, enabled: true };
+  } catch {
+    return null;
+  }
+}
+
+function emitFirstStateReceived(state: string, agentSource: string | null) {
+  if (firstStateEmitted) return;
+  firstStateEmitted = true;
+  const cfg = readTelemetryConfig();
+  if (!cfg) return;
+  const body = JSON.stringify({
+    install_id: cfg.install_id,
+    event: "desktop_first_state_received",
+    state,
+    agent_source: agentSource,
+  });
+  // Fire-and-forget. AbortSignal.timeout protects against a stuck
+  // network; the unref()-style behavior we want comes from running
+  // inside the sidecar (already a long-lived process), so we don't
+  // need to spawn a worker like the CLI does.
+  fetch(TELEMETRY_ENDPOINT, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body,
+    signal: AbortSignal.timeout(2000),
+  }).catch(() => {
+    // Swallow telemetry errors — they're not actionable here.
+  });
+}
+
+function constantTimeEquals(a: string, b: string): boolean {
+  // timingSafeEqual requires equal-length buffers; pad to the longer
+  // before comparing so a length mismatch is also constant-time.
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ab.length !== bb.length) {
+    // Still run a fixed-cost comparison so we don't leak length.
+    timingSafeEqual(ab, ab);
+    return false;
+  }
+  return timingSafeEqual(ab, bb);
+}
 
 function log(line: string) {
   const stamped = `[${new Date().toISOString()}] ${line}\n`;
@@ -309,7 +409,11 @@ const server = http.createServer(async (req, res) => {
       } catch {
         return jsonResponse(res, 400, { ok: false, error: "invalid_json" });
       }
-      const data = body as { state?: unknown; duration?: unknown };
+      const data = body as {
+        state?: unknown;
+        duration?: unknown;
+        agent_source?: unknown;
+      };
       const state = typeof data.state === "string" ? data.state : null;
       if (!state || !VALID_STATES.has(state)) {
         return jsonResponse(res, 400, {
@@ -322,8 +426,15 @@ const server = http.createServer(async (req, res) => {
         typeof data.duration === "number" && data.duration > 0
           ? Math.min(data.duration, 30_000)
           : undefined;
+      const agentSource =
+        typeof data.agent_source === "string"
+          ? data.agent_source.slice(0, 64)
+          : null;
       writeState(state, duration);
       log(`state=${state} duration=${duration ?? "-"}`);
+      // Funnel terminal step: emit once on the first accepted state of
+      // this sidecar session. Any subsequent hook hits are no-ops.
+      emitFirstStateReceived(state, agentSource);
       return jsonResponse(res, 200, {
         ok: true,
         state,
@@ -337,6 +448,17 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && url.pathname === "/update") {
+      // Token gate: defends against drive-by CSRF from any site the
+      // user visits. The Zig bridge reads ~/.petdex/runtime/update-token
+      // (mode 0600) and forwards it as a header; browsers can't read
+      // user files so they can't forge it. timingSafeEqual prevents
+      // a length-leak via response time.
+      const provided = req.headers[UPDATE_TOKEN_HEADER];
+      const providedStr = Array.isArray(provided) ? provided[0] : provided;
+      if (!providedStr || !constantTimeEquals(providedStr, UPDATE_TOKEN)) {
+        return jsonResponse(res, 401, { ok: false, error: "unauthorized" });
+      }
+
       // Click handler. Idempotent: if an update is already running we
       // just return the current state.
       const info = readUpdateInfo();

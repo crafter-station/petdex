@@ -756,12 +756,35 @@ const PetdexState = struct {
     fn triggerUpdateCmd(context: *anyopaque, invocation: zero_native.bridge.Invocation, output: []u8) anyerror![]const u8 {
         _ = invocation;
         const self: *PetdexState = @ptrCast(@alignCast(context));
-        // Spawn `curl -fsS -X POST http://127.0.0.1:7777/update` detached.
-        // curl ships with macOS and most Linux distros, so this beats
-        // pulling in a Zig HTTP client just for one fire-and-forget POST.
-        // The sidecar handles the actual `npx petdex update --silent`
-        // logic and writes status back to update.json, which the
-        // WebView polls.
+        // Read the per-session token the sidecar wrote to ~/.petdex/
+        // runtime/update-token (mode 0600). Forward it as a header so
+        // a drive-by website can't trigger this endpoint via no-cors.
+        const token_path = try std.fs.path.join(self.allocator, &.{ self.config_dir, "runtime", "update-token" });
+        defer self.allocator.free(token_path);
+        var token_file = std.Io.Dir.openFileAbsolute(self.io, token_path, .{}) catch {
+            return std.fmt.bufPrint(output, "{{\"ok\":false,\"error\":\"no_token\"}}", .{});
+        };
+        defer token_file.close(self.io);
+        var token_buf: [128]u8 = undefined;
+        const token_read = token_file.readPositionalAll(self.io, &token_buf, 0) catch {
+            return std.fmt.bufPrint(output, "{{\"ok\":false,\"error\":\"token_read\"}}", .{});
+        };
+        const token = std.mem.trim(u8, token_buf[0..token_read], " \t\r\n");
+        if (token.len == 0) {
+            return std.fmt.bufPrint(output, "{{\"ok\":false,\"error\":\"empty_token\"}}", .{});
+        }
+
+        // Build "X-Petdex-Update-Token: <token>" header arg.
+        const header_arg = try std.fmt.allocPrint(
+            self.allocator,
+            "X-Petdex-Update-Token: {s}",
+            .{token},
+        );
+        defer self.allocator.free(header_arg);
+
+        // Spawn `curl -fsS -X POST -H "..." http://127.0.0.1:7777/update`
+        // detached. curl ships with macOS and most Linux distros, so this
+        // beats pulling in a Zig HTTP client for one fire-and-forget POST.
         const argv = &[_][]const u8{
             "curl",
             "-fsS",
@@ -769,6 +792,8 @@ const PetdexState = struct {
             "5",
             "-X",
             "POST",
+            "-H",
+            header_arg,
             "http://127.0.0.1:7777/update",
         };
         _ = std.process.spawn(self.io, .{
