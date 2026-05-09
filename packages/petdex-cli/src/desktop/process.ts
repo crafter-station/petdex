@@ -174,10 +174,16 @@ export async function startDesktop(): Promise<StartResult> {
 }
 
 export type StopResult =
-  | { ok: true; pid: number }
+  | { ok: true; pid: number; portReleased: boolean }
   | { ok: false; reason: string };
 
-export function stopDesktop(): StopResult {
+const SIDECAR_PORT = 7777;
+
+export async function stopDesktop(
+  options: { sidecarPort?: number; portWaitTimeoutMs?: number } = {},
+): Promise<StopResult> {
+  const sidecarPort = options.sidecarPort ?? SIDECAR_PORT;
+  const portWaitTimeoutMs = options.portWaitTimeoutMs ?? 5_000;
   const status = desktopStatus();
   if (status.state === "stopped") {
     return { ok: false, reason: "petdex-desktop is not running" };
@@ -193,17 +199,53 @@ export function stopDesktop(): StopResult {
     };
   }
   const pid = status.pid;
+  // TOCTOU shrink: re-verify identity right before signalling. The
+  // window between desktopStatus() and process.kill() is ~ms; a pid
+  // recycle in that window is essentially impossible on macOS, but
+  // re-checking is microseconds and removes the residual race. We
+  // re-read the pid file so we're comparing against the record we
+  // believed in, not state from a stale closure.
+  const recheckRecord = readPidFile();
+  if (recheckRecord === null || !pidMatchesRecord(recheckRecord)) {
+    clearPidFile();
+    return {
+      ok: false,
+      reason: `petdex-desktop exited before stop (pid ${pid} no longer alive)`,
+    };
+  }
   try {
     process.kill(pid, "SIGTERM");
   } catch (err) {
     clearPidFile();
+    const code = (err as NodeJS.ErrnoException).code;
+    // ESRCH means the process exited between our re-check and this
+    // kill (microsecond window). From the user's perspective "stop"
+    // succeeded — the process is gone.
+    if (code === "ESRCH") {
+      // Try the port wait anyway — the sidecar may still be alive
+      // because the desktop binary is its parent, not us.
+      const released = await waitForPortRelease(sidecarPort, {
+        timeoutMs: portWaitTimeoutMs,
+      });
+      return { ok: true, pid, portReleased: released };
+    }
     return {
       ok: false,
       reason: `Failed to signal pid ${pid}: ${(err as Error).message}`,
     };
   }
   clearPidFile();
-  return { ok: true, pid };
+  // Wait for the sidecar to actually release :7777 before we tell
+  // the caller "stopped". Without this wait `petdex desktop stop &&
+  // petdex desktop start` races: the new desktop spawns its own
+  // sidecar before the old one has noticed its parent is gone (the
+  // sidecar's parent watchdog polls every 2s), and the new sidecar
+  // crashes on EADDRINUSE. The cap is 5s — well above the 2s
+  // watchdog interval plus the HTTP server's drain time.
+  const portReleased = await waitForPortRelease(sidecarPort, {
+    timeoutMs: portWaitTimeoutMs,
+  });
+  return { ok: true, pid, portReleased };
 }
 
 export async function cmdDesktopStart(): Promise<void> {
@@ -222,13 +264,28 @@ export async function cmdDesktopStart(): Promise<void> {
   }
 }
 
-export function cmdDesktopStop(): void {
-  const result = stopDesktop();
+export async function cmdDesktopStop(): Promise<void> {
+  const result = await stopDesktop();
   if (!result.ok) {
     console.error(`${pc.dim("•")} ${result.reason}`);
     process.exit(result.reason.includes("not running") ? 0 : 1);
   }
-  console.log(`${pc.green("✓")} stopped pid ${result.pid}`);
+  // If the sidecar is still holding :7777 after our 5s cap, warn
+  // the user — the next `petdex desktop start` could fail with
+  // EADDRINUSE. Better to surface it now than have the next start
+  // command produce a confusing error.
+  if (result.portReleased) {
+    console.log(`${pc.green("✓")} stopped pid ${result.pid}`);
+  } else {
+    console.log(
+      `${pc.yellow("!")} stopped pid ${result.pid}, but :${SIDECAR_PORT} still busy`,
+    );
+    console.log(
+      pc.dim(
+        `  if 'petdex desktop start' fails with EADDRINUSE, wait a moment and retry`,
+      ),
+    );
+  }
 }
 
 /**

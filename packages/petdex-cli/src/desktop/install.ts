@@ -368,12 +368,47 @@ const DEFAULT_PET_SLUG = "boba";
 const PETDEX_URL =
   process.env.PETDEX_URL ?? "https://petdex.crafter.run";
 
+// Hosts we trust for serving pet assets (spritesheet + pet.json).
+// Mirrored from src/lib/url-allowlist.ts (the server-side validation
+// for /api/submit). The manifest API is itself trusted (we control
+// PETDEX_URL), but the URLs IT returns are still data — if the
+// manifest were ever compromised, or PETDEX_URL got pointed at a
+// malicious origin in CI/dev, an unrestricted fetch would write
+// attacker-controlled bytes to ~/.petdex/pets and ~/.codex/pets.
+// Keep this list in sync with the server-side allowlist.
+const TRUSTED_ASSET_HOSTS = new Set<string>([
+  // R2 public bucket (current asset origin).
+  "pub-94495283df974cfea5e98d6a9e3fa462.r2.dev",
+  // Legacy UploadThing host. Rows from before the R2 migration still
+  // point here; safe for GET because UT URLs are user-uploaded but
+  // namespaced. Drop when no manifest entries reference UT anymore.
+  "yu2vz9gndp.ufs.sh",
+]);
+
+function isTrustedAssetUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:") return false;
+    return TRUSTED_ASSET_HOSTS.has(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
+// Lazy HOME lookup so tests can swap process.env.HOME and have the
+// pets dirs land in their tmpdir. os.homedir() ignores HOME on
+// macOS — we prefer process.env.HOME, falling back to homedir() when
+// unset (e.g. in real CLI usage).
+function homeDir(): string {
+  return process.env.HOME ?? homedir();
+}
+
 function petsRoot(): string {
-  return path.join(homedir(), ".petdex", "pets");
+  return path.join(homeDir(), ".petdex", "pets");
 }
 
 function codexPetsRoot(): string {
-  return path.join(homedir(), ".codex", "pets");
+  return path.join(homeDir(), ".codex", "pets");
 }
 
 // True only if at least one pet directory under either canonical
@@ -404,7 +439,17 @@ async function hasAnyInstalledPet(): Promise<boolean> {
 // — the binary still landed on disk and the user can install a pet
 // manually. Returns the slug it installed, or null if it skipped
 // or failed.
-async function installStarterPet(): Promise<string | null> {
+export async function _installStarterPetForTest(
+  options: { fetchOverride?: typeof fetch; petdexUrl?: string } = {},
+): Promise<string | null> {
+  return installStarterPet(options);
+}
+
+async function installStarterPet(
+  options: { fetchOverride?: typeof fetch; petdexUrl?: string } = {},
+): Promise<string | null> {
+  const fetchImpl = options.fetchOverride ?? fetch;
+  const baseUrl = options.petdexUrl ?? PETDEX_URL;
   type Pet = {
     slug: string;
     displayName: string;
@@ -413,7 +458,7 @@ async function installStarterPet(): Promise<string | null> {
   };
   let pet: Pet | null = null;
   try {
-    const res = await fetch(`${PETDEX_URL}/api/manifest`, {
+    const res = await fetchImpl(`${baseUrl}/api/manifest`, {
       signal: AbortSignal.timeout(8_000),
     });
     if (!res.ok) return null;
@@ -430,17 +475,36 @@ async function installStarterPet(): Promise<string | null> {
   }
   if (!pet) return null;
 
+  // Belt-and-braces: the server-side /api/manifest already filters
+  // submissions through the same allowlist, but a CLI installing
+  // bytes into the user's HOME shouldn't trust that boundary alone.
+  // If either URL fails the host check, abort the starter install
+  // entirely instead of writing attacker-controlled bytes.
+  if (
+    !isTrustedAssetUrl(pet.spritesheetUrl) ||
+    !isTrustedAssetUrl(pet.petJsonUrl)
+  ) {
+    return null;
+  }
+
   const ext = pet.spritesheetUrl.endsWith(".png") ? "png" : "webp";
   const targets = [
     path.join(petsRoot(), pet.slug),
     path.join(codexPetsRoot(), pet.slug),
   ];
+  // Track which dirs we created so we can roll back on partial
+  // failure. Without rollback an aborted starter install leaves
+  // empty pet directories that hasSpritesheet() correctly skips,
+  // but they clutter the collection and confuse hasAnyInstalledPet
+  // on retry.
+  const createdDirs: string[] = [];
   try {
     for (const t of targets) {
       await mkdir(t, { recursive: true });
+      createdDirs.push(t);
     }
     const fetchOrThrow = async (url: string): Promise<ArrayBuffer> => {
-      const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+      const res = await fetchImpl(url, { signal: AbortSignal.timeout(15_000) });
       if (!res.ok) throw new Error(`download ${url} → ${res.status}`);
       return res.arrayBuffer();
     };
@@ -456,6 +520,13 @@ async function installStarterPet(): Promise<string | null> {
     );
     return pet.slug;
   } catch {
+    // Partial-failure rollback: tear down the directories we just
+    // created so the user retrying doesn't see "starter pet exists"
+    // on a torn-up install.
+    const { rm } = await import("node:fs/promises");
+    await Promise.all(
+      createdDirs.map((d) => rm(d, { recursive: true, force: true })),
+    );
     return null;
   }
 }

@@ -11,6 +11,7 @@ import { join } from "node:path";
 
 import {
   _commitStagedForTest,
+  _installStarterPetForTest,
   fetchLatestRelease,
   type StagedFile,
 } from "./install";
@@ -248,5 +249,253 @@ describe("fetchLatestRelease", () => {
     globalThis.fetch = (async () =>
       new Response(JSON.stringify({}), { status: 403 })) as typeof fetch;
     await expect(fetchLatestRelease()).rejects.toThrow(/403/);
+  });
+});
+
+// ---- installStarterPet (Finding 1: starter pet on default flow) ----
+//
+// installStarterPet is the new safety net in `petdex install desktop`
+// for the user who installs the binary, hooks, and runs `desktop start`
+// without ever running `petdex install <slug>`. Without it the binary
+// would exit "No pets found". The test surface targets:
+//   - URL allowlist: untrusted hosts in the manifest must abort the
+//     install instead of writing attacker-controlled bytes
+//   - manifest fetch failure → returns null, no files touched
+//   - happy path → files land in both ~/.petdex/pets and ~/.codex/pets
+//   - partial download failure → rollback removes orphan directories
+
+const TRUSTED_HOST =
+  "https://pub-94495283df974cfea5e98d6a9e3fa462.r2.dev";
+
+describe("installStarterPet", () => {
+  const realHome = process.env.HOME;
+  let tmpHome: string;
+
+  beforeEach(() => {
+    tmpHome = mkdtempSync(join(tmpdir(), "petdex-starter-test-"));
+    process.env.HOME = tmpHome;
+  });
+
+  afterEach(() => {
+    process.env.HOME = realHome;
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  function petsDir(): string {
+    return join(tmpHome, ".petdex", "pets");
+  }
+  function codexPetsDir(): string {
+    return join(tmpHome, ".codex", "pets");
+  }
+
+  function makeFetch(
+    handler: (url: string) => Response | Promise<Response>,
+  ): typeof fetch {
+    return (async (url: string | URL) => {
+      return handler(url.toString());
+    }) as typeof fetch;
+  }
+
+  test("aborts when the manifest's spritesheetUrl is on an untrusted host", async () => {
+    const fetchImpl = makeFetch((url) => {
+      if (url.endsWith("/api/manifest")) {
+        return new Response(
+          JSON.stringify({
+            pets: [
+              {
+                slug: "boba",
+                displayName: "Boba",
+                spritesheetUrl: "https://evil.example.com/track.gif",
+                petJsonUrl: `${TRUSTED_HOST}/pets/boba/pet.json`,
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      // Should never reach asset URLs; fail loud if we do.
+      return new Response("not allowed", { status: 500 });
+    });
+
+    const result = await _installStarterPetForTest({
+      fetchOverride: fetchImpl,
+      petdexUrl: "https://petdex.test",
+    });
+
+    expect(result).toBeNull();
+    // No directories created — the host check happens before mkdir.
+    expect(existsSync(join(petsDir(), "boba"))).toBe(false);
+    expect(existsSync(join(codexPetsDir(), "boba"))).toBe(false);
+  });
+
+  test("aborts when petJsonUrl is on an untrusted host", async () => {
+    const fetchImpl = makeFetch((url) => {
+      if (url.endsWith("/api/manifest")) {
+        return new Response(
+          JSON.stringify({
+            pets: [
+              {
+                slug: "boba",
+                displayName: "Boba",
+                spritesheetUrl: `${TRUSTED_HOST}/pets/boba/spritesheet.webp`,
+                petJsonUrl: "http://attacker.lan/pet.json",
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response("not allowed", { status: 500 });
+    });
+
+    const result = await _installStarterPetForTest({
+      fetchOverride: fetchImpl,
+      petdexUrl: "https://petdex.test",
+    });
+
+    expect(result).toBeNull();
+  });
+
+  test("returns null when the manifest fetch fails", async () => {
+    const fetchImpl = makeFetch(() => new Response("nope", { status: 503 }));
+    const result = await _installStarterPetForTest({
+      fetchOverride: fetchImpl,
+      petdexUrl: "https://petdex.test",
+    });
+    expect(result).toBeNull();
+  });
+
+  test("returns null when the manifest has no pets", async () => {
+    const fetchImpl = makeFetch((url) => {
+      if (url.endsWith("/api/manifest")) {
+        return new Response(JSON.stringify({ pets: [] }), { status: 200 });
+      }
+      return new Response("not allowed", { status: 500 });
+    });
+    const result = await _installStarterPetForTest({
+      fetchOverride: fetchImpl,
+      petdexUrl: "https://petdex.test",
+    });
+    expect(result).toBeNull();
+  });
+
+  test("happy path: writes pet.json + spritesheet to both roots", async () => {
+    const fetchImpl = makeFetch((url) => {
+      if (url.endsWith("/api/manifest")) {
+        return new Response(
+          JSON.stringify({
+            pets: [
+              {
+                slug: "boba",
+                displayName: "Boba",
+                spritesheetUrl: `${TRUSTED_HOST}/pets/boba/spritesheet.webp`,
+                petJsonUrl: `${TRUSTED_HOST}/pets/boba/pet.json`,
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.endsWith("/spritesheet.webp")) {
+        return new Response("WEBP-BYTES", { status: 200 });
+      }
+      if (url.endsWith("/pet.json")) {
+        return new Response('{"displayName":"Boba"}', { status: 200 });
+      }
+      return new Response("not allowed", { status: 500 });
+    });
+
+    const result = await _installStarterPetForTest({
+      fetchOverride: fetchImpl,
+      petdexUrl: "https://petdex.test",
+    });
+
+    expect(result).toBe("boba");
+    for (const root of [petsDir(), codexPetsDir()]) {
+      const slugDir = join(root, "boba");
+      expect(existsSync(join(slugDir, "pet.json"))).toBe(true);
+      expect(existsSync(join(slugDir, "spritesheet.webp"))).toBe(true);
+      expect(readFileSync(join(slugDir, "pet.json"), "utf8")).toBe(
+        '{"displayName":"Boba"}',
+      );
+    }
+  });
+
+  test("partial failure: rolls back created directories", async () => {
+    let manifestCalls = 0;
+    const fetchImpl = makeFetch((url) => {
+      if (url.endsWith("/api/manifest")) {
+        manifestCalls += 1;
+        return new Response(
+          JSON.stringify({
+            pets: [
+              {
+                slug: "boba",
+                displayName: "Boba",
+                spritesheetUrl: `${TRUSTED_HOST}/pets/boba/spritesheet.webp`,
+                petJsonUrl: `${TRUSTED_HOST}/pets/boba/pet.json`,
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      // Spritesheet download fails — pet.json may have already
+      // landed.
+      if (url.endsWith("/spritesheet.webp")) {
+        return new Response("err", { status: 500 });
+      }
+      if (url.endsWith("/pet.json")) {
+        return new Response('{"displayName":"Boba"}', { status: 200 });
+      }
+      return new Response("not allowed", { status: 500 });
+    });
+
+    const result = await _installStarterPetForTest({
+      fetchOverride: fetchImpl,
+      petdexUrl: "https://petdex.test",
+    });
+
+    expect(result).toBeNull();
+    expect(manifestCalls).toBe(1);
+    // Rollback must remove BOTH target directories so the next retry
+    // doesn't see a half-installed pet.
+    expect(existsSync(join(petsDir(), "boba"))).toBe(false);
+    expect(existsSync(join(codexPetsDir(), "boba"))).toBe(false);
+  });
+
+  test("falls back to the first manifest entry when boba is missing", async () => {
+    const fetchImpl = makeFetch((url) => {
+      if (url.endsWith("/api/manifest")) {
+        return new Response(
+          JSON.stringify({
+            pets: [
+              {
+                slug: "fox",
+                displayName: "Fox",
+                spritesheetUrl: `${TRUSTED_HOST}/pets/fox/spritesheet.png`,
+                petJsonUrl: `${TRUSTED_HOST}/pets/fox/pet.json`,
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.endsWith("/spritesheet.png")) {
+        return new Response("PNG", { status: 200 });
+      }
+      if (url.endsWith("/pet.json")) {
+        return new Response('{"displayName":"Fox"}', { status: 200 });
+      }
+      return new Response("not allowed", { status: 500 });
+    });
+
+    const result = await _installStarterPetForTest({
+      fetchOverride: fetchImpl,
+      petdexUrl: "https://petdex.test",
+    });
+
+    expect(result).toBe("fox");
+    expect(existsSync(join(petsDir(), "fox", "spritesheet.png"))).toBe(true);
   });
 });

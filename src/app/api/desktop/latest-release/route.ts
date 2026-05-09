@@ -18,6 +18,19 @@ const DESKTOP_TAG_PREFIX = "desktop-v";
 const RELEASES_PAGE =
   "https://github.com/crafter-station/petdex/releases";
 
+// Hard-pin the redirect target to the petdex repo on github.com. The
+// `html_url` on the response is technically attacker-controlled (a
+// compromised GH response, an MITM, or a future API shape change
+// could surface a non-GH URL), and forwarding it blindly into a 307
+// turns this endpoint into an open redirect. Anything that fails the
+// prefix check falls back to the static releases page, which is
+// always safe.
+const SAFE_URL_PREFIX = "https://github.com/crafter-station/petdex/";
+
+function isTrustedReleaseUrl(url: string): boolean {
+  return url.startsWith(SAFE_URL_PREFIX);
+}
+
 type GhRelease = {
   tag_name?: string;
   html_url?: string;
@@ -44,9 +57,15 @@ async function resolveDesktopRelease(): Promise<string> {
         typeof r.tag_name === "string" &&
         r.tag_name.startsWith(DESKTOP_TAG_PREFIX),
     );
-    if (hit?.html_url) return hit.html_url;
+    // Trust html_url only when it points back at our own repo on
+    // github.com. Anything else gets discarded in favor of a URL we
+    // construct ourselves from the tag name (which we already
+    // validated by prefix, so it's a-z0-9.- safe).
+    if (hit?.html_url && isTrustedReleaseUrl(hit.html_url)) {
+      return hit.html_url;
+    }
     if (hit?.tag_name) {
-      return `https://github.com/crafter-station/petdex/releases/tag/${hit.tag_name}`;
+      return `${SAFE_URL_PREFIX}releases/tag/${hit.tag_name}`;
     }
     return RELEASES_PAGE;
   } catch {

@@ -1099,7 +1099,7 @@ async function cmdDesktop(args: string[]) {
       emit("cli_desktop_start_success", { cli_version: VERSION });
       break;
     case "stop":
-      cmdDesktopStop();
+      await cmdDesktopStop();
       break;
     case "status":
       cmdDesktopStatus();

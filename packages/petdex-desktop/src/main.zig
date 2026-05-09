@@ -598,6 +598,13 @@ const html_tail =
 const Pet = struct {
     slug: []u8,
     display_name: []u8,
+    // Absolute path of the pets root that contains this slug. We
+    // store it per-pet because we now read from BOTH ~/.petdex/pets
+    // AND ~/.codex/pets — picking just the first existing root
+    // (the old behavior) made an empty ~/.petdex/pets dir mask a
+    // populated ~/.codex/pets, and the binary would exit with "No
+    // pets in ...".
+    root: []u8,
 };
 
 fn spawnSidecar(allocator: std.mem.Allocator, io: std.Io, sidecar_dir: []const u8, env_map: *std.process.Environ.Map) !void {
@@ -669,13 +676,20 @@ const PetdexState = struct {
     allocator: std.mem.Allocator,
     io: std.Io,
     config_dir: []u8,
-    pets_dir: []u8,
+    // Every existing pets root in priority order (.petdex first,
+    // .codex second). Stored as a list rather than a single dir so
+    // setActiveCmd can resolve the correct root when the user
+    // installed a pet into ~/.codex/pets but NOT ~/.petdex/pets —
+    // the previous "first root wins" logic made an empty .petdex
+    // dir mask a populated .codex dir at startup.
+    pets_roots: [][]u8,
     asset_root: []u8,
     bridge_handlers: [5]zero_native.BridgeHandler = undefined,
 
     fn deinit(self: *PetdexState) void {
         self.allocator.free(self.config_dir);
-        self.allocator.free(self.pets_dir);
+        for (self.pets_roots) |r| self.allocator.free(r);
+        self.allocator.free(self.pets_roots);
         self.allocator.free(self.asset_root);
     }
 
@@ -721,7 +735,12 @@ const PetdexState = struct {
         // launch would crash in main()'s loadSpritesheet call until
         // the user manually edited active.json. Validating first
         // means a failed selection leaves the previous active intact.
-        const sprite = try loadSpritesheet(self.allocator, self.io, self.pets_dir, slug);
+        //
+        // We try each pets root in priority order (.petdex first,
+        // .codex second) and use the first one that has the slug.
+        // The picker would have shown the slug from whichever root
+        // it actually came from — we just need to find it again.
+        const sprite = try loadSpritesheetAcrossRoots(self.allocator, self.io, self.pets_roots, slug);
         defer self.allocator.free(sprite.bytes);
 
         var root_dir = try std.Io.Dir.openDirAbsolute(self.io, self.asset_root, .{});
@@ -891,15 +910,36 @@ fn pathExists(io: std.Io, absolute_path: []const u8) bool {
     return true;
 }
 
-fn resolvePetsDir(allocator: std.mem.Allocator, io: std.Io, env_map: *std.process.Environ.Map) ![]u8 {
+// Returns every existing pets root in priority order. Callers must
+// own and free the inner slices. Empty result means no canonical
+// pets root exists at all (fresh install, or HOME without .petdex
+// or .codex). Existing-but-empty roots are still returned — the
+// caller filters via listPetsAcrossRoots.
+//
+// Why not the old "first existing" behavior: an empty/broken
+// ~/.petdex/pets dir (left over from an aborted install, for
+// example) used to mask a populated ~/.codex/pets, and the binary
+// would exit "No pets". Reading both roots and merging fixes that.
+fn resolvePetsRoots(allocator: std.mem.Allocator, io: std.Io, env_map: *std.process.Environ.Map) ![][]u8 {
     const home = env_map.get("HOME") orelse return error.NoHome;
+    var roots: std.ArrayList([]u8) = .empty;
+    errdefer {
+        for (roots.items) |r| allocator.free(r);
+        roots.deinit(allocator);
+    }
     const petdex_path = try std.fs.path.join(allocator, &.{ home, ".petdex", "pets" });
-    if (pathExists(io, petdex_path)) return petdex_path;
-    allocator.free(petdex_path);
+    if (pathExists(io, petdex_path)) {
+        try roots.append(allocator, petdex_path);
+    } else {
+        allocator.free(petdex_path);
+    }
     const codex_path = try std.fs.path.join(allocator, &.{ home, ".codex", "pets" });
-    if (pathExists(io, codex_path)) return codex_path;
-    allocator.free(codex_path);
-    return error.NoPetsDirectory;
+    if (pathExists(io, codex_path)) {
+        try roots.append(allocator, codex_path);
+    } else {
+        allocator.free(codex_path);
+    }
+    return roots.toOwnedSlice(allocator);
 }
 
 fn resolveConfigDir(allocator: std.mem.Allocator, io: std.Io, env_map: *std.process.Environ.Map) ![]u8 {
@@ -961,19 +1001,80 @@ fn hasSpritesheet(io: std.Io, parent: std.Io.Dir, slug: []const u8) bool {
 fn listPets(allocator: std.mem.Allocator, io: std.Io, pets_dir: []const u8) !std.ArrayList(Pet) {
     var dir = try std.Io.Dir.openDirAbsolute(io, pets_dir, .{ .iterate = true });
     defer dir.close(io);
-    return listPetsFromDir(allocator, io, dir);
+    return listPetsFromDir(allocator, io, dir, pets_dir);
 }
 
-// Same as listPets but takes an already-open Dir. Split out so tests
-// can drive it against a tmpDir without going through realpath() to
-// recover an absolute path. Production code paths through listPets;
-// the picker filtering and skip-logging behavior live here.
-fn listPetsFromDir(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir) !std.ArrayList(Pet) {
+// Iterates each root in priority order and returns the merged list.
+// Slug conflicts (same slug installed in BOTH .petdex and .codex)
+// resolve to the first occurrence — i.e. .petdex wins, since it
+// comes first in resolvePetsRoots. This matches the CLI install
+// behavior: `petdex install <slug>` writes to both roots, so they
+// should hold byte-identical copies and which root we pick from
+// doesn't matter when both have it. When only one root has it, we
+// surface that root's pet.
+fn listPetsAcrossRoots(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    roots: []const []u8,
+) !std.ArrayList(Pet) {
     var pets: std.ArrayList(Pet) = .empty;
     errdefer {
         for (pets.items) |p| {
             allocator.free(p.slug);
             allocator.free(p.display_name);
+            allocator.free(p.root);
+        }
+        pets.deinit(allocator);
+    }
+
+    var seen_slugs: std.StringHashMap(void) = .init(allocator);
+    defer seen_slugs.deinit();
+
+    for (roots) |root_path| {
+        var dir = std.Io.Dir.openDirAbsolute(io, root_path, .{ .iterate = true }) catch continue;
+        defer dir.close(io);
+        var iter = dir.iterate();
+        while (try iter.next(io)) |entry| {
+            if (entry.kind != .directory) continue;
+            if (seen_slugs.contains(entry.name)) continue;
+            if (!hasSpritesheet(io, dir, entry.name)) {
+                std.debug.print(
+                    "Skipping pet '{s}' in {s}: no spritesheet.webp or spritesheet.png\n",
+                    .{ entry.name, root_path },
+                );
+                continue;
+            }
+            const slug = try allocator.dupe(u8, entry.name);
+            errdefer allocator.free(slug);
+            const display_name = try readDisplayName(allocator, io, dir, entry.name) orelse try allocator.dupe(u8, entry.name);
+            errdefer allocator.free(display_name);
+            const root_copy = try allocator.dupe(u8, root_path);
+            errdefer allocator.free(root_copy);
+            try pets.append(allocator, .{
+                .slug = slug,
+                .display_name = display_name,
+                .root = root_copy,
+            });
+            try seen_slugs.put(slug, {});
+        }
+    }
+
+    std.mem.sort(Pet, pets.items, {}, petLessThan);
+    return pets;
+}
+
+// Same as listPets but takes an already-open Dir. Split out so tests
+// can drive it against a tmpDir without going through realpath() to
+// recover an absolute path. Production code paths through listPets
+// and listPetsAcrossRoots; the picker filtering and skip-logging
+// behavior live here.
+fn listPetsFromDir(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, root_path: []const u8) !std.ArrayList(Pet) {
+    var pets: std.ArrayList(Pet) = .empty;
+    errdefer {
+        for (pets.items) |p| {
+            allocator.free(p.slug);
+            allocator.free(p.display_name);
+            allocator.free(p.root);
         }
         pets.deinit(allocator);
     }
@@ -992,8 +1093,15 @@ fn listPetsFromDir(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir) !s
             continue;
         }
         const slug = try allocator.dupe(u8, entry.name);
+        errdefer allocator.free(slug);
         const display_name = try readDisplayName(allocator, io, dir, entry.name) orelse try allocator.dupe(u8, entry.name);
-        try pets.append(allocator, .{ .slug = slug, .display_name = display_name });
+        errdefer allocator.free(display_name);
+        const root_copy = try allocator.dupe(u8, root_path);
+        try pets.append(allocator, .{
+            .slug = slug,
+            .display_name = display_name,
+            .root = root_copy,
+        });
     }
 
     std.mem.sort(Pet, pets.items, {}, petLessThan);
@@ -1015,7 +1123,34 @@ fn readDisplayName(allocator: std.mem.Allocator, io: std.Io, parent: std.Io.Dir,
     return try allocator.dupe(u8, display);
 }
 
-fn loadSpritesheet(allocator: std.mem.Allocator, io: std.Io, pets_dir: []const u8, slug: []const u8) !struct { ext: []const u8, bytes: []u8 } {
+// Sprite payload returned by both loadSpritesheet and
+// loadSpritesheetAcrossRoots. Named struct so Zig keeps a single
+// nominal type instead of two anonymous structs that can't be
+// interchanged.
+const SpritePayload = struct { ext: []const u8, bytes: []u8 };
+
+// Find the slug across all roots in priority order, return the
+// first sprite that loads. Used by setActiveCmd because the slug
+// the picker handed us could live in either ~/.petdex/pets or
+// ~/.codex/pets and we don't carry the source root through the
+// bridge invocation payload.
+fn loadSpritesheetAcrossRoots(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    roots: []const []u8,
+    slug: []const u8,
+) !SpritePayload {
+    for (roots) |root_path| {
+        if (loadSpritesheet(allocator, io, root_path, slug)) |sprite| {
+            return sprite;
+        } else |_| {
+            // Try the next root.
+        }
+    }
+    return error.NoSpritesheet;
+}
+
+fn loadSpritesheet(allocator: std.mem.Allocator, io: std.Io, pets_dir: []const u8, slug: []const u8) !SpritePayload {
     var dir = try std.Io.Dir.openDirAbsolute(io, pets_dir, .{});
     defer dir.close(io);
     var pet_dir = try dir.openDir(io, slug, .{});
@@ -1034,7 +1169,7 @@ fn loadSpritesheet(allocator: std.mem.Allocator, io: std.Io, pets_dir: []const u
     return error.NoSpritesheet;
 }
 
-fn copyAllSpritesheets(allocator: std.mem.Allocator, io: std.Io, pets_dir: []const u8, asset_root: []const u8, pets: []const Pet) !void {
+fn copyAllSpritesheets(allocator: std.mem.Allocator, io: std.Io, asset_root: []const u8, pets: []const Pet) !void {
     var root_dir = try std.Io.Dir.openDirAbsolute(io, asset_root, .{});
     defer root_dir.close(io);
 
@@ -1045,12 +1180,15 @@ fn copyAllSpritesheets(allocator: std.mem.Allocator, io: std.Io, pets_dir: []con
         defer allocator.free(abs_sub);
         ensureDir(io, abs_sub) catch {};
 
-        if (isSpritesheetFresh(allocator, io, pets_dir, abs_sub, p.slug)) {
+        // Each pet now carries the absolute root it lives under, so
+        // the freshness check + sprite read use that root directly
+        // instead of assuming a single global pets_dir.
+        if (isSpritesheetFresh(allocator, io, p.root, abs_sub, p.slug)) {
             skipped += 1;
             continue;
         }
 
-        const sprite = loadSpritesheet(allocator, io, pets_dir, p.slug) catch continue;
+        const sprite = loadSpritesheet(allocator, io, p.root, p.slug) catch continue;
         defer allocator.free(sprite.bytes);
 
         var sub_dir = std.Io.Dir.openDirAbsolute(io, abs_sub, .{}) catch continue;
@@ -1221,22 +1359,30 @@ pub fn main(init: std.process.Init) !void {
     const config_dir = try resolveConfigDir(allocator, init.io, init.environ_map);
     defer allocator.free(config_dir);
 
-    const pets_dir = resolvePetsDir(allocator, init.io, init.environ_map) catch |err| {
+    const pets_roots = resolvePetsRoots(allocator, init.io, init.environ_map) catch |err| {
         std.debug.print("No pets found. Install one with `npx petdex install <slug>`.\n", .{});
         return err;
     };
-    defer allocator.free(pets_dir);
+    defer {
+        for (pets_roots) |r| allocator.free(r);
+        allocator.free(pets_roots);
+    }
+    if (pets_roots.len == 0) {
+        std.debug.print("No pets root exists. Install one with `npx petdex install <slug>`.\n", .{});
+        return error.NoPetsDirectory;
+    }
 
-    var pets = try listPets(allocator, init.io, pets_dir);
+    var pets = try listPetsAcrossRoots(allocator, init.io, pets_roots);
     defer {
         for (pets.items) |p| {
             allocator.free(p.slug);
             allocator.free(p.display_name);
+            allocator.free(p.root);
         }
         pets.deinit(allocator);
     }
     if (pets.items.len == 0) {
-        std.debug.print("No pets in {s}. Install one with `npx petdex install <slug>`.\n", .{pets_dir});
+        std.debug.print("No pets in any root. Install one with `npx petdex install <slug>`.\n", .{});
         return error.NoPets;
     }
 
@@ -1252,9 +1398,19 @@ pub fn main(init: std.process.Init) !void {
         break :blk pets.items[0].slug;
     };
 
+    // Find the root that owns the active slug — could be either
+    // .petdex/pets or .codex/pets.
+    const active_root = blk: {
+        for (pets.items) |p| {
+            if (std.mem.eql(u8, p.slug, active_slug)) break :blk p.root;
+        }
+        // Should be unreachable: active_slug was selected from pets.items.
+        break :blk pets.items[0].root;
+    };
+
     std.debug.print("Loading pet: {s} ({d} installed)\n", .{ active_slug, pets.items.len });
 
-    const sprite = try loadSpritesheet(allocator, init.io, pets_dir, active_slug);
+    const sprite = try loadSpritesheet(allocator, init.io, active_root, active_slug);
     defer allocator.free(sprite.bytes);
 
     const petdex_json = try buildPetdexJson(allocator, pets.items, active_slug);
@@ -1266,7 +1422,7 @@ pub fn main(init: std.process.Init) !void {
     const asset_root = try prepareAssetRoot(allocator, init.io, config_dir, html_doc, sprite.ext, sprite.bytes);
     defer allocator.free(asset_root);
 
-    try copyAllSpritesheets(allocator, init.io, pets_dir, asset_root, pets.items);
+    try copyAllSpritesheets(allocator, init.io, asset_root, pets.items);
 
     // Spawn the HTTP sidecar so external CLIs (Claude Code, Codex, Gemini, OpenCode,
     // shell scripts) can drive the mascot via POST /state. The CLI installs
@@ -1275,11 +1431,27 @@ pub fn main(init: std.process.Init) !void {
     defer allocator.free(sidecar_dir);
     try spawnSidecar(allocator, init.io, sidecar_dir, init.environ_map);
 
+    // Duplicate pets_roots into a state-owned slice so PetdexState's
+    // deinit can free it independently of the local lifetime of
+    // pets_roots above. Each entry is also dup'd so we don't share
+    // pointers.
+    var roots_for_state = try allocator.alloc([]u8, pets_roots.len);
+    {
+        var i: usize = 0;
+        errdefer {
+            for (roots_for_state[0..i]) |r| allocator.free(r);
+            allocator.free(roots_for_state);
+        }
+        while (i < pets_roots.len) : (i += 1) {
+            roots_for_state[i] = try allocator.dupe(u8, pets_roots[i]);
+        }
+    }
+
     var state = PetdexState{
         .allocator = allocator,
         .io = init.io,
         .config_dir = try allocator.dupe(u8, config_dir),
-        .pets_dir = try allocator.dupe(u8, pets_dir),
+        .pets_roots = roots_for_state,
         .asset_root = try allocator.dupe(u8, asset_root),
     };
     defer state.deinit();
@@ -1393,11 +1565,12 @@ test "listPetsFromDir: filters out pet dirs without a spritesheet" {
         try writeTestFile(sub, "spritesheet.png", "PNG");
     }
 
-    var pets = try listPetsFromDir(testing.allocator, testing_io, tmp.dir);
+    var pets = try listPetsFromDir(testing.allocator, testing_io, tmp.dir, "/test-root");
     defer {
         for (pets.items) |p| {
             testing.allocator.free(p.slug);
             testing.allocator.free(p.display_name);
+            testing.allocator.free(p.root);
         }
         pets.deinit(testing.allocator);
     }
@@ -1417,11 +1590,12 @@ test "listPetsFromDir: returns empty list when every pet dir is broken" {
     try tmp.dir.createDirPath(testing_io, "broken-a");
     try tmp.dir.createDirPath(testing_io, "broken-b");
 
-    var pets = try listPetsFromDir(testing.allocator, testing_io, tmp.dir);
+    var pets = try listPetsFromDir(testing.allocator, testing_io, tmp.dir, "/test-root");
     defer {
         for (pets.items) |p| {
             testing.allocator.free(p.slug);
             testing.allocator.free(p.display_name);
+            testing.allocator.free(p.root);
         }
         pets.deinit(testing.allocator);
     }
@@ -1439,11 +1613,12 @@ test "listPetsFromDir: prefers pet.json display_name over slug" {
     try writeTestFile(sub, "spritesheet.webp", "WEBP");
     try writeTestFile(sub, "pet.json", "{\"displayName\":\"Foxy\"}");
 
-    var pets = try listPetsFromDir(testing.allocator, testing_io, tmp.dir);
+    var pets = try listPetsFromDir(testing.allocator, testing_io, tmp.dir, "/test-root");
     defer {
         for (pets.items) |p| {
             testing.allocator.free(p.slug);
             testing.allocator.free(p.display_name);
+            testing.allocator.free(p.root);
         }
         pets.deinit(testing.allocator);
     }
@@ -1451,4 +1626,38 @@ test "listPetsFromDir: prefers pet.json display_name over slug" {
     try testing.expectEqual(@as(usize, 1), pets.items.len);
     try testing.expectEqualStrings("fox", pets.items[0].slug);
     try testing.expectEqualStrings("Foxy", pets.items[0].display_name);
+}
+
+test "listPetsFromDir: assigns the supplied root to every pet" {
+    var tmp = testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+
+    try tmp.dir.createDirPath(testing_io, "alpha");
+    var alpha = try tmp.dir.openDir(testing_io, "alpha", .{});
+    defer alpha.close(testing_io);
+    try writeTestFile(alpha, "spritesheet.webp", "WEBP");
+
+    try tmp.dir.createDirPath(testing_io, "bravo");
+    var bravo = try tmp.dir.openDir(testing_io, "bravo", .{});
+    defer bravo.close(testing_io);
+    try writeTestFile(bravo, "spritesheet.png", "PNG");
+
+    const sentinel_root = "/this/specific/path";
+    var pets = try listPetsFromDir(testing.allocator, testing_io, tmp.dir, sentinel_root);
+    defer {
+        for (pets.items) |p| {
+            testing.allocator.free(p.slug);
+            testing.allocator.free(p.display_name);
+            testing.allocator.free(p.root);
+        }
+        pets.deinit(testing.allocator);
+    }
+
+    // Pets must remember which root they came from. setActiveCmd
+    // and copyAllSpritesheets both rely on this to load sprites
+    // from the correct root when ~/.petdex/pets and ~/.codex/pets
+    // both exist.
+    try testing.expectEqual(@as(usize, 2), pets.items.len);
+    try testing.expectEqualStrings(sentinel_root, pets.items[0].root);
+    try testing.expectEqualStrings(sentinel_root, pets.items[1].root);
 }

@@ -209,7 +209,7 @@ export async function runUpdate(args: string[] = []): Promise<void> {
         ? "Stopping running petdex-desktop"
         : `${pc.dim("•")} Stopping running petdex-desktop`,
     );
-    stopDesktop();
+    await stopDesktop();
   }
 
   // Phase 3: commit. commitDesktopAssets rolls back from .prev

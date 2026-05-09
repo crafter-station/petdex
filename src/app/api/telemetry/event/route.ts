@@ -1,5 +1,6 @@
 import { createHmac } from "node:crypto";
 
+import { normalizeCountry } from "@/lib/country-code";
 import { db, schema } from "@/lib/db/client";
 import { telemetryRatelimit } from "@/lib/ratelimit";
 
@@ -74,12 +75,15 @@ async function readBodyCapped(
   return out;
 }
 
+// Validate the country header against ISO 3166-1 alpha-2 to keep
+// junk/spoofed values out of the admin geo dashboard. See
+// src/lib/country-code.ts for rationale and tests.
 function getCountry(req: Request): string | null {
-  return (
+  const raw =
     req.headers.get("x-vercel-ip-country") ??
     (req as Request & { geo?: { country?: string } }).geo?.country ??
-    null
-  );
+    null;
+  return normalizeCountry(raw);
 }
 
 /**

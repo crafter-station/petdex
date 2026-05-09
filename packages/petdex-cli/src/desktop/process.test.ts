@@ -175,7 +175,7 @@ describe("desktopStatus / stopDesktop pid-identity", () => {
     expect(desktopStatus()).toEqual({ state: "stopped" });
   });
 
-  test("legacy bare-pid format is treated as stale, never as running", () => {
+  test("legacy bare-pid format is treated as stale, never as running", async () => {
     // Old version of the CLI wrote just the integer. We must NOT
     // trust those records — without lstart we can't verify identity,
     // and if the OS reused that pid, signalling it would hit an
@@ -187,7 +187,10 @@ describe("desktopStatus / stopDesktop pid-identity", () => {
 
     // stop() must refuse to signal — and must clear the legacy file
     // so future runs start clean.
-    const stopRes = stopDesktop();
+    const stopRes = await stopDesktop({
+      sidecarPort: 47891, // unused port in tests
+      portWaitTimeoutMs: 200,
+    });
     expect(stopRes.ok).toBe(false);
     if (!stopRes.ok) {
       expect(stopRes.reason).toMatch(/not running/);
@@ -203,7 +206,10 @@ describe("desktopStatus / stopDesktop pid-identity", () => {
     expect(status.state).toBe("running");
     if (status.state === "running") expect(status.pid).toBe(pid);
 
-    const stopRes = stopDesktop();
+    const stopRes = await stopDesktop({
+      sidecarPort: 47891, // unused port in tests
+      portWaitTimeoutMs: 200,
+    });
     expect(stopRes.ok).toBe(true);
     if (stopRes.ok) expect(stopRes.pid).toBe(pid);
 
@@ -226,7 +232,7 @@ describe("desktopStatus / stopDesktop pid-identity", () => {
     expect(existsSync(pidPath)).toBe(false);
   });
 
-  test("recycled pid (wrong lstart) -> stale, stop refuses to signal", () => {
+  test("recycled pid (wrong lstart) -> stale, stop refuses to signal", async () => {
     // Spawn a proxy and grab its real lstart. Then write a record
     // with the SAME pid but a different lstart string — this models
     // "pid file says 12345 started Mon, but the live 12345 actually
@@ -246,7 +252,10 @@ describe("desktopStatus / stopDesktop pid-identity", () => {
     const status = desktopStatus();
     expect(status.state).toBe("stale");
 
-    const stopRes = stopDesktop();
+    const stopRes = await stopDesktop({
+      sidecarPort: 47891, // unused port in tests
+      portWaitTimeoutMs: 200,
+    });
     expect(stopRes.ok).toBe(false);
     if (!stopRes.ok) expect(stopRes.reason).toMatch(/not running/);
 
@@ -297,7 +306,10 @@ describe("desktopStatus / stopDesktop pid-identity", () => {
     const status = desktopStatus();
     expect(status.state).toBe("stale");
 
-    const stopRes = stopDesktop();
+    const stopRes = await stopDesktop({
+      sidecarPort: 47891, // unused port in tests
+      portWaitTimeoutMs: 200,
+    });
     expect(stopRes.ok).toBe(false);
     expect(existsSync(pidPath)).toBe(false);
   });
