@@ -29,6 +29,49 @@ const MAX_BODY_BYTES = 4096;
 
 type RawBody = Record<string, unknown>;
 
+class PayloadTooLargeError extends Error {
+  constructor() {
+    super("payload_too_large");
+  }
+}
+
+/**
+ * Read a ReadableStream into a UTF-8 string while enforcing a hard
+ * byte cap. Aborts the stream the moment we exceed `maxBytes` so a
+ * chunked / unlabeled body can't force the runtime to buffer the
+ * whole payload before validation.
+ */
+async function readBodyCapped(
+  body: ReadableStream<Uint8Array> | null,
+  maxBytes: number,
+): Promise<string> {
+  if (!body) return "";
+  const reader = body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let total = 0;
+  let out = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        try {
+          await reader.cancel();
+        } catch {
+          // best-effort
+        }
+        throw new PayloadTooLargeError();
+      }
+      out += decoder.decode(value, { stream: true });
+    }
+    out += decoder.decode();
+  } finally {
+    reader.releaseLock();
+  }
+  return out;
+}
+
 function getCountry(req: Request): string | null {
   return (
     req.headers.get("x-vercel-ip-country") ??
@@ -140,8 +183,7 @@ export async function POST(req: Request): Promise<Response> {
     return new Response(null, { status: 429 });
   }
 
-  // Reject obviously oversized bodies before reading them. Express
-  // through both Content-Length and a fallback streaming length cap.
+  // Cheap upfront reject when the client advertises an oversized body.
   const contentLength = Number(req.headers.get("content-length") ?? "0");
   if (contentLength > MAX_BODY_BYTES) {
     return new Response(JSON.stringify({ error: "payload_too_large" }), {
@@ -150,9 +192,29 @@ export async function POST(req: Request): Promise<Response> {
     });
   }
 
+  // Stream-cap fallback: chunked or unlabeled bodies don't have
+  // Content-Length, so a malicious client can still force the runtime
+  // to buffer a multi-MB body before validation runs. Read the stream
+  // ourselves and abort the moment we cross MAX_BODY_BYTES.
+  let bodyText: string;
+  try {
+    bodyText = await readBodyCapped(req.body, MAX_BODY_BYTES);
+  } catch (err) {
+    if (err instanceof PayloadTooLargeError) {
+      return new Response(JSON.stringify({ error: "payload_too_large" }), {
+        status: 413,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    return new Response(JSON.stringify({ error: "invalid_body" }), {
+      status: 400,
+      headers: { "content-type": "application/json" },
+    });
+  }
+
   let parsed: unknown;
   try {
-    parsed = await req.json();
+    parsed = bodyText.length === 0 ? null : JSON.parse(bodyText);
   } catch {
     return new Response(JSON.stringify({ error: "invalid_json" }), {
       status: 400,
