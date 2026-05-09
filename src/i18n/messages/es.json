@@ -69,7 +69,9 @@
     "openMore": "Más enlaces",
     "discover": "Descubrir",
     "make": "Crear",
-    "promote": "Promover"
+    "promote": "Promover",
+    "download": "Descargar",
+    "downloadDesc": "App de escritorio para macOS - tu mascota junto a cada agente"
   },
   "theme": {
     "toggle": "Cambiar tema",
@@ -1166,5 +1168,68 @@
   },
   "collectionDetail": {
     "backToCollections": "← Ver todas las colecciones"
+  },
+  "download": {
+    "eyebrow": "App de escritorio",
+    "title": "Petdex Desktop",
+    "subtitle": "Tu mascota, flotando junto a cada agente de programacion.",
+    "hero": {
+      "downloadCta": "Descargar para macOS",
+      "cliSubtext": "O instala via CLI"
+    },
+    "features": {
+      "eyebrow": "Que hace",
+      "title": "Una mascota que vive en tu flujo de trabajo",
+      "crossAgent": {
+        "title": "Reacciones entre agentes",
+        "description": "Los hooks se instalan en Claude Code, Codex CLI, Gemini CLI y OpenCode. Tu mascota reacciona a cada tool call."
+      },
+      "alwaysWithYou": {
+        "title": "Siempre contigo",
+        "description": "Flotante, sin marco, siempre encima. Arrastra con momentum, como Codex Desktop."
+      },
+      "pickYourFighter": {
+        "title": "Elige tu luchador",
+        "description": "Click derecho alterna 9 estados del sprite. Mas de 200 mascotas de la coleccion."
+      }
+    },
+    "setup": {
+      "eyebrow": "Empezar",
+      "title": "Listo en 30 segundos",
+      "step1": {
+        "title": "Instala el binario de escritorio"
+      },
+      "step2": {
+        "title": "Conecta tus agentes",
+        "hint": "Configura Claude Code, Codex, Gemini y OpenCode automaticamente"
+      },
+      "step3": {
+        "title": "Empieza a flotar"
+      },
+      "step4": {
+        "title": "Mantente actualizado",
+        "hint": "Descarga la ultima version del escritorio y reinicia la mascota si estaba corriendo. Corre cuando quieras."
+      }
+    },
+    "platforms": {
+      "eyebrow": "Soporte de plataformas",
+      "title": "Donde funciona",
+      "available": "Disponible",
+      "comingSoon": "Proximamente",
+      "macos": {
+        "name": "macOS",
+        "detail": "Apple Silicon e Intel"
+      },
+      "linux": {
+        "name": "Linux",
+        "detail": "Proximamente"
+      },
+      "windows": {
+        "name": "Windows",
+        "detail": "Proximamente"
+      },
+      "footer": "¿Quieres un lanzamiento mas rapido en Linux o Windows? Dale una estrella al repo o abre un issue."
+    },
+    "docsLink": "Leer la documentacion"
   }
 }

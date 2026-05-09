@@ -4,7 +4,7 @@ import { usePathname } from "next/navigation";
 import type { ComponentType } from "react";
 import { useEffect, useMemo, useState } from "react";
 
-import { CollectionsAnnouncementModal } from "@/components/collections-announcement-modal";
+import { DesktopAnnouncementModal } from "@/components/desktop-announcement-modal";
 import { GithubStarModal } from "@/components/github-star-modal";
 
 type QueuedAnnouncement = {
@@ -17,9 +17,9 @@ type QueuedAnnouncement = {
 const HOME_PATH_RE = /^\/(?:en|es|zh)?\/?$/;
 
 // Order matters — github-star runs first (permanent CTA), then the
-// collections launch announcement (one-shot per browser, dismissed via
-// localStorage). Onboarding tour and the original vibe-search
-// announcement were retired now that those features are mature.
+// desktop launch announcement (one-shot per browser, dismissed via
+// localStorage). The collections + vibe-search announcements were
+// retired now that those features are mature.
 const QUEUE: QueuedAnnouncement[] = [
   {
     id: "petdex_announce_github_star_v1",
@@ -28,10 +28,10 @@ const QUEUE: QueuedAnnouncement[] = [
     Component: GithubStarModal,
   },
   {
-    id: "petdex_announce_collections_v1",
+    id: "petdex_announce_desktop_v1",
     delayMs: 0,
     gateMs: 0,
-    Component: CollectionsAnnouncementModal,
+    Component: DesktopAnnouncementModal,
   },
 ];
 

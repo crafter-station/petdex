@@ -69,7 +69,9 @@
     "openMore": "More links",
     "discover": "Discover",
     "make": "Make",
-    "promote": "Promote"
+    "promote": "Promote",
+    "download": "Download",
+    "downloadDesc": "macOS desktop app - your pet beside every agent"
   },
   "theme": {
     "toggle": "Toggle theme",
@@ -1166,5 +1168,68 @@
   },
   "collectionDetail": {
     "backToCollections": "← All collections"
+  },
+  "download": {
+    "eyebrow": "Desktop app",
+    "title": "Petdex Desktop",
+    "subtitle": "Your pet, floating beside every coding agent.",
+    "hero": {
+      "downloadCta": "Download for macOS",
+      "cliSubtext": "Or install via CLI"
+    },
+    "features": {
+      "eyebrow": "What it does",
+      "title": "A pet that actually lives in your workflow",
+      "crossAgent": {
+        "title": "Cross-agent reactions",
+        "description": "Hooks install in Claude Code, Codex CLI, Gemini CLI, and OpenCode. Your pet reacts to each tool call."
+      },
+      "alwaysWithYou": {
+        "title": "Always with you",
+        "description": "Floating, frameless, on top. Drag with momentum, just like Codex Desktop."
+      },
+      "pickYourFighter": {
+        "title": "Pick your fighter",
+        "description": "Right-click cycles 9 sprite states. 200+ pets from the collection."
+      }
+    },
+    "setup": {
+      "eyebrow": "Get started",
+      "title": "Set up in 30 seconds",
+      "step1": {
+        "title": "Install the desktop binary"
+      },
+      "step2": {
+        "title": "Wire up your agents",
+        "hint": "Configures Claude Code, Codex, Gemini, and OpenCode automatically"
+      },
+      "step3": {
+        "title": "Start floating"
+      },
+      "step4": {
+        "title": "Stay updated",
+        "hint": "Pulls the latest desktop release and restarts the pet if it was running. Run any time."
+      }
+    },
+    "platforms": {
+      "eyebrow": "Platform support",
+      "title": "Where it runs",
+      "available": "Available",
+      "comingSoon": "Coming soon",
+      "macos": {
+        "name": "macOS",
+        "detail": "Apple Silicon and Intel"
+      },
+      "linux": {
+        "name": "Linux",
+        "detail": "Coming soon"
+      },
+      "windows": {
+        "name": "Windows",
+        "detail": "Coming soon"
+      },
+      "footer": "Want a faster Linux or Windows release? Star the repo or open an issue."
+    },
+    "docsLink": "Read the docs"
   }
 }
