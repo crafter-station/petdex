@@ -53,13 +53,18 @@ export function SubmittedBy({ credit }: SubmittedByProps) {
   const avatarUrl = showAvatar ? displayCredit.imageUrl : null;
   const profileHref = `/u/${displayCredit.handle}`;
 
+  // The card itself is a non-anchor div so we can host real
+  // <a> elements (the profile link + each external link) inside
+  // without HTML-spec-illegal interactive nesting. The outer div
+  // gets the visual hover treatment but no click handler — every
+  // interactive surface is its own focusable child element.
   return (
-    <Link
-      href={profileHref}
-      aria-label={t("viewProfile", { name: displayCredit.name })}
-      className="group block rounded-2xl border border-border-base bg-surface/76 p-4 backdrop-blur transition hover:border-border-strong hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
-    >
-      <div className="flex items-center gap-3">
+    <div className="group rounded-2xl border border-border-base bg-surface/76 p-4 backdrop-blur transition hover:border-border-strong hover:bg-surface">
+      <Link
+        href={profileHref}
+        aria-label={t("viewProfile", { name: displayCredit.name })}
+        className="flex items-center gap-3 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+      >
         {avatarUrl ? (
           <Image
             src={avatarUrl}
@@ -88,38 +93,33 @@ export function SubmittedBy({ credit }: SubmittedByProps) {
             ) : null}
           </div>
         </div>
-      </div>
+      </Link>
 
       {displayCredit.externals.length > 0 ? (
         <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-border-base pt-3">
           {displayCredit.externals.map((ext) => (
-            // Rendered as a button (not nested <a>, which would be
-            // invalid HTML inside the wrapping profile <Link>). The
-            // button calls window.open and stops propagation so the
-            // outer card click doesn't also fire.
-            <button
+            // Plain anchor now that we're not nested inside another
+            // <a>. target=_blank + rel=noopener mirrors the previous
+            // window.open call. The outer card no longer receives
+            // clicks so we don't need stopPropagation either.
+            <a
               key={ext.url}
-              type="button"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                window.open(ext.url, "_blank", "noopener,noreferrer");
-              }}
-              className="inline-flex h-7 max-w-full items-center gap-1.5 rounded-full border border-border-base bg-surface px-2.5 font-mono text-[11px] tracking-[0.04em] text-muted-2 transition hover:border-border-strong hover:bg-surface-muted"
+              href={ext.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex h-7 max-w-full items-center gap-1.5 rounded-full border border-border-base bg-surface px-2.5 font-mono text-[11px] tracking-[0.04em] text-muted-2 transition hover:border-border-strong hover:bg-surface-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
             >
               {ext.provider === "github" ? (
                 <GithubIcon className="size-3.5 shrink-0" />
               ) : (
                 <XIcon className="size-3 shrink-0" />
               )}
-              <span className="truncate whitespace-nowrap">
-                {ext.username}
-              </span>
-            </button>
+              <span className="truncate whitespace-nowrap">{ext.username}</span>
+            </a>
           ))}
         </div>
       ) : null}
-    </Link>
+    </div>
   );
 }
 
