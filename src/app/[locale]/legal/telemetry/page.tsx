@@ -64,11 +64,18 @@ export default function TelemetryPrivacyPage() {
                   <code className="font-mono text-xs">
                     cli_hooks_install_success
                   </code>
-                  , or{" "}
+                  ,{" "}
                   <code className="font-mono text-xs">
                     cli_desktop_start_success
                   </code>
-                  .
+                  , or{" "}
+                  <code className="font-mono text-xs">
+                    desktop_first_state_received
+                  </code>{" "}
+                  (the desktop sidecar emits this once per session when a hook
+                  first reaches the mascot — it lets us measure how many
+                  installs go all the way through the install, configure, and
+                  run flow).
                 </td>
               </tr>
               <tr className="border-b border-border-base/50">
@@ -76,7 +83,20 @@ export default function TelemetryPrivacyPage() {
                 <td className="py-2 pr-4 font-mono text-xs">semver</td>
                 <td className="py-2">
                   Version of the petdex CLI package (e.g.{" "}
-                  <code className="font-mono text-xs">0.1.2</code>).
+                  <code className="font-mono text-xs">0.1.4</code>).
+                </td>
+              </tr>
+              <tr className="border-b border-border-base/50">
+                <td className="py-2 pr-4 font-mono text-xs">binary_version</td>
+                <td className="py-2 pr-4 font-mono text-xs">semver</td>
+                <td className="py-2">
+                  Version of the desktop binary that was installed (e.g.{" "}
+                  <code className="font-mono text-xs">0.1.4</code>). Only sent
+                  on{" "}
+                  <code className="font-mono text-xs">
+                    cli_install_desktop_success
+                  </code>
+                  .
                 </td>
               </tr>
               <tr className="border-b border-border-base/50">
@@ -115,6 +135,35 @@ export default function TelemetryPrivacyPage() {
                     cli_hooks_install_success
                   </code>{" "}
                   event.
+                </td>
+              </tr>
+              <tr className="border-b border-border-base/50">
+                <td className="py-2 pr-4 font-mono text-xs">state</td>
+                <td className="py-2 pr-4 font-mono text-xs">enum</td>
+                <td className="py-2">
+                  Sprite animation state the first hook triggered (e.g.{" "}
+                  <code className="font-mono text-xs">running</code>,{" "}
+                  <code className="font-mono text-xs">idle</code>,{" "}
+                  <code className="font-mono text-xs">waving</code>). Only sent
+                  on{" "}
+                  <code className="font-mono text-xs">
+                    desktop_first_state_received
+                  </code>
+                  .
+                </td>
+              </tr>
+              <tr className="border-b border-border-base/50">
+                <td className="py-2 pr-4 font-mono text-xs">agent_source</td>
+                <td className="py-2 pr-4 font-mono text-xs">string</td>
+                <td className="py-2">
+                  Optional self-reported label of the agent that fired the first
+                  hook (e.g.{" "}
+                  <code className="font-mono text-xs">claude-code</code>).
+                  Capped at 64 characters and only sent on{" "}
+                  <code className="font-mono text-xs">
+                    desktop_first_state_received
+                  </code>{" "}
+                  if the hook command included it.
                 </td>
               </tr>
               <tr>

@@ -237,7 +237,7 @@ export default async function DownloadPage({
                   {t("setup.step2.title")}
                 </p>
                 <CommandLine
-                  command="petdex hooks install"
+                  command="npx petdex hooks install"
                   source="download-step2"
                   className="w-full max-w-sm"
                 />
@@ -254,7 +254,7 @@ export default async function DownloadPage({
                   {t("setup.step3.title")}
                 </p>
                 <CommandLine
-                  command="petdex desktop start"
+                  command="npx petdex desktop start"
                   source="download-step3"
                   className="w-full max-w-sm"
                 />
@@ -270,7 +270,7 @@ export default async function DownloadPage({
                   {t("setup.step4.title")}
                 </p>
                 <CommandLine
-                  command="petdex update"
+                  command="npx petdex update"
                   source="download-step4"
                   className="w-full max-w-sm"
                 />
