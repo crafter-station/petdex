@@ -152,10 +152,12 @@ async function stageDownload(
 async function commitStaged(staged: StagedFile[]): Promise<void> {
   const renamed: { from: string; backup: string }[] = [];
   for (const file of staged) {
+    // backup tracks the current iteration's snapshot before the catch
+    // block runs. Critical: if rename(tmp, dest) fails AFTER we moved
+    // dest -> dest.prev, the in-progress backup is NOT in `renamed`
+    // yet. The catch must restore it explicitly or we lose the file.
     let backup: string | null = null;
     try {
-      // Snapshot current dest to .prev so we can roll back if a later
-      // rename fails. Skipped silently if no current file exists.
       const prevPath = `${file.destPath}.prev`;
       try {
         await rename(file.destPath, prevPath);
@@ -167,7 +169,19 @@ async function commitStaged(staged: StagedFile[]): Promise<void> {
       await rename(file.tmpPath, file.destPath);
       renamed.push({ from: file.destPath, backup: backup ?? "" });
     } catch (err) {
-      // Roll back already-committed renames using their .prev snapshots.
+      // 1. Restore the in-progress backup first (before the failed rename
+      //    finished pushing to `renamed`). Without this, the existing
+      //    binary or sidecar is gone and the all-or-nothing guarantee
+      //    is broken.
+      if (backup) {
+        try {
+          await rm(file.destPath, { force: true });
+          await rename(backup, file.destPath);
+        } catch {
+          // best-effort
+        }
+      }
+      // 2. Roll back already-committed renames using their .prev snapshots.
       for (const r of renamed.reverse()) {
         if (!r.backup) continue;
         try {
@@ -177,7 +191,7 @@ async function commitStaged(staged: StagedFile[]): Promise<void> {
           // best-effort
         }
       }
-      // Clean up remaining .tmp files
+      // 3. Clean up remaining .tmp files.
       for (const f of staged) {
         try {
           await rm(f.tmpPath, { force: true });
