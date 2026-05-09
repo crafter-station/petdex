@@ -1032,7 +1032,7 @@ pub fn main(init: std.process.Init) !void {
     };
 
     try runner.runWithOptions(app.app(), .{
-        .app_name = "petdex-desktop",
+        .app_name = "Petdex",
         .window_title = "Petdex",
         .bundle_id = "run.crafter.petdex-desktop",
         .icon_path = "assets/icon.icns",
