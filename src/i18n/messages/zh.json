@@ -88,7 +88,10 @@
     "openMore": "更多链接",
     "discover": "发现",
     "make": "创作",
-    "promote": "推广"
+    "promote": "推广",
+    "download": "下载",
+    "downloadDesc": "macOS 桌面应用 - 让宠物在每个 AI 助手旁边",
+    "downloadDesc__fixme": true
   },
   "theme": {
     "toggle": "切换主题",
@@ -1334,5 +1337,97 @@
   },
   "collectionDetail": {
     "backToCollections": "← 返回全部合集"
+  },
+  "download": {
+    "eyebrow": "桌面应用",
+    "eyebrow__fixme": true,
+    "title": "Petdex Desktop",
+    "subtitle": "你的宠物，漂浮在每个编程助手身旁。",
+    "subtitle__fixme": true,
+    "hero": {
+      "downloadCta": "下载 macOS 版本",
+      "downloadCta__fixme": true,
+      "cliSubtext": "或通过 CLI 安装",
+      "cliSubtext__fixme": true
+    },
+    "features": {
+      "eyebrow": "功能介绍",
+      "eyebrow__fixme": true,
+      "title": "真正融入你工作流的宠物",
+      "title__fixme": true,
+      "crossAgent": {
+        "title": "跨助手响应",
+        "title__fixme": true,
+        "description": "在 Claude Code、Codex CLI、Gemini CLI 和 OpenCode 中安装钩子。宠物会响应每次工具调用。",
+        "description__fixme": true
+      },
+      "alwaysWithYou": {
+        "title": "始终陪伴",
+        "title__fixme": true,
+        "description": "无边框、置顶、可拖动，像 Codex Desktop 一样带有惯性效果。",
+        "description__fixme": true
+      },
+      "pickYourFighter": {
+        "title": "挑选你的伙伴",
+        "title__fixme": true,
+        "description": "右键切换 9 种动画状态。来自合集的 200+ 只宠物。",
+        "description__fixme": true
+      }
+    },
+    "setup": {
+      "eyebrow": "开始使用",
+      "eyebrow__fixme": true,
+      "title": "30 秒完成设置",
+      "title__fixme": true,
+      "step1": {
+        "title": "安装桌面二进制文件",
+        "title__fixme": true
+      },
+      "step2": {
+        "title": "连接你的 AI 助手",
+        "title__fixme": true,
+        "hint": "自动配置 Claude Code、Codex、Gemini 和 OpenCode",
+        "hint__fixme": true
+      },
+      "step3": {
+        "title": "开始漂浮",
+        "title__fixme": true
+      },
+      "step4": {
+        "title": "保持更新",
+        "title__fixme": true,
+        "hint": "拉取最新的桌面版本，并在运行时重启宠物。可随时执行。",
+        "hint__fixme": true
+      }
+    },
+    "platforms": {
+      "eyebrow": "平台支持",
+      "eyebrow__fixme": true,
+      "title": "运行环境",
+      "title__fixme": true,
+      "available": "可用",
+      "available__fixme": true,
+      "comingSoon": "即将推出",
+      "comingSoon__fixme": true,
+      "macos": {
+        "name": "macOS",
+        "detail": "Apple Silicon 和 Intel",
+        "detail__fixme": true
+      },
+      "linux": {
+        "name": "Linux",
+        "detail": "即将推出",
+        "detail__fixme": true
+      },
+      "windows": {
+        "name": "Windows",
+        "detail": "即将推出",
+        "detail__fixme": true
+      },
+      "footer": "希望更快上线 Linux 或 Windows 版本？请给仓库点星或提交 issue。",
+      "footer__fixme": true
+    },
+    "docsLink": "查看文档",
+    "docsLink__fixme": true
   }
 }
