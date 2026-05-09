@@ -1,6 +1,6 @@
 {
-  "id": "a-0010-email-preferences-only",
-  "prevId": "262ae20f-6769-44d9-bc20-8c6bcbb30f2b",
+  "id": "b07c25ac-8ec6-475b-9522-4b7b6dcf8c0c",
+  "prevId": "a-0010-email-preferences-only",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2673,6 +2673,138 @@
           "isUnique": false,
           "concurrently": false,
           "method": "gin",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.telemetry_events": {
+      "name": "telemetry_events",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "install_id": {
+          "name": "install_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "event": {
+          "name": "event",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cli_version": {
+          "name": "cli_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "binary_version": {
+          "name": "binary_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "os": {
+          "name": "os",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "arch": {
+          "name": "arch",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "agents": {
+          "name": "agents",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "agent_source": {
+          "name": "agent_source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "country": {
+          "name": "country",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "telemetry_install_id_idx": {
+          "name": "telemetry_install_id_idx",
+          "columns": [
+            {
+              "expression": "install_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "telemetry_event_idx": {
+          "name": "telemetry_event_idx",
+          "columns": [
+            {
+              "expression": "event",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "telemetry_created_at_idx": {
+          "name": "telemetry_created_at_idx",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
           "with": {}
         }
       },
