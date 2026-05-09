@@ -159,26 +159,35 @@ export async function runUpdate(args: string[] = []): Promise<void> {
 
   await writeFile(VERSION_FILE, `${release.tag_name}\n`);
 
-  // Phase 3: restart so the user picks up the new binary + sidecar.
-  // In --silent mode we skip the restart: when the sidecar that
-  // triggered this update gets killed by stopDesktop, child npm
-  // processes also get reaped if the user ran us under the desktop
-  // process tree. Leaving restart to the user (or to a follow-up
-  // notification) keeps the update predictable.
-  if (wasRunning && !silent) {
-    info(`${pc.dim("•")} Restarting petdex-desktop`);
+  // Phase 4: restart so the user picks up the new binary + sidecar.
+  // We restart in BOTH interactive and --silent modes. In silent mode
+  // the sidecar spawned us, then `stopDesktop()` killed the desktop
+  // (and its sidecar child), but `startDesktop()` re-spawns the
+  // desktop as a detached + unref'd process — it inherits no parent,
+  // so it survives the eventual exit of this updater. Without this
+  // restart, an in-app "update available" click leaves the user with
+  // no mascot at all and no WebView to read the "update done"
+  // message the sidecar wrote to update.json.
+  if (wasRunning) {
+    info(
+      silent
+        ? "Restarting petdex-desktop"
+        : `${pc.dim("•")} Restarting petdex-desktop`,
+    );
     const startResult = await startDesktop();
     if (startResult.ok) {
-      info(`${pc.green("✓")} Restarted (pid ${startResult.pid})`);
+      info(
+        silent
+          ? `Restarted (pid ${startResult.pid})`
+          : `${pc.green("✓")} Restarted (pid ${startResult.pid})`,
+      );
     } else {
       warn(
-        `${pc.yellow("!")} Could not restart: ${startResult.reason}. Run \`petdex desktop start\` manually.`,
+        silent
+          ? `Could not restart: ${startResult.reason}. Run 'petdex desktop start' manually.`
+          : `${pc.yellow("!")} Could not restart: ${startResult.reason}. Run \`petdex desktop start\` manually.`,
       );
     }
-  } else if (wasRunning && silent) {
-    info(
-      "Desktop was running; restart manually after the next launch notification.",
-    );
   }
 
   const note = installed
