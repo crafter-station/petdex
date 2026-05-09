@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { auth } from "@clerk/nextjs/server";
-import { eq } from "drizzle-orm";
+import { desc, eq, sql as dsql } from "drizzle-orm";
 
 import { isAdmin } from "@/lib/admin";
 import { type SendResult, sendBroadcast } from "@/lib/admin/send-broadcast";
@@ -11,19 +11,9 @@ import { db, schema } from "@/lib/db/client";
 
 import type { Locale } from "@/i18n/config";
 
-const COLLECTION_SLUGS = [
-  "cyberpunk-strays",
-  "ghibli-companions",
-  "anime-heroes",
-  "mystic-familiars",
-  "tiny-chaos-agents",
-  "studio-deskmates",
-  "retro-game-cast",
-  "object-spirits",
-  "midnight-melancholy",
-  "good-vibes-only",
-];
-
+// Loads the top featured collections by pet count. The email template
+// renders up to 10 — that limit lives here so the admin UI can preview
+// what the broadcast will actually contain.
 async function loadCollections(): Promise<
   { slug: string; title: string; description: string }[]
 > {
@@ -32,13 +22,27 @@ async function loadCollections(): Promise<
       slug: schema.petCollections.slug,
       title: schema.petCollections.title,
       description: schema.petCollections.description,
+      pets: dsql<number>`count(${schema.petCollectionItems.petSlug})`.as("pets"),
     })
-    .from(schema.petCollections);
-  const bySlug = new Map(rows.map((r) => [r.slug, r]));
-  return COLLECTION_SLUGS.flatMap((s) => {
-    const r = bySlug.get(s);
-    return r ? [r] : [];
-  });
+    .from(schema.petCollections)
+    .leftJoin(
+      schema.petCollectionItems,
+      eq(schema.petCollectionItems.collectionId, schema.petCollections.id),
+    )
+    .where(eq(schema.petCollections.featured, true))
+    .groupBy(
+      schema.petCollections.slug,
+      schema.petCollections.title,
+      schema.petCollections.description,
+    )
+    .orderBy(desc(dsql`count(${schema.petCollectionItems.petSlug})`))
+    .limit(10);
+
+  return rows.map((r) => ({
+    slug: r.slug,
+    title: r.title,
+    description: r.description,
+  }));
 }
 
 export async function sendTestAction(form: FormData): Promise<{
