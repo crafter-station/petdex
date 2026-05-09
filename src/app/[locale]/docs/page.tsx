@@ -32,13 +32,14 @@ export default function DocsPage() {
       <SiteHeader />
       <section className="mx-auto grid w-full max-w-6xl gap-12 px-5 pt-8 pb-12 md:grid-cols-[220px_1fr] md:px-8 md:pb-16">
         <aside className="hidden md:block">
-          <nav className="sticky top-6 flex flex-col gap-1.5 text-sm">
+          <nav className="sticky top-24 flex flex-col gap-1.5 text-sm">
             <NavHeader>Get started</NavHeader>
             <NavLink href="#quick-start">Quick start</NavLink>
             <NavLink href="#install">Install</NavLink>
             <NavLink href="#authenticate">Authenticate</NavLink>
             <NavHeader>CLI</NavHeader>
             <NavLink href="#commands">Commands</NavLink>
+            <NavLink href="#desktop">Desktop app</NavLink>
             <NavLink href="#distribute">Distribute pets</NavLink>
             <NavLink href="#validation">Validation</NavLink>
             <NavLink href="#failure">Failure modes</NavLink>
@@ -183,8 +184,9 @@ export default function DocsPage() {
 
           <Section id="commands" title="Commands">
             <p>
-              Six commands cover the full lifecycle, from discovery to
-              publishing. All commands accept <code>--help</code>.
+              The CLI covers the full lifecycle: discover, install, hatch,
+              publish, plus the desktop app and agent hooks. All commands accept{" "}
+              <code>--help</code>.
             </p>
 
             <h3 className="mt-6 font-semibold">
@@ -247,6 +249,114 @@ export default function DocsPage() {
               <code>petdex login / logout / whoami</code>
             </h3>
             <p>See the Authenticate section above.</p>
+          </Section>
+
+          <Section id="desktop" title="Desktop app">
+            <p>
+              Petdex Desktop is a floating mascot that lives on top of your
+              workspace and reacts to your coding agent's tool calls. macOS
+              today, Linux and Windows soon. See{" "}
+              <Link
+                href="/download"
+                className="font-medium underline underline-offset-4"
+              >
+                /download
+              </Link>{" "}
+              for the visual tour.
+            </p>
+
+            <h3 className="mt-6 font-semibold">
+              <code>petdex install desktop</code>
+            </h3>
+            <p>
+              Fetches the latest binary from GitHub Releases for your platform
+              and drops it at <code>~/.petdex/bin/petdex-desktop</code>. The CLI
+              strips the macOS quarantine attribute so the app opens without a
+              Gatekeeper prompt.
+            </p>
+            <CommandLine
+              command="npx petdex install desktop"
+              source="docs-desktop-install"
+              className="w-full max-w-xl"
+            />
+
+            <h3 className="mt-6 font-semibold">
+              <code>petdex hooks install</code>
+            </h3>
+            <p>
+              Wires the desktop app into your coding agents so the pet animates
+              as you work. Picks the agents present on your machine and writes
+              hooks for each:
+            </p>
+            <ul className="ml-6 list-disc space-y-1 text-muted-2">
+              <li>
+                <strong>Claude Code</strong>:{" "}
+                <code>~/.claude/settings.json</code>
+              </li>
+              <li>
+                <strong>Codex CLI</strong>: <code>~/.codex/hooks.json</code>
+              </li>
+              <li>
+                <strong>Gemini CLI</strong>:{" "}
+                <code>~/.gemini/settings.json</code>
+              </li>
+              <li>
+                <strong>OpenCode</strong>:{" "}
+                <code>~/.config/opencode/plugins/petdex.js</code>
+              </li>
+            </ul>
+            <p>
+              Tool events map to pet states: <code>tool.before</code> →{" "}
+              <code>running</code>, <code>tool.after</code> → <code>idle</code>,
+              <code>session.end</code> → <code>waving</code>,{" "}
+              <code>session.error</code> → <code>failed</code>. Each hook POSTs
+              to the local sidecar at <code>http://127.0.0.1:7777/state</code>.
+            </p>
+            <CommandLine
+              command="npx petdex hooks install"
+              source="docs-desktop-hooks"
+              className="w-full max-w-xl"
+            />
+
+            <h3 className="mt-6 font-semibold">
+              <code>petdex desktop &lt;start | stop | status&gt;</code>
+            </h3>
+            <p>
+              Manage the running pet. <code>start</code> spawns it detached (PID
+              at <code>~/.petdex/desktop.pid</code>, log at{" "}
+              <code>~/.petdex/desktop.log</code>). <code>stop</code> sends
+              SIGTERM. <code>status</code> reports running, stopped, or stale.
+            </p>
+            <CommandLine
+              command="npx petdex desktop start"
+              source="docs-desktop-start"
+              className="w-full max-w-xl"
+            />
+
+            <h3 className="mt-6 font-semibold">
+              <code>petdex update</code>
+            </h3>
+            <p>
+              Compares your installed version against the latest GitHub Release
+              tag and downloads it if newer. If the desktop app was running, it
+              stops it, swaps the binary, and restarts. Pass{" "}
+              <code>--force</code> to re-download the same version.
+            </p>
+            <CommandLine
+              command="npx petdex update"
+              source="docs-desktop-update"
+              className="w-full max-w-xl"
+            />
+
+            <Callout>
+              The sidecar is a local HTTP server on port <code>7777</code>.
+              Anything that can <code>curl</code> can drive the pet:{" "}
+              <code>
+                curl -X POST http://127.0.0.1:7777/state -d
+                '&#123;"state":"waving"&#125;'
+              </code>
+              .
+            </Callout>
           </Section>
 
           <Section id="distribute" title="Distribute your pets">
