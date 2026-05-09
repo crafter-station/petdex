@@ -342,20 +342,35 @@ export const AGENTS: Agent[] = [
 ];
 
 function curlCommand(state: PetState, duration?: number): string {
+  // The string we return here is what gets stored as the literal
+  // shell command in agent settings JSON. JSON.stringify (called by
+  // the agent merging code) handles JSON-escaping; we just need to
+  // emit the raw shell text we want the shell to see.
+  //
+  // Token gate: read ~/.petdex/runtime/update-token at hook
+  // execution time. POSIX shells happily nest double quotes inside
+  // a $() — `T="$(cat "$HOME/foo" 2>/dev/null)"` is well-formed —
+  // so we don't need any escapes here. An earlier version pre-
+  // escaped the inner quotes, which produced literal backslash-
+  // quote sequences in the final settings file and made T always
+  // come back empty, silently disabling the hook.
   const body =
     duration != null
-      ? `{\\"state\\":\\"${state}\\",\\"duration\\":${duration}}`
-      : `{\\"state\\":\\"${state}\\"}`;
-  // Read the per-session token from ~/.petdex/runtime/update-token
-  // at hook execution time. Without this header any website the user
-  // visits could fire a no-cors POST to localhost:7777/state and
-  // manipulate the mascot, spam the log, and trigger the
-  // desktop_first_state_received telemetry event. The hook silently
-  // no-ops when the token is missing (sidecar not running yet) — the
-  // mascot just doesn't react that one time, no error noise.
-  const tokenRead =
-    '"$(cat \\"$HOME/.petdex/runtime/update-token\\" 2>/dev/null)"';
-  return `T=${tokenRead}; [ -n "$T" ] && curl -s -m 1 -X POST ${SIDECAR_URL} -H "Content-Type: application/json" -H "X-Petdex-Update-Token: $T" -d "${body}" >/dev/null 2>&1 || true`;
+      ? `{"state":"${state}","duration":${duration}}`
+      : `{"state":"${state}"}`;
+  // Two statements separated by `;`: assign T from the token file,
+  // then run the curl only if T is non-empty. `&& ... || true` swallows
+  // a curl error so a sidecar that's offline doesn't surface as a
+  // failed hook.
+  const assign = `T="$(cat "$HOME/.petdex/runtime/update-token" 2>/dev/null)"`;
+  const post = [
+    `[ -n "$T" ] && curl -s -m 1 -X POST ${SIDECAR_URL}`,
+    `-H "Content-Type: application/json"`,
+    `-H "X-Petdex-Update-Token: $T"`,
+    `--data-raw '${body}'`,
+    `>/dev/null 2>&1 || true`,
+  ].join(" ");
+  return `${assign}; ${post}`;
 }
 
 function openCodePluginSource(): string {

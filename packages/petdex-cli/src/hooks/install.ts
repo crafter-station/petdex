@@ -171,10 +171,21 @@ export async function runInstall(): Promise<HooksInstallResult> {
     }
   }
 
+  // The test command mirrors what the generated hooks do at runtime:
+  // read the per-session token from ~/.petdex/runtime/update-token,
+  // then POST with the X-Petdex-Update-Token header. Without the
+  // header the sidecar returns 401, so the previous example always
+  // failed once we added the CSRF gate.
+  const testCommand = [
+    `T=$(cat ~/.petdex/runtime/update-token)`,
+    `curl -X POST ${SIDECAR_URL}`,
+    `-H "X-Petdex-Update-Token: $T"`,
+    `--data-raw '{"state":"waving"}'`,
+  ].join(" ");
   p.log.info(
     [
       `Petdex listens on ${pc.cyan(SIDECAR_URL)} when ${pc.bold("petdex-desktop")} is running.`,
-      `Test it: ${pc.cyan(`curl -X POST ${SIDECAR_URL} -d '{"state":"waving"}'`)}`,
+      `Test it: ${pc.cyan(testCommand)}`,
     ].join("\n"),
   );
 
