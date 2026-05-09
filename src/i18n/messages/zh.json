@@ -1413,6 +1413,12 @@
         "title": "安装桌面二进制文件",
         "title__fixme": true
       },
+      "installPet": {
+        "title": "安装 {slug}",
+        "title__fixme": true,
+        "hint": "将这只宠物添加到你的本地集合",
+        "hint__fixme": true
+      },
       "step2": {
         "title": "连接你的 AI 助手",
         "title__fixme": true,

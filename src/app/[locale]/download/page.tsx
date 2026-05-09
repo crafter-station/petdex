@@ -9,13 +9,15 @@ import {
   Pointer,
   Zap,
 } from "lucide-react";
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 
 import { buildLocaleAlternates } from "@/lib/locale-routing";
 
 import { CommandLine } from "@/components/command-line";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
+
+import { buildSetupSteps, parsePendingPet } from "./setup-steps";
 
 export const metadata = {
   title: "Download Petdex Desktop",
@@ -31,19 +33,11 @@ type DownloadPageProps = {
   searchParams: Promise<{ next?: string | string[] }>;
 };
 
-function parsePendingPet(next: string | string[] | undefined): string | null {
-  const value = Array.isArray(next) ? next[0] : next;
-  if (!value || !value.startsWith("install/")) return null;
-  const slug = value.slice("install/".length);
-  // Mirror the server slug regex so a malformed ?next= can't render anything.
-  if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(slug)) return null;
-  return slug;
-}
-
 export default async function DownloadPage({
   searchParams,
 }: DownloadPageProps) {
   const t = await getTranslations("download");
+  const locale = await getLocale();
   const params = await searchParams;
   const pendingPet = parsePendingPet(params.next);
 
@@ -212,71 +206,30 @@ export default async function DownloadPage({
           </h2>
 
           <ol className="mt-10 flex flex-col gap-8">
-            <li className="flex gap-5">
-              <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-full bg-brand font-mono text-xs font-semibold text-on-inverse">
-                1
-              </span>
-              <div className="flex flex-col gap-2">
-                <p className="font-semibold text-foreground">
-                  {t("setup.step1.title")}
-                </p>
-                <CommandLine
-                  command="npx petdex install desktop"
-                  source="download-step1"
-                  className="w-full max-w-sm"
-                />
-              </div>
-            </li>
-
-            <li className="flex gap-5">
-              <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-full bg-brand font-mono text-xs font-semibold text-on-inverse">
-                2
-              </span>
-              <div className="flex flex-col gap-2">
-                <p className="font-semibold text-foreground">
-                  {t("setup.step2.title")}
-                </p>
-                <CommandLine
-                  command="npx petdex hooks install"
-                  source="download-step2"
-                  className="w-full max-w-sm"
-                />
-                <p className="text-xs text-muted-3">{t("setup.step2.hint")}</p>
-              </div>
-            </li>
-
-            <li className="flex gap-5">
-              <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-full bg-brand font-mono text-xs font-semibold text-on-inverse">
-                3
-              </span>
-              <div className="flex flex-col gap-2">
-                <p className="font-semibold text-foreground">
-                  {t("setup.step3.title")}
-                </p>
-                <CommandLine
-                  command="npx petdex desktop start"
-                  source="download-step3"
-                  className="w-full max-w-sm"
-                />
-              </div>
-            </li>
-
-            <li className="flex gap-5">
-              <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-full bg-surface font-mono text-xs font-semibold text-muted-2 ring-1 ring-border-base">
-                4
-              </span>
-              <div className="flex flex-col gap-2">
-                <p className="font-semibold text-foreground">
-                  {t("setup.step4.title")}
-                </p>
-                <CommandLine
-                  command="npx petdex update"
-                  source="download-step4"
-                  className="w-full max-w-sm"
-                />
-                <p className="text-xs text-muted-3">{t("setup.step4.hint")}</p>
-              </div>
-            </li>
+            {buildSetupSteps(t, pendingPet).map((step, idx) => {
+              const number = idx + 1;
+              const dotClass = step.dimmed
+                ? "mt-0.5 grid size-7 shrink-0 place-items-center rounded-full bg-surface font-mono text-xs font-semibold text-muted-2 ring-1 ring-border-base"
+                : "mt-0.5 grid size-7 shrink-0 place-items-center rounded-full bg-brand font-mono text-xs font-semibold text-on-inverse";
+              return (
+                <li key={step.key} className="flex gap-5">
+                  <span className={dotClass}>{number}</span>
+                  <div className="flex flex-col gap-2">
+                    <p className="font-semibold text-foreground">
+                      {step.title}
+                    </p>
+                    <CommandLine
+                      command={step.command}
+                      source={`download-${step.key}`}
+                      className="w-full max-w-sm"
+                    />
+                    {step.hint ? (
+                      <p className="text-xs text-muted-3">{step.hint}</p>
+                    ) : null}
+                  </div>
+                </li>
+              );
+            })}
           </ol>
         </div>
       </section>
@@ -322,7 +275,7 @@ export default async function DownloadPage({
       <section className="mx-auto w-full max-w-[1440px] px-5 py-10 md:px-8">
         <div className="mx-auto max-w-2xl">
           <Link
-            href="/docs"
+            href={`/${locale}/docs`}
             className="inline-flex items-center gap-1.5 text-sm font-medium text-brand transition hover:text-brand-deep"
           >
             {t("docsLink")}

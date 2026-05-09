@@ -1227,6 +1227,10 @@
       "step1": {
         "title": "Install the desktop binary"
       },
+      "installPet": {
+        "title": "Install {slug}",
+        "hint": "Adds this pet to your local collection"
+      },
       "step2": {
         "title": "Wire up your agents",
         "hint": "Configures Claude Code, Codex, Gemini, and OpenCode automatically"

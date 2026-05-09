@@ -1227,6 +1227,10 @@
       "step1": {
         "title": "Instala el binario de escritorio"
       },
+      "installPet": {
+        "title": "Instala {slug}",
+        "hint": "Anade esta mascota a tu coleccion local"
+      },
       "step2": {
         "title": "Conecta tus agentes",
         "hint": "Configura Claude Code, Codex, Gemini y OpenCode automaticamente"
