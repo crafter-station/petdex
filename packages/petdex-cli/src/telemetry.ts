@@ -49,12 +49,34 @@ export type TelemetryPayload = {
   agents?: string[];
 };
 
-function readConfig(): TelemetryConfig | null {
-  if (!existsSync(TELEMETRY_FILE)) return null;
+// Three-state read result so callers can distinguish "no config yet"
+// (fresh install — opt-out default kicks in) from "config exists but
+// we can't trust what's in it" (read error / parse error — fail
+// closed so a corrupted file can't silently re-enable telemetry for a
+// user who had explicitly opted out).
+type ReadConfigResult =
+  | { kind: "missing" }
+  | { kind: "ok"; config: TelemetryConfig }
+  | { kind: "error"; reason: string };
+
+function readConfig(): ReadConfigResult {
+  if (!existsSync(TELEMETRY_FILE)) return { kind: "missing" };
+  let raw: string;
   try {
-    return JSON.parse(readFileSync(TELEMETRY_FILE, "utf8")) as TelemetryConfig;
-  } catch {
-    return null;
+    raw = readFileSync(TELEMETRY_FILE, "utf8");
+  } catch (err) {
+    return {
+      kind: "error",
+      reason: `read failed: ${(err as Error).message}`,
+    };
+  }
+  try {
+    return { kind: "ok", config: JSON.parse(raw) as TelemetryConfig };
+  } catch (err) {
+    return {
+      kind: "error",
+      reason: `parse failed: ${(err as Error).message}`,
+    };
   }
 }
 
@@ -73,15 +95,20 @@ function writeConfigSafe(config: TelemetryConfig): boolean {
 /**
  * Returns existing config, or creates one when telemetry is enabled
  * AND the filesystem allows writing. Returns null in every other case
- * so callers can short-circuit cleanly.
+ * (env opt-out, read/parse error, write failure) so callers
+ * short-circuit cleanly. A corrupted config file is never replaced
+ * here because that would silently flip a previously opted-out user
+ * back on; the only way to recover is `petdex telemetry on/off` which
+ * goes through a different path that overwrites the file explicitly.
  */
 export function ensureTelemetryConfig(): TelemetryConfig | null {
   // Hard opt-out via env: never read or create the file. This is what
   // CI / sandbox / restricted-HOME users rely on.
   if (process.env.PETDEX_TELEMETRY === "0") return null;
 
-  const existing = readConfig();
-  if (existing) return existing;
+  const result = readConfig();
+  if (result.kind === "ok") return result.config;
+  if (result.kind === "error") return null; // fail closed
 
   const fresh: TelemetryConfig = {
     install_id: randomUUID(),
@@ -94,33 +121,39 @@ export function ensureTelemetryConfig(): TelemetryConfig | null {
 
 export function isEnabled(): boolean {
   if (process.env.PETDEX_TELEMETRY === "0") return false;
-  const config = readConfig();
-  if (!config) return true; // default ON for opt-out model
-  return config.enabled;
+  const result = readConfig();
+  if (result.kind === "missing") return true; // opt-out model default
+  if (result.kind === "error") return false; // fail closed on corruption
+  return result.config.enabled;
 }
 
 export function setEnabled(enabled: boolean): boolean {
   // For an explicit `petdex telemetry on/off` call we need a config
   // file even if PETDEX_TELEMETRY=0 was set; the user is overriding.
-  let config = readConfig();
-  if (!config) {
+  // A read/parse error here is the one place we DO want to overwrite
+  // the corrupt file: the user just typed an explicit toggle, so
+  // their intent is clear and we should honor it with a fresh config.
+  const result = readConfig();
+  let config: TelemetryConfig;
+  if (result.kind === "ok") {
+    config = result.config;
+    config.enabled = enabled;
+  } else {
     config = {
       install_id: randomUUID(),
       enabled,
       notice_seen: true,
       first_seen: new Date().toISOString(),
     };
-  } else {
-    config.enabled = enabled;
   }
   return writeConfigSafe(config);
 }
 
 export function getStatus(): { enabled: boolean; install_id: string | null } {
-  const config = readConfig();
+  const result = readConfig();
   return {
     enabled: isEnabled(),
-    install_id: config?.install_id ?? null,
+    install_id: result.kind === "ok" ? result.config.install_id : null,
   };
 }
 
