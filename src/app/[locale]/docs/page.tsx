@@ -350,12 +350,20 @@ export default function DocsPage() {
 
             <Callout>
               The sidecar is a local HTTP server on port <code>7777</code>.
-              Anything that can <code>curl</code> can drive the pet:{" "}
-              <code>
-                curl -X POST http://127.0.0.1:7777/state -d
-                '&#123;"state":"waving"&#125;'
-              </code>
-              .
+              Anything that can <code>curl</code> + read the per-session token
+              at <code>~/.petdex/runtime/update-token</code> can drive the pet.
+              The token rotates every sidecar boot and lives at mode{" "}
+              <code>0600</code>, so only your user can read it — browsers and
+              remote sites can't:
+              <pre className="mt-3 overflow-x-auto rounded-lg bg-surface-muted p-3 font-mono text-xs leading-relaxed">
+                {[
+                  `T="$(cat "$HOME/.petdex/runtime/update-token")"`,
+                  `curl -X POST http://127.0.0.1:7777/state \\`,
+                  `  -H "Content-Type: application/json" \\`,
+                  `  -H "X-Petdex-Update-Token: $T" \\`,
+                  `  --data-raw '{"state":"waving"}'`,
+                ].join("\n")}
+              </pre>
             </Callout>
           </Section>
 
