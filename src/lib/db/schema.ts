@@ -8,6 +8,7 @@ import {
   pgTable,
   primaryKey,
   real,
+  serial,
   text,
   timestamp,
   uniqueIndex,
@@ -771,3 +772,33 @@ export type EmailPreference = typeof emailPreferences.$inferSelect;
 export type NewEmailPreference = typeof emailPreferences.$inferInsert;
 export type EmailSend = typeof emailSends.$inferSelect;
 export type NewEmailSend = typeof emailSends.$inferInsert;
+
+// Anonymous CLI usage telemetry. No PII — install_id is a random UUID
+// generated locally on first run. Users can opt out with `petdex telemetry off`.
+export const telemetryEvents = pgTable(
+  "telemetry_events",
+  {
+    id: serial("id").primaryKey(),
+    installId: text("install_id").notNull(),
+    event: text("event").notNull(),
+    cliVersion: text("cli_version"),
+    binaryVersion: text("binary_version"),
+    os: text("os"),
+    arch: text("arch"),
+    agents: jsonb("agents"),
+    state: text("state"),
+    agentSource: text("agent_source"),
+    country: text("country"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    installIdIdx: index("telemetry_install_id_idx").on(table.installId),
+    eventIdx: index("telemetry_event_idx").on(table.event),
+    createdAtIdx: index("telemetry_created_at_idx").on(table.createdAt),
+  }),
+);
+
+export type TelemetryEvent = typeof telemetryEvents.$inferSelect;
+export type NewTelemetryEvent = typeof telemetryEvents.$inferInsert;
