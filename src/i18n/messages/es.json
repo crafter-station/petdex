@@ -1261,12 +1261,19 @@
     "docsLink": "Leer la documentacion",
     "pendingPet": {
       "eyebrow": "Casi listo.",
-      "message": "Instala Petdex Desktop para probar {slug} en 1 clic. Despues de correr `petdex install desktop`, la mascota se activa automaticamente.",
+      "messageBefore": "Instala Petdex Desktop para probar",
+      "messageAfter": "en 1 clic.",
       "hint": "Solo macOS por ahora"
     }
   },
   "openInPetdex": {
+    "eyebrow": "Instalacion en 1 clic",
     "label": "Abrir en Petdex Desktop",
-    "opening": "Abriendo Petdex..."
+    "subtitle": "Que esta mascota flote junto a tu agente",
+    "opening": "Abriendo Petdex...",
+    "ariaLabel": "Abrir {slug} en Petdex Desktop"
+  },
+  "installCompact": {
+    "seeGuide": "Ver guia de instalacion completa"
   }
 }

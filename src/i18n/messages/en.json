@@ -1261,12 +1261,19 @@
     "docsLink": "Read the docs",
     "pendingPet": {
       "eyebrow": "Almost there.",
-      "message": "Install Petdex Desktop to test {slug} in 1 click. After install runs `petdex install desktop`, the pet activates automatically.",
+      "messageBefore": "Install Petdex Desktop to test",
+      "messageAfter": "in 1 click.",
       "hint": "macOS only for now"
     }
   },
   "openInPetdex": {
+    "eyebrow": "One-click install",
     "label": "Open in Petdex Desktop",
-    "opening": "Opening Petdex..."
+    "subtitle": "Float this pet beside your coding agent",
+    "opening": "Opening Petdex...",
+    "ariaLabel": "Open {slug} in Petdex Desktop"
+  },
+  "installCompact": {
+    "seeGuide": "See full install guide"
   }
 }
