@@ -378,7 +378,8 @@
       "campaigns": "Campaigns",
       "mailing": "Mailing",
       "manifest": "Manifest",
-      "insights": "Insights"
+      "insights": "Insights",
+      "telemetry": "Telemetry"
     },
     "status": {
       "pending": "Pending",
@@ -579,6 +580,33 @@
     },
     "threadPage": {
       "back": "← Inbox"
+    },
+    "telemetry": {
+      "eyebrow": "Telemetry",
+      "title": "CLI usage telemetry",
+      "description": "Anonymous install volume, OS distribution, and agent adoption from petdex CLI users.",
+      "stats": {
+        "totalInstalls": "Total installs",
+        "weeklyActive": "Weekly active installs",
+        "totalEvents": "Total events"
+      },
+      "sections": {
+        "adoptionCurve": "Adoption over 30 days",
+        "osDistribution": "OS distribution",
+        "archDistribution": "Arch distribution",
+        "versionAdoption": "Version adoption",
+        "topAgents": "Top agents",
+        "funnel": "Conversion funnel",
+        "geoTop10": "Top 10 countries"
+      },
+      "funnel": {
+        "install": "Install desktop",
+        "hooks": "Hooks install",
+        "start": "Desktop start",
+        "firstEvent": "First state"
+      },
+      "empty": "No telemetry events yet.",
+      "noData": "No data"
     }
   },
   "submit": {
@@ -1230,6 +1258,15 @@
       },
       "footer": "Want a faster Linux or Windows release? Star the repo or open an issue."
     },
-    "docsLink": "Read the docs"
+    "docsLink": "Read the docs",
+    "pendingPet": {
+      "eyebrow": "Almost there.",
+      "message": "Install Petdex Desktop to test {slug} in 1 click. After install runs `petdex install desktop`, the pet activates automatically.",
+      "hint": "macOS only for now"
+    }
+  },
+  "openInPetdex": {
+    "label": "Open in Petdex Desktop",
+    "opening": "Opening Petdex..."
   }
 }

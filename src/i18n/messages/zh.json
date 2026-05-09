@@ -417,7 +417,9 @@
       "campaigns": "广告活动",
       "mailing": "邮件",
       "manifest": "Manifest",
-      "insights": "数据"
+      "insights": "数据",
+      "telemetry": "Telemetry",
+      "telemetry__fixme": true
     },
     "status": {
       "pending": "待处理",
@@ -620,6 +622,34 @@
     },
     "threadPage": {
       "back": "← 收件箱"
+    },
+    "telemetry": {
+      "__fixme": true,
+      "eyebrow": "Telemetry",
+      "title": "CLI usage telemetry",
+      "description": "Anonymous install volume, OS distribution, and agent adoption from petdex CLI users.",
+      "stats": {
+        "totalInstalls": "Total installs",
+        "weeklyActive": "Weekly active installs",
+        "totalEvents": "Total events"
+      },
+      "sections": {
+        "adoptionCurve": "Adoption over 30 days",
+        "osDistribution": "OS distribution",
+        "archDistribution": "Arch distribution",
+        "versionAdoption": "Version adoption",
+        "topAgents": "Top agents",
+        "funnel": "Conversion funnel",
+        "geoTop10": "Top 10 countries"
+      },
+      "funnel": {
+        "install": "Install desktop",
+        "hooks": "Hooks install",
+        "start": "Desktop start",
+        "firstEvent": "First state"
+      },
+      "empty": "No telemetry events yet.",
+      "noData": "No data"
     }
   },
   "submit": {
@@ -1428,6 +1458,20 @@
       "footer__fixme": true
     },
     "docsLink": "查看文档",
-    "docsLink__fixme": true
+    "docsLink__fixme": true,
+    "pendingPet": {
+      "eyebrow": "马上就好。",
+      "eyebrow__fixme": true,
+      "message": "安装 Petdex Desktop 即可一键测试 {slug}。运行 `petdex install desktop` 后，宠物会自动激活。",
+      "message__fixme": true,
+      "hint": "目前仅支持 macOS",
+      "hint__fixme": true
+    }
+  },
+  "openInPetdex": {
+    "label": "在 Petdex Desktop 中打开",
+    "label__fixme": true,
+    "opening": "正在打开 Petdex...",
+    "opening__fixme": true
   }
 }
