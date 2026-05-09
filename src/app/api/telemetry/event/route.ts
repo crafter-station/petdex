@@ -1,3 +1,5 @@
+import { createHmac } from "node:crypto";
+
 import { db, schema } from "@/lib/db/client";
 import { telemetryRatelimit } from "@/lib/ratelimit";
 
@@ -78,6 +80,32 @@ function getCountry(req: Request): string | null {
     (req as Request & { geo?: { country?: string } }).geo?.country ??
     null
   );
+}
+
+/**
+ * Hash an IP into a rate-limit key with a server-side secret so the
+ * value Upstash persists is not the IP itself. Two IPs from different
+ * users get different keys, so per-IP rate limiting still works, but
+ * an attacker with Redis access can't enumerate IP -> request count.
+ *
+ * The secret rotates per deploy if TELEMETRY_RATELIMIT_SECRET is
+ * unset (we fall back to a process-stable random buffer). That makes
+ * rate-limit windows reset on every redeploy, which we accept — the
+ * tradeoff is rare hot reloads vs. predictable hash collisions across
+ * cold starts.
+ */
+const RATE_LIMIT_SECRET = (() => {
+  const fromEnv = process.env.TELEMETRY_RATELIMIT_SECRET;
+  if (fromEnv && fromEnv.length >= 16) return fromEnv;
+  // Fallback so dev environments without the env var still get hashed
+  // keys, just not stable ones across restarts.
+  return createHmac("sha256", "petdex-telemetry-fallback")
+    .update(`${process.pid}:${Date.now()}`)
+    .digest("hex");
+})();
+
+function hashIpForRateLimit(ip: string): string {
+  return createHmac("sha256", RATE_LIMIT_SECRET).update(ip).digest("hex");
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -172,11 +200,14 @@ function validate(body: unknown):
 }
 
 export async function POST(req: Request): Promise<Response> {
-  // Rate-limit by IP. We never store the IP itself or log it — the
-  // privacy page promises country-only.
+  // Rate-limit by IP, but hash it before handing to Upstash so the
+  // Redis key isn't a literal IP — the privacy page promises raw IPs
+  // are never stored, and "stored in our rate-limit cache" still
+  // counts as stored. With a per-deploy server secret the hash is
+  // also non-trivial to reverse via rainbow table.
   const xff = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  const rateLimitKey =
-    xff ?? req.headers.get("x-real-ip") ?? "unknown-anonymous";
+  const ip = xff ?? req.headers.get("x-real-ip") ?? "unknown-anonymous";
+  const rateLimitKey = hashIpForRateLimit(ip);
 
   const rl = await telemetryRatelimit.limit(rateLimitKey);
   if (!rl.success) {
