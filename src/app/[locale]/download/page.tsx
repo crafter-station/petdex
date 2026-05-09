@@ -103,13 +103,11 @@ export default async function DownloadPage({
               <span className="font-semibold text-brand">
                 {t("pendingPet.eyebrow")}
               </span>{" "}
-              {t.rich("pendingPet.message", {
-                slug: () => (
-                  <code className="rounded bg-surface-muted px-1.5 py-0.5 font-mono text-xs">
-                    {pendingPet}
-                  </code>
-                ),
-              })}
+              {t("pendingPet.messageBefore")}{" "}
+              <code className="rounded bg-surface-muted px-1.5 py-0.5 font-mono text-xs">
+                {pendingPet}
+              </code>{" "}
+              {t("pendingPet.messageAfter")}
             </p>
             <p className="text-xs text-muted-2 md:ml-auto">
               {t("pendingPet.hint")}
