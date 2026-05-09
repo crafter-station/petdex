@@ -71,6 +71,20 @@
       "when": 1778093672772,
       "tag": "0009_ad_events",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1778145600000,
+      "tag": "0010_email_preferences",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1778832000000,
+      "tag": "0011_telemetry_events",
+      "breakpoints": true
     }
   ]
 }

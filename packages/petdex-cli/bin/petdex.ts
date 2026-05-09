@@ -15,6 +15,12 @@ import {
 } from "../src/desktop/process.js";
 import { runUpdate } from "../src/desktop/update.js";
 import { runInstall as runHooksInstall } from "../src/hooks/install.js";
+import {
+  emit,
+  getStatus,
+  maybeShowFirstRunNotice,
+  setEnabled,
+} from "../src/telemetry.js";
 
 // ─── config ────────────────────────────────────────────────────────────────
 const PETDEX_URL = process.env.PETDEX_URL ?? "https://petdex.crafter.run";
@@ -86,7 +92,7 @@ async function getAuth(): Promise<ClerkCliAuth> {
   return _auth;
 }
 
-const VERSION = "0.1.2";
+const VERSION = "0.1.4";
 
 // ─── entrypoint ────────────────────────────────────────────────────────────
 main().catch((err) => {
@@ -101,6 +107,17 @@ async function main() {
   if (!cmd || cmd === "--help" || cmd === "-h" || cmd === "help") {
     printHelp();
     return;
+  }
+
+  // Meta commands must produce machine-readable output. `petdex --version`
+  // is parsed by package managers and CI scripts; the multi-line telemetry
+  // notice would corrupt that. `telemetry on|off|status` manages the
+  // notice itself, so triggering it there creates a confusing UX. The
+  // notice still fires on the first real command (install / submit /
+  // hooks / desktop / update).
+  const META_COMMANDS = new Set(["version", "--version", "-v", "telemetry"]);
+  if (!META_COMMANDS.has(cmd)) {
+    maybeShowFirstRunNotice();
   }
 
   switch (cmd) {
@@ -131,6 +148,9 @@ async function main() {
     case "update":
       await runUpdate(args.slice(1));
       break;
+    case "telemetry":
+      cmdTelemetry(args.slice(1));
+      break;
     case "version":
     case "--version":
     case "-v":
@@ -159,12 +179,13 @@ function printHelp() {
       `    ${pc.bold("logout")}             Clear stored credentials`,
       `    ${pc.bold("whoami")}             Show signed-in user`,
       `    ${pc.bold("submit")} <path>      Submit a pet folder, zip, or parent of pets (bulk)`,
-      `    ${pc.bold("install")} <slug>     Install a pet into ~/.codex/pets/<slug>`,
+      `    ${pc.bold("install")} <slug>     Install a pet into ~/.petdex/pets and ~/.codex/pets`,
       `    ${pc.bold("install desktop")}    Install the petdex-desktop binary for your platform`,
       `    ${pc.bold("list")}               List approved pets`,
       `    ${pc.bold("hooks install")}      Wire petdex-desktop into your coding agents`,
       `    ${pc.bold("desktop")} <cmd>      Manage petdex-desktop (start | stop | status)`,
       `    ${pc.bold("update")}             Pull the latest petdex-desktop release and restart`,
+      `    ${pc.bold("telemetry")} [on|off|status]  Manage anonymous usage telemetry`,
       "",
       `  ${c("Examples")}`,
       `    ${dim("$")} petdex login`,
@@ -239,7 +260,18 @@ async function cmdInstall(args: string[]) {
     process.exit(1);
   }
   if (slug === "desktop") {
-    await runInstallDesktop();
+    const { tag } = await runInstallDesktop();
+    emit("cli_install_desktop_success", {
+      cli_version: VERSION,
+      os: process.platform,
+      arch: process.arch,
+      // Strip the `desktop-v` prefix from the release tag (e.g.
+      // `desktop-v0.1.4` -> `0.1.4`) so it matches the telemetry
+      // endpoint's semver-only validator. Without this the value
+      // gets dropped server-side and the version adoption chart
+      // stays empty.
+      binary_version: tag.replace(/^desktop-v/, ""),
+    });
     return;
   }
 
@@ -285,15 +317,44 @@ async function cmdInstall(args: string[]) {
     throw err;
   }
 
-  const petDir = path.join(homedir(), ".codex", "pets", slug);
-  s.message(`Downloading to ${petDir}`);
+  // Multi-target install: write to ~/.petdex/pets/ AND ~/.codex/pets/ so
+  // both Petdex Desktop and Codex Desktop can see the pet immediately.
+  // Petdex Desktop reads from either dir via resolvePetsDir().
+  const petdexDir = path.join(homedir(), ".petdex", "pets", slug);
+  const codexDir = path.join(homedir(), ".codex", "pets", slug);
+  s.message(`Downloading ${slug}`);
 
-  await mkdir(petDir, { recursive: true });
+  await Promise.all([
+    mkdir(petdexDir, { recursive: true }),
+    mkdir(codexDir, { recursive: true }),
+  ]);
 
   const ext = pet.spritesheetUrl.endsWith(".png") ? "png" : "webp";
+  // Download once, write to both targets to save bandwidth.
+  // Validate response status before reading the body so a 404/500
+  // doesn't silently land HTML inside pet.json or spritesheet.*.
+  const fetchOrThrow = async (url: string): Promise<ArrayBuffer> => {
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`download ${url} → ${res.status} ${res.statusText}`);
+    }
+    return res.arrayBuffer();
+  };
+  const [petJson, spritesheet] = await Promise.all([
+    fetchOrThrow(pet.petJsonUrl),
+    fetchOrThrow(pet.spritesheetUrl),
+  ]);
   await Promise.all([
-    download(pet.petJsonUrl, path.join(petDir, "pet.json")),
-    download(pet.spritesheetUrl, path.join(petDir, `spritesheet.${ext}`)),
+    writeFile(path.join(petdexDir, "pet.json"), Buffer.from(petJson)),
+    writeFile(
+      path.join(petdexDir, `spritesheet.${ext}`),
+      Buffer.from(spritesheet),
+    ),
+    writeFile(path.join(codexDir, "pet.json"), Buffer.from(petJson)),
+    writeFile(
+      path.join(codexDir, `spritesheet.${ext}`),
+      Buffer.from(spritesheet),
+    ),
   ]);
 
   // Fire-and-forget install metric so the gallery counter ticks up.
@@ -305,11 +366,13 @@ async function cmdInstall(args: string[]) {
 
   p.note(
     [
-      `Path: ${pc.dim(petDir)}`,
+      `Paths:`,
+      `  ${pc.dim(`~/.petdex/pets/${slug}`)} (Petdex Desktop)`,
+      `  ${pc.dim(`~/.codex/pets/${slug}`)} (Codex Desktop)`,
       "",
-      "Activate inside Codex:",
+      "Activate in Petdex Desktop: right-click the mascot.",
+      "Activate in Codex Desktop:",
       `  ${pc.cyan("Settings → Appearance → Pets")} → select ${pc.bold(pet.displayName)}`,
-      `Then ${pc.cyan("/pet")} inside Codex to wake or tuck it away.`,
     ].join("\n"),
     "Next steps",
   );
@@ -981,9 +1044,19 @@ async function cmdHooks(args: string[]) {
     return;
   }
   switch (sub) {
-    case "install":
-      await runHooksInstall();
+    case "install": {
+      const { installedAgents } = await runHooksInstall();
+      // Only emit success when at least one agent was actually written.
+      // Cancelled/no-op runs return an empty array; counting those as
+      // success makes the dashboard "agents wired up" funnel lie.
+      if (installedAgents.length > 0) {
+        emit("cli_hooks_install_success", {
+          cli_version: VERSION,
+          agents: installedAgents,
+        });
+      }
       break;
+    }
     default:
       console.error(pc.red(`Unknown hooks command: ${sub}`));
       printHooksHelp();
@@ -1023,6 +1096,7 @@ async function cmdDesktop(args: string[]) {
   switch (sub) {
     case "start":
       await cmdDesktopStart();
+      emit("cli_desktop_start_success", { cli_version: VERSION });
       break;
     case "stop":
       cmdDesktopStop();
@@ -1060,4 +1134,25 @@ function printDesktopHelp() {
       "",
     ].join("\n"),
   );
+}
+
+// ─── telemetry ─────────────────────────────────────────────────────────────
+
+function cmdTelemetry(args: string[]): void {
+  const sub = args[0];
+  if (sub === "on") {
+    setEnabled(true);
+    console.log("Telemetry enabled");
+  } else if (sub === "off") {
+    setEnabled(false);
+    console.log("Telemetry disabled");
+  } else if (sub === "status" || !sub) {
+    const status = getStatus();
+    console.log(`Status: ${status.enabled ? "enabled" : "disabled"}`);
+    if (status.install_id) console.log(`Install ID: ${status.install_id}`);
+  } else {
+    console.error(pc.red(`Unknown telemetry subcommand: ${sub}`));
+    console.error("Use: petdex telemetry [on|off|status]");
+    process.exit(1);
+  }
 }

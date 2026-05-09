@@ -162,3 +162,12 @@ export const manifestFullRatelimit = createRatelimit({
   limiter: Ratelimit.slidingWindow(120, "1 h"),
   prefix: "petdex:manifest-full",
 });
+
+// Telemetry event ingestion. One UUID per device, fire-and-forget. 60/min
+// stops a loop from filling the DB but never triggers on normal CLI usage.
+// Keyed by IP because install_id can be faked.
+export const telemetryRatelimit = createRatelimit({
+  redis,
+  limiter: Ratelimit.slidingWindow(60, "1 m"),
+  prefix: "petdex:telemetry",
+});

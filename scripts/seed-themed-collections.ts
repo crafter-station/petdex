@@ -1,232 +1,123 @@
-// Seed 10 themed collections with anime-heroes-style identity, then
-// auto-populate them by matching pet vibes + tags. Each collection has
-// a narrative hook (not a generic facet like "fluffy"), so they can
-// headline a launch email + dedicated hero UI.
+// Seeds franchise-based collections from REAL data: reads
+// scripts/.franchise-buckets.json (output of extract-franchises.ts)
+// and creates one collection per franchise that has >= 2 pets.
 //
-// Idempotent. Re-run safe — uses ON CONFLICT for collections and
-// (collection_id, pet_slug) PK for items.
+// Each collection is featured + auto-populated. Re-run safe.
 //
-// Run:
-//   bun --env-file .env.local scripts/seed-themed-collections.ts [--dry]
-//   bun --env-file .env.local scripts/seed-themed-collections.ts --only=cyberpunk-strays
+// Uses neon() directly (not src/lib/db/client which is server-only)
+// so it runs as a standalone Bun script.
+//
+// Run order:
+//   1. bun --env-file .env.local scripts/extract-franchises.ts
+//   2. bun --env-file .env.local scripts/seed-themed-collections.ts --dry
+//   3. bun --env-file .env.local scripts/seed-themed-collections.ts
 
-import { and, sql as dsql, eq, inArray } from "drizzle-orm";
+import { readFileSync } from "node:fs";
 
-import { db, schema } from "../src/lib/db/client";
+import { neon } from "@neondatabase/serverless";
 
+import { requiredEnv } from "./env";
+
+const sql = neon(requiredEnv("DATABASE_URL"));
 const dryRun = process.argv.includes("--dry");
-const onlyArg = process.argv.find((a) => a.startsWith("--only="));
-const onlySlug = onlyArg ? onlyArg.split("=")[1] : null;
+const minPets = Number(
+  process.argv.find((a) => a.startsWith("--min="))?.split("=")[1] ?? 2,
+);
 
-type Theme = {
-  slug: string;
-  title: string;
-  description: string;
-  vibes?: string[];
-  kinds?: ("creature" | "object" | "character")[];
-  tagIncludes?: string[];
-  colorFamilies?: string[];
-  limit?: number;
+type Bucket = {
+  generatedAt: string;
+  totalApproved: number;
+  buckets: Record<string, string[]>;
 };
 
-const THEMES: Theme[] = [
-  {
-    slug: "cyberpunk-strays",
-    title: "Cyberpunk Strays",
-    description:
-      "Neon-drenched companions from the fringes of the grid. Edgy, mischievous, off-the-record.",
-    vibes: ["edgy", "mischievous", "chaotic"],
-    tagIncludes: ["cyber", "neon", "robot", "android", "tech", "hacker"],
-  },
-  {
-    slug: "ghibli-companions",
-    title: "Ghibli Companions",
-    description:
-      "Soft, wholesome, slightly magical. The pets you'd meet on a forest detour at dusk.",
-    vibes: ["wholesome", "cozy", "calm"],
-    tagIncludes: ["forest", "spirit", "ghibli", "totoro", "cat", "owl"],
-  },
-  {
-    slug: "anime-heroes",
-    title: "Anime Heroes",
-    description:
-      "The shounen lineup. Fierce silhouettes, signature moves, no flinching.",
-    vibes: ["heroic"],
-    kinds: ["character"],
-    tagIncludes: ["anime", "hero", "shounen", "warrior"],
-  },
-  {
-    slug: "mystic-familiars",
-    title: "Mystic Familiars",
-    description:
-      "Bonded to old magic. They watch from candlelight and remember everything.",
-    vibes: ["mystical", "melancholic"],
-    tagIncludes: ["magic", "spell", "witch", "rune", "occult", "moon"],
-  },
-  {
-    slug: "tiny-chaos-agents",
-    title: "Tiny Chaos Agents",
-    description:
-      "Small. Unhinged. They knocked the cup off the table on purpose and they'll do it again.",
-    vibes: ["chaotic", "mischievous", "playful"],
-  },
-  {
-    slug: "studio-deskmates",
-    title: "Studio Deskmates",
-    description:
-      "Focused, calm, perfectly content with a long compile. The pets that quietly pair-program.",
-    vibes: ["focused", "calm", "cozy"],
-    tagIncludes: ["coffee", "code", "desk", "study", "book"],
-  },
-  {
-    slug: "retro-game-cast",
-    title: "Retro Game Cast",
-    description:
-      "Sprite-era mascots. Every frame counts. Save points still hit.",
-    kinds: ["character"],
-    tagIncludes: ["pixel", "8bit", "16bit", "retro", "arcade", "game"],
-  },
-  {
-    slug: "object-spirits",
-    title: "Object Spirits",
-    description:
-      "Things that aren't supposed to be alive but absolutely are. Toasters with feelings.",
-    kinds: ["object"],
-  },
-  {
-    slug: "midnight-melancholy",
-    title: "Midnight Melancholy",
-    description: "Up too late. Window pets. Quiet songs about empty cities.",
-    vibes: ["melancholic", "calm"],
-  },
-  {
-    slug: "good-vibes-only",
-    title: "Good Vibes Only",
-    description:
-      "The cheerful welcome committee. Optimism with fur. Bring snacks.",
-    vibes: ["cheerful", "playful", "wholesome"],
-  },
-];
+const data = JSON.parse(
+  readFileSync("./scripts/.franchise-buckets.json", "utf8"),
+) as Bucket;
 
-async function findMatchingPets(theme: Theme): Promise<string[]> {
-  const conditions = [eq(schema.submittedPets.status, "approved")];
-
-  if (theme.kinds && theme.kinds.length > 0) {
-    conditions.push(inArray(schema.submittedPets.kind, theme.kinds));
-  }
-
-  if (theme.vibes && theme.vibes.length > 0) {
-    const vibeArray = `ARRAY[${theme.vibes.map((v) => `'${v}'`).join(",")}]::text[]`;
-    conditions.push(
-      dsql`(${schema.submittedPets.vibes})::jsonb ?| ${dsql.raw(vibeArray)}`,
-    );
-  }
-
-  if (theme.colorFamilies && theme.colorFamilies.length > 0) {
-    conditions.push(
-      inArray(schema.submittedPets.colorFamily, theme.colorFamilies),
-    );
-  }
-
-  let rows = await db
-    .select({
-      slug: schema.submittedPets.slug,
-      tags: schema.submittedPets.tags,
-    })
-    .from(schema.submittedPets)
-    .where(and(...conditions))
-    .limit(theme.limit ?? 200);
-
-  if (theme.tagIncludes && theme.tagIncludes.length > 0) {
-    const needles = theme.tagIncludes.map((t) => t.toLowerCase());
-    rows = rows.filter((r) => {
-      const tags = (r.tags ?? []).map((t) => t.toLowerCase());
-      return needles.some((n) => tags.some((t) => t.includes(n)));
-    });
-  }
-
-  return rows.map((r) => r.slug);
+function slugify(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/'/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
 }
 
-async function upsertCollection(theme: Theme): Promise<string> {
-  const existing = await db
-    .select()
-    .from(schema.petCollections)
-    .where(eq(schema.petCollections.slug, theme.slug))
-    .limit(1);
-
-  if (existing[0]) {
-    if (!dryRun) {
-      await db
-        .update(schema.petCollections)
-        .set({
-          title: theme.title,
-          description: theme.description,
-          featured: true,
-          updatedAt: new Date(),
-        })
-        .where(eq(schema.petCollections.slug, theme.slug));
-    }
-    return existing[0].id;
-  }
-
-  const id = `col_${crypto.randomUUID().replace(/-/g, "").slice(0, 22)}`;
-  if (!dryRun) {
-    await db.insert(schema.petCollections).values({
-      id,
-      slug: theme.slug,
-      title: theme.title,
-      description: theme.description,
-      featured: true,
-    });
-  }
-  return id;
+function description(name: string, count: number): string {
+  return `${count} community fan submissions inspired by ${name}. Made by Petdex creators.`;
 }
 
-async function main() {
-  const themes = onlySlug ? THEMES.filter((t) => t.slug === onlySlug) : THEMES;
-  if (onlySlug && themes.length === 0) {
-    console.error(`no theme matches --only=${onlySlug}`);
-    process.exit(1);
-  }
+const entries = Object.entries(data.buckets)
+  .filter(([, slugs]) => slugs.length >= minPets)
+  .sort(([, a], [, b]) => b.length - a.length);
 
-  for (const theme of themes) {
-    const slugs = await findMatchingPets(theme);
+if (entries.length === 0) {
+  console.error(
+    `no franchise has >=${minPets} pets — re-run extractor or lower --min`,
+  );
+  process.exit(1);
+}
+
+console.log(
+  `\nseeding ${entries.length} franchise collections (mode=${dryRun ? "DRY" : "APPLY"})\n`,
+);
+
+for (const [franchise, petSlugs] of entries) {
+  const slug = `franchise-${slugify(franchise)}`;
+  const title = franchise;
+  const desc = description(franchise, petSlugs.length);
+
+  console.log(`${slug.padEnd(38)} ${petSlugs.length} pets`);
+
+  if (dryRun) {
     console.log(
-      `${theme.slug}: ${slugs.length} matches${dryRun ? " (dry)" : ""}`,
+      `  → ${petSlugs.slice(0, 5).join(", ")}${petSlugs.length > 5 ? "…" : ""}`,
     );
-    if (slugs.length === 0) continue;
-
-    const collectionId = await upsertCollection(theme);
-    if (dryRun) {
-      console.log(
-        `  would-add → ${slugs.slice(0, 5).join(", ")}${slugs.length > 5 ? "…" : ""}`,
-      );
-      continue;
-    }
-
-    let position = 0;
-    for (const petSlug of slugs) {
-      try {
-        await db
-          .insert(schema.petCollectionItems)
-          .values({ collectionId, petSlug, position: position++ })
-          .onConflictDoNothing();
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.warn(`  skip ${petSlug}: ${msg}`);
-      }
-    }
-
-    if (slugs[0]) {
-      await db
-        .update(schema.petCollections)
-        .set({ coverPetSlug: slugs[0], updatedAt: new Date() })
-        .where(eq(schema.petCollections.id, collectionId));
-    }
+    continue;
   }
 
-  console.log("\ndone");
+  const existing = await sql`
+    SELECT id FROM pet_collections WHERE slug = ${slug} LIMIT 1
+  `;
+
+  let collectionId: string;
+  if (existing.length > 0) {
+    collectionId = existing[0].id;
+    await sql`
+      UPDATE pet_collections
+      SET title = ${title},
+          description = ${desc},
+          featured = true,
+          cover_pet_slug = ${petSlugs[0]},
+          updated_at = now()
+      WHERE id = ${collectionId}
+    `;
+  } else {
+    collectionId = `col_${crypto.randomUUID().replace(/-/g, "").slice(0, 22)}`;
+    await sql`
+      INSERT INTO pet_collections (
+        id, slug, title, description, cover_pet_slug, featured
+      ) VALUES (
+        ${collectionId}, ${slug}, ${title}, ${desc}, ${petSlugs[0]}, true
+      )
+    `;
+  }
+
+  let position = 0;
+  for (const petSlug of petSlugs) {
+    try {
+      await sql`
+        INSERT INTO pet_collection_items (
+          collection_id, pet_slug, position
+        ) VALUES (
+          ${collectionId}, ${petSlug}, ${position++}
+        )
+        ON CONFLICT (collection_id, pet_slug) DO NOTHING
+      `;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`  skip ${petSlug}: ${msg}`);
+    }
+  }
 }
 
-await main();
+console.log("\ndone");

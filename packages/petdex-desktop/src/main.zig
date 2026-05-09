@@ -237,6 +237,61 @@ const html_tail =
     \\    } catch (e) {}
     \\  }
     \\  setInterval(pollSidecarState, 200);
+    \\
+    \\  // Layer 1 autoupdate: read update.json (written by the sidecar's
+    \\  // periodic GH releases poll) and render a notification card. A
+    \\  // single click POSTs to the sidecar's /update endpoint, which
+    \\  // spawns `npx petdex update --silent`. We keep this DOM lightweight
+    \\  // — a fixed-position card, no animations.
+    \\  let lastUpdateStatus = '';
+    \\  let updateCard = null;
+    \\  function ensureUpdateCard() {
+    \\    if (updateCard) return updateCard;
+    \\    updateCard = document.createElement('div');
+    \\    updateCard.id = 'update-card';
+    \\    updateCard.style.cssText = 'position:fixed;left:6px;right:6px;bottom:6px;padding:8px 10px;border-radius:10px;background:rgba(15,18,30,0.92);color:#e8eaf3;font:600 11px system-ui,-apple-system,sans-serif;box-shadow:0 4px 16px rgba(0,0,0,0.35);backdrop-filter:blur(8px);display:none;cursor:pointer;line-height:1.3;';
+    \\    updateCard.addEventListener('click', async () => {
+    \\      if (!(window.zero && window.zero.invoke)) return;
+    \\      try {
+    \\        await window.zero.invoke('petdex.trigger_update', {});
+    \\        renderUpdate({ status: 'running', message: 'Updating...' });
+    \\      } catch (e) {}
+    \\    });
+    \\    document.body.appendChild(updateCard);
+    \\    return updateCard;
+    \\  }
+    \\  function renderUpdate(info) {
+    \\    const card = ensureUpdateCard();
+    \\    if (info.status === 'idle' || (!info.available && info.status !== 'error' && info.status !== 'done')) {
+    \\      card.style.display = 'none';
+    \\      return;
+    \\    }
+    \\    let text = '';
+    \\    if (info.status === 'available') {
+    \\      text = 'Update ' + (info.latest || 'available') + ' — click to install';
+    \\    } else if (info.status === 'running') {
+    \\      text = info.message || 'Updating...';
+    \\    } else if (info.status === 'done') {
+    \\      text = info.message || 'Update installed. Restart Petdex.';
+    \\    } else if (info.status === 'error') {
+    \\      text = info.message || 'Update failed.';
+    \\    }
+    \\    card.textContent = text;
+    \\    card.style.display = 'block';
+    \\  }
+    \\  async function pollUpdate() {
+    \\    if (!(window.zero && window.zero.invoke)) return;
+    \\    try {
+    \\      const info = await window.zero.invoke('petdex.read_update_info', {});
+    \\      if (!info || typeof info !== 'object') return;
+    \\      const sig = info.status + ':' + (info.latest || '') + ':' + (info.message || '');
+    \\      if (sig === lastUpdateStatus) return;
+    \\      lastUpdateStatus = sig;
+    \\      renderUpdate(info);
+    \\    } catch (e) {}
+    \\  }
+    \\  setInterval(pollUpdate, 5000);
+    \\  pollUpdate();
     \\  // Drag + momentum (Codex parity).
     \\  const TICK_MS = 16, FRICTION = 0.88, MIN_VEL = 65, MAX_DURATION = 900;
     \\  const SAMPLE_WINDOW_MS = 100, THRESHOLD = 4;
@@ -616,7 +671,7 @@ const PetdexState = struct {
     config_dir: []u8,
     pets_dir: []u8,
     asset_root: []u8,
-    bridge_handlers: [3]zero_native.BridgeHandler = undefined,
+    bridge_handlers: [5]zero_native.BridgeHandler = undefined,
 
     fn deinit(self: *PetdexState) void {
         self.allocator.free(self.config_dir);
@@ -629,6 +684,8 @@ const PetdexState = struct {
             .{ .name = "petdex.set_active", .context = self, .invoke_fn = setActiveCmd },
             .{ .name = "petdex.quit", .context = self, .invoke_fn = quitCmd },
             .{ .name = "petdex.read_runtime_state", .context = self, .invoke_fn = readRuntimeStateCmd },
+            .{ .name = "petdex.read_update_info", .context = self, .invoke_fn = readUpdateInfoCmd },
+            .{ .name = "petdex.trigger_update", .context = self, .invoke_fn = triggerUpdateCmd },
         };
         return .{
             .policy = .{ .enabled = true, .commands = &petdex_command_policies },
@@ -677,6 +734,78 @@ const PetdexState = struct {
         std.process.exit(0);
         return std.fmt.bufPrint(output, "{{\"ok\":true}}", .{});
     }
+
+    fn readUpdateInfoCmd(context: *anyopaque, invocation: zero_native.bridge.Invocation, output: []u8) anyerror![]const u8 {
+        _ = invocation;
+        const self: *PetdexState = @ptrCast(@alignCast(context));
+        const path = try std.fs.path.join(self.allocator, &.{ self.config_dir, "runtime", "update.json" });
+        defer self.allocator.free(path);
+        var file = std.Io.Dir.openFileAbsolute(self.io, path, .{}) catch {
+            return std.fmt.bufPrint(output, "{{\"available\":false,\"status\":\"idle\"}}", .{});
+        };
+        defer file.close(self.io);
+        const stat = try file.stat(self.io);
+        const size: usize = @intCast(stat.size);
+        if (size == 0 or size > output.len) {
+            return std.fmt.bufPrint(output, "{{\"available\":false,\"status\":\"idle\"}}", .{});
+        }
+        const read = try file.readPositionalAll(self.io, output[0..size], 0);
+        return output[0..read];
+    }
+
+    fn triggerUpdateCmd(context: *anyopaque, invocation: zero_native.bridge.Invocation, output: []u8) anyerror![]const u8 {
+        _ = invocation;
+        const self: *PetdexState = @ptrCast(@alignCast(context));
+        // Read the per-session token the sidecar wrote to ~/.petdex/
+        // runtime/update-token (mode 0600). Forward it as a header so
+        // a drive-by website can't trigger this endpoint via no-cors.
+        const token_path = try std.fs.path.join(self.allocator, &.{ self.config_dir, "runtime", "update-token" });
+        defer self.allocator.free(token_path);
+        var token_file = std.Io.Dir.openFileAbsolute(self.io, token_path, .{}) catch {
+            return std.fmt.bufPrint(output, "{{\"ok\":false,\"error\":\"no_token\"}}", .{});
+        };
+        defer token_file.close(self.io);
+        var token_buf: [128]u8 = undefined;
+        const token_read = token_file.readPositionalAll(self.io, &token_buf, 0) catch {
+            return std.fmt.bufPrint(output, "{{\"ok\":false,\"error\":\"token_read\"}}", .{});
+        };
+        const token = std.mem.trim(u8, token_buf[0..token_read], " \t\r\n");
+        if (token.len == 0) {
+            return std.fmt.bufPrint(output, "{{\"ok\":false,\"error\":\"empty_token\"}}", .{});
+        }
+
+        // Build "X-Petdex-Update-Token: <token>" header arg.
+        const header_arg = try std.fmt.allocPrint(
+            self.allocator,
+            "X-Petdex-Update-Token: {s}",
+            .{token},
+        );
+        defer self.allocator.free(header_arg);
+
+        // Spawn `curl -fsS -X POST -H "..." http://127.0.0.1:7777/update`
+        // detached. curl ships with macOS and most Linux distros, so this
+        // beats pulling in a Zig HTTP client for one fire-and-forget POST.
+        const argv = &[_][]const u8{
+            "curl",
+            "-fsS",
+            "-m",
+            "5",
+            "-X",
+            "POST",
+            "-H",
+            header_arg,
+            "http://127.0.0.1:7777/update",
+        };
+        _ = std.process.spawn(self.io, .{
+            .argv = argv,
+            .stdin = .ignore,
+            .stdout = .ignore,
+            .stderr = .ignore,
+        }) catch |err| {
+            return std.fmt.bufPrint(output, "{{\"ok\":false,\"error\":\"{s}\"}}", .{@errorName(err)});
+        };
+        return std.fmt.bufPrint(output, "{{\"ok\":true}}", .{});
+    }
 };
 
 const petdex_origins = [_][]const u8{ "zero://app", "zero://inline" };
@@ -684,6 +813,8 @@ const petdex_command_policies = [_]zero_native.BridgeCommandPolicy{
     .{ .name = "petdex.set_active", .origins = &petdex_origins },
     .{ .name = "petdex.quit", .origins = &petdex_origins },
     .{ .name = "petdex.read_runtime_state", .origins = &petdex_origins },
+    .{ .name = "petdex.read_update_info", .origins = &petdex_origins },
+    .{ .name = "petdex.trigger_update", .origins = &petdex_origins },
 };
 
 fn jsonStringField(payload: []const u8, key: []const u8) ?[]const u8 {

@@ -417,7 +417,9 @@
       "campaigns": "广告活动",
       "mailing": "邮件",
       "manifest": "Manifest",
-      "insights": "数据"
+      "insights": "数据",
+      "telemetry": "Telemetry",
+      "telemetry__fixme": true
     },
     "status": {
       "pending": "待处理",
@@ -620,6 +622,34 @@
     },
     "threadPage": {
       "back": "← 收件箱"
+    },
+    "telemetry": {
+      "__fixme": true,
+      "eyebrow": "Telemetry",
+      "title": "CLI usage telemetry",
+      "description": "Anonymous install volume, OS distribution, and agent adoption from petdex CLI users.",
+      "stats": {
+        "totalInstalls": "Total installs",
+        "weeklyActive": "Weekly active installs",
+        "totalEvents": "Total events"
+      },
+      "sections": {
+        "adoptionCurve": "Adoption over 30 days",
+        "osDistribution": "OS distribution",
+        "archDistribution": "Arch distribution",
+        "versionAdoption": "Version adoption",
+        "topAgents": "Top agents",
+        "funnel": "Conversion funnel",
+        "geoTop10": "Top 10 countries"
+      },
+      "funnel": {
+        "install": "Install desktop",
+        "hooks": "Hooks install",
+        "start": "Desktop start",
+        "firstEvent": "First state"
+      },
+      "empty": "No telemetry events yet.",
+      "noData": "No data"
     }
   },
   "submit": {
@@ -1428,6 +1458,32 @@
       "footer__fixme": true
     },
     "docsLink": "查看文档",
-    "docsLink__fixme": true
+    "docsLink__fixme": true,
+    "pendingPet": {
+      "eyebrow": "马上就好。",
+      "eyebrow__fixme": true,
+      "messageBefore": "安装 Petdex Desktop 即可一键测试",
+      "messageBefore__fixme": true,
+      "messageAfter": "。",
+      "messageAfter__fixme": true,
+      "hint": "目前仅支持 macOS",
+      "hint__fixme": true
+    }
+  },
+  "openInPetdex": {
+    "eyebrow": "一键安装",
+    "eyebrow__fixme": true,
+    "label": "在 Petdex Desktop 中打开",
+    "label__fixme": true,
+    "subtitle": "让这只宠物漂浮在你的编程助手旁",
+    "subtitle__fixme": true,
+    "opening": "正在打开 Petdex...",
+    "opening__fixme": true,
+    "ariaLabel": "在 Petdex Desktop 中打开 {slug}",
+    "ariaLabel__fixme": true
+  },
+  "installCompact": {
+    "seeGuide": "查看完整安装指南",
+    "seeGuide__fixme": true
   }
 }

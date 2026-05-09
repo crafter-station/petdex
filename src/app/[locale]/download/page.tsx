@@ -27,8 +27,25 @@ export const metadata = {
 const RELEASES_URL =
   "https://github.com/crafter-station/petdex/releases/latest";
 
-export default async function DownloadPage() {
+type DownloadPageProps = {
+  searchParams: Promise<{ next?: string | string[] }>;
+};
+
+function parsePendingPet(next: string | string[] | undefined): string | null {
+  const value = Array.isArray(next) ? next[0] : next;
+  if (!value || !value.startsWith("install/")) return null;
+  const slug = value.slice("install/".length);
+  // Mirror the server slug regex so a malformed ?next= can't render anything.
+  if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(slug)) return null;
+  return slug;
+}
+
+export default async function DownloadPage({
+  searchParams,
+}: DownloadPageProps) {
   const t = await getTranslations("download");
+  const params = await searchParams;
+  const pendingPet = parsePendingPet(params.next);
 
   const features = [
     {
@@ -78,6 +95,26 @@ export default async function DownloadPage() {
       </div>
 
       <SiteHeader />
+
+      {pendingPet ? (
+        <div className="relative z-10 border-border-base/60 border-b bg-brand/10 backdrop-blur-sm">
+          <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-1 px-5 py-3 md:flex-row md:items-center md:gap-3 md:px-8">
+            <p className="text-sm text-foreground">
+              <span className="font-semibold text-brand">
+                {t("pendingPet.eyebrow")}
+              </span>{" "}
+              {t("pendingPet.messageBefore")}{" "}
+              <code className="rounded bg-surface-muted px-1.5 py-0.5 font-mono text-xs">
+                {pendingPet}
+              </code>{" "}
+              {t("pendingPet.messageAfter")}
+            </p>
+            <p className="text-xs text-muted-2 md:ml-auto">
+              {t("pendingPet.hint")}
+            </p>
+          </div>
+        </div>
+      ) : null}
 
       <section className="mx-auto w-full max-w-[1440px] px-5 pt-16 pb-12 md:px-8 md:pt-24">
         <div className="flex flex-col items-center text-center">
