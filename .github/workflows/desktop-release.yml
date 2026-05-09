@@ -25,6 +25,11 @@ jobs:
     steps:
       - name: Checkout petdex
         uses: actions/checkout@v4
+        with:
+          # Manual workflow_dispatch must build from inputs.tag, not from
+          # the branch the workflow file lives on. Tag pushes already
+          # arrive with github.ref pointing at the tag.
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Resolve zero-native source
         # The desktop project lives at packages/petdex-desktop and points to a
@@ -82,6 +87,8 @@ jobs:
     steps:
       - name: Checkout petdex
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Install Bun
         uses: oven-sh/setup-bun@v2
@@ -108,6 +115,8 @@ jobs:
     steps:
       - name: Checkout petdex
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Download all binaries
         uses: actions/download-artifact@v4
