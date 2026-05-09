@@ -18,19 +18,6 @@ function r2PublicHost(): string {
   }
 }
 
-// WeChat group QR is hosted on Aliyun OSS (Henry's bucket). Pulled from
-// the env var Henry's PR shipped, so any future bucket swap doesn't
-// require a code change to the CSP. Returns null when the env var is
-// missing so we don't hand the CSP a bad host.
-function wechatQrHost(): string | null {
-  if (!process.env.NEXT_PUBLIC_WECHAT_GROUP_QR_URL) return null;
-  try {
-    return new URL(process.env.NEXT_PUBLIC_WECHAT_GROUP_QR_URL).hostname;
-  } catch {
-    return null;
-  }
-}
-
 // Content-Security-Policy. Blocks inline <script> sources we didn't ship,
 // caps img / connect / frame ancestors. The `unsafe-inline` allowance for
 // styles is required by Next/Tailwind during hydration; for scripts we
@@ -44,13 +31,6 @@ function wechatQrHost(): string | null {
 // - vercel-scripts / vitals for Vercel analytics
 // - R2 public bucket + UploadThing host + Clerk image hosts + social
 //   avatar hosts for sprites and avatars
-// - Aliyun OSS host (when set via NEXT_PUBLIC_WECHAT_GROUP_QR_URL) for
-//   the WeChat group QR shown on /zh/community + the collaborator panel
-const WECHAT_QR_IMG_HOST = wechatQrHost();
-const wechatQrImgSrc = WECHAT_QR_IMG_HOST
-  ? ` https://${WECHAT_QR_IMG_HOST}`
-  : "";
-
 const cspDirectives = [
   "default-src 'self'",
   "base-uri 'self'",
@@ -64,7 +44,7 @@ const cspDirectives = [
   "frame-src 'self' https://challenges.cloudflare.com https://*.clerk.com https://*.clerk.accounts.dev https://accounts.petdex.crafter.run https://clerk.petdex.crafter.run",
   "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://clerk.petdex.crafter.run https://accounts.petdex.crafter.run https://*.clerk.com https://*.clerk.accounts.dev https://challenges.cloudflare.com https://va.vercel-scripts.com https://vercel.live",
   "style-src 'self' 'unsafe-inline'",
-  `img-src 'self' data: blob: https://pub-94495283df974cfea5e98d6a9e3fa462.r2.dev https://yu2vz9gndp.ufs.sh https://img.clerk.com https://images.clerk.dev https://avatars.githubusercontent.com https://pbs.twimg.com https://storage.googleapis.com${wechatQrImgSrc}`,
+  "img-src 'self' data: blob: https://pub-94495283df974cfea5e98d6a9e3fa462.r2.dev https://yu2vz9gndp.ufs.sh https://img.clerk.com https://images.clerk.dev https://avatars.githubusercontent.com https://pbs.twimg.com https://storage.googleapis.com",
   "media-src 'self' https://pub-94495283df974cfea5e98d6a9e3fa462.r2.dev",
   "font-src 'self' data:",
   // R2 reads via pub-*.r2.dev, R2 PUT uploads via the account-specific
@@ -119,9 +99,6 @@ const nextConfig: NextConfig = {
       { protocol: "https", hostname: "avatars.githubusercontent.com" },
       { protocol: "https", hostname: "pbs.twimg.com" },
       { protocol: "https", hostname: "storage.googleapis.com" },
-      ...(WECHAT_QR_IMG_HOST
-        ? [{ protocol: "https" as const, hostname: WECHAT_QR_IMG_HOST }]
-        : []),
     ],
   },
   // Server-only modules that don't survive Turbopack/webpack bundling:

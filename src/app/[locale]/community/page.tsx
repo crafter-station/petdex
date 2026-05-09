@@ -14,11 +14,24 @@ import { DiscordLink } from "@/components/discord-link";
 import { JsonLd } from "@/components/json-ld";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
+import { WechatCommunityDialog } from "@/components/wechat-community-dialog";
 
 import { hasLocale } from "@/i18n/config";
 
 export const dynamic = "force-static";
 const SITE_URL = "https://petdex.crafter.run";
+const WECHAT_COMMUNITY_ENABLED =
+  process.env.NEXT_PUBLIC_WECHAT_COMMUNITY_ENABLED === "1";
+const WECHAT_QR_PROXY_CONFIGURED = Boolean(
+  process.env.ALIYUN_OSS_ACCESS_KEY_ID &&
+    process.env.ALIYUN_OSS_ACCESS_KEY_SECRET &&
+    process.env.ALIYUN_OSS_BUCKET &&
+    process.env.ALIYUN_OSS_REGION,
+);
+
+type PageProps = {
+  params: Promise<{ locale: string }>;
+};
 
 export async function generateMetadata({
   params,
@@ -70,9 +83,12 @@ const SECTIONS: Array<{
   },
 ];
 
-export default function CommunityPage() {
+export default async function CommunityPage({ params }: PageProps) {
+  const { locale } = await params;
   const inviteUrl = process.env.NEXT_PUBLIC_DISCORD_INVITE_URL;
   if (!inviteUrl) notFound();
+  const showWechatCommunity =
+    locale === "zh" && WECHAT_COMMUNITY_ENABLED && WECHAT_QR_PROXY_CONFIGURED;
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "WebPage",
@@ -108,6 +124,7 @@ export default function CommunityPage() {
                 Join the Discord
                 <ArrowRight className="size-4" />
               </DiscordLink>
+              {showWechatCommunity ? <WechatCommunityDialog /> : null}
               <a
                 href="https://github.com/crafter-station/petdex"
                 target="_blank"
