@@ -150,7 +150,17 @@ async function stageDownload(
  * up with the previous coherent state.
  */
 async function commitStaged(staged: StagedFile[]): Promise<void> {
-  const renamed: { from: string; backup: string }[] = [];
+  // Each renamed entry tracks whether there was a previous file at
+  // dest. If yes, rollback restores from .prev. If no (fresh install),
+  // rollback deletes the newly-renamed file so a partial first
+  // install doesn't leave the user with only the binary or only the
+  // sidecar — the previous loop skipped no-backup entries entirely
+  // and broke the all-or-nothing contract for first-time installs.
+  type RenamedEntry = {
+    dest: string;
+    backup: string | null;
+  };
+  const renamed: RenamedEntry[] = [];
   for (const file of staged) {
     // backup tracks the current iteration's snapshot before the catch
     // block runs. Critical: if rename(tmp, dest) fails AFTER we moved
@@ -167,12 +177,12 @@ async function commitStaged(staged: StagedFile[]): Promise<void> {
         if (code !== "ENOENT") throw err;
       }
       await rename(file.tmpPath, file.destPath);
-      renamed.push({ from: file.destPath, backup: backup ?? "" });
+      renamed.push({ dest: file.destPath, backup });
     } catch (err) {
-      // 1. Restore the in-progress backup first (before the failed rename
-      //    finished pushing to `renamed`). Without this, the existing
-      //    binary or sidecar is gone and the all-or-nothing guarantee
-      //    is broken.
+      // 1. Restore the in-progress backup first (before the failed
+      //    rename finished pushing to `renamed`). Without this the
+      //    existing binary or sidecar is gone and the all-or-nothing
+      //    guarantee is broken.
       if (backup) {
         try {
           await rm(file.destPath, { force: true });
@@ -181,12 +191,20 @@ async function commitStaged(staged: StagedFile[]): Promise<void> {
           // best-effort
         }
       }
-      // 2. Roll back already-committed renames using their .prev snapshots.
+      // 2. Roll back already-committed renames in reverse order.
+      //    Two cases:
+      //    - backup is set: there was a previous file, restore it.
+      //    - backup is null: this was a fresh install with no prior
+      //      file. Delete the new dest so we don't leave the user
+      //      with a partial install (e.g. only the binary, no sidecar).
       for (const r of renamed.reverse()) {
-        if (!r.backup) continue;
         try {
-          await rm(r.from, { force: true });
-          await rename(r.backup, r.from);
+          if (r.backup) {
+            await rm(r.dest, { force: true });
+            await rename(r.backup, r.dest);
+          } else {
+            await rm(r.dest, { force: true });
+          }
         } catch {
           // best-effort
         }
@@ -202,7 +220,7 @@ async function commitStaged(staged: StagedFile[]): Promise<void> {
       throw err;
     }
   }
-  // All renames succeeded — drop the .prev snapshots.
+  // All renames succeeded — drop the .prev snapshots that exist.
   for (const r of renamed) {
     if (!r.backup) continue;
     try {
