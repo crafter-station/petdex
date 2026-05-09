@@ -261,7 +261,16 @@ export async function downloadDesktopAssets(release: Release): Promise<{
   return { binAsset, sidecarAsset };
 }
 
-export async function runInstallDesktop(): Promise<void> {
+export type RunInstallDesktopResult = {
+  /**
+   * GitHub Release tag of the binary that landed on disk. Caller can
+   * forward it to telemetry so the dashboard's version-adoption chart
+   * actually populates.
+   */
+  tag: string;
+};
+
+export async function runInstallDesktop(): Promise<RunInstallDesktopResult> {
   p.intro(pc.bgMagenta(pc.white(" petdex install desktop ")));
 
   const target = detectTarget();
@@ -313,6 +322,8 @@ export async function runInstallDesktop(): Promise<void> {
   );
 
   p.outro(`${pc.green("✓")} ${release.tag_name}`);
+
+  return { tag: release.tag_name };
 }
 
 function formatBytes(bytes: number): string {

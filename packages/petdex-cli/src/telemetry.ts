@@ -7,8 +7,17 @@
  * - User can opt out: `petdex telemetry off`.
  * - Notice shown once on first run (notice_seen flag).
  * - PETDEX_TELEMETRY=0 env var also disables.
+ *
+ * Failure modes:
+ * - HOME unwritable / config read error / opt-out: degrade silently.
+ *   Telemetry is best-effort; never block or crash an unrelated CLI
+ *   command because the user's filesystem is read-only.
+ * - Slow endpoint: emit() spawns a detached worker process so the main
+ *   CLI exits immediately even if the network is hung. A global fetch
+ *   in the parent would keep the event loop alive until it settled.
  */
 
+import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -49,36 +58,62 @@ function readConfig(): TelemetryConfig | null {
   }
 }
 
-function writeConfig(config: TelemetryConfig): void {
-  mkdirSync(path.dirname(TELEMETRY_FILE), { recursive: true });
-  writeFileSync(TELEMETRY_FILE, `${JSON.stringify(config, null, 2)}\n`);
+function writeConfigSafe(config: TelemetryConfig): boolean {
+  try {
+    mkdirSync(path.dirname(TELEMETRY_FILE), { recursive: true });
+    writeFileSync(TELEMETRY_FILE, `${JSON.stringify(config, null, 2)}\n`);
+    return true;
+  } catch {
+    // HOME unwritable, disk full, etc. Telemetry must never crash the
+    // surrounding CLI command, so we degrade silently.
+    return false;
+  }
 }
 
-export function ensureTelemetryConfig(): TelemetryConfig {
-  let config = readConfig();
-  if (!config) {
-    config = {
-      install_id: randomUUID(),
-      enabled: true,
-      notice_seen: false,
-      first_seen: new Date().toISOString(),
-    };
-    writeConfig(config);
-  }
-  return config;
+/**
+ * Returns existing config, or creates one when telemetry is enabled
+ * AND the filesystem allows writing. Returns null in every other case
+ * so callers can short-circuit cleanly.
+ */
+export function ensureTelemetryConfig(): TelemetryConfig | null {
+  // Hard opt-out via env: never read or create the file. This is what
+  // CI / sandbox / restricted-HOME users rely on.
+  if (process.env.PETDEX_TELEMETRY === "0") return null;
+
+  const existing = readConfig();
+  if (existing) return existing;
+
+  const fresh: TelemetryConfig = {
+    install_id: randomUUID(),
+    enabled: true,
+    notice_seen: false,
+    first_seen: new Date().toISOString(),
+  };
+  return writeConfigSafe(fresh) ? fresh : null;
 }
 
 export function isEnabled(): boolean {
   if (process.env.PETDEX_TELEMETRY === "0") return false;
   const config = readConfig();
-  if (!config) return true;
+  if (!config) return true; // default ON for opt-out model
   return config.enabled;
 }
 
-export function setEnabled(enabled: boolean): void {
-  const config = ensureTelemetryConfig();
-  config.enabled = enabled;
-  writeConfig(config);
+export function setEnabled(enabled: boolean): boolean {
+  // For an explicit `petdex telemetry on/off` call we need a config
+  // file even if PETDEX_TELEMETRY=0 was set; the user is overriding.
+  let config = readConfig();
+  if (!config) {
+    config = {
+      install_id: randomUUID(),
+      enabled,
+      notice_seen: true,
+      first_seen: new Date().toISOString(),
+    };
+  } else {
+    config.enabled = enabled;
+  }
+  return writeConfigSafe(config);
 }
 
 export function getStatus(): { enabled: boolean; install_id: string | null } {
@@ -90,7 +125,9 @@ export function getStatus(): { enabled: boolean; install_id: string | null } {
 }
 
 export function maybeShowFirstRunNotice(): void {
+  if (process.env.PETDEX_TELEMETRY === "0") return;
   const config = ensureTelemetryConfig();
+  if (!config) return; // best-effort: skip notice when we can't persist it
   if (config.notice_seen) return;
   console.log(
     [
@@ -103,31 +140,53 @@ export function maybeShowFirstRunNotice(): void {
     ].join("\n"),
   );
   config.notice_seen = true;
-  writeConfig(config);
+  // If write fails, just show the notice again next run — no big deal.
+  writeConfigSafe(config);
 }
 
+/**
+ * Fire-and-forget telemetry event. The POST runs in a detached worker
+ * process so the parent CLI can exit immediately. A global fetch() in
+ * the parent process keeps the event loop alive until the request
+ * settles, which adds the full TIMEOUT_MS to every successful command
+ * that reaches emit() — exactly the lag this function is meant to
+ * avoid.
+ */
 export function emit(
   event: TelemetryEvent,
   payload: TelemetryPayload = {},
 ): void {
   if (!isEnabled()) return;
   const config = ensureTelemetryConfig();
+  if (!config) return; // no install_id, nothing to send
+
   const body = JSON.stringify({
     install_id: config.install_id,
     event,
     ...payload,
   });
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-  if (typeof timer === "object" && timer !== null && "unref" in timer) {
-    (timer as NodeJS.Timeout).unref();
-  }
-  fetch(ENDPOINT, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body,
-    signal: controller.signal,
-  }).catch(() => {
+
+  // Spawn a tiny Node process that owns the fetch. `unref` drops the
+  // parent's reference so process.exit doesn't wait on this child;
+  // detached + ignored stdio means the OS reaps it after it settles.
+  // If anything fails (Node missing, sandbox, etc.), swallow.
+  try {
+    const worker = `
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), ${TIMEOUT_MS});
+      fetch(${JSON.stringify(ENDPOINT)}, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: ${JSON.stringify(body)},
+        signal: controller.signal,
+      }).catch(() => {}).finally(() => clearTimeout(t));
+    `;
+    const child = spawn(process.execPath, ["-e", worker], {
+      detached: true,
+      stdio: "ignore",
+    });
+    child.unref();
+  } catch {
     // Telemetry failures are silent.
-  });
+  }
 }

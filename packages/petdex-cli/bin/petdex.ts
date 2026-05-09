@@ -251,11 +251,14 @@ async function cmdInstall(args: string[]) {
     process.exit(1);
   }
   if (slug === "desktop") {
-    await runInstallDesktop();
+    const { tag } = await runInstallDesktop();
     emit("cli_install_desktop_success", {
       cli_version: VERSION,
       os: process.platform,
       arch: process.arch,
+      // Forward the release tag so the dashboard's version adoption
+      // chart isn't always empty.
+      binary_version: tag,
     });
     return;
   }
@@ -316,9 +319,18 @@ async function cmdInstall(args: string[]) {
 
   const ext = pet.spritesheetUrl.endsWith(".png") ? "png" : "webp";
   // Download once, write to both targets to save bandwidth.
+  // Validate response status before reading the body so a 404/500
+  // doesn't silently land HTML inside pet.json or spritesheet.*.
+  const fetchOrThrow = async (url: string): Promise<ArrayBuffer> => {
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`download ${url} → ${res.status} ${res.statusText}`);
+    }
+    return res.arrayBuffer();
+  };
   const [petJson, spritesheet] = await Promise.all([
-    fetch(pet.petJsonUrl).then((r) => r.arrayBuffer()),
-    fetch(pet.spritesheetUrl).then((r) => r.arrayBuffer()),
+    fetchOrThrow(pet.petJsonUrl),
+    fetchOrThrow(pet.spritesheetUrl),
   ]);
   await Promise.all([
     writeFile(path.join(petdexDir, "pet.json"), Buffer.from(petJson)),
@@ -1020,10 +1032,19 @@ async function cmdHooks(args: string[]) {
     return;
   }
   switch (sub) {
-    case "install":
-      await runHooksInstall();
-      emit("cli_hooks_install_success", { cli_version: VERSION });
+    case "install": {
+      const { installedAgents } = await runHooksInstall();
+      // Only emit success when at least one agent was actually written.
+      // Cancelled/no-op runs return an empty array; counting those as
+      // success makes the dashboard "agents wired up" funnel lie.
+      if (installedAgents.length > 0) {
+        emit("cli_hooks_install_success", {
+          cli_version: VERSION,
+          agents: installedAgents,
+        });
+      }
       break;
+    }
     default:
       console.error(pc.red(`Unknown hooks command: ${sub}`));
       printHooksHelp();
