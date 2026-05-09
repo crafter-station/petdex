@@ -31,11 +31,11 @@ jobs:
           # arrive with github.ref pointing at the tag.
           ref: ${{ inputs.tag || github.ref }}
 
-      - name: Resolve zero-native source
-        # The desktop project lives at packages/petdex-desktop and points to a
-        # checkout of zero-native via build.zig's default_zero_native_path.
-        # CI clones a working zero-native into a workspace-local directory
-        # and patches build.zig to point at it.
+      - name: Clone zero-native
+        # build.zig resolves zero-native from -Dzero-native-path flag, the
+        # ZERO_NATIVE_PATH env var, or ../../zero-native (in that order).
+        # CI passes the checkout path explicitly via the env var so we
+        # don't have to patch build.zig at runtime.
         #
         # Source defaults to Railly/zero-native:feature/window-resize because
         # the floating-window options + window.resize + focusable flag aren't
@@ -49,19 +49,7 @@ jobs:
         run: |
           set -euo pipefail
           git clone --depth 1 --branch "$ZERO_NATIVE_BRANCH" "$ZERO_NATIVE_REMOTE" "$GITHUB_WORKSPACE/zero-native"
-          ZN_PATH="$GITHUB_WORKSPACE/zero-native/"
-          python3 - <<PYEOF
-          import re, pathlib, os
-          zn_path = os.environ["GITHUB_WORKSPACE"] + "/zero-native/"
-          p = pathlib.Path("packages/petdex-desktop/build.zig")
-          src = p.read_text()
-          src = re.sub(
-              r'const default_zero_native_path = "[^"]*";',
-              f'const default_zero_native_path = "{zn_path}";',
-              src,
-          )
-          p.write_text(src)
-          PYEOF
+          echo "ZERO_NATIVE_PATH=$GITHUB_WORKSPACE/zero-native/" >> "$GITHUB_ENV"
 
       - name: Install Zig 0.16.0
         uses: mlugg/setup-zig@v1
@@ -71,7 +59,7 @@ jobs:
       - name: Build petdex-desktop
         working-directory: packages/petdex-desktop
         run: |
-          zig build -Doptimize=ReleaseSafe
+          zig build -Doptimize=ReleaseSafe -Dzero-native-path="$ZERO_NATIVE_PATH"
           mv zig-out/bin/petdex-desktop "petdex-desktop-${{ matrix.target }}"
           ls -lh "petdex-desktop-${{ matrix.target }}"
 

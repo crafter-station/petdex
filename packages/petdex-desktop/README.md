@@ -8,25 +8,48 @@ is frameless, transparent, and always-on-top, rendering whatever pet is
 already installed in `~/.codex/pets/`.
 
 Built on a fork of `vercel-labs/zero-native` that exposes `frameless`,
-`transparent`, and `always_on_top` window options. The fork lives at
-`/Users/raillyhugo/Programming/railly/zero-native` on the
-`feature/floating-window` branch and is referenced from `build.zig` via
-`default_zero_native_path`. The diff is upstreamable as a single PR.
+`transparent`, and `always_on_top` window options. The fork is at
+`Railly/zero-native` on the `feature/window-resize` branch (which
+builds on `feature/floating-window`, the upstream PR in review). The
+diff is upstreamable as a single PR.
 
 ## Build
 
+The build needs a local checkout of zero-native. Resolution order:
+
+1. `-Dzero-native-path=<path>` cli flag
+2. `ZERO_NATIVE_PATH` environment variable
+3. `../../zero-native` relative to this build.zig (sibling of the
+   petdex repo, common dev layout)
+
+If none of those resolve to an existing directory, the build panics
+with the command you need to run.
+
 ```bash
+# Common case: clone zero-native next to petdex
+git clone --branch feature/window-resize \
+  https://github.com/Railly/zero-native.git ../../zero-native
+
 cd packages/petdex-desktop
 zig build
 ./zig-out/bin/petdex-desktop
+```
+
+Or pass the path explicitly:
+
+```bash
+zig build -Dzero-native-path=/absolute/path/to/zero-native/
+# or
+ZERO_NATIVE_PATH=/absolute/path/to/zero-native/ zig build
 ```
 
 You need:
 
 - macOS (Linux/Windows not wired up yet)
 - Zig 0.16
-- At least one pet installed under `~/.codex/pets/<slug>/` (run
-  `npx petdex install boba` if you don't have any yet)
+- At least one pet installed under `~/.petdex/pets/<slug>/` or
+  `~/.codex/pets/<slug>/` (run `npx petdex install boba` if you don't
+  have any yet)
 
 ## How it works
 

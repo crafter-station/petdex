@@ -19,8 +19,16 @@ const WebEngineOption = enum {
     chromium,
 };
 
-const default_zero_native_path = "/Users/raillyhugo/Programming/railly/zero-native/";
 const app_exe_name = "petdex-desktop";
+
+// Resolution order for the zero-native framework checkout:
+//   1. -Dzero-native-path=<path>
+//   2. ZERO_NATIVE_PATH env var
+//   3. ../../zero-native (sibling of the petdex repo, common dev layout)
+// If none of those resolve to an existing directory we panic with the
+// command the contributor needs to run, instead of silently falling
+// back to whatever the build server was patched with.
+const ZERO_NATIVE_FALLBACK = "../../zero-native";
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
@@ -33,7 +41,7 @@ pub fn build(b: *std.Build) void {
     const web_engine_override = b.option(WebEngineOption, "web-engine", "Override app.zon web engine: system, chromium");
     const cef_dir_override = b.option([]const u8, "cef-dir", "Override CEF root directory for Chromium builds");
     const cef_auto_install_override = b.option(bool, "cef-auto-install", "Override app.zon CEF auto-install setting");
-    const zero_native_path = b.option([]const u8, "zero-native-path", "Path to the zero-native framework checkout") orelse default_zero_native_path;
+    const zero_native_path = resolveZeroNativePath(b);
     const selected_platform: PlatformOption = switch (platform_option) {
         .auto => if (target.result.os.tag == .macos) .macos else if (target.result.os.tag == .linux) .linux else .null,
         else => platform_option,
@@ -267,4 +275,25 @@ fn boolField(source: []const u8, field: []const u8) ?bool {
     if (std.mem.startsWith(u8, source[index..], "true")) return true;
     if (std.mem.startsWith(u8, source[index..], "false")) return false;
     return null;
+}
+
+fn resolveZeroNativePath(b: *std.Build) []const u8 {
+    // Resolution order:
+    //   1. -Dzero-native-path=<path>
+    //   2. ZERO_NATIVE_PATH env var
+    //   3. ../../zero-native relative to this build.zig (petdex repo
+    //      and zero-native cloned as siblings — common local layout)
+    //
+    // If none resolves, the downstream zeroNativeModule() call will
+    // fail when it tries to read root.zig from the path. We surface
+    // the resolution chain in the build log so contributors see where
+    // we looked. This keeps the build script free of std.fs APIs that
+    // shifted across Zig versions.
+    if (b.option([]const u8, "zero-native-path", "Path to the zero-native framework checkout")) |opt| {
+        return opt;
+    }
+    if (b.graph.environ_map.get("ZERO_NATIVE_PATH")) |env_value| {
+        return env_value;
+    }
+    return b.pathFromRoot(ZERO_NATIVE_FALLBACK);
 }
