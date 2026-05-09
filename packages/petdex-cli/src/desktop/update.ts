@@ -30,7 +30,14 @@ import {
   fetchLatestRelease,
   stageDesktopAssets,
 } from "./install.js";
-import { desktopStatus, startDesktop, stopDesktop } from "./process.js";
+import {
+  desktopStatus,
+  startDesktop,
+  stopDesktop,
+  waitForPortRelease,
+} from "./process.js";
+
+const SIDECAR_PORT = 7777;
 
 const VERSION_FILE = path.join(homedir(), ".petdex", "version");
 
@@ -160,15 +167,39 @@ export async function runUpdate(args: string[] = []): Promise<void> {
   await writeFile(VERSION_FILE, `${release.tag_name}\n`);
 
   // Phase 4: restart so the user picks up the new binary + sidecar.
-  // We restart in BOTH interactive and --silent modes. In silent mode
-  // the sidecar spawned us, then `stopDesktop()` killed the desktop
-  // (and its sidecar child), but `startDesktop()` re-spawns the
-  // desktop as a detached + unref'd process — it inherits no parent,
-  // so it survives the eventual exit of this updater. Without this
-  // restart, an in-app "update available" click leaves the user with
-  // no mascot at all and no WebView to read the "update done"
-  // message the sidecar wrote to update.json.
+  //
+  // In --silent mode the sidecar that spawned us deliberately keeps
+  // serving until its updater child (this process) exits. That means
+  // when we hit startDesktop() the old sidecar still owns :7777, the
+  // new desktop spawns a new sidecar, and the new sidecar bombs out
+  // on EADDRINUSE. Then the old sidecar finally exits, leaves the
+  // port free, and the user has a desktop with no hook listener.
+  //
+  // Wait for the port to actually free up before we restart. We wait
+  // up to 10s; if the old sidecar is still holding it past that,
+  // surface the failure with a remediation rather than fire-and-
+  // pray.
   if (wasRunning) {
+    info(
+      silent
+        ? "Waiting for sidecar port to release"
+        : `${pc.dim("•")} Waiting for sidecar port to release`,
+    );
+    const portFree = await waitForPortRelease(SIDECAR_PORT, {
+      timeoutMs: 10_000,
+    });
+    if (!portFree) {
+      warn(
+        silent
+          ? `Port ${SIDECAR_PORT} still in use after 10s. Run 'petdex desktop stop && petdex desktop start' to recover.`
+          : `${pc.yellow("!")} Port ${SIDECAR_PORT} still in use after 10s. Run \`petdex desktop stop && petdex desktop start\` to recover.`,
+      );
+      // Don't restart — we'd just spawn a desktop whose sidecar
+      // immediately crashes. Better to leave the user with the
+      // version-file already updated and an explicit recovery
+      // command than to silently produce a broken state.
+      return;
+    }
     info(
       silent
         ? "Restarting petdex-desktop"

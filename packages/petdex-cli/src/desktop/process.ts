@@ -144,6 +144,48 @@ export function cmdDesktopStop(): void {
   console.log(`${pc.green("✓")} stopped pid ${result.pid}`);
 }
 
+/**
+ * Poll-and-wait for whoever is bound to 127.0.0.1:<port> to release
+ * it. Returns true once the port is free, false if `timeoutMs`
+ * elapses first. Used by the update flow to ensure the old sidecar
+ * has actually exited before we spawn a new desktop, which would
+ * otherwise spawn its own sidecar and crash on EADDRINUSE while the
+ * old one was still draining its updater child.
+ */
+export async function waitForPortRelease(
+  port: number,
+  options: { timeoutMs?: number; intervalMs?: number; host?: string } = {},
+): Promise<boolean> {
+  const timeoutMs = options.timeoutMs ?? 10_000;
+  const intervalMs = options.intervalMs ?? 100;
+  const host = options.host ?? "127.0.0.1";
+  const { createConnection } = await import("node:net");
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const free = await new Promise<boolean>((resolve) => {
+      const socket = createConnection({ host, port });
+      const cleanup = (result: boolean) => {
+        socket.removeAllListeners();
+        socket.destroy();
+        resolve(result);
+      };
+      socket.once("connect", () => cleanup(false));
+      socket.once("error", (err: NodeJS.ErrnoException) => {
+        // ECONNREFUSED means nothing is listening — port is free.
+        // Any other error (host unreachable, etc.) we treat as
+        // "no sidecar here" and let the caller proceed; if the
+        // port really is held, startDesktop will fail loudly later.
+        cleanup(err.code === "ECONNREFUSED");
+      });
+      socket.setTimeout(intervalMs, () => cleanup(false));
+    });
+    if (free) return true;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  return false;
+}
+
 export function cmdDesktopStatus(): void {
   const status = desktopStatus();
   switch (status.state) {
