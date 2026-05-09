@@ -350,6 +350,11 @@ function logUpdate(line: string) {
 // terminal status, leaving update.json stuck on "running".
 let currentUpdateChild: ReturnType<typeof spawn> | null = null;
 
+// Set true after the updater hits POST /update/handoff. Used to
+// short-circuit duplicate handoffs and to stop the parent watchdog
+// from re-triggering shutdown after we already initiated one.
+let handoffRequested = false;
+
 function spawnUpdate(): void {
   // npx so the host machine can pin its own petdex-cli version. The
   // child runs detached + ignored-stdin so the sidecar exits cleanly
@@ -488,6 +493,52 @@ const server = http.createServer(async (req, res) => {
       return jsonResponse(res, 200, readUpdateInfo());
     }
 
+    if (req.method === "POST" && url.pathname === "/update/handoff") {
+      // Called by the updater child right before it tries to restart
+      // the desktop. We hold :7777 to keep the sidecar alive while the
+      // updater runs, but the new desktop's new sidecar can't bind
+      // until we let go. Without this signal the updater would block
+      // on waitForPortRelease until its 10s deadline (we won't exit
+      // until it does), the deadline trips, and the user is left with
+      // no desktop.
+      //
+      // On handoff: stop accepting new connections, mark update.json
+      // done, and schedule a hard exit. The updater child keeps
+      // running independently — it was spawned detached, so closing
+      // our HTTP server doesn't kill it.
+      const provided = req.headers[UPDATE_TOKEN_HEADER];
+      const providedStr = Array.isArray(provided) ? provided[0] : provided;
+      if (!providedStr || !constantTimeEquals(providedStr, UPDATE_TOKEN)) {
+        return jsonResponse(res, 401, { ok: false, error: "unauthorized" });
+      }
+      if (!handoffRequested) {
+        handoffRequested = true;
+        log("handoff requested by updater; releasing port");
+        const info = readUpdateInfo();
+        if (info.status === "running") {
+          writeUpdateInfo({
+            ...info,
+            status: "done",
+            message: "Update installed. Restarting the desktop.",
+            checkedAt: Date.now(),
+          });
+        }
+        // Reply BEFORE close() so the updater sees a 200, then close
+        // the listener. server.close() stops accepting new
+        // connections; existing ones (just this one) drain to ack.
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+        server.close(() => {
+          log("handoff: server closed, exiting");
+          process.exit(0);
+        });
+        // Hard cap so a stuck connection doesn't deny the port back.
+        setTimeout(() => process.exit(0), 1000).unref();
+        return;
+      }
+      return jsonResponse(res, 200, { ok: true, alreadyHandedOff: true });
+    }
+
     if (req.method === "POST" && url.pathname === "/update") {
       // Token gate: defends against drive-by CSRF from any site the
       // user visits. The Zig bridge reads ~/.petdex/runtime/update-token
@@ -552,6 +603,14 @@ server.on("error", (err) => {
 const UPDATE_CHILD_GRACE_MS = 60_000;
 
 function shutdown(signal: string) {
+  // Handoff already initiated a clean shutdown sequence (server
+  // closed, exit scheduled). A second shutdown call from SIGTERM or
+  // the parent watchdog at this point would just race the same exit;
+  // ignore it.
+  if (handoffRequested) {
+    log(`shutdown(${signal}) ignored: handoff in progress`);
+    return;
+  }
   // If we're mid-update, give the child a chance to write its
   // terminal status to update.json. Without this the sidecar's
   // own death (triggered by the desktop dying inside `petdex update

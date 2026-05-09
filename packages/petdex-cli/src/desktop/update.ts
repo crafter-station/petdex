@@ -38,8 +38,62 @@ import {
 } from "./process.js";
 
 const SIDECAR_PORT = 7777;
+const UPDATE_TOKEN_HEADER = "x-petdex-update-token";
+const UPDATE_TOKEN_PATH = path.join(
+  homedir(),
+  ".petdex",
+  "runtime",
+  "update-token",
+);
 
 const VERSION_FILE = path.join(homedir(), ".petdex", "version");
+
+/**
+ * Ask the running sidecar to release :7777 before we restart. Without
+ * this signal we'd deadlock: the sidecar holds the port until we exit,
+ * and we wait on the port before exiting. Reading the token from
+ * ~/.petdex/runtime/update-token is the same auth path the WebView
+ * curl uses.
+ *
+ * Best-effort. If the token file is missing, the sidecar isn't
+ * actually running, the request 401s/404s (older sidecar that
+ * predates this endpoint), or anything else fails, we return false so
+ * the caller falls back to waitForPortRelease — that's the safety
+ * net for any case the handoff can't cover.
+ */
+export async function requestSidecarHandoff(options: {
+  port?: number;
+  timeoutMs?: number;
+  tokenPath?: string;
+} = {}): Promise<boolean> {
+  const port = options.port ?? SIDECAR_PORT;
+  const timeoutMs = options.timeoutMs ?? 2_000;
+  const tokenPath = options.tokenPath ?? UPDATE_TOKEN_PATH;
+  let token: string;
+  try {
+    token = readFileSync(tokenPath, "utf8").trim();
+  } catch {
+    return false;
+  }
+  if (!token) return false;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(
+      `http://127.0.0.1:${port}/update/handoff`,
+      {
+        method: "POST",
+        headers: { [UPDATE_TOKEN_HEADER]: token },
+        signal: controller.signal,
+      },
+    );
+    return res.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 function readInstalledVersion(): string | null {
   if (!existsSync(VERSION_FILE)) return null;
@@ -180,10 +234,27 @@ export async function runUpdate(args: string[] = []): Promise<void> {
   // surface the failure with a remediation rather than fire-and-
   // pray.
   if (wasRunning) {
+    // Ask the sidecar to release :7777 first. The sidecar deliberately
+    // keeps serving while this updater child is running; without an
+    // explicit handoff it never lets go, the port wait below would
+    // time out, and we'd return without restarting (deadlock from
+    // opencode-bot review). The handoff is best-effort — older
+    // sidecars without the endpoint, missing token files, etc. — so
+    // we always still call waitForPortRelease as a safety net.
     info(
       silent
-        ? "Waiting for sidecar port to release"
-        : `${pc.dim("•")} Waiting for sidecar port to release`,
+        ? "Asking sidecar to release port"
+        : `${pc.dim("•")} Asking sidecar to release port`,
+    );
+    const handedOff = await requestSidecarHandoff();
+    info(
+      silent
+        ? handedOff
+          ? "Sidecar acknowledged handoff"
+          : "Sidecar handoff unavailable, falling back to port wait"
+        : handedOff
+          ? `${pc.dim("•")} Sidecar acknowledged handoff`
+          : `${pc.dim("•")} Sidecar handoff unavailable, falling back to port wait`,
     );
     const portFree = await waitForPortRelease(SIDECAR_PORT, {
       timeoutMs: 10_000,
