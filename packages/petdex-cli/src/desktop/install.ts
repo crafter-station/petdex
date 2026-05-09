@@ -1,12 +1,21 @@
 /**
- * `petdex install desktop` — downloads the petdex-desktop binary for the
- * current platform from GitHub Releases and drops it under ~/.petdex/bin/.
+ * `petdex install desktop` — downloads the petdex-desktop binary AND the
+ * Node sidecar (`server.js`) for the current platform from GitHub Releases
+ * and drops them under ~/.petdex/.
  *
- * The binary is published from the petdex repo via .github/workflows/
- * desktop-release.yml when a tag matching `desktop-v*` is pushed. Asset
- * naming convention is `petdex-desktop-{darwin|linux|win32}-{arm64|x64}`.
+ * Layout after install:
+ *   ~/.petdex/bin/petdex-desktop          (platform-specific binary, executable)
+ *   ~/.petdex/sidecar/server.js           (cross-platform Node script)
+ *   ~/.petdex/version                     (tag name of the installed release)
+ *
+ * The desktop binary at runtime resolves the sidecar via
+ * resolveSidecarDir() in main.zig, which falls back to ~/.petdex/sidecar.
+ *
+ * Released from .github/workflows/desktop-release.yml on tag desktop-v*.
+ * Asset names: `petdex-desktop-{darwin|linux|win32}-{arm64|x64}` and
+ * `petdex-desktop-sidecar.js`.
  */
-import { chmod, mkdir, writeFile } from "node:fs/promises";
+import { chmod, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { homedir, arch as nodeArch, platform as nodePlatform } from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
@@ -17,14 +26,15 @@ import pc from "picocolors";
 
 const RELEASE_API =
   "https://api.github.com/repos/crafter-station/petdex/releases/latest";
+const SIDECAR_ASSET_NAME = "petdex-desktop-sidecar.js";
 
-type ReleaseAsset = {
+export type ReleaseAsset = {
   name: string;
   browser_download_url: string;
   size: number;
 };
 
-type Release = {
+export type Release = {
   tag_name: string;
   assets: ReleaseAsset[];
 };
@@ -59,6 +69,105 @@ export function desktopBinPath(): string {
   return path.join(homedir(), ".petdex", "bin", `petdex-desktop${ext}`);
 }
 
+export function sidecarPath(): string {
+  return path.join(homedir(), ".petdex", "sidecar", "server.js");
+}
+
+export async function fetchLatestRelease(): Promise<Release> {
+  const res = await fetch(RELEASE_API, {
+    headers: { Accept: "application/vnd.github+json" },
+  });
+  if (!res.ok) throw new Error(`GitHub API ${res.status}`);
+  return (await res.json()) as Release;
+}
+
+export function findBinaryAsset(
+  release: Release,
+  assetSuffix: string,
+): ReleaseAsset {
+  const wantedSuffix = `petdex-desktop-${assetSuffix}`;
+  const asset = release.assets.find((a) => a.name.startsWith(wantedSuffix));
+  if (!asset) {
+    const available = release.assets.map((a) => `      ${a.name}`).join("\n");
+    throw new Error(
+      `No binary for ${assetSuffix} in ${release.tag_name}.\n   Available:\n${available}`,
+    );
+  }
+  return asset;
+}
+
+export function findSidecarAsset(release: Release): ReleaseAsset | null {
+  return release.assets.find((a) => a.name === SIDECAR_ASSET_NAME) ?? null;
+}
+
+/**
+ * Atomic download: stream to {dest}.tmp, fsync via writeFile-buffer, rename
+ * over dest. A failed download leaves a stale .tmp behind (we clean up) but
+ * never corrupts the existing dest.
+ */
+async function downloadAtomic(
+  url: string,
+  destPath: string,
+  mode?: number,
+): Promise<void> {
+  const res = await fetch(url);
+  if (!res.ok || !res.body) {
+    throw new Error(`download ${url} → ${res.status}`);
+  }
+  const buffer = Buffer.from(await res.arrayBuffer());
+  const tmpPath = `${destPath}.tmp`;
+  try {
+    await writeFile(tmpPath, buffer);
+    if (mode !== undefined) {
+      await chmod(tmpPath, mode);
+    }
+    if (nodePlatform() === "darwin") {
+      try {
+        const { spawnSync } = await import("node:child_process");
+        spawnSync("xattr", ["-d", "com.apple.quarantine", tmpPath], {
+          stdio: "ignore",
+        });
+      } catch {
+        // quarantine xattr may not exist on locally-built binaries; ignore
+      }
+    }
+    await rename(tmpPath, destPath);
+  } catch (err) {
+    try {
+      await rm(tmpPath, { force: true });
+    } catch {
+      // best-effort cleanup
+    }
+    throw err;
+  }
+}
+
+/**
+ * Download both the binary and the sidecar to a staging area, then move
+ * them into place atomically. Used by both `install desktop` and `update`.
+ */
+export async function downloadDesktopAssets(release: Release): Promise<{
+  binAsset: ReleaseAsset;
+  sidecarAsset: ReleaseAsset | null;
+}> {
+  const target = detectTarget();
+  const binAsset = findBinaryAsset(release, target.assetSuffix);
+  const sidecarAsset = findSidecarAsset(release);
+
+  const binPath = desktopBinPath();
+  const sidecar = sidecarPath();
+  await mkdir(path.dirname(binPath), { recursive: true });
+  await mkdir(path.dirname(sidecar), { recursive: true });
+
+  await downloadAtomic(binAsset.browser_download_url, binPath, 0o755);
+
+  if (sidecarAsset) {
+    await downloadAtomic(sidecarAsset.browser_download_url, sidecar);
+  }
+
+  return { binAsset, sidecarAsset };
+}
+
 export async function runInstallDesktop(): Promise<void> {
   p.intro(pc.bgMagenta(pc.white(" petdex install desktop ")));
 
@@ -67,72 +176,37 @@ export async function runInstallDesktop(): Promise<void> {
 
   const s = p.spinner();
   s.start("Looking up the latest release");
-
   let release: Release;
   try {
-    const res = await fetch(RELEASE_API, {
-      headers: { Accept: "application/vnd.github+json" },
-    });
-    if (!res.ok) {
-      s.stop(pc.red("failed"));
-      throw new Error(`GitHub API ${res.status}`);
-    }
-    release = (await res.json()) as Release;
+    release = await fetchLatestRelease();
   } catch (err) {
     s.stop(pc.red("failed"));
     throw new Error(
       `Could not reach GitHub. Check your connection.\n   ${(err as Error).message}`,
     );
   }
-
-  const wantedSuffix = `petdex-desktop-${target.assetSuffix}`;
-  const asset = release.assets.find((a) => a.name.startsWith(wantedSuffix));
-  if (!asset) {
-    s.stop(pc.red("no binary"));
-    const available = release.assets.map((a) => `      ${a.name}`).join("\n");
-    throw new Error(
-      `No binary found for ${target.assetSuffix} in release ${release.tag_name}.\n   Available:\n${available}`,
-    );
-  }
-
-  s.stop(
-    `${pc.green("✓")} Found ${pc.bold(asset.name)} (${formatBytes(asset.size)})`,
-  );
-
-  const binPath = desktopBinPath();
-  await mkdir(path.dirname(binPath), { recursive: true });
+  s.stop(`${pc.green("✓")} Latest: ${pc.bold(release.tag_name)}`);
 
   const dl = p.spinner();
-  dl.start(`Downloading ${asset.name}`);
+  dl.start("Downloading desktop binary and sidecar");
+  let result: Awaited<ReturnType<typeof downloadDesktopAssets>>;
   try {
-    const res = await fetch(asset.browser_download_url);
-    if (!res.ok || !res.body) {
-      dl.stop(pc.red("failed"));
-      throw new Error(`Download ${asset.browser_download_url} → ${res.status}`);
-    }
-    const buffer = Buffer.from(await res.arrayBuffer());
-    await writeFile(binPath, buffer);
-    await chmod(binPath, 0o755);
-    // Strip macOS quarantine attribute so the binary opens without the
-    // "cannot be opened because the developer cannot be verified" prompt.
-    if (nodePlatform() === "darwin") {
-      try {
-        const { spawnSync } = await import("node:child_process");
-        spawnSync("xattr", ["-d", "com.apple.quarantine", binPath], {
-          stdio: "ignore",
-        });
-      } catch {
-        // quarantine xattr may not exist on locally-built binaries; ignore
-      }
-    }
-    // Record the installed version so `petdex update` knows what we have.
-    const versionFile = path.join(homedir(), ".petdex", "version");
-    await writeFile(versionFile, release.tag_name + "\n");
-    dl.stop(`${pc.green("✓")} Installed at ${pc.cyan(tildeify(binPath))}`);
+    result = await downloadDesktopAssets(release);
   } catch (err) {
     dl.stop(pc.red("failed"));
     throw err;
   }
+
+  const binPath = desktopBinPath();
+  const versionFile = path.join(homedir(), ".petdex", "version");
+  await writeFile(versionFile, `${release.tag_name}\n`);
+
+  const sidecarMsg = result.sidecarAsset
+    ? `\n${pc.dim("•")} Sidecar at ${pc.cyan(tildeify(sidecarPath()))} (${formatBytes(result.sidecarAsset.size)})`
+    : `\n${pc.yellow("!")} No sidecar in this release. Hooks won't reach the mascot until a release ships ${SIDECAR_ASSET_NAME}.`;
+  dl.stop(
+    `${pc.green("✓")} Binary at ${pc.cyan(tildeify(binPath))} (${formatBytes(result.binAsset.size)})${sidecarMsg}`,
+  );
 
   p.note(
     [

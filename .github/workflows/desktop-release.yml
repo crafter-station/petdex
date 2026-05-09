@@ -76,9 +76,32 @@ jobs:
           name: petdex-desktop-${{ matrix.target }}
           path: packages/petdex-desktop/petdex-desktop-${{ matrix.target }}
 
+  sidecar:
+    name: build sidecar (server.js)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout petdex
+        uses: actions/checkout@v4
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Build sidecar
+        working-directory: packages/petdex-desktop/sidecar
+        run: |
+          bun install --frozen-lockfile || bun install
+          bun run build
+          ls -lh server.js
+
+      - name: Upload sidecar artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: petdex-desktop-sidecar
+          path: packages/petdex-desktop/sidecar/server.js
+
   release:
     name: publish github release
-    needs: build
+    needs: [build, sidecar]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -95,12 +118,20 @@ jobs:
         run: |
           mkdir -p release
           find artifacts -type f -name "petdex-desktop-*" -exec cp {} release/ \;
+          # Rename sidecar so the asset name is unambiguous in GH Releases.
+          if [ -f artifacts/petdex-desktop-sidecar/server.js ]; then
+            cp artifacts/petdex-desktop-sidecar/server.js release/petdex-desktop-sidecar.js
+          fi
           ls -lh release/
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name == '' && inputs.tag || github.ref_name }}
+          # `inputs.tag` is set on workflow_dispatch (manual run); on push of
+          # a desktop-v* tag, `github.ref_name` carries the tag. The
+          # `inputs.tag || github.ref_name` order works because `inputs.tag`
+          # is null on tag pushes.
+          tag_name: ${{ inputs.tag || github.ref_name }}
           files: release/*
           generate_release_notes: true
           fail_on_unmatched_files: true

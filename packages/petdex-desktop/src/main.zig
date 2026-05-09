@@ -1,4 +1,6 @@
 const std = @import("std");
+
+extern fn getpid() c_int;
 const runner = @import("runner");
 const zero_native = @import("zero-native");
 
@@ -557,9 +559,28 @@ fn spawnSidecar(allocator: std.mem.Allocator, io: std.Io, sidecar_dir: []const u
     const server_path = try std.fs.path.join(allocator, &.{ sidecar_dir, "server.js" });
     defer allocator.free(server_path);
 
+    // server.js is installed to ~/.petdex/sidecar/server.js by `petdex
+    // install desktop`. If it's missing, the binary was launched without
+    // the CLI's install step (or the user wiped ~/.petdex/sidecar). Bail
+    // gracefully so hooks fail loudly instead of POSTing to a dead port.
+    var probe = std.Io.Dir.openFileAbsolute(io, server_path, .{}) catch {
+        std.debug.print("petdex: sidecar not found at {s}. Run `petdex install desktop` (or `petdex update`) to fetch it. Hooks won't reach the mascot.\n", .{server_path});
+        return;
+    };
+    probe.close(io);
+
+    // Pass our PID to the sidecar so it can self-terminate if we die. The
+    // sidecar polls process.kill(parent, 0) every 2s and exits on ESRCH.
+    // This prevents zombie node processes hogging port 7777 after a
+    // `petdex desktop stop` or a crash.
+    var pid_buf: [32]u8 = undefined;
+    const pid_str = try std.fmt.bufPrint(&pid_buf, "{d}", .{getpid()});
+    try env_map.put("PETDEX_PARENT_PID", pid_str);
+
     const argv = &[_][]const u8{ node_path, server_path };
     _ = std.process.spawn(io, .{
         .argv = argv,
+        .environ_map = env_map,
         .stdin = .ignore,
         .stdout = .ignore,
         .stderr = .ignore,
@@ -567,8 +588,8 @@ fn spawnSidecar(allocator: std.mem.Allocator, io: std.Io, sidecar_dir: []const u
         std.debug.print("petdex: failed to spawn sidecar: {s}\n", .{@errorName(err)});
         return;
     };
-    // Detach: we never wait on the child explicitly. The sidecar listens for
-    // SIGTERM and exits on its own; macOS reaps it when petdex-desktop exits.
+    // Detach: we never wait on the child explicitly. The sidecar's parent
+    // watchdog handles cleanup when we exit; in-band it listens for SIGTERM.
     std.debug.print("petdex: sidecar spawned (node {s})\n", .{server_path});
 }
 
@@ -719,6 +740,16 @@ fn resolveConfigDir(allocator: std.mem.Allocator, io: std.Io, env_map: *std.proc
     const dir = try std.fs.path.join(allocator, &.{ home, ".petdex" });
     try ensureDir(io, dir);
     return dir;
+}
+
+fn resolveSidecarDir(allocator: std.mem.Allocator, env_map: *std.process.Environ.Map) ![]u8 {
+    // Local development override: lets the author run the binary against
+    // the in-tree sidecar without copying server.js to ~/.petdex/sidecar/.
+    if (env_map.get("PETDEX_SIDECAR_DIR")) |override| {
+        return try allocator.dupe(u8, override);
+    }
+    const home = env_map.get("HOME") orelse return error.NoHome;
+    return try std.fs.path.join(allocator, &.{ home, ".petdex", "sidecar" });
 }
 
 fn readActiveSlug(allocator: std.mem.Allocator, io: std.Io, config_dir: []const u8) !?[]u8 {
@@ -999,8 +1030,10 @@ pub fn main(init: std.process.Init) !void {
     try copyAllSpritesheets(allocator, init.io, pets_dir, asset_root, pets.items);
 
     // Spawn the HTTP sidecar so external CLIs (Claude Code, Codex, Gemini, OpenCode,
-    // shell scripts) can drive the mascot via POST /state.
-    const sidecar_dir = "/Users/raillyhugo/Programming/crafter-station/petdex/packages/petdex-desktop/sidecar";
+    // shell scripts) can drive the mascot via POST /state. The CLI installs
+    // server.js to ~/.petdex/sidecar/server.js alongside the binary.
+    const sidecar_dir = try resolveSidecarDir(allocator, init.environ_map);
+    defer allocator.free(sidecar_dir);
     try spawnSidecar(allocator, init.io, sidecar_dir, init.environ_map);
 
     var state = PetdexState{

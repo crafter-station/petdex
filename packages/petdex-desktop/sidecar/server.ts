@@ -183,3 +183,21 @@ function shutdown(signal: string) {
 
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
+
+// Parent watchdog: if petdex-desktop spawned us with PETDEX_PARENT_PID,
+// poll the parent every 2s and exit cleanly when it disappears. This
+// prevents zombie sidecars after `petdex desktop stop` or a desktop crash.
+const parentPid = Number(process.env.PETDEX_PARENT_PID);
+if (Number.isFinite(parentPid) && parentPid > 0) {
+  log(`sidecar watching parent pid ${parentPid}`);
+  const timer = setInterval(() => {
+    try {
+      process.kill(parentPid, 0);
+    } catch {
+      log(`parent ${parentPid} gone, exiting`);
+      clearInterval(timer);
+      shutdown("parent-gone");
+    }
+  }, 2000);
+  timer.unref();
+}
