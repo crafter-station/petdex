@@ -68,9 +68,13 @@ export function buildSetupSteps(
       hint: t("setup.step2.hint"),
     },
     {
+      // step3 is the wake step. `petdex up` is one-shot:
+      // enables hooks + launches the desktop. Same end-state as
+      // `desktop start`, but symmetric with `down` and matches
+      // what /petdex toggles to from inside an agent.
       key: "step3",
       title: t("setup.step3.title"),
-      command: "npx petdex desktop start",
+      command: "npx petdex up",
     },
     {
       key: "step4",

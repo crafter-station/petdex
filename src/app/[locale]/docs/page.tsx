@@ -334,6 +334,100 @@ export default function DocsPage() {
             />
 
             <h3 className="mt-6 font-semibold">
+              <code>petdex up / down / toggle</code>
+            </h3>
+            <p>
+              One-shot wake/sleep for the mascot. <code>up</code> enables
+              hooks AND launches the desktop. <code>down</code> disables hooks
+              AND stops the desktop. <code>toggle</code> flips between them
+              based on current state — that's what the <code>/petdex</code>{" "}
+              slash command runs from inside your agent.
+            </p>
+            <CommandLine
+              command="npx petdex toggle"
+              source="docs-desktop-toggle"
+              className="w-full max-w-xl"
+            />
+
+            <h3 className="mt-6 font-semibold">
+              <code>/petdex</code> (slash command)
+            </h3>
+            <p>
+              Once <code>petdex hooks install</code> has run, every supported
+              agent (Claude Code, Codex, Gemini, OpenCode) gets a{" "}
+              <code>/petdex</code> command in its picker. Type it inside the
+              agent and the mascot wakes or sleeps without leaving the chat:
+            </p>
+            <ul className="ml-6 list-disc space-y-1 text-muted-2">
+              <li>
+                <code>/petdex</code> — toggle (wake if asleep, sleep if awake)
+              </li>
+              <li>
+                <code>/petdex up</code> — force-wake
+              </li>
+              <li>
+                <code>/petdex down</code> — force-sleep
+              </li>
+              <li>
+                <code>/petdex status</code> — show whether hooks are enabled
+              </li>
+              <li>
+                <code>/petdex doctor</code> — diagnose install + agent wiring
+              </li>
+            </ul>
+
+            <h3 className="mt-6 font-semibold">
+              <code>petdex hooks</code> (kill-switch)
+            </h3>
+            <p>
+              Even with hooks installed, you can pause them without touching
+              your agent's settings. <code>petdex hooks off</code> drops a
+              flag file at <code>~/.petdex/runtime/hooks-disabled</code>;
+              every installed hook checks for it first and exits 0
+              immediately. <code>petdex hooks on</code> removes the file.
+              Useful when a sidecar has gone weird and you don't want stray
+              curls in your agent log.
+            </p>
+            <CommandLine
+              command="npx petdex hooks toggle"
+              source="docs-hooks-toggle"
+              className="w-full max-w-xl"
+            />
+
+            <h3 className="mt-6 font-semibold">
+              <code>petdex hooks uninstall</code>
+            </h3>
+            <p>
+              Reverses <code>hooks install</code>: removes the petdex entries
+              from each agent's config (preserving your own hooks), deletes
+              the <code>/petdex</code> slash command files, and removes the
+              OpenCode plugin. Pass <code>--remove-token</code> to also drop
+              the auth token at{" "}
+              <code>~/.petdex/runtime/update-token</code>.
+            </p>
+            <CommandLine
+              command="npx petdex hooks uninstall"
+              source="docs-hooks-uninstall"
+              className="w-full max-w-xl"
+            />
+
+            <h3 className="mt-6 font-semibold">
+              <code>petdex doctor</code>
+            </h3>
+            <p>
+              Diagnostic. Verifies binary, sidecar bundle, sidecar
+              reachability, pid file format, token mode, kill-switch state,
+              hooks installed in each agent, Codex's <code>codex_hooks</code>{" "}
+              feature flag, and usable pet count. Each failed check ships an
+              actionable hint.
+            </p>
+            <CommandLine
+              command="npx petdex doctor"
+              source="docs-doctor"
+              className="w-full max-w-xl"
+            />
+
+            <h3 className="mt-6 font-semibold">
               <code>petdex update</code>
             </h3>
             <p>

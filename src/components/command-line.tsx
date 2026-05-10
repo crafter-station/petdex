@@ -15,6 +15,31 @@ type CommandLineProps = {
   className?: string;
 };
 
+/**
+ * Display says `npx petdex install desktop`, clipboard says
+ * `npx petdex@latest install desktop`. Pinning to @latest in the
+ * copy keeps every paste resolving to the newest release without
+ * cluttering the visual command. Also handles bare `petdex`
+ * (without npx) so a user copying from a globally-installed
+ * snippet still gets the latest tag.
+ *
+ * Only rewrites the FIRST occurrence — no risk of accidentally
+ * rewriting embedded references in flags or paths.
+ */
+function pinToLatest(command: string): string {
+  // Already pinned? Leave it alone.
+  if (command.includes("petdex@")) return command;
+  // npx petdex ... → npx petdex@latest ...
+  const npxMatch = command.match(/^(.*?\bnpx\s+)petdex(\b.*)$/);
+  if (npxMatch) return `${npxMatch[1]}petdex@latest${npxMatch[2]}`;
+  // bare leading `petdex ...` (e.g. when the user has it on PATH)
+  // → `npx petdex@latest ...`. We add npx so the pinned form
+  // works even without a global install.
+  const bareMatch = command.match(/^petdex(\b.*)$/);
+  if (bareMatch) return `npx petdex@latest${bareMatch[1]}`;
+  return command;
+}
+
 // Soft, light-on-light syntax: command word in brand blue, subcommands darker,
 // flags accent-violet, paths/strings stone, pipes/redirects muted.
 function tokenize(command: string): React.ReactNode {
@@ -78,8 +103,13 @@ export function CommandLine({
   const [copied, setCopied] = useState(false);
 
   async function handleCopy() {
+    // Display the natural `npx petdex` form, but copy the
+    // version-pinned `petdex@latest` so every paste resolves to
+    // the most recent release. Tracking still uses the visual
+    // form so dashboards stay readable.
+    const toCopy = pinToLatest(command);
     try {
-      await navigator.clipboard.writeText(command);
+      await navigator.clipboard.writeText(toCopy);
       setCopied(true);
       track("command_line_copied", {
         command: command.slice(0, 80),
