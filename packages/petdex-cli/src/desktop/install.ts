@@ -16,7 +16,7 @@
  * `petdex-desktop-sidecar.js`.
  */
 import { randomBytes } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { chmod, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { homedir, arch as nodeArch, platform as nodePlatform } from "node:os";
 import path from "node:path";
@@ -433,23 +433,53 @@ function codexPetsRoot(): string {
   return path.join(homeDir(), ".codex", "pets");
 }
 
+// Same size cap as MAX_PET_BYTES in main.zig. Spritesheets larger
+// than this fail loadSpritesheet and crash the desktop on startup,
+// so they don't count as a "usable" pet from the CLI's perspective
+// either — `petdex install desktop` should treat that user as
+// having no pets and download the starter.
+const MAX_PET_BYTES = 16 * 1024 * 1024;
+
+// Returns true iff the slug directory contains a spritesheet that
+// the desktop binary would actually accept: present, openable,
+// stat-able, and within the size cap. Mirrors the validation in
+// main.zig's hasSpritesheet/checkSpritesheetVariant.
+function isPetUsable(slugDir: string): boolean {
+  for (const name of ["spritesheet.webp", "spritesheet.png"]) {
+    const file = path.join(slugDir, name);
+    try {
+      const stat = statSync(file);
+      if (stat.isFile() && stat.size > 0 && stat.size <= MAX_PET_BYTES) {
+        return true;
+      }
+    } catch {
+      // missing or unreadable — try the other extension
+    }
+  }
+  return false;
+}
+
 // True only if at least one pet directory under either canonical
-// pets root has a usable spritesheet. Mirrors what the desktop
-// binary's listPets() filter accepts (see main.zig hasSpritesheet).
+// pets root has a usable spritesheet under MAX_PET_BYTES. The
+// previous "any path exists" check let a stale/oversized sprite
+// count as "installed" — `petdex install desktop` would then skip
+// the starter download, and `petdex desktop start` would crash on
+// the unreadable file.
+export async function _hasAnyInstalledPetForTest(): Promise<boolean> {
+  return hasAnyInstalledPet();
+}
+
 async function hasAnyInstalledPet(): Promise<boolean> {
+  const { readdir } = await import("node:fs/promises");
   for (const root of [petsRoot(), codexPetsRoot()]) {
     let entries: string[];
     try {
-      const { readdir } = await import("node:fs/promises");
       entries = await readdir(root);
     } catch {
       continue; // root doesn't exist yet
     }
     for (const slug of entries) {
-      const dir = path.join(root, slug);
-      const webp = path.join(dir, "spritesheet.webp");
-      const png = path.join(dir, "spritesheet.png");
-      if (existsSync(webp) || existsSync(png)) return true;
+      if (isPetUsable(path.join(root, slug))) return true;
     }
   }
   return false;
@@ -478,30 +508,63 @@ async function installStarterPet(
     spritesheetUrl: string;
     petJsonUrl: string;
   };
-  let pet: Pet | null = null;
+  let manifestPets: Pet[];
   try {
     const res = await fetchImpl(`${baseUrl}/api/manifest`, {
       signal: AbortSignal.timeout(8_000),
     });
     if (!res.ok) return null;
     const data = (await res.json()) as { pets: Pet[] };
-    pet =
-      data.pets.find((p) => p.slug === DEFAULT_PET_SLUG) ??
-      // Fall back to the first pet in the manifest if our preferred
-      // default isn't approved. Better to ship SOMETHING than to
-      // leave the user with an empty collection.
-      data.pets[0] ??
-      null;
+    manifestPets = Array.isArray(data?.pets) ? data.pets : [];
   } catch {
     return null;
   }
-  if (!pet) return null;
+  if (manifestPets.length === 0) return null;
 
+  // Build a candidate ordering: preferred default first, then the
+  // manifest as-is. We dedupe so DEFAULT_PET_SLUG isn't tried twice.
+  const ordered: Pet[] = [];
+  const seen = new Set<string>();
+  const preferred = manifestPets.find((p) => p.slug === DEFAULT_PET_SLUG);
+  if (preferred) {
+    ordered.push(preferred);
+    seen.add(preferred.slug);
+  }
+  for (const p of manifestPets) {
+    if (!seen.has(p.slug)) {
+      ordered.push(p);
+      seen.add(p.slug);
+    }
+  }
+
+  // Walk the candidates and install the first one whose:
+  //   - asset URLs both pass the host allowlist (anti-SSRF)
+  //   - target directories are FREE in both pets roots (we never
+  //     overwrite a pre-existing slug dir, even if it's broken)
+  // If every candidate is taken or untrusted we give up — the
+  // caller will surface a recoverable hint to the user.
+  for (const candidate of ordered) {
+    const installed = await tryInstallStarterCandidate(candidate, fetchImpl);
+    if (installed) return installed;
+  }
+  return null;
+}
+
+async function tryInstallStarterCandidate(
+  pet: {
+    slug: string;
+    displayName: string;
+    spritesheetUrl: string;
+    petJsonUrl: string;
+  },
+  fetchImpl: typeof fetch,
+): Promise<string | null> {
   // Belt-and-braces: the server-side /api/manifest already filters
   // submissions through the same allowlist, but a CLI installing
   // bytes into the user's HOME shouldn't trust that boundary alone.
-  // If either URL fails the host check, abort the starter install
-  // entirely instead of writing attacker-controlled bytes.
+  // If either URL fails the host check, skip this candidate and
+  // try the next one — better than aborting the starter flow
+  // entirely if just one row is misconfigured.
   if (
     !isTrustedAssetUrl(pet.spritesheetUrl) ||
     !isTrustedAssetUrl(pet.petJsonUrl)
@@ -516,17 +579,13 @@ async function installStarterPet(
   ];
 
   // Refuse to touch a pet directory that already exists. The user
-  // could have a partial/custom install at ~/.petdex/pets/boba (or
-  // even a complete one we just don't want to overwrite). Aborting
-  // is safer than the previous rollback path, which deleted the
-  // entire target directory on partial failure — that path could
-  // wipe pre-existing files belonging to the user.
+  // could have a partial/custom install at ~/.petdex/pets/boba.
+  // We don't repair: skip this slug and try the next manifest
+  // candidate. The starter flow's whole point is to give the user
+  // SOMETHING to render, and another pet is a strictly better
+  // outcome than racing a write against existing files.
   for (const t of targets) {
-    if (existsSync(t)) {
-      // Either the user already installed this slug, or the dir
-      // exists from a prior attempt. Either way, leave it alone.
-      return null;
-    }
+    if (existsSync(t)) return null;
   }
 
   const fetchOrThrow = async (url: string): Promise<ArrayBuffer> => {

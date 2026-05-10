@@ -12,6 +12,7 @@ import { join } from "node:path";
 
 import {
   _commitStagedForTest,
+  _hasAnyInstalledPetForTest,
   _installStarterPetForTest,
   fetchLatestRelease,
   isTrustedAssetUrl,
@@ -581,6 +582,164 @@ describe("installStarterPet", () => {
     );
   });
 
+  test("falls through to a different manifest pet when boba's slug dir is taken", async () => {
+    // User has a stale ~/.petdex/pets/boba folder (maybe from a
+    // previous incomplete install). The desktop binary won't accept
+    // it because hasSpritesheet rejects empty/oversized sprites,
+    // but the dir blocks the canonical starter slug. The CLI must
+    // try the next manifest entry rather than dead-end.
+    mkdirSync(join(petsDir(), "boba"), { recursive: true });
+    // No spritesheet inside — desktop would skip it on startup.
+
+    let bobaPetJsonFetched = 0;
+    let foxAssetsFetched = 0;
+    const fetchImpl = makeFetch((url) => {
+      if (url.endsWith("/api/manifest")) {
+        return new Response(
+          JSON.stringify({
+            pets: [
+              {
+                slug: "boba",
+                displayName: "Boba",
+                spritesheetUrl: `${TRUSTED_HOST}/pets/boba/spritesheet.webp`,
+                petJsonUrl: `${TRUSTED_HOST}/pets/boba/pet.json`,
+              },
+              {
+                slug: "fox",
+                displayName: "Fox",
+                spritesheetUrl: `${TRUSTED_HOST}/pets/fox/spritesheet.webp`,
+                petJsonUrl: `${TRUSTED_HOST}/pets/fox/pet.json`,
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.includes("/pets/boba/")) {
+        bobaPetJsonFetched += 1;
+        // Should never be called — boba slug is taken, candidate
+        // skipped before any download starts.
+        return new Response("should not have been called", { status: 500 });
+      }
+      if (url.includes("/pets/fox/spritesheet.webp")) {
+        foxAssetsFetched += 1;
+        return new Response("WEBP", { status: 200 });
+      }
+      if (url.includes("/pets/fox/pet.json")) {
+        foxAssetsFetched += 1;
+        return new Response('{"displayName":"Fox"}', { status: 200 });
+      }
+      return new Response("not allowed", { status: 500 });
+    });
+
+    const result = await _installStarterPetForTest({
+      fetchOverride: fetchImpl,
+      petdexUrl: "https://petdex.test",
+    });
+
+    expect(result).toBe("fox");
+    // We never even tried to download boba's assets — we saw the
+    // existing dir during the dir-free check and moved on.
+    expect(bobaPetJsonFetched).toBe(0);
+    expect(foxAssetsFetched).toBe(2);
+    // Stale boba dir is preserved untouched.
+    expect(existsSync(join(petsDir(), "boba"))).toBe(true);
+    // Fox lands in both roots.
+    expect(existsSync(join(petsDir(), "fox", "spritesheet.webp"))).toBe(true);
+    expect(existsSync(join(codexPetsDir(), "fox", "spritesheet.webp"))).toBe(
+      true,
+    );
+  });
+
+  test("returns null when every manifest candidate's slug dir is taken", async () => {
+    // Edge case: every pet in the manifest already has a stale dir.
+    // We can't pick anything to install — the function returns null
+    // and the caller surfaces a hint to the user.
+    mkdirSync(join(petsDir(), "boba"), { recursive: true });
+    mkdirSync(join(petsDir(), "fox"), { recursive: true });
+
+    const fetchImpl = makeFetch((url) => {
+      if (url.endsWith("/api/manifest")) {
+        return new Response(
+          JSON.stringify({
+            pets: [
+              {
+                slug: "boba",
+                displayName: "Boba",
+                spritesheetUrl: `${TRUSTED_HOST}/pets/boba/spritesheet.webp`,
+                petJsonUrl: `${TRUSTED_HOST}/pets/boba/pet.json`,
+              },
+              {
+                slug: "fox",
+                displayName: "Fox",
+                spritesheetUrl: `${TRUSTED_HOST}/pets/fox/spritesheet.webp`,
+                petJsonUrl: `${TRUSTED_HOST}/pets/fox/pet.json`,
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response("should not have been called", { status: 500 });
+    });
+
+    const result = await _installStarterPetForTest({
+      fetchOverride: fetchImpl,
+      petdexUrl: "https://petdex.test",
+    });
+
+    expect(result).toBeNull();
+  });
+
+  test("skips candidates with untrusted asset URLs and tries the next one", async () => {
+    // Manifest serves a poisoned first row (host outside the
+    // allowlist) — we must skip it AND try the next candidate
+    // rather than aborting the whole starter flow.
+    const fetchImpl = makeFetch((url) => {
+      if (url.endsWith("/api/manifest")) {
+        return new Response(
+          JSON.stringify({
+            pets: [
+              {
+                slug: "boba",
+                displayName: "Boba",
+                spritesheetUrl: "https://attacker.example.com/spritesheet.webp",
+                petJsonUrl: "https://attacker.example.com/pet.json",
+              },
+              {
+                slug: "fox",
+                displayName: "Fox",
+                spritesheetUrl: `${TRUSTED_HOST}/pets/fox/spritesheet.webp`,
+                petJsonUrl: `${TRUSTED_HOST}/pets/fox/pet.json`,
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.includes("attacker.example.com")) {
+        return new Response("should not be reached", { status: 500 });
+      }
+      if (url.includes("/pets/fox/spritesheet.webp")) {
+        return new Response("WEBP", { status: 200 });
+      }
+      if (url.includes("/pets/fox/pet.json")) {
+        return new Response('{"displayName":"Fox"}', { status: 200 });
+      }
+      return new Response("not allowed", { status: 500 });
+    });
+
+    const result = await _installStarterPetForTest({
+      fetchOverride: fetchImpl,
+      petdexUrl: "https://petdex.test",
+    });
+
+    expect(result).toBe("fox");
+    expect(existsSync(join(petsDir(), "fox", "spritesheet.webp"))).toBe(true);
+    // The poisoned slug must NOT have been touched.
+    expect(existsSync(join(petsDir(), "boba"))).toBe(false);
+  });
+
   test("falls back to the first manifest entry when boba is missing", async () => {
     const fetchImpl = makeFetch((url) => {
       if (url.endsWith("/api/manifest")) {
@@ -671,5 +830,89 @@ describe("isTrustedAssetUrl", () => {
         "https://pub-94495283df974cfea5e98d6a9e3fa462.r2.dev.attacker.com/x",
       ),
     ).toBe(false);
+  });
+});
+
+// ---- hasAnyInstalledPet (Finding: usability mirror desktop) --------
+//
+// hasAnyInstalledPet decides whether `petdex install desktop` should
+// download a starter. It used to accept "spritesheet path exists" as
+// good enough — but the desktop binary requires the file to be both
+// openable AND <= MAX_PET_BYTES. A stale 50 MB sprite would let
+// hasAnyInstalledPet return true, so the starter never downloaded,
+// and `petdex desktop start` then crashed on the unreadable file.
+// These tests pin the size + presence + emptiness checks.
+
+describe("hasAnyInstalledPet usability", () => {
+  const realHome = process.env.HOME;
+  let tmpHome: string;
+
+  beforeEach(() => {
+    tmpHome = mkdtempSync(join(tmpdir(), "petdex-usable-test-"));
+    process.env.HOME = tmpHome;
+  });
+
+  afterEach(() => {
+    process.env.HOME = realHome;
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  function petsDir(): string {
+    return join(tmpHome, ".petdex", "pets");
+  }
+
+  test("returns false when no pets root exists", async () => {
+    expect(await _hasAnyInstalledPetForTest()).toBe(false);
+  });
+
+  test("returns false when a pet dir has only an empty spritesheet", async () => {
+    mkdirSync(join(petsDir(), "ghost"), { recursive: true });
+    writeFileSync(join(petsDir(), "ghost", "spritesheet.webp"), "");
+    expect(await _hasAnyInstalledPetForTest()).toBe(false);
+  });
+
+  test("returns false when the only spritesheet exceeds MAX_PET_BYTES", async () => {
+    // 16 MiB cap; a 17 MiB sprite is treated as "no usable pet" so
+    // the CLI knows to install a starter rather than relying on a
+    // file the desktop will refuse to load.
+    mkdirSync(join(petsDir(), "huge"), { recursive: true });
+    const oversize = 16 * 1024 * 1024 + 1;
+    writeFileSync(
+      join(petsDir(), "huge", "spritesheet.webp"),
+      Buffer.alloc(oversize, 0),
+    );
+    expect(await _hasAnyInstalledPetForTest()).toBe(false);
+  });
+
+  test("returns true when a usable webp exists", async () => {
+    mkdirSync(join(petsDir(), "boba"), { recursive: true });
+    writeFileSync(
+      join(petsDir(), "boba", "spritesheet.webp"),
+      Buffer.from("WEBP-SMALL"),
+    );
+    expect(await _hasAnyInstalledPetForTest()).toBe(true);
+  });
+
+  test("returns true when a usable png exists", async () => {
+    mkdirSync(join(petsDir(), "boba"), { recursive: true });
+    writeFileSync(
+      join(petsDir(), "boba", "spritesheet.png"),
+      Buffer.from("PNG-SMALL"),
+    );
+    expect(await _hasAnyInstalledPetForTest()).toBe(true);
+  });
+
+  test("returns true if at least one pet is usable, ignoring oversized siblings", async () => {
+    mkdirSync(join(petsDir(), "huge"), { recursive: true });
+    writeFileSync(
+      join(petsDir(), "huge", "spritesheet.webp"),
+      Buffer.alloc(16 * 1024 * 1024 + 1, 0),
+    );
+    mkdirSync(join(petsDir(), "small"), { recursive: true });
+    writeFileSync(
+      join(petsDir(), "small", "spritesheet.webp"),
+      Buffer.from("OK"),
+    );
+    expect(await _hasAnyInstalledPetForTest()).toBe(true);
   });
 });
