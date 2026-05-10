@@ -4,8 +4,13 @@ import { usePathname } from "next/navigation";
 import type { ComponentType } from "react";
 import { useEffect, useMemo, useState } from "react";
 
-import { DesktopAnnouncementModal } from "@/components/desktop-announcement-modal";
+// Paused — see QUEUE below. Keep the import so re-enabling is one
+// line and we catch any rename to the modal at typecheck time.
+// biome-ignore lint/correctness/noUnusedImports: scheduled to come back when /download is public
+import { DesktopAnnouncementModal as _DesktopAnnouncementModal } from "@/components/desktop-announcement-modal";
 import { GithubStarModal } from "@/components/github-star-modal";
+
+void _DesktopAnnouncementModal;
 
 type QueuedAnnouncement = {
   id: string;
@@ -20,6 +25,10 @@ const HOME_PATH_RE = /^\/(?:en|es|zh)?\/?$/;
 // desktop launch announcement (one-shot per browser, dismissed via
 // localStorage). The collections + vibe-search announcements were
 // retired now that those features are mature.
+//
+// NOTE: the desktop announcement is paused while the desktop app
+// is in admin-only pre-launch. Restore the entry below to re-enable
+// once /download is publicly accessible.
 const QUEUE: QueuedAnnouncement[] = [
   {
     id: "petdex_announce_github_star_v1",
@@ -27,12 +36,12 @@ const QUEUE: QueuedAnnouncement[] = [
     gateMs: 600,
     Component: GithubStarModal,
   },
-  {
-    id: "petdex_announce_desktop_v1",
-    delayMs: 0,
-    gateMs: 0,
-    Component: DesktopAnnouncementModal,
-  },
+  // {
+  //   id: "petdex_announce_desktop_v1",
+  //   delayMs: 0,
+  //   gateMs: 0,
+  //   Component: DesktopAnnouncementModal,
+  // },
 ];
 
 type Phase = "idle" | "showing";

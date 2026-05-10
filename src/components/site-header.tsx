@@ -3,6 +3,10 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { useUser } from "@clerk/nextjs";
+
+import { isAdminClientSafe } from "@/lib/admin";
+
 import {
   BookOpenIcon,
   CrownIcon,
@@ -61,6 +65,13 @@ export function SiteHeader({ hideSubmitCta = false }: SiteHeaderProps) {
   const t = useTranslations("header");
   const common = useTranslations("common");
 
+  // Hide /download from non-admins while the desktop is in
+  // pre-launch. The page itself notFound()s for non-admins, so the
+  // link would lead nowhere; we just remove it so it isn't a
+  // visible-but-broken affordance.
+  const { user } = useUser();
+  const showDownload = isAdminClientSafe(user?.id);
+
   function href(pathname: string) {
     return withLocale(pathname, currentLocale);
   }
@@ -87,13 +98,17 @@ export function SiteHeader({ hideSubmitCta = false }: SiteHeaderProps) {
   ];
 
   const buildItems: NavItem[] = [
-    {
-      href: href("/download"),
-      title: t("download"),
-      description: t("downloadDesc"),
-      icon: DownloadSimpleIcon,
-      badge: "new",
-    },
+    ...(showDownload
+      ? [
+          {
+            href: href("/download"),
+            title: t("download"),
+            description: t("downloadDesc"),
+            icon: DownloadSimpleIcon,
+            badge: "new",
+          } as NavItem,
+        ]
+      : []),
     {
       href: href("/submit"),
       title: t("submitCta"),
@@ -295,14 +310,19 @@ export function SiteHeader({ hideSubmitCta = false }: SiteHeaderProps) {
             <MobileLink href={href("/docs")} onClick={() => setOpen(false)}>
               {t("docs")}
             </MobileLink>
-            <MobileLink href={href("/download")} onClick={() => setOpen(false)}>
-              <span className="inline-flex items-center gap-2">
-                {t("download")}
-                <span className="rounded-full bg-brand-tint px-1.5 py-0.5 font-mono text-[9px] font-semibold tracking-[0.12em] text-brand uppercase ring-1 ring-brand/30 dark:bg-brand-tint-dark">
-                  new
+            {showDownload ? (
+              <MobileLink
+                href={href("/download")}
+                onClick={() => setOpen(false)}
+              >
+                <span className="inline-flex items-center gap-2">
+                  {t("download")}
+                  <span className="rounded-full bg-brand-tint px-1.5 py-0.5 font-mono text-[9px] font-semibold tracking-[0.12em] text-brand uppercase ring-1 ring-brand/30 dark:bg-brand-tint-dark">
+                    new
+                  </span>
                 </span>
-              </span>
-            </MobileLink>
+              </MobileLink>
+            ) : null}
             <MobileLink
               href={href("/collections")}
               onClick={() => setOpen(false)}
