@@ -1112,15 +1112,28 @@ fn petLessThan(_: void, a: Pet, b: Pet) bool {
     return std.mem.lessThan(u8, a.slug, b.slug);
 }
 
+// pet.json is typically ~200 bytes (slug + displayName + a few
+// optional metadata fields), but it's user-authored and not strictly
+// validated, so we leave headroom for hand-edited files with longer
+// descriptions. 32 KB is generous enough that no real pet.json will
+// hit it and small enough to bound a malformed file's read time.
+const MAX_PET_JSON_BYTES: usize = 32 * 1024;
+
+// display_name is optional — every caller falls back to the slug
+// when this returns null. So any failure (oversized file, truncated
+// read, parse error, transient I/O) MUST be downgraded to null
+// rather than propagated, otherwise one bad pet.json on disk would
+// fail listPetsAcrossRoots entirely and prevent the desktop from
+// starting even when an unrelated pet is the active one.
 fn readDisplayName(allocator: std.mem.Allocator, io: std.Io, parent: std.Io.Dir, slug: []const u8) !?[]u8 {
-    const path = try std.fs.path.join(allocator, &.{ slug, "pet.json" });
+    const path = std.fs.path.join(allocator, &.{ slug, "pet.json" }) catch return null;
     defer allocator.free(path);
     var file = parent.openFile(io, path, .{}) catch return null;
     defer file.close(io);
-    const bytes = try readFileAll(io, allocator, file, MAX_ACTIVE_BYTES);
+    const bytes = readFileAll(io, allocator, file, MAX_PET_JSON_BYTES) catch return null;
     defer allocator.free(bytes);
     const display = jsonStringField(bytes, "displayName") orelse return null;
-    return try allocator.dupe(u8, display);
+    return allocator.dupe(u8, display) catch null;
 }
 
 // Sprite payload returned by both loadSpritesheet and
@@ -1660,4 +1673,84 @@ test "listPetsFromDir: assigns the supplied root to every pet" {
     try testing.expectEqual(@as(usize, 2), pets.items.len);
     try testing.expectEqualStrings(sentinel_root, pets.items[0].root);
     try testing.expectEqualStrings(sentinel_root, pets.items[1].root);
+}
+
+test "listPetsFromDir: malformed pet.json falls back to slug, doesn't fail the listing" {
+    // A user with two installed pets where one has a bad pet.json
+    // (truncated, oversized, junk bytes) used to crash the whole
+    // listing — readDisplayName propagated FileTooLarge / parse
+    // errors through `try`. Now any failure inside readDisplayName
+    // degrades to "no displayName" and the slug is used instead.
+    var tmp = testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+
+    // Pet a: completely valid.
+    try tmp.dir.createDirPath(testing_io, "fox");
+    var fox = try tmp.dir.openDir(testing_io, "fox", .{});
+    defer fox.close(testing_io);
+    try writeTestFile(fox, "spritesheet.webp", "WEBP");
+    try writeTestFile(fox, "pet.json", "{\"displayName\":\"Fox\"}");
+
+    // Pet b: junk bytes where pet.json should be (binary, no JSON).
+    // jsonStringField won't find "displayName" and we expect a slug
+    // fallback, NOT a failure that takes the whole listing down.
+    try tmp.dir.createDirPath(testing_io, "broken-meta");
+    var bm = try tmp.dir.openDir(testing_io, "broken-meta", .{});
+    defer bm.close(testing_io);
+    try writeTestFile(bm, "spritesheet.webp", "WEBP");
+    try writeTestFile(bm, "pet.json", "\x00\x01\x02not json at all");
+
+    var pets = try listPetsFromDir(testing.allocator, testing_io, tmp.dir, "/test-root");
+    defer {
+        for (pets.items) |p| {
+            testing.allocator.free(p.slug);
+            testing.allocator.free(p.display_name);
+            testing.allocator.free(p.root);
+        }
+        pets.deinit(testing.allocator);
+    }
+
+    try testing.expectEqual(@as(usize, 2), pets.items.len);
+    // Sort is alphabetical: broken-meta < fox.
+    try testing.expectEqualStrings("broken-meta", pets.items[0].slug);
+    try testing.expectEqualStrings("broken-meta", pets.items[0].display_name);
+    try testing.expectEqualStrings("fox", pets.items[1].slug);
+    try testing.expectEqualStrings("Fox", pets.items[1].display_name);
+}
+
+test "listPetsFromDir: oversized pet.json falls back to slug, doesn't fail the listing" {
+    // Stress the size cap path: a pet.json larger than MAX_PET_JSON_BYTES
+    // returns null from readDisplayName instead of bubbling
+    // FileTooLarge through every caller. The user should still see
+    // the pet (with its slug as the label) rather than have the
+    // whole desktop refuse to start.
+    var tmp = testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+
+    try tmp.dir.createDirPath(testing_io, "huge");
+    var huge = try tmp.dir.openDir(testing_io, "huge", .{});
+    defer huge.close(testing_io);
+    try writeTestFile(huge, "spritesheet.webp", "WEBP");
+
+    // 64 KB > 32 KB cap. Build it as a giant string of garbage so we
+    // don't have to allocate a real Vec.
+    const oversized = try testing.allocator.alloc(u8, 64 * 1024);
+    defer testing.allocator.free(oversized);
+    @memset(oversized, 'X');
+    try writeTestFile(huge, "pet.json", oversized);
+
+    var pets = try listPetsFromDir(testing.allocator, testing_io, tmp.dir, "/test-root");
+    defer {
+        for (pets.items) |p| {
+            testing.allocator.free(p.slug);
+            testing.allocator.free(p.display_name);
+            testing.allocator.free(p.root);
+        }
+        pets.deinit(testing.allocator);
+    }
+
+    try testing.expectEqual(@as(usize, 1), pets.items.len);
+    try testing.expectEqualStrings("huge", pets.items[0].slug);
+    // Display name fell back to slug because pet.json was too big.
+    try testing.expectEqualStrings("huge", pets.items[0].display_name);
 }
