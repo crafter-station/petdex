@@ -7,7 +7,10 @@ import JSZip from "jszip";
 import pc from "picocolors";
 
 import { ClerkCliAuth } from "../src/cli-auth/index.js";
-import { runInstallDesktop } from "../src/desktop/install.js";
+import {
+  isTrustedAssetUrl,
+  runInstallDesktop,
+} from "../src/desktop/install.js";
 import {
   cmdDesktopStart,
   cmdDesktopStatus,
@@ -308,6 +311,22 @@ async function cmdInstall(args: string[]) {
       s.stop(pc.red("not found"));
       p.cancel(
         `No pet with slug ${pc.bold(slug)}. Try ${pc.cyan("petdex list")} to see what's available.`,
+      );
+      process.exit(1);
+    }
+    // Belt-and-braces: server-side validation already enforces the
+    // host allowlist on submission, but a legacy/compromised approved
+    // row could still slip a non-allowlisted URL into /api/manifest
+    // (the route returns raw DB columns). Refuse to download bytes
+    // from anything outside the trusted asset origins instead of
+    // writing them into the user's HOME.
+    if (
+      !isTrustedAssetUrl(found.spritesheetUrl) ||
+      !isTrustedAssetUrl(found.petJsonUrl)
+    ) {
+      s.stop(pc.red("untrusted asset host"));
+      p.cancel(
+        `Refusing to install ${pc.bold(slug)}: asset URLs are outside the petdex host allowlist. This row may need to be re-uploaded by an admin.`,
       );
       process.exit(1);
     }

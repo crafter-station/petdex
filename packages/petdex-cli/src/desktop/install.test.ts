@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -13,6 +14,7 @@ import {
   _commitStagedForTest,
   _installStarterPetForTest,
   fetchLatestRelease,
+  isTrustedAssetUrl,
   type StagedFile,
 } from "./install";
 
@@ -152,7 +154,77 @@ describe("fetchLatestRelease", () => {
     ];
     await fetchLatestRelease();
     expect(lastUrl).toMatch(/\/releases\?per_page=\d+/);
+    expect(lastUrl).toMatch(/page=1/);
     expect(lastUrl).not.toMatch(/\/releases\/latest/);
+  });
+
+  test("paginates when desktop-v* is not on page 1", async () => {
+    // Simulate a long run of web-v* releases on page 1 followed by
+    // a desktop release on page 2. Without pagination this would
+    // throw "no desktop release found".
+    const calls: string[] = [];
+    const page1 = Array.from({ length: 30 }, (_, i) => ({
+      tag_name: `web-v${i}.0.0`,
+      assets: [],
+      draft: false,
+      prerelease: false,
+    }));
+    const page2 = [
+      { tag_name: "desktop-v0.1.4", assets: [], draft: false, prerelease: false },
+    ];
+    globalThis.fetch = (async (url: string | URL) => {
+      const u = url.toString();
+      calls.push(u);
+      const body = u.includes("page=1") ? page1 : page2;
+      return new Response(JSON.stringify(body), { status: 200 });
+    }) as typeof fetch;
+
+    const release = await fetchLatestRelease({ maxPages: 5 });
+    expect(release.tag_name).toBe("desktop-v0.1.4");
+    expect(calls.length).toBe(2);
+    expect(calls[0]).toMatch(/page=1/);
+    expect(calls[1]).toMatch(/page=2/);
+  });
+
+  test("stops paginating when a short page indicates the end of the list", async () => {
+    // page 1 returns < page size with no desktop release. We should
+    // NOT issue a page-2 request.
+    const calls: string[] = [];
+    globalThis.fetch = (async (url: string | URL) => {
+      calls.push(url.toString());
+      return new Response(
+        JSON.stringify([
+          { tag_name: "web-v1", assets: [], draft: false, prerelease: false },
+        ]),
+        { status: 200 },
+      );
+    }) as typeof fetch;
+
+    await expect(fetchLatestRelease({ maxPages: 5 })).rejects.toThrow(
+      /desktop-v/,
+    );
+    expect(calls.length).toBe(1);
+  });
+
+  test("respects maxPages cap and reports how many it scanned", async () => {
+    // Every page is full of non-desktop releases; we should walk
+    // exactly maxPages then throw.
+    const calls: string[] = [];
+    globalThis.fetch = (async (url: string | URL) => {
+      calls.push(url.toString());
+      const fullPage = Array.from({ length: 30 }, () => ({
+        tag_name: "web-v1",
+        assets: [],
+        draft: false,
+        prerelease: false,
+      }));
+      return new Response(JSON.stringify(fullPage), { status: 200 });
+    }) as typeof fetch;
+
+    await expect(fetchLatestRelease({ maxPages: 3 })).rejects.toThrow(
+      /3 page/,
+    );
+    expect(calls.length).toBe(3);
   });
 
   test("picks the newest desktop-v* even when a non-desktop release is at the top", async () => {
@@ -239,7 +311,7 @@ describe("fetchLatestRelease", () => {
 
   test("throws when GitHub returns an empty array", async () => {
     mockBody = [];
-    await expect(fetchLatestRelease()).rejects.toThrow(/no releases/);
+    await expect(fetchLatestRelease()).rejects.toThrow(/desktop-v/);
   });
 
   test("throws on non-200 from GitHub", async () => {
@@ -464,6 +536,51 @@ describe("installStarterPet", () => {
     expect(existsSync(join(codexPetsDir(), "boba"))).toBe(false);
   });
 
+  test("refuses to overwrite a pre-existing slug directory", async () => {
+    // User has an existing pet folder (maybe partial, maybe complete,
+    // maybe with custom files). The previous rollback path would have
+    // mkdir'd over it and rm-rf'd on failure — destroying user data.
+    // Now we abort before touching anything if the dir exists.
+    mkdirSync(join(petsDir(), "boba"), { recursive: true });
+    writeFileSync(join(petsDir(), "boba", "user-custom.txt"), "DO NOT TOUCH");
+
+    let manifestCalls = 0;
+    const fetchImpl = makeFetch((url) => {
+      if (url.endsWith("/api/manifest")) {
+        manifestCalls += 1;
+        return new Response(
+          JSON.stringify({
+            pets: [
+              {
+                slug: "boba",
+                displayName: "Boba",
+                spritesheetUrl: `${TRUSTED_HOST}/pets/boba/spritesheet.webp`,
+                petJsonUrl: `${TRUSTED_HOST}/pets/boba/pet.json`,
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response("not allowed", { status: 500 });
+    });
+
+    const result = await _installStarterPetForTest({
+      fetchOverride: fetchImpl,
+      petdexUrl: "https://petdex.test",
+    });
+
+    expect(result).toBeNull();
+    // Manifest was consulted (the function got far enough to know
+    // there's a slug to install), but the user's existing file is
+    // intact.
+    expect(manifestCalls).toBe(1);
+    expect(existsSync(join(petsDir(), "boba", "user-custom.txt"))).toBe(true);
+    expect(readFileSync(join(petsDir(), "boba", "user-custom.txt"), "utf8")).toBe(
+      "DO NOT TOUCH",
+    );
+  });
+
   test("falls back to the first manifest entry when boba is missing", async () => {
     const fetchImpl = makeFetch((url) => {
       if (url.endsWith("/api/manifest")) {
@@ -497,5 +614,62 @@ describe("installStarterPet", () => {
 
     expect(result).toBe("fox");
     expect(existsSync(join(petsDir(), "fox", "spritesheet.png"))).toBe(true);
+  });
+});
+
+// ---- isTrustedAssetUrl ---------------------------------------------
+//
+// Used by both installStarterPet and cmdInstall to gate manifest URLs
+// before downloading bytes into ~/.petdex / ~/.codex. Mirrors
+// src/lib/url-allowlist.ts on the server side; if these drift the CLI
+// could either reject legit installs or accept attacker bytes.
+
+describe("isTrustedAssetUrl", () => {
+  test("accepts the R2 public bucket", () => {
+    expect(
+      isTrustedAssetUrl(
+        "https://pub-94495283df974cfea5e98d6a9e3fa462.r2.dev/pets/boba/spritesheet.webp",
+      ),
+    ).toBe(true);
+  });
+
+  test("accepts the legacy UploadThing host (pre-R2 migration)", () => {
+    expect(isTrustedAssetUrl("https://yu2vz9gndp.ufs.sh/f/abc123")).toBe(true);
+  });
+
+  test("rejects http (must be https)", () => {
+    expect(
+      isTrustedAssetUrl(
+        "http://pub-94495283df974cfea5e98d6a9e3fa462.r2.dev/pets/boba/spritesheet.webp",
+      ),
+    ).toBe(false);
+  });
+
+  test("rejects an unknown host even on https", () => {
+    expect(
+      isTrustedAssetUrl("https://attacker.example.com/pet.json"),
+    ).toBe(false);
+  });
+
+  test("rejects javascript: / data: / file: pseudo-URLs", () => {
+    expect(isTrustedAssetUrl("javascript:alert(1)")).toBe(false);
+    expect(isTrustedAssetUrl("data:text/html,evil")).toBe(false);
+    expect(isTrustedAssetUrl("file:///etc/passwd")).toBe(false);
+  });
+
+  test("rejects malformed URLs", () => {
+    expect(isTrustedAssetUrl("not a url")).toBe(false);
+    expect(isTrustedAssetUrl("")).toBe(false);
+  });
+
+  test("rejects subdomain spoof attempts", () => {
+    // attacker.r2.dev is not the same as our specific bucket
+    expect(isTrustedAssetUrl("https://attacker.r2.dev/x")).toBe(false);
+    // Check that a hostname suffix attack (substring match) doesn't slip through
+    expect(
+      isTrustedAssetUrl(
+        "https://pub-94495283df974cfea5e98d6a9e3fa462.r2.dev.attacker.com/x",
+      ),
+    ).toBe(false);
   });
 });

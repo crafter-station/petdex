@@ -15,6 +15,7 @@
  * Asset names: `petdex-desktop-{darwin|linux|win32}-{arm64|x64}` and
  * `petdex-desktop-sidecar.js`.
  */
+import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { chmod, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { homedir, arch as nodeArch, platform as nodePlatform } from "node:os";
@@ -28,11 +29,18 @@ import pc from "picocolors";
 // Listing recent releases instead of /releases/latest because the
 // petdex repo publishes multiple lineages (desktop-v*, web-v*,
 // sidecar-v*) under the same tag namespace. /releases/latest returns
-// whichever was published last regardless of prefix; pulling 20 and
-// filtering to desktop-v* guarantees the user gets a tag with desktop
-// assets attached.
-const RELEASE_API =
-  "https://api.github.com/repos/crafter-station/petdex/releases?per_page=20";
+// whichever was published last regardless of prefix; we filter to
+// desktop-v* explicitly. We paginate through the list because a long
+// streak of web/sidecar releases between desktop tags would otherwise
+// hide the latest desktop release behind page 1.
+const RELEASES_API_BASE =
+  "https://api.github.com/repos/crafter-station/petdex/releases";
+const RELEASES_PAGE_SIZE = 30;
+// Cap the search at 5 pages = 150 releases. Anything older than that
+// is almost certainly stale anyway, and searching forever would burn
+// the GitHub API rate limit if the repo state ever loses every
+// desktop tag.
+const RELEASES_MAX_PAGES = 5;
 const DESKTOP_TAG_PREFIX = "desktop-v";
 const SIDECAR_ASSET_NAME = "petdex-desktop-sidecar.js";
 
@@ -81,32 +89,46 @@ export function sidecarPath(): string {
   return path.join(homedir(), ".petdex", "sidecar", "server.js");
 }
 
-export async function fetchLatestRelease(): Promise<Release> {
-  const res = await fetch(RELEASE_API, {
-    headers: { Accept: "application/vnd.github+json" },
-  });
-  if (!res.ok) throw new Error(`GitHub API ${res.status}`);
-  const releases = (await res.json()) as Array<
-    Release & { draft?: boolean; prerelease?: boolean }
-  >;
-  if (!Array.isArray(releases) || releases.length === 0) {
-    throw new Error("GitHub API returned no releases");
-  }
-  // GH lists newest-first by published_at. Skip drafts (not visible
-  // anyway) and prereleases (we don't ship those for desktop yet).
-  const hit = releases.find(
-    (r) =>
-      !r.draft &&
-      !r.prerelease &&
-      typeof r.tag_name === "string" &&
-      r.tag_name.startsWith(DESKTOP_TAG_PREFIX),
-  );
-  if (!hit) {
-    throw new Error(
-      `No ${DESKTOP_TAG_PREFIX}* release found in the last ${releases.length} releases`,
+export async function fetchLatestRelease(
+  options: { fetchOverride?: typeof fetch; maxPages?: number } = {},
+): Promise<Release> {
+  const fetchImpl = options.fetchOverride ?? fetch;
+  const maxPages = options.maxPages ?? RELEASES_MAX_PAGES;
+
+  // Walk pages newest-first until we hit a desktop-v* release or
+  // exhaust the cap. Most repos will resolve on page 1; the loop
+  // exists so a long run of web-v*/sidecar-v* releases doesn't
+  // make us return "no desktop release" when one is just on page 2.
+  let scanned = 0;
+  for (let page = 1; page <= maxPages; page++) {
+    const url = `${RELEASES_API_BASE}?per_page=${RELEASES_PAGE_SIZE}&page=${page}`;
+    const res = await fetchImpl(url, {
+      headers: { Accept: "application/vnd.github+json" },
+    });
+    if (!res.ok) throw new Error(`GitHub API ${res.status}`);
+    const releases = (await res.json()) as Array<
+      Release & { draft?: boolean; prerelease?: boolean }
+    >;
+    if (!Array.isArray(releases) || releases.length === 0) {
+      // Empty page = end of list. If we've never found a desktop
+      // release, fall through to the throw below.
+      break;
+    }
+    scanned += releases.length;
+    const hit = releases.find(
+      (r) =>
+        !r.draft &&
+        !r.prerelease &&
+        typeof r.tag_name === "string" &&
+        r.tag_name.startsWith(DESKTOP_TAG_PREFIX),
     );
+    if (hit) return hit;
+    // Short page = end of list reached, no point asking for the next.
+    if (releases.length < RELEASES_PAGE_SIZE) break;
   }
-  return hit;
+  throw new Error(
+    `No ${DESKTOP_TAG_PREFIX}* release found in the last ${scanned} releases (scanned ${maxPages} page(s))`,
+  );
 }
 
 export function findBinaryAsset(
@@ -385,7 +407,7 @@ const TRUSTED_ASSET_HOSTS = new Set<string>([
   "yu2vz9gndp.ufs.sh",
 ]);
 
-function isTrustedAssetUrl(url: string): boolean {
+export function isTrustedAssetUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
     if (parsed.protocol !== "https:") return false;
@@ -492,41 +514,81 @@ async function installStarterPet(
     path.join(petsRoot(), pet.slug),
     path.join(codexPetsRoot(), pet.slug),
   ];
-  // Track which dirs we created so we can roll back on partial
-  // failure. Without rollback an aborted starter install leaves
-  // empty pet directories that hasSpritesheet() correctly skips,
-  // but they clutter the collection and confuse hasAnyInstalledPet
-  // on retry.
-  const createdDirs: string[] = [];
-  try {
-    for (const t of targets) {
-      await mkdir(t, { recursive: true });
-      createdDirs.push(t);
+
+  // Refuse to touch a pet directory that already exists. The user
+  // could have a partial/custom install at ~/.petdex/pets/boba (or
+  // even a complete one we just don't want to overwrite). Aborting
+  // is safer than the previous rollback path, which deleted the
+  // entire target directory on partial failure — that path could
+  // wipe pre-existing files belonging to the user.
+  for (const t of targets) {
+    if (existsSync(t)) {
+      // Either the user already installed this slug, or the dir
+      // exists from a prior attempt. Either way, leave it alone.
+      return null;
     }
-    const fetchOrThrow = async (url: string): Promise<ArrayBuffer> => {
-      const res = await fetchImpl(url, { signal: AbortSignal.timeout(15_000) });
-      if (!res.ok) throw new Error(`download ${url} → ${res.status}`);
-      return res.arrayBuffer();
-    };
-    const [petJson, spritesheet] = await Promise.all([
+  }
+
+  const fetchOrThrow = async (url: string): Promise<ArrayBuffer> => {
+    const res = await fetchImpl(url, { signal: AbortSignal.timeout(15_000) });
+    if (!res.ok) throw new Error(`download ${url} → ${res.status}`);
+    return res.arrayBuffer();
+  };
+
+  // Download to memory FIRST so we don't even create a dir on the
+  // user's disk if the network fails. Writes happen only after both
+  // assets are fully buffered.
+  let petJson: ArrayBuffer;
+  let spritesheet: ArrayBuffer;
+  try {
+    [petJson, spritesheet] = await Promise.all([
       fetchOrThrow(pet.petJsonUrl),
       fetchOrThrow(pet.spritesheetUrl),
     ]);
-    await Promise.all(
-      targets.flatMap((t) => [
-        writeFile(path.join(t, "pet.json"), Buffer.from(petJson)),
-        writeFile(path.join(t, `spritesheet.${ext}`), Buffer.from(spritesheet)),
-      ]),
-    );
+  } catch {
+    return null;
+  }
+
+  // Stage each target into a sibling temp dir, then rename atomically
+  // into place. If the rename fails on one target we clean up only
+  // the temp dirs WE created — a pre-existing target dir is never
+  // touched (the existsSync check above ensured none existed at the
+  // time we started, but rm is path-pinned anyway).
+  const stagedDirs: string[] = [];
+  const renamedDirs: string[] = [];
+  try {
+    for (const t of targets) {
+      const stage = `${t}.partial-${randomBytes(6).toString("hex")}`;
+      await mkdir(stage, { recursive: true });
+      stagedDirs.push(stage);
+      await Promise.all([
+        writeFile(path.join(stage, "pet.json"), Buffer.from(petJson)),
+        writeFile(
+          path.join(stage, `spritesheet.${ext}`),
+          Buffer.from(spritesheet),
+        ),
+      ]);
+      // Ensure the parent (e.g. ~/.petdex/pets) exists; rename
+      // would otherwise fail if this is the user's first install.
+      await mkdir(path.dirname(t), { recursive: true });
+      await rename(stage, t);
+      // Once renamed, the path no longer belongs to the staging
+      // bucket — we drop it from stagedDirs and add it to
+      // renamedDirs in case a LATER target fails and we have to
+      // unwind.
+      stagedDirs.pop();
+      renamedDirs.push(t);
+    }
     return pet.slug;
   } catch {
-    // Partial-failure rollback: tear down the directories we just
-    // created so the user retrying doesn't see "starter pet exists"
-    // on a torn-up install.
-    const { rm } = await import("node:fs/promises");
-    await Promise.all(
-      createdDirs.map((d) => rm(d, { recursive: true, force: true })),
-    );
+    // Best-effort cleanup. Only remove paths we created in this
+    // call: the staged temp dirs (always safe — random suffix), and
+    // the freshly-renamed targets (safe because existsSync(t) was
+    // false before we started; anything at that path now is ours).
+    await Promise.all([
+      ...stagedDirs.map((d) => rm(d, { recursive: true, force: true })),
+      ...renamedDirs.map((d) => rm(d, { recursive: true, force: true })),
+    ]);
     return null;
   }
 }
