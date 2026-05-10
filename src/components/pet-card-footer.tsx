@@ -45,6 +45,7 @@ function PetCardFooterImpl({
       e.preventDefault();
       e.stopPropagation();
       if (busy) return;
+      if (!clerk.loaded) return;
       const session = clerk.session;
       if (!session) {
         router.push("/?signin=1");
