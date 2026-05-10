@@ -292,6 +292,38 @@ const html_tail =
     \\  }
     \\  setInterval(pollUpdate, 5000);
     \\  pollUpdate();
+    \\  // Sidecar watchdog. The sidecar dies via parent watchdog when
+    \\  // we exit, but it can also crash mid-flight (Node OOM, an
+    \\  // unhandled error in the HTTP handler) leaving us alive with
+    \\  // no listener on :7777 — at which point hooks fail until the
+    \\  // user restarts. Probe /health every 5s; after 3 consecutive
+    \\  // failures, ask the bridge to respawn it. Backs off on
+    \\  // repeated respawns so a sidecar that won't start doesn't
+    \\  // burn CPU.
+    \\  let sidecarFails = 0;
+    \\  let lastRespawnAt = 0;
+    \\  async function probeSidecar() {
+    \\    try {
+    \\      const r = await fetch('http://127.0.0.1:7777/health', {
+    \\        signal: AbortSignal.timeout(500),
+    \\      });
+    \\      if (r.ok) {
+    \\        sidecarFails = 0;
+    \\        return;
+    \\      }
+    \\    } catch (e) {}
+    \\    sidecarFails += 1;
+    \\    if (sidecarFails < 3) return;
+    \\    // Backoff: wait at least 4s between respawn attempts.
+    \\    const now = Date.now();
+    \\    if (now - lastRespawnAt < 4000) return;
+    \\    lastRespawnAt = now;
+    \\    try {
+    \\      await window.zero.invoke('petdex.respawn_sidecar', {});
+    \\      sidecarFails = 0;
+    \\    } catch (e) {}
+    \\  }
+    \\  setInterval(probeSidecar, 5000);
     \\  // Drag + momentum (Codex parity).
     \\  const TICK_MS = 16, FRICTION = 0.88, MIN_VEL = 65, MAX_DURATION = 900;
     \\  const SAMPLE_WINDOW_MS = 100, THRESHOLD = 4;
@@ -684,13 +716,18 @@ const PetdexState = struct {
     // dir mask a populated .codex dir at startup.
     pets_roots: [][]u8,
     asset_root: []u8,
-    bridge_handlers: [5]zero_native.BridgeHandler = undefined,
+    // Held so respawn_sidecar can re-issue spawnSidecar without
+    // having to re-resolve sidecar_dir or rebuild the env map.
+    sidecar_dir: []u8,
+    env_map: *std.process.Environ.Map,
+    bridge_handlers: [6]zero_native.BridgeHandler = undefined,
 
     fn deinit(self: *PetdexState) void {
         self.allocator.free(self.config_dir);
         for (self.pets_roots) |r| self.allocator.free(r);
         self.allocator.free(self.pets_roots);
         self.allocator.free(self.asset_root);
+        self.allocator.free(self.sidecar_dir);
     }
 
     fn bridge(self: *PetdexState) zero_native.BridgeDispatcher {
@@ -700,11 +737,25 @@ const PetdexState = struct {
             .{ .name = "petdex.read_runtime_state", .context = self, .invoke_fn = readRuntimeStateCmd },
             .{ .name = "petdex.read_update_info", .context = self, .invoke_fn = readUpdateInfoCmd },
             .{ .name = "petdex.trigger_update", .context = self, .invoke_fn = triggerUpdateCmd },
+            .{ .name = "petdex.respawn_sidecar", .context = self, .invoke_fn = respawnSidecarCmd },
         };
         return .{
             .policy = .{ .enabled = true, .commands = &petdex_command_policies },
             .registry = .{ .handlers = &self.bridge_handlers },
         };
+    }
+
+    // Called by the WebView JS when /health fails repeatedly. The
+    // old sidecar's parent watchdog handles cleanup if it's alive,
+    // so this is fire-and-forget. We don't track the new pid; the
+    // next health probe is the success/failure signal.
+    fn respawnSidecarCmd(context: *anyopaque, invocation: zero_native.bridge.Invocation, output: []u8) anyerror![]const u8 {
+        _ = invocation;
+        const self: *PetdexState = @ptrCast(@alignCast(context));
+        spawnSidecar(self.allocator, self.io, self.sidecar_dir, self.env_map) catch |err| {
+            return std.fmt.bufPrint(output, "{{\"ok\":false,\"error\":\"{s}\"}}", .{@errorName(err)});
+        };
+        return std.fmt.bufPrint(output, "{{\"ok\":true}}", .{});
     }
 
     fn readRuntimeStateCmd(context: *anyopaque, invocation: zero_native.bridge.Invocation, output: []u8) anyerror![]const u8 {
@@ -845,6 +896,7 @@ const petdex_command_policies = [_]zero_native.BridgeCommandPolicy{
     .{ .name = "petdex.read_runtime_state", .origins = &petdex_origins },
     .{ .name = "petdex.read_update_info", .origins = &petdex_origins },
     .{ .name = "petdex.trigger_update", .origins = &petdex_origins },
+    .{ .name = "petdex.respawn_sidecar", .origins = &petdex_origins },
 };
 
 fn jsonStringField(payload: []const u8, key: []const u8) ?[]const u8 {
@@ -1493,6 +1545,8 @@ pub fn main(init: std.process.Init) !void {
         .config_dir = try allocator.dupe(u8, config_dir),
         .pets_roots = roots_for_state,
         .asset_root = try allocator.dupe(u8, asset_root),
+        .sidecar_dir = try allocator.dupe(u8, sidecar_dir),
+        .env_map = init.environ_map,
     };
     defer state.deinit();
 

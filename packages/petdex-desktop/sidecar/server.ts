@@ -70,6 +70,38 @@ const VALID_STATES = new Set([
 
 mkdirSync(RUNTIME_DIR, { recursive: true });
 
+// Token-bucket rate limiter for POST /state. The bucket holds at
+// most STATE_RATE_BURST tokens and refills at STATE_RATE_PER_SEC
+// per second. A real coding agent under heavy load (rapid greps,
+// tight tool loops) tops out around 5-10 tool calls/sec, so 30/sec
+// is well above that. The bucket protects against runaway hooks
+// (infinite loops in user pre-tool scripts, malicious plugins) by
+// 429-ing once exhausted; agent-side curl swallows the response so
+// the agent never sees the error.
+const STATE_RATE_PER_SEC = 30;
+const STATE_RATE_BURST = 60;
+type RateLimiter = { consume: () => boolean };
+const stateRateLimiter: RateLimiter = (() => {
+  let tokens = STATE_RATE_BURST;
+  let lastRefill = Date.now();
+  return {
+    consume(): boolean {
+      const now = Date.now();
+      const elapsed = (now - lastRefill) / 1000;
+      if (elapsed > 0) {
+        tokens = Math.min(
+          STATE_RATE_BURST,
+          tokens + elapsed * STATE_RATE_PER_SEC,
+        );
+        lastRefill = now;
+      }
+      if (tokens < 1) return false;
+      tokens -= 1;
+      return true;
+    },
+  };
+})();
+
 // Generate a fresh per-session token for POST /update + POST /state.
 // Without this any website the user visits could fire
 // `fetch("http://127.0.0.1:7777/update", { method: "POST",
@@ -481,6 +513,16 @@ const server = http.createServer(async (req, res) => {
       const providedStr = Array.isArray(provided) ? provided[0] : provided;
       if (!providedStr || !constantTimeEquals(providedStr, UPDATE_TOKEN)) {
         return jsonResponse(res, 401, { ok: false, error: "unauthorized" });
+      }
+      // Rate limiter: a real agent's tool-call rate caps around
+      // 5-10 per second under the loudest workloads (rapid greps,
+      // tight loops). 30/sec is well above that and well below
+      // anything that could DoS the desktop (sprite updates each
+      // tick are bound by frame loop). A runaway hook (infinite
+      // loop in a user's pre-tool script, malicious plugin) trips
+      // 429 and the hook ignores it via `|| true`.
+      if (!stateRateLimiter.consume()) {
+        return jsonResponse(res, 429, { ok: false, error: "rate_limited" });
       }
 
       let body: unknown;

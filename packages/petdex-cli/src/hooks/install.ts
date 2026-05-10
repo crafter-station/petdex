@@ -20,6 +20,7 @@ import {
   type PostInstallNote,
   SIDECAR_URL,
 } from "./agents.js";
+import { installSlashCommand } from "./slash-command.js";
 
 type Detection = { agent: Agent; installed: boolean };
 
@@ -200,6 +201,12 @@ async function installForAgent(agent: Agent): Promise<InstallResult> {
   await mkdir(path.dirname(agent.configFile), { recursive: true });
 
   const config = agent.build();
+
+  // /petdex slash command — installed alongside the hook config so
+  // users can toggle the killswitch from inside their agent without
+  // dropping to a shell. Idempotent: overwrites our own file, never
+  // user-authored content (we own the path under <agent>/commands/).
+  await installSlashCommand(agent);
 
   // OpenCode plugin is a JS source file — write it whole, no merge.
   if (agent.id === "opencode") {

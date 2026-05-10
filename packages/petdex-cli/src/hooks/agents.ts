@@ -67,6 +67,18 @@ export type Agent = {
   hookEntries: HookEntry[];
   docsUrl: string;
   /**
+   * Where this agent looks for user-defined slash commands. We drop a
+   * /petdex command file here so users can toggle the killswitch from
+   * inside their agent without leaving for a shell.
+   *
+   * Each agent has its own directory:
+   *   - Claude Code:  ~/.claude/commands/petdex.md
+   *   - Codex:        ~/.codex/prompts/petdex.md
+   *   - OpenCode:     ~/.config/opencode/command/petdex.md
+   *   - Gemini:       ~/.gemini/antigravity/global_workflows/petdex.md
+   */
+  slashCommandPath: string;
+  /**
    * Build the actual config object the agent expects, given the hook entries.
    * Returns the whole settings object so we can merge into existing files.
    */
@@ -88,6 +100,7 @@ export const AGENTS: Agent[] = [
     displayName: "Claude Code",
     configDir: path.join(HOME, ".claude"),
     configFile: path.join(HOME, ".claude", "settings.json"),
+    slashCommandPath: path.join(HOME, ".claude", "commands", "petdex.md"),
     docsUrl: "https://docs.anthropic.com/en/docs/claude-code/hooks",
     hookEntries: [
       { event: "PreToolUse", kind: "tool.before" },
@@ -136,6 +149,7 @@ export const AGENTS: Agent[] = [
     displayName: "Codex CLI",
     configDir: path.join(HOME, ".codex"),
     configFile: path.join(HOME, ".codex", "hooks.json"),
+    slashCommandPath: path.join(HOME, ".codex", "prompts", "petdex.md"),
     docsUrl: "https://developers.openai.com/codex/hooks",
     hookEntries: [
       { event: "PreToolUse", kind: "tool.before" },
@@ -278,6 +292,13 @@ export const AGENTS: Agent[] = [
     displayName: "Gemini CLI",
     configDir: path.join(HOME, ".gemini"),
     configFile: path.join(HOME, ".gemini", "settings.json"),
+    slashCommandPath: path.join(
+      HOME,
+      ".gemini",
+      "antigravity",
+      "global_workflows",
+      "petdex.md",
+    ),
     docsUrl: "https://google-gemini.github.io/gemini-cli/docs/hooks",
     hookEntries: [
       { event: "BeforeTool", kind: "tool.before" },
@@ -328,6 +349,13 @@ export const AGENTS: Agent[] = [
     // OpenCode plugins live as TS/JS files, not in the JSON config. We treat
     // the plugin path as the "config file" for write/uninstall purposes.
     configFile: path.join(HOME, ".config", "opencode", "plugins", "petdex.js"),
+    slashCommandPath: path.join(
+      HOME,
+      ".config",
+      "opencode",
+      "command",
+      "petdex.md",
+    ),
     docsUrl: "https://opencode.ai/docs/plugins",
     hookEntries: [
       { event: "tool.execute.before", kind: "tool.before" },
@@ -347,6 +375,15 @@ function curlCommand(state: PetState, duration?: number): string {
   // the agent merging code) handles JSON-escaping; we just need to
   // emit the raw shell text we want the shell to see.
   //
+  // Killswitch: if ~/.petdex/runtime/hooks-disabled exists, exit 0
+  // before any token read or network attempt. Users toggle it with
+  // `/petdex` from inside their agent (or `petdex hooks toggle`
+  // from a shell). Important properties:
+  //   - exit 0, NEVER non-zero — a non-zero hook in Claude Code
+  //     stains the UI; we want this to be invisible.
+  //   - check FIRST so a stale token + dead sidecar doesn't waste
+  //     even a TCP RST when the user opted out.
+  //
   // Token gate: read ~/.petdex/runtime/update-token at hook
   // execution time. POSIX shells happily nest double quotes inside
   // a $() — `T="$(cat "$HOME/foo" 2>/dev/null)"` is well-formed —
@@ -358,19 +395,24 @@ function curlCommand(state: PetState, duration?: number): string {
     duration != null
       ? `{"state":"${state}","duration":${duration}}`
       : `{"state":"${state}"}`;
-  // Two statements separated by `;`: assign T from the token file,
-  // then run the curl only if T is non-empty. `&& ... || true` swallows
-  // a curl error so a sidecar that's offline doesn't surface as a
-  // failed hook.
+  // Three statements separated by `;`:
+  //   1. killswitch: bail if disabled
+  //   2. read token from disk
+  //   3. POST iff token non-empty (and swallow any curl error)
+  // -m 0.3 instead of -m 1: 300ms is well above any realistic
+  // localhost roundtrip and below the threshold a human notices
+  // as agent latency. With -m 1 a stuck sidecar would have added
+  // up to a full second per tool call.
+  const killswitch = `[ -f "$HOME/.petdex/runtime/hooks-disabled" ] && exit 0`;
   const assign = `T="$(cat "$HOME/.petdex/runtime/update-token" 2>/dev/null)"`;
   const post = [
-    `[ -n "$T" ] && curl -s -m 1 -X POST ${SIDECAR_URL}`,
+    `[ -n "$T" ] && curl -s -m 0.3 -X POST ${SIDECAR_URL}`,
     `-H "Content-Type: application/json"`,
     `-H "X-Petdex-Update-Token: $T"`,
     `--data-raw '${body}'`,
     `>/dev/null 2>&1 || true`,
   ].join(" ");
-  return `${assign}; ${post}`;
+  return `${killswitch}; ${assign}; ${post}`;
 }
 
 function openCodePluginSource(): string {
@@ -378,12 +420,15 @@ function openCodePluginSource(): string {
 // Forwards OpenCode lifecycle events to the petdex desktop mascot via HTTP.
 // Edit STATE_MAP below to customize which state each event triggers.
 
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 const SIDECAR_URL = ${JSON.stringify(SIDECAR_URL)};
-const TOKEN_PATH = join(homedir(), ".petdex", "runtime", "update-token");
+const RUNTIME_DIR = join(homedir(), ".petdex", "runtime");
+const TOKEN_PATH = join(RUNTIME_DIR, "update-token");
+const KILLSWITCH_PATH = join(RUNTIME_DIR, "hooks-disabled");
 
 async function readToken() {
   try {
@@ -394,6 +439,11 @@ async function readToken() {
 }
 
 async function setState(state, duration) {
+  // Killswitch: users toggle this with /petdex inside their agent
+  // (or \`petdex hooks toggle\` from a shell). Bail before the token
+  // read so the disabled state has zero filesystem cost beyond the
+  // existsSync.
+  if (existsSync(KILLSWITCH_PATH)) return;
   // Token gate defends against drive-by no-cors POSTs from any site
   // the user visits. The token rotates per sidecar session and lives
   // at mode 0600, so only this user can read it.
@@ -407,7 +457,9 @@ async function setState(state, duration) {
         "X-Petdex-Update-Token": token,
       },
       body: JSON.stringify(duration != null ? { state, duration } : { state }),
-      signal: AbortSignal.timeout(1000),
+      // 300ms instead of 1s: well above any real localhost roundtrip
+      // and below the threshold an agent user notices as latency.
+      signal: AbortSignal.timeout(300),
     });
   } catch {
     // sidecar offline: stay quiet, the agent shouldn't notice.

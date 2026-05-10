@@ -61,6 +61,52 @@ describe("Claude Code hook command", () => {
     expect(reparsed.command).not.toContain(`cat \\"$HOME`);
   });
 
+  test("includes the killswitch guard before any token read or curl", () => {
+    const cmd = getCommand("running");
+    // Killswitch is the FIRST statement so a disabled state has
+    // zero filesystem cost beyond the test -f.
+    expect(cmd).toMatch(/^\[ -f "\$HOME\/\.petdex\/runtime\/hooks-disabled" \]/);
+    expect(cmd).toContain("&& exit 0");
+    // And it MUST exit 0 — a non-zero hook stains the agent UI.
+    expect(cmd).not.toContain("&& exit 1");
+  });
+
+  test("uses 300ms timeout (not the original 1s) to bound worst-case agent latency", () => {
+    const cmd = getCommand("running");
+    expect(cmd).toContain("curl -s -m 0.3");
+    expect(cmd).not.toContain("curl -s -m 1 ");
+  });
+
+  test("killswitch file actually short-circuits in a real shell", () => {
+    // End-to-end: write the killswitch file, run the generated
+    // command, and confirm the curl never fires (would otherwise
+    // exit non-zero into a closed port).
+    const fakeHome = mkdtempSync(join(tmpdir(), "petdex-killswitch-"));
+    try {
+      const runtimeDir = join(fakeHome, ".petdex", "runtime");
+      execSync(`mkdir -p "${runtimeDir}"`);
+      writeFileSync(join(runtimeDir, "update-token"), "tok");
+      // Drop the killswitch flag.
+      writeFileSync(join(runtimeDir, "hooks-disabled"), "");
+
+      const cmd = getCommand("running");
+      // Even with the SIDECAR_URL pointing at a real-but-closed
+      // port, we should exit 0 BEFORE curl runs. We test this by
+      // pointing SIDECAR_URL at a deliberately bad value and
+      // confirming no error surfaces — the killswitch must catch
+      // it first.
+      const stubbed = cmd.replace(SIDECAR_URL, "http://127.0.0.1:1");
+      const result = execSync(stubbed, {
+        env: { ...process.env, HOME: fakeHome },
+        shell: "/bin/sh",
+        timeout: 3000,
+      });
+      expect(result.toString()).toBe("");
+    } finally {
+      rmSync(fakeHome, { recursive: true, force: true });
+    }
+  });
+
   test("generated command is real-shell-executable and reads the token file", () => {
     // Build a fake HOME with a token file, run the generated
     // command with PETDEX_PORT pointed at a closed port, and

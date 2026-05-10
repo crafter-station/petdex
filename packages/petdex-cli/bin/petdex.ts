@@ -16,8 +16,15 @@ import {
   cmdDesktopStatus,
   cmdDesktopStop,
 } from "../src/desktop/process.js";
+import { runDoctor } from "../src/desktop/doctor.js";
 import { runUpdate } from "../src/desktop/update.js";
 import { runInstall as runHooksInstall } from "../src/hooks/install.js";
+import {
+  getKillswitchState,
+  setKillswitchState,
+  toggleKillswitch,
+} from "../src/hooks/killswitch.js";
+import { runUninstall as runHooksUninstall } from "../src/hooks/uninstall.js";
 import {
   emit,
   getStatus,
@@ -151,6 +158,9 @@ async function main() {
     case "update":
       await runUpdate(args.slice(1));
       break;
+    case "doctor":
+      await runDoctor();
+      break;
     case "telemetry":
       cmdTelemetry(args.slice(1));
       break;
@@ -188,6 +198,7 @@ function printHelp() {
       `    ${pc.bold("hooks install")}      Wire petdex-desktop into your coding agents`,
       `    ${pc.bold("desktop")} <cmd>      Manage petdex-desktop (start | stop | status)`,
       `    ${pc.bold("update")}             Pull the latest petdex-desktop release and restart`,
+      `    ${pc.bold("doctor")}             Diagnose install/runtime/agents and surface fixes`,
       `    ${pc.bold("telemetry")} [on|off|status]  Manage anonymous usage telemetry`,
       "",
       `  ${c("Examples")}`,
@@ -1076,10 +1087,50 @@ async function cmdHooks(args: string[]) {
       }
       break;
     }
+    case "toggle":
+    case "on":
+    case "off":
+    case "status": {
+      cmdHooksKillswitch(sub);
+      break;
+    }
+    case "uninstall": {
+      const removeToken = args.includes("--remove-token");
+      await runHooksUninstall({ removeToken });
+      break;
+    }
     default:
       console.error(pc.red(`Unknown hooks command: ${sub}`));
       printHooksHelp();
       process.exit(1);
+  }
+}
+
+function cmdHooksKillswitch(sub: "toggle" | "on" | "off" | "status"): void {
+  let state: "on" | "off";
+  if (sub === "toggle") {
+    state = toggleKillswitch();
+  } else if (sub === "on") {
+    state = setKillswitchState("on");
+  } else if (sub === "off") {
+    state = setKillswitchState("off");
+  } else {
+    state = getKillswitchState();
+  }
+  if (state === "on") {
+    console.log(`${pc.green("●")} Petdex hooks are ${pc.bold("ENABLED")}`);
+    console.log(
+      pc.dim(
+        `  agent tool calls will animate the mascot when petdex-desktop is running`,
+      ),
+    );
+  } else {
+    console.log(`${pc.yellow("○")} Petdex hooks are ${pc.bold("DISABLED")}`);
+    console.log(
+      pc.dim(
+        `  agent hooks short-circuit before any network call. Re-enable: petdex hooks on`,
+      ),
+    );
   }
 }
 
@@ -1095,10 +1146,17 @@ function printHooksHelp() {
       `    petdex hooks <command>`,
       "",
       `  ${c("Commands")}`,
-      `    ${pc.bold("install")}    Wire petdex into your coding agents (Claude Code, Codex, Gemini, OpenCode)`,
+      `    ${pc.bold("install")}              Wire petdex into your coding agents`,
+      `    ${pc.bold("uninstall")}            Remove petdex from your agent configs (--remove-token also drops the auth token)`,
+      `    ${pc.bold("toggle")}               Flip the killswitch — disable/enable hooks without restarting agents`,
+      `    ${pc.bold("on")}                   Enable hooks (clears the killswitch)`,
+      `    ${pc.bold("off")}                  Disable hooks (sets the killswitch — agent tool calls become no-ops)`,
+      `    ${pc.bold("status")}               Show whether hooks are currently enabled`,
       "",
       `  ${c("Examples")}`,
       `    ${dim("$")} petdex hooks install`,
+      `    ${dim("$")} petdex hooks toggle`,
+      `    ${dim("$")} petdex hooks status`,
       "",
     ].join("\n"),
   );
