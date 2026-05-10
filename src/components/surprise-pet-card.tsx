@@ -23,6 +23,7 @@ type SurprisePet = {
 };
 
 const BASE_KEY = "petdex_surprise_pet_seen";
+const THUMBNAIL_SPRITE_SCALE = 0.45;
 
 export function SurprisePetCard() {
   const locale = useLocale();
@@ -88,13 +89,13 @@ export function SurprisePetCard() {
       <div className="mt-4 flex gap-4">
         <Link
           href={petHref}
-          className="grid size-24 shrink-0 place-items-center rounded-2xl border border-border-base bg-surface-muted transition hover:-translate-y-0.5"
+          className="grid size-24 shrink-0 place-items-center overflow-hidden rounded-2xl border border-border-base bg-surface-muted transition hover:-translate-y-0.5"
           aria-label={t("viewAria", { name: pet.displayName })}
         >
           <PetSprite
             src={pet.spritesheetPath}
             state="idle"
-            scale={0.58}
+            scale={THUMBNAIL_SPRITE_SCALE}
             label={t("spriteAlt", { name: pet.displayName })}
           />
         </Link>

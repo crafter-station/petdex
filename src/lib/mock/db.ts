@@ -32,6 +32,15 @@ if (!globalMockDb.__petdexMockDb) {
   };
 }
 const state: MockDbState = globalMockDb.__petdexMockDb;
+const MOCK_R2_PUBLIC_BASE =
+  "https://pub-94495283df974cfea5e98d6a9e3fa462.r2.dev";
+const MOCK_CURATED_ASSET_SLUGS = new Set([
+  "nukey",
+  "boba",
+  "boxcat",
+  "scoop",
+  "byte-bunny",
+]);
 
 async function bootstrap(client: PGlite): Promise<void> {
   // Drizzle migrations are SQL files. We run them in order, tolerating
@@ -276,14 +285,17 @@ async function seed(client: PGlite): Promise<void> {
     const idea = sample[i];
     const slug = idea.id;
     const id = `pet_mock_${i.toString().padStart(3, "0")}`;
-    // Use a 1x1 transparent webp data URI as a stand-in spritesheet so
-    // <img> tags don't 404 in the gallery. Real R2 URLs would point to
-    // multi-frame sprite sheets.
-    const placeholder =
-      "data:image/svg+xml;utf8," +
-      encodeURIComponent(
-        `<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256"><rect width="256" height="256" fill="#1a1a1a"/><text x="50%" y="50%" fill="#888" text-anchor="middle" dominant-baseline="middle" font-family="monospace" font-size="20">${idea.name}</text></svg>`,
-      );
+    const assetBase = `${MOCK_R2_PUBLIC_BASE}/curated/${slug}`;
+    const fallbackSpritesheet = mockSpritesheetDataUri(idea.name, slug);
+    const spritesheetUrl = MOCK_CURATED_ASSET_SLUGS.has(slug)
+      ? `${assetBase}/spritesheet.webp`
+      : fallbackSpritesheet;
+    const petJsonUrl = MOCK_CURATED_ASSET_SLUGS.has(slug)
+      ? `${assetBase}/pet.json`
+      : fallbackSpritesheet;
+    const zipUrl = MOCK_CURATED_ASSET_SLUGS.has(slug)
+      ? `${assetBase}/${slug}.zip`
+      : fallbackSpritesheet;
     await client.query(
       `INSERT INTO submitted_pets (
         id, slug, display_name, description, spritesheet_url,
@@ -292,8 +304,8 @@ async function seed(client: PGlite): Promise<void> {
         approved_at
       ) VALUES (
         $1, $2, $3, $4, $5,
-        $5, $5, 'creature', '[]'::jsonb, $6::jsonb,
-        'approved', 'submit', $7, $8, $9,
+        $6, $7, 'creature', '[]'::jsonb, $8::jsonb,
+        'approved', 'submit', $9, $10, $11,
         now()
       )
       ON CONFLICT (slug) DO NOTHING`,
@@ -302,7 +314,9 @@ async function seed(client: PGlite): Promise<void> {
         slug,
         idea.name,
         idea.description,
-        placeholder,
+        spritesheetUrl,
+        petJsonUrl,
+        zipUrl,
         JSON.stringify(idea.tags ?? []),
         MOCK_USER.userId,
         MOCK_USER.email,
@@ -323,6 +337,57 @@ async function seed(client: PGlite): Promise<void> {
       "Mock user for local QA",
     ],
   );
+}
+
+function mockSpritesheetDataUri(name: string, slug: string): string {
+  const accent = colorFromSlug(slug);
+  const initials = name
+    .split(/\s+/)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 3)
+    .toUpperCase();
+  const safeName = escapeSvgText(name);
+  const safeInitials = escapeSvgText(initials);
+  const frames = Array.from({ length: 9 }, (_, row) =>
+    Array.from({ length: 8 }, (_, col) => {
+      const x = col * 192;
+      const y = row * 208;
+      const bob = col % 2 === 0 ? 0 : -5;
+      return `<g transform="translate(${x} ${y})">
+        <rect width="192" height="208" fill="#f8fafc"/>
+        <ellipse cx="96" cy="${157 - bob}" rx="54" ry="12" fill="#d9e2f0"/>
+        <circle cx="96" cy="${92 + bob}" r="42" fill="${accent}"/>
+        <circle cx="80" cy="${82 + bob}" r="5" fill="#111827"/>
+        <circle cx="112" cy="${82 + bob}" r="5" fill="#111827"/>
+        <path d="M82 ${104 + bob} Q96 ${118 + bob} 110 ${104 + bob}" fill="none" stroke="#111827" stroke-width="6" stroke-linecap="round"/>
+        <rect x="42" y="${138 + bob}" width="108" height="24" rx="12" fill="#111827" opacity="0.9"/>
+        <text x="96" y="${155 + bob}" fill="#ffffff" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" font-weight="700">${safeInitials}</text>
+        <text x="96" y="190" fill="#475569" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14">${safeName}</text>
+      </g>`;
+    }).join(""),
+  ).join("");
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1536" height="1872" viewBox="0 0 1536 1872">${frames}</svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)
+    .replaceAll("'", "%27")
+    .replaceAll("(", "%28")
+    .replaceAll(")", "%29")}`;
+}
+
+function colorFromSlug(slug: string): string {
+  let hash = 0;
+  for (const char of slug) {
+    hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  }
+  const hue = hash % 360;
+  return `hsl(${hue} 78% 62%)`;
+}
+
+function escapeSvgText(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
 }
 
 // Bootstrap+seed are run synchronously at module load via top-level
