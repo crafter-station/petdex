@@ -63,6 +63,8 @@
     "earn": "Crecer",
     "earnDesc": "Gestioná campañas, impresiones y clicks",
     "advertiseDesc": "Llegá a devs que instalan tools vía sponsored cards",
+    "builtWith": "Hecho con Petdex",
+    "builtWithDesc": "Apps que la comunidad está shippeando sobre el formato Petdex",
     "communityDesc": "Discord con canales de shipping y voice rooms",
     "takedown": "Takedown",
     "takedownDesc": "Reportar un pet que usa tu obra",
@@ -861,6 +863,64 @@
       "title": "Creador web de mascotas",
       "soon": "Pronto",
       "body": "Un estudio nativo del navegador para que bocetes, animes y previsualices tu mascota sin salir de Petdex, sin necesidad de tokens de Codex. Inicia sesión para enterarte cuando llegue."
+    }
+  },
+  "builtWith": {
+    "metadata": {
+      "titleTemplate": "Hecho con Petdex: {total} proyectos de la comunidad",
+      "description": "{total} proyectos open source construidos sobre Petdex: companions de escritorio, apps de wellness, wearables, SDKs y creadores de pets."
+    },
+    "eyebrow": "Hecho con Petdex",
+    "title": "Apps que la comunidad está shippeando sobre Petdex",
+    "subtitle": "{total} proyectos open source consumen la galería, la API o el formato de Petdex. Apps de wellness, wearables, SDKs y creadores. Curado, con evidencia, sin vibes.",
+    "stats": {
+      "stars": "{total} stars combinadas",
+      "projects": "{total} proyectos",
+      "categories": "{total} categorías"
+    },
+    "cta": {
+      "submit": "Enviá tu proyecto",
+      "starPetdex": "Dale star a Petdex"
+    },
+    "categoryCount": "{count}",
+    "categories": {
+      "desktopCompanion": {
+        "label": "Companions de escritorio",
+        "description": "Apps que ponen un pet de Petdex en tu desktop."
+      },
+      "wellness": {
+        "label": "Wellness & focus",
+        "description": "Pomodoros, descansos y herramientas de focus que usan pets de Petdex como personaje en pantalla."
+      },
+      "wearable": {
+        "label": "Wearable",
+        "description": "Pets de Petdex corriendo en Apple Watch, Garmin y otros wearables."
+      },
+      "sdk": {
+        "label": "SDKs y runtimes",
+        "description": "Librerías y runtimes que envuelven la API o el formato de Petdex para otras plataformas."
+      },
+      "bundled": {
+        "label": "Bundleados en apps más grandes",
+        "description": "Pets de Petdex shippeados como feature de productos más grandes."
+      },
+      "petCreator": {
+        "label": "Creadores de pets",
+        "description": "Creadores solos distribuyendo pets originales en formato Petdex."
+      }
+    },
+    "submit": {
+      "eyebrow": "Cómo entrar a la lista",
+      "title": "Shippeá algo con Petdex, después postulá",
+      "step1": "Construí algo que consuma la galería, la API o el formato de Petdex con atribución explícita.",
+      "step2": "Abrí un issue de GitHub usando el template \"Add my project to /built-with\".",
+      "step3": "Mandanos una cita como evidencia (link al README o ruta del código que prueba la integración).",
+      "step4": "Revisamos, tomamos un screenshot 1280x720 y mergeamos.",
+      "openIssue": "Abrir issue de submission"
+    },
+    "card": {
+      "screenshotAlt": "Screenshot de {name}",
+      "site": "Sitio"
     }
   },
   "about": {

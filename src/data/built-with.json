@@ -1,0 +1,267 @@
+{
+  "$schema": "./built-with.schema.json",
+  "version": 1,
+  "lastUpdated": "2026-05-10",
+  "categories": {
+    "desktop-companion": {
+      "label": "Desktop companions",
+      "description": "Apps that put a Petdex pet on your desktop."
+    },
+    "wellness": {
+      "label": "Wellness & focus",
+      "description": "Pomodoros, breaks, and focus tools that use Petdex pets as their on-screen character."
+    },
+    "wearable": {
+      "label": "Wearable",
+      "description": "Petdex pets running on Apple Watch, Garmin, and other wearables."
+    },
+    "sdk": {
+      "label": "SDKs & runtimes",
+      "description": "Libraries and runtimes that wrap the Petdex API or pet format for other platforms."
+    },
+    "bundled": {
+      "label": "Bundled in larger apps",
+      "description": "Petdex pets shipped as a feature of bigger products."
+    },
+    "pet-creator": {
+      "label": "Pet creators",
+      "description": "Solo creators distributing original pets in Petdex package format."
+    }
+  },
+  "projects": [
+    {
+      "slug": "pawpause",
+      "name": "PawPause",
+      "tagline": "Wellness companion that keeps a Petdex pet on screen and nudges you to pause, hydrate, and stay focused.",
+      "category": "wellness",
+      "repo": "angziii/PawPause",
+      "homepage": "https://pawpause.vercel.app",
+      "stars": 11,
+      "language": "TypeScript",
+      "platforms": ["macOS", "Windows"],
+      "addedAt": "2026-05-10",
+      "evidence": {
+        "type": "readme",
+        "quote": "PetDex compatibility: PawPause reads companions installed to ~/.codex/pets.",
+        "url": "https://github.com/angziii/PawPause#features"
+      },
+      "screenshot": "/built-with/pawpause.png"
+    },
+    {
+      "slug": "focuspal",
+      "name": "FocusPal",
+      "tagline": "Pomodoro companion app for macOS that imports a Petdex pet via /focuspal petdex <slug>.",
+      "category": "wellness",
+      "repo": "filippello/focuspal",
+      "homepage": null,
+      "stars": 0,
+      "language": "Swift",
+      "platforms": ["macOS"],
+      "addedAt": "2026-05-10",
+      "evidence": {
+        "type": "readme",
+        "quote": "Fetches https://petdex.crafter.run/api/manifest to look up the canonical spritesheet URL.",
+        "url": "https://github.com/filippello/focuspal#readme"
+      },
+      "screenshot": "/built-with/focuspal.png"
+    },
+    {
+      "slug": "petdex-dock",
+      "name": "petdex-dock",
+      "tagline": "Tiny Codex pet that lives at the edge of your desktop, installable from the Petdex gallery.",
+      "category": "desktop-companion",
+      "repo": "felipetodev/petdex-dock",
+      "homepage": null,
+      "stars": 1,
+      "language": "TypeScript",
+      "platforms": ["macOS", "Windows", "Linux"],
+      "addedAt": "2026-05-10",
+      "evidence": {
+        "type": "readme",
+        "quote": "Uses the PetDex public gallery for Codex-compatible animated pets. npx petdex install [pet]",
+        "url": "https://github.com/felipetodev/petdex-dock#readme"
+      },
+      "screenshot": "/built-with/petdex-dock.png"
+    },
+    {
+      "slug": "petdex-cc",
+      "name": "petdex-cc",
+      "tagline": "Desktop pet for Claude Code with 8-level progression, AI speech bubbles, and time-aware greetings. Pulls from 1,569+ Petdex pets.",
+      "category": "desktop-companion",
+      "repo": "devnomad-byte/petdex-cc",
+      "homepage": "https://www.npmjs.com/package/petdex-cc",
+      "stars": 1,
+      "language": "TypeScript",
+      "platforms": ["macOS", "Windows", "Linux"],
+      "addedAt": "2026-05-10",
+      "evidence": {
+        "type": "readme",
+        "quote": "Pick any pet from Petdex (1,569+ community pets). Pets powered by Petdex.",
+        "url": "https://github.com/devnomad-byte/petdex-cc#readme"
+      },
+      "screenshot": "/built-with/petdex-cc.png"
+    },
+    {
+      "slug": "codux",
+      "name": "Codux",
+      "tagline": "Native macOS terminal workspace for AI coding tools with a built-in Petdex marketplace for the in-app pet companion.",
+      "category": "desktop-companion",
+      "repo": "duxweb/codux",
+      "homepage": null,
+      "stars": 74,
+      "language": "Swift",
+      "platforms": ["macOS"],
+      "addedAt": "2026-05-10",
+      "evidence": {
+        "type": "code",
+        "quote": "URL(string: petL(\"pet.custom.market.url\", \"https://petdex.crafter.run/zh\"))",
+        "url": "https://github.com/duxweb/codux/blob/main/Sources/DmuxWorkspace/UI/Pet/PetDexWindow.swift"
+      },
+      "screenshot": "/built-with/codux.png"
+    },
+    {
+      "slug": "bitfun",
+      "name": "BitFun",
+      "tagline": "Rust-based desktop Agent runtime suite with Petdex companion packages as a first-class type. CSS animations named bitfun-petdex-walk.",
+      "category": "desktop-companion",
+      "repo": "GCWing/BitFun",
+      "homepage": null,
+      "stars": 696,
+      "language": "Rust",
+      "platforms": ["macOS", "Windows", "Linux"],
+      "addedAt": "2026-05-10",
+      "evidence": {
+        "type": "code",
+        "quote": "/// Optional Petdex-compatible companion package selected by the user.",
+        "url": "https://github.com/GCWing/BitFun"
+      },
+      "screenshot": "/built-with/bitfun.png"
+    },
+    {
+      "slug": "codex-pet-watch-sprite",
+      "name": "Codex Pet Watch Sprite",
+      "tagline": "Swift Package + iOS/watchOS demo that renders Petdex pets on Apple Watch complications, with a built-in Petdex gallery picker.",
+      "category": "wearable",
+      "repo": "shiroemons/codex-pet-watch-sprite",
+      "homepage": null,
+      "stars": 0,
+      "language": "Swift",
+      "platforms": ["iOS", "watchOS"],
+      "addedAt": "2026-05-10",
+      "evidence": {
+        "type": "readme",
+        "quote": "iOS デモアプリには Petdex manifest (https://petdex.crafter.run/api/manifest) から一覧を取得し、選択した pet の spritesheetUrl をアプリ内キャッシュへ保存",
+        "url": "https://github.com/shiroemons/codex-pet-watch-sprite#readme"
+      },
+      "screenshot": "/built-with/codex-pet-watch-sprite.png"
+    },
+    {
+      "slug": "garmin-pet",
+      "name": "garmin-pet",
+      "tagline": "Pipeline that exports Petdex pets to Garmin watch face PNG frames. Wearable adapter for runners.",
+      "category": "wearable",
+      "repo": "Mooreel/garmin-pet",
+      "homepage": null,
+      "stars": 0,
+      "language": "Python",
+      "platforms": ["Garmin"],
+      "addedAt": "2026-05-10",
+      "evidence": {
+        "type": "code",
+        "quote": "PETDEX_BASE = \"https://petdex.crafter.run\"",
+        "url": "https://github.com/Mooreel/garmin-pet/blob/main/pipeline/app/petdex.py"
+      },
+      "screenshot": "/built-with/garmin-pet.png"
+    },
+    {
+      "slug": "petdex-swift",
+      "name": "petdex-swift",
+      "tagline": "Community Swift Package that wraps the public Petdex API. iOS example app included.",
+      "category": "sdk",
+      "repo": "irangareddy/petdex-swift",
+      "homepage": null,
+      "stars": 2,
+      "language": "Swift",
+      "platforms": ["iOS", "macOS"],
+      "addedAt": "2026-05-10",
+      "evidence": {
+        "type": "readme",
+        "quote": "A lightweight Swift Package for the public Petdex API.",
+        "url": "https://github.com/irangareddy/petdex-swift#readme"
+      },
+      "screenshot": "/built-with/petdex-swift.png"
+    },
+    {
+      "slug": "openpet",
+      "name": "OpenPet",
+      "tagline": "Local desktop pet runtime for AI agents (CLI / MCP / HTTP) with Petdex import support.",
+      "category": "sdk",
+      "repo": "X-T-E-R/OpenPet",
+      "homepage": null,
+      "stars": 32,
+      "language": "TypeScript",
+      "platforms": ["macOS", "Windows", "Linux"],
+      "addedAt": "2026-05-10",
+      "evidence": {
+        "type": "readme",
+        "quote": "python skills/openpet-cli/scripts/openpet_cli.py import-website https://petdex.crafter.run/pets/boba",
+        "url": "https://github.com/X-T-E-R/OpenPet#readme"
+      },
+      "screenshot": "/built-with/openpet.png"
+    },
+    {
+      "slug": "omniget",
+      "name": "Omniget",
+      "tagline": "Open-source desktop study app (Hotmart, Udemy, PDFs, EPUBs) with a built-in pet mascot system that pulls from Petdex.",
+      "category": "bundled",
+      "repo": "tonhowtf/omniget",
+      "homepage": null,
+      "stars": 3919,
+      "language": "Svelte",
+      "platforms": ["macOS", "Windows", "Linux"],
+      "addedAt": "2026-05-10",
+      "evidence": {
+        "type": "code",
+        "quote": "const MANIFEST_URL: &str = \"https://petdex.crafter.run/api/manifest\";",
+        "url": "https://github.com/tonhowtf/omniget/blob/main/src-tauri/src/pets/download.rs"
+      },
+      "screenshot": "/built-with/omniget.png"
+    },
+    {
+      "slug": "petdex-cute",
+      "name": "Petdex Cute",
+      "tagline": "Original pet pack (Aka Pilot, Homelander) distributed through the Petdex gallery.",
+      "category": "pet-creator",
+      "repo": "Maqiaogongmin/petdex_cute",
+      "homepage": "https://petdex.crafter.run/pets/aka-pilot",
+      "stars": 0,
+      "language": null,
+      "platforms": [],
+      "addedAt": "2026-05-10",
+      "evidence": {
+        "type": "readme",
+        "quote": "请访问：https://petdex.crafter.run/pets/aka-pilot",
+        "url": "https://github.com/Maqiaogongmin/petdex_cute#readme"
+      },
+      "screenshot": "/built-with/petdex-cute.png"
+    },
+    {
+      "slug": "petdex-zaizai",
+      "name": "Petdex Zaizai",
+      "tagline": "Single original pet (Zaizai, a round golden cat) packaged for Petdex submission.",
+      "category": "pet-creator",
+      "repo": "Zzzslog/Petdex_Zaizai",
+      "homepage": null,
+      "stars": 0,
+      "language": "PowerShell",
+      "platforms": [],
+      "addedAt": "2026-05-10",
+      "evidence": {
+        "type": "repo-name",
+        "quote": "Petdex Zaizai 桌面小宠项目 — distributed as zaizai-petdex.zip",
+        "url": "https://github.com/Zzzslog/Petdex_Zaizai"
+      },
+      "screenshot": "/built-with/petdex-zaizai.png"
+    }
+  ]
+}

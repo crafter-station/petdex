@@ -4,9 +4,6 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { useUser } from "@clerk/nextjs";
-
-import { isAdminClientSafe } from "@/lib/admin";
-
 import {
   BookOpenIcon,
   CrownIcon,
@@ -14,6 +11,7 @@ import {
   HandHeartIcon,
   MegaphoneIcon,
   PaintBrushIcon,
+  PuzzlePieceIcon,
   StackIcon,
   UploadSimpleIcon,
   UsersThreeIcon,
@@ -21,6 +19,7 @@ import {
 import { ExternalLink, Menu, X } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
+import { isAdminClientSafe } from "@/lib/admin";
 import { withLocale } from "@/lib/locale-routing";
 import { cn } from "@/lib/utils";
 
@@ -135,6 +134,13 @@ export function SiteHeader({ hideSubmitCta = false }: SiteHeaderProps) {
       description: t("advertiseDesc"),
       icon: MegaphoneIcon,
     },
+    {
+      href: href("/built-with"),
+      title: t("builtWith"),
+      description: t("builtWithDesc"),
+      icon: PuzzlePieceIcon,
+      badge: "new",
+    },
     ...(process.env.NEXT_PUBLIC_DISCORD_INVITE_URL
       ? [
           {
@@ -142,7 +148,6 @@ export function SiteHeader({ hideSubmitCta = false }: SiteHeaderProps) {
             title: t("community"),
             description: t("communityDesc"),
             icon: UsersThreeIcon,
-            badge: "new",
           },
         ]
       : []),

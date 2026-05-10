@@ -1,0 +1,105 @@
+name: Add my project to /built-with
+description: Submit your open-source project that builds on top of Petdex
+title: "[Built with] <project-name>"
+labels: ["built-with-submission"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for shipping with Petdex. The /built-with page features projects that pull from the Petdex gallery, API, or pet format with explicit attribution.
+
+        We review submissions manually. Once approved, we take a screenshot and merge the entry into `src/data/built-with.json`. Typical turnaround: 3-5 days.
+
+        Read the [audit criteria](https://petdex.crafter.run/built-with) before submitting.
+  - type: input
+    id: project-name
+    attributes:
+      label: Project name
+      placeholder: PawPause
+    validations:
+      required: true
+  - type: input
+    id: tagline
+    attributes:
+      label: Tagline
+      description: One sentence (max 200 chars) describing what your project does and how it uses Petdex.
+      placeholder: Wellness companion that keeps a Petdex pet on screen and nudges you to pause, hydrate, and stay focused.
+    validations:
+      required: true
+  - type: input
+    id: repo
+    attributes:
+      label: GitHub repo
+      description: owner/name format
+      placeholder: angziii/PawPause
+    validations:
+      required: true
+  - type: input
+    id: homepage
+    attributes:
+      label: Homepage URL (optional)
+      placeholder: https://pawpause.vercel.app
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      options:
+        - desktop-companion
+        - wellness
+        - wearable
+        - sdk
+        - bundled
+        - pet-creator
+    validations:
+      required: true
+  - type: checkboxes
+    id: platforms
+    attributes:
+      label: Platforms
+      options:
+        - label: macOS
+        - label: Windows
+        - label: Linux
+        - label: iOS
+        - label: watchOS
+        - label: Android
+        - label: Garmin
+        - label: Web
+  - type: textarea
+    id: evidence-quote
+    attributes:
+      label: Evidence quote
+      description: Verbatim quote from your README or source code that proves the Petdex integration.
+      placeholder: |
+        e.g. "PetDex compatibility: PawPause reads companions installed to ~/.codex/pets."
+    validations:
+      required: true
+  - type: input
+    id: evidence-url
+    attributes:
+      label: Evidence URL
+      description: Link to the README or source file containing the quote above.
+      placeholder: https://github.com/angziii/PawPause#features
+    validations:
+      required: true
+  - type: dropdown
+    id: evidence-type
+    attributes:
+      label: Where does the evidence live?
+      options:
+        - readme
+        - code
+        - repo-name
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Confirmation
+      options:
+        - label: My project actually uses Petdex (not just the generic Codex pet format).
+          required: true
+        - label: The evidence quote and URL above are accurate and live right now.
+          required: true
+        - label: I'm comfortable with the project being publicly listed at petdex.crafter.run/built-with.
+          required: true

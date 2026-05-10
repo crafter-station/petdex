@@ -82,6 +82,8 @@
     "earn": "推广",
     "earnDesc": "管理广告活动、展示和点击数据",
     "advertiseDesc": "通过赞助卡片触达安装 AI 工具的开发者",
+    "builtWith": "用 Petdex 构建",
+    "builtWithDesc": "社区基于 Petdex 格式发布的应用",
     "communityDesc": "Discord 服务器：shipping 频道和语音房间",
     "takedown": "下架",
     "takedownDesc": "举报使用你作品的宠物",
@@ -973,6 +975,64 @@
       "soon__fixme": true,
       "body": "一个原生浏览器工作室，让你不用离开 Petdex 就能草绘、制作动画并预览宠物，而且不需要 Codex tokens。登录后可在上线时收到通知。",
       "body__fixme": true
+    }
+  },
+  "builtWith": {
+    "metadata": {
+      "titleTemplate": "用 Petdex 构建：{total} 个社区项目",
+      "description": "{total} 个基于 Petdex 构建的开源项目：桌面伙伴、专注工具、可穿戴设备、SDK 和 pet 创作者。"
+    },
+    "eyebrow": "用 Petdex 构建",
+    "title": "社区正在 Petdex 上发布的应用",
+    "subtitle": "{total} 个开源项目使用 Petdex 的图库、API 或 pet 格式。专注工具、可穿戴设备、SDK 和创作者。精选、有证据、不靠感觉。",
+    "stats": {
+      "stars": "总计 {total} stars",
+      "projects": "{total} 个项目",
+      "categories": "{total} 个分类"
+    },
+    "cta": {
+      "submit": "提交你的项目",
+      "starPetdex": "为 Petdex 加星"
+    },
+    "categoryCount": "{count}",
+    "categories": {
+      "desktopCompanion": {
+        "label": "桌面伙伴",
+        "description": "把 Petdex pet 放到桌面上的应用。"
+      },
+      "wellness": {
+        "label": "专注与休息",
+        "description": "用 Petdex pet 作为屏幕角色的番茄钟、休息和专注工具。"
+      },
+      "wearable": {
+        "label": "可穿戴",
+        "description": "在 Apple Watch、Garmin 等可穿戴设备上运行的 Petdex pet。"
+      },
+      "sdk": {
+        "label": "SDK 与运行时",
+        "description": "为其他平台封装 Petdex API 或 pet 格式的库和运行时。"
+      },
+      "bundled": {
+        "label": "嵌入更大的应用",
+        "description": "作为更大产品功能的一部分发布的 Petdex pet。"
+      },
+      "petCreator": {
+        "label": "Pet 创作者",
+        "description": "以 Petdex 包格式分发原创 pet 的独立创作者。"
+      }
+    },
+    "submit": {
+      "eyebrow": "如何上榜",
+      "title": "用 Petdex 做点东西，然后提交",
+      "step1": "构建一个使用 Petdex 图库、API 或 pet 格式并明确署名的项目。",
+      "step2": "用 \"Add my project to /built-with\" 模板开一个 GitHub issue。",
+      "step3": "提供证据引文（README 链接或代码路径，证明集成）。",
+      "step4": "我们审核、截取 1280x720 截图并合并。",
+      "openIssue": "打开提交 issue"
+    },
+    "card": {
+      "screenshotAlt": "{name} 截图",
+      "site": "网站"
     }
   },
   "about": {

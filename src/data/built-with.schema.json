@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "Petdex /built-with registry",
+  "description": "Curated list of OSS projects that build on top of Petdex (gallery, CLI, API, or pet format with explicit attribution). Submission via PR.",
+  "type": "object",
+  "required": ["version", "lastUpdated", "categories", "projects"],
+  "properties": {
+    "version": { "type": "integer", "minimum": 1 },
+    "lastUpdated": { "type": "string", "format": "date" },
+    "categories": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["label", "description"],
+        "properties": {
+          "label": { "type": "string", "maxLength": 40 },
+          "description": { "type": "string", "maxLength": 160 }
+        }
+      }
+    },
+    "projects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "slug",
+          "name",
+          "tagline",
+          "category",
+          "repo",
+          "stars",
+          "addedAt",
+          "evidence",
+          "screenshot"
+        ],
+        "properties": {
+          "slug": {
+            "type": "string",
+            "pattern": "^[a-z0-9-]+$",
+            "description": "Unique kebab-case ID. Used as filename for the screenshot."
+          },
+          "name": { "type": "string", "maxLength": 40 },
+          "tagline": { "type": "string", "maxLength": 200 },
+          "category": {
+            "type": "string",
+            "enum": [
+              "desktop-companion",
+              "wellness",
+              "wearable",
+              "sdk",
+              "bundled",
+              "pet-creator"
+            ]
+          },
+          "repo": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+            "description": "GitHub owner/name."
+          },
+          "homepage": { "type": ["string", "null"], "format": "uri" },
+          "stars": { "type": "integer", "minimum": 0 },
+          "language": { "type": ["string", "null"] },
+          "platforms": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "addedAt": { "type": "string", "format": "date" },
+          "evidence": {
+            "type": "object",
+            "required": ["type", "quote", "url"],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": ["readme", "code", "repo-name"],
+                "description": "Where the Petdex attribution lives."
+              },
+              "quote": {
+                "type": "string",
+                "maxLength": 400,
+                "description": "Verbatim quote proving Petdex usage."
+              },
+              "url": {
+                "type": "string",
+                "format": "uri",
+                "description": "Link to the README or source file containing the quote."
+              }
+            }
+          },
+          "screenshot": {
+            "type": "string",
+            "pattern": "^/built-with/[a-z0-9-]+\\.png$",
+            "description": "Path under /public to the project screenshot. Captured at 1280x720 viewport via agent-browser."
+          }
+        }
+      }
+    }
+  }
+}
