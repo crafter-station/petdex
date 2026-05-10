@@ -19,21 +19,20 @@ import path from "node:path";
 import type { Agent } from "./agents.js";
 
 const SLASH_COMMAND_BODY = `---
-description: Toggle, enable, disable, or check the petdex hooks killswitch
+description: Wake or sleep the petdex mascot — toggles the floating pet on/off
 ---
 
-The user wants to control the petdex hooks killswitch (the file at \`~/.petdex/runtime/hooks-disabled\`). When this file exists, the curl hooks installed in agent settings exit 0 immediately, before any token read or network call — so a broken sidecar or stale token can't pollute the agent log.
+The user wants to control the petdex mascot from inside the agent. The mascot is a floating macOS window driven by hooks installed in agent settings. /petdex is a one-shot toggle that flips the entire state in a single command:
 
-Run the appropriate \`petdex hooks\` subcommand based on \`$ARGUMENTS\`:
-
-- \`/petdex\` (no args) or \`/petdex toggle\` → run \`petdex hooks toggle\`
-- \`/petdex on\` → run \`petdex hooks on\`
-- \`/petdex off\` → run \`petdex hooks off\`
+- \`/petdex\` (no args) → run \`petdex toggle\` (if mascot is awake, send to sleep; otherwise wake it up)
+- \`/petdex up\` → run \`petdex up\` (force-wake: enables hooks AND starts the desktop)
+- \`/petdex down\` → run \`petdex down\` (force-sleep: disables hooks AND stops the desktop)
 - \`/petdex status\` → run \`petdex hooks status\`
+- \`/petdex doctor\` → run \`petdex doctor\` (diagnose install + agents)
 
 Show the command output verbatim to the user. Don't reinterpret, don't explain — the CLI's output is already user-facing.
 
-If the \`petdex\` binary isn't on PATH, suggest \`npx petdex hooks <subcommand>\` instead.
+If the \`petdex\` binary isn't on PATH, suggest \`npx petdex <subcommand>\` instead.
 
 Arguments: \`$ARGUMENTS\`
 `;

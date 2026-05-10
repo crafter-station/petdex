@@ -115,7 +115,7 @@ export const AGENTS: Agent[] = [
               hooks: [
                 {
                   type: "command",
-                  command: curlCommand("running"),
+                  command: curlCommand("claude-code", "running"),
                 },
               ],
             },
@@ -125,7 +125,7 @@ export const AGENTS: Agent[] = [
               hooks: [
                 {
                   type: "command",
-                  command: curlCommand("idle"),
+                  command: curlCommand("claude-code", "idle"),
                 },
               ],
             },
@@ -135,7 +135,7 @@ export const AGENTS: Agent[] = [
               hooks: [
                 {
                   type: "command",
-                  command: curlCommand("waving", 1500),
+                  command: curlCommand("claude-code", "waving", 1500),
                 },
               ],
             },
@@ -258,7 +258,7 @@ export const AGENTS: Agent[] = [
               hooks: [
                 {
                   type: "command",
-                  command: curlCommand("running"),
+                  command: curlCommand("codex", "running"),
                 },
               ],
             },
@@ -268,7 +268,7 @@ export const AGENTS: Agent[] = [
               hooks: [
                 {
                   type: "command",
-                  command: curlCommand("idle"),
+                  command: curlCommand("codex", "idle"),
                 },
               ],
             },
@@ -278,7 +278,7 @@ export const AGENTS: Agent[] = [
               hooks: [
                 {
                   type: "command",
-                  command: curlCommand("waving", 1500),
+                  command: curlCommand("codex", "waving", 1500),
                 },
               ],
             },
@@ -313,7 +313,7 @@ export const AGENTS: Agent[] = [
               hooks: [
                 {
                   type: "command",
-                  command: curlCommand("running"),
+                  command: curlCommand("gemini", "running"),
                 },
               ],
             },
@@ -323,7 +323,7 @@ export const AGENTS: Agent[] = [
               hooks: [
                 {
                   type: "command",
-                  command: curlCommand("idle"),
+                  command: curlCommand("gemini", "idle"),
                 },
               ],
             },
@@ -333,7 +333,7 @@ export const AGENTS: Agent[] = [
               hooks: [
                 {
                   type: "command",
-                  command: curlCommand("waving", 1500),
+                  command: curlCommand("gemini", "waving", 1500),
                 },
               ],
             },
@@ -369,7 +369,11 @@ export const AGENTS: Agent[] = [
   },
 ];
 
-function curlCommand(state: PetState, duration?: number): string {
+function curlCommand(
+  agentId: Agent["id"],
+  state: PetState,
+  duration?: number,
+): string {
   // The string we return here is what gets stored as the literal
   // shell command in agent settings JSON. JSON.stringify (called by
   // the agent merging code) handles JSON-escaping; we just need to
@@ -391,10 +395,15 @@ function curlCommand(state: PetState, duration?: number): string {
   // escaped the inner quotes, which produced literal backslash-
   // quote sequences in the final settings file and made T always
   // come back empty, silently disabling the hook.
+  // Body always carries agent_source so the sidecar can route
+  // updates to the correct mascot when we ship per-agent pets in
+  // a future PR. Today the field is recorded for telemetry but
+  // doesn't affect routing. Stamping it now means existing
+  // installs work seamlessly when multi-pet ships.
   const body =
     duration != null
-      ? `{"state":"${state}","duration":${duration}}`
-      : `{"state":"${state}"}`;
+      ? `{"state":"${state}","duration":${duration},"agent_source":"${agentId}"}`
+      : `{"state":"${state}","agent_source":"${agentId}"}`;
   // Three statements separated by `;`:
   //   1. killswitch: bail if disabled
   //   2. read token from disk
@@ -449,6 +458,13 @@ async function setState(state, duration) {
   // at mode 0600, so only this user can read it.
   const token = await readToken();
   if (!token) return; // sidecar offline or missing — silently no-op
+  // Stamp agent_source so the sidecar can route per-pet when we
+  // ship multi-mascot. Today the field is recorded for telemetry
+  // but doesn't affect routing.
+  const body =
+    duration != null
+      ? { state, duration, agent_source: "opencode" }
+      : { state, agent_source: "opencode" };
   try {
     await fetch(SIDECAR_URL, {
       method: "POST",
@@ -456,7 +472,7 @@ async function setState(state, duration) {
         "Content-Type": "application/json",
         "X-Petdex-Update-Token": token,
       },
-      body: JSON.stringify(duration != null ? { state, duration } : { state }),
+      body: JSON.stringify(body),
       // 300ms instead of 1s: well above any real localhost roundtrip
       // and below the threshold an agent user notices as latency.
       signal: AbortSignal.timeout(300),

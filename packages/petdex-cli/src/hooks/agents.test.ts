@@ -38,7 +38,9 @@ describe("Claude Code hook command", () => {
     // The body should land as raw JSON inside single quotes; no
     // escaped quotes in the source string mean nothing breaks
     // when JSON.stringify wraps it for the agent settings file.
-    expect(cmd).toContain(`--data-raw '{"state":"running"}'`);
+    expect(cmd).toContain(
+      `--data-raw '{"state":"running","agent_source":"claude-code"}'`,
+    );
   });
 
   test("survives JSON.stringify -> parse -> shell parse roundtrip", () => {

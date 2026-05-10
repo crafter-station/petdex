@@ -29,6 +29,8 @@ import http from "node:http";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+import { StateQueue } from "./state-queue";
+
 const PORT = Number(process.env.PETDEX_PORT ?? 7777);
 const RUNTIME_DIR = join(homedir(), ".petdex", "runtime");
 const STATE_PATH = join(RUNTIME_DIR, "state.json");
@@ -244,6 +246,20 @@ function writeState(state: string, duration?: number) {
     }, duration);
   }
 }
+
+// State queue: every accepted POST /state pushes here, a worker
+// drains. Smooths the running/idle/running/idle pinball that any
+// agent doing rapid tool calls would otherwise produce, and bounds
+// the queue under burst so we don't lag behind reality. See
+// state-queue.ts for the coalesce + dwell rules.
+const stateQueue = new StateQueue({ minDwellMs: 250, maxQueueSize: 50 });
+
+// Worker tick: 100ms is well under the WebView's 200ms state.json
+// poll, so the user sees changes within one polling cycle.
+setInterval(() => {
+  const next = stateQueue.tick(Date.now());
+  if (next) writeState(next.state, next.duration);
+}, 100).unref();
 
 writeState("idle");
 
@@ -552,8 +568,19 @@ const server = http.createServer(async (req, res) => {
         typeof data.agent_source === "string"
           ? data.agent_source.slice(0, 64)
           : null;
-      writeState(state, duration);
-      log(`state=${state} duration=${duration ?? "-"}`);
+      // Enqueue rather than writing directly. The worker tick
+      // drains in order with coalesce + min dwell so consecutive
+      // identical events (running/idle/running/idle pinball under
+      // heavy tool-call activity) don't visually thrash. See
+      // state-queue.ts.
+      const accepted = stateQueue.enqueue({
+        state,
+        duration,
+        receivedAt: Date.now(),
+      });
+      log(
+        `state=${state} duration=${duration ?? "-"} ${accepted ? "queued" : "coalesced"}`,
+      );
       // Funnel terminal step: emit once on the first accepted state of
       // this sidecar session. Any subsequent hook hits are no-ops.
       emitFirstStateReceived(state, agentSource);
@@ -561,6 +588,7 @@ const server = http.createServer(async (req, res) => {
         ok: true,
         state,
         duration: duration ?? null,
+        queued: accepted,
       });
     }
 

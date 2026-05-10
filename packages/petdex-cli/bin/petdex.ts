@@ -15,6 +15,9 @@ import {
   cmdDesktopStart,
   cmdDesktopStatus,
   cmdDesktopStop,
+  desktopStatus,
+  startDesktop,
+  stopDesktop,
 } from "../src/desktop/process.js";
 import { runDoctor } from "../src/desktop/doctor.js";
 import { runUpdate } from "../src/desktop/update.js";
@@ -155,6 +158,15 @@ async function main() {
     case "desktop":
       await cmdDesktop(args.slice(1));
       break;
+    case "up":
+      await cmdUp();
+      break;
+    case "down":
+      await cmdDown();
+      break;
+    case "toggle":
+      await cmdToggle();
+      break;
     case "update":
       await runUpdate(args.slice(1));
       break;
@@ -196,6 +208,9 @@ function printHelp() {
       `    ${pc.bold("install desktop")}    Install the petdex-desktop binary for your platform`,
       `    ${pc.bold("list")}               List approved pets`,
       `    ${pc.bold("hooks install")}      Wire petdex-desktop into your coding agents`,
+      `    ${pc.bold("toggle")}             One-shot wake/sleep — flips the mascot on or off depending on current state`,
+      `    ${pc.bold("up")}                 Force-wake the mascot — enables hooks AND launches petdex-desktop`,
+      `    ${pc.bold("down")}               Force-sleep the mascot — disables hooks AND stops petdex-desktop`,
       `    ${pc.bold("desktop")} <cmd>      Manage petdex-desktop (start | stop | status)`,
       `    ${pc.bold("update")}             Pull the latest petdex-desktop release and restart`,
       `    ${pc.bold("doctor")}             Diagnose install/runtime/agents and surface fixes`,
@@ -1131,6 +1146,75 @@ function cmdHooksKillswitch(sub: "toggle" | "on" | "off" | "status"): void {
         `  agent hooks short-circuit before any network call. Re-enable: petdex hooks on`,
       ),
     );
+  }
+}
+
+// Wake-up: clears the killswitch AND ensures the desktop is running.
+// This is what /petdex (no args) calls from inside an agent. The
+// command is idempotent — safe to call when desktop is already up,
+// or when hooks were already enabled.
+async function cmdUp(): Promise<void> {
+  setKillswitchState("on");
+  console.log(`${pc.green("●")} Hooks ${pc.bold("ENABLED")}`);
+
+  const status = desktopStatus();
+  if (status.state === "running") {
+    console.log(
+      `${pc.green("●")} Desktop already running (pid ${status.pid})`,
+    );
+    return;
+  }
+  // Either stopped or stale — startDesktop handles both.
+  const result = await startDesktop();
+  if (result.ok) {
+    console.log(
+      result.alreadyRunning
+        ? `${pc.dim("•")} Desktop already running (pid ${result.pid})`
+        : `${pc.green("✓")} Desktop started (pid ${result.pid})`,
+    );
+  } else {
+    console.log(`${pc.yellow("!")} ${result.reason}`);
+    console.log(
+      pc.dim(
+        `  Install the binary first: ${pc.cyan("petdex install desktop")}`,
+      ),
+    );
+  }
+}
+
+// One-shot toggle: if the mascot is awake (hooks on AND desktop
+// running), this is `down`. Otherwise it's `up`. Drives the
+// /petdex slash with no args — single keystroke flips the whole
+// state. "Awake" requires BOTH because either alone is a degraded
+// state worth flipping out of.
+async function cmdToggle(): Promise<void> {
+  const hooksOn = getKillswitchState() === "on";
+  const desktopRunning = desktopStatus().state === "running";
+  const awake = hooksOn && desktopRunning;
+  if (awake) {
+    await cmdDown();
+  } else {
+    await cmdUp();
+  }
+}
+
+// Sleep: sets the killswitch + stops the desktop. The killswitch
+// alone would silence hooks but leave the mascot floating. `down`
+// is the symmetric "go away" command.
+async function cmdDown(): Promise<void> {
+  setKillswitchState("off");
+  console.log(`${pc.yellow("○")} Hooks ${pc.bold("DISABLED")}`);
+
+  const status = desktopStatus();
+  if (status.state === "stopped") {
+    console.log(`${pc.dim("•")} Desktop wasn't running`);
+    return;
+  }
+  const result = await stopDesktop();
+  if (result.ok) {
+    console.log(`${pc.green("✓")} Desktop stopped (pid ${result.pid})`);
+  } else {
+    console.log(`${pc.dim("•")} ${result.reason}`);
   }
 }
 
