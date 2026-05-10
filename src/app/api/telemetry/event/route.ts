@@ -92,17 +92,42 @@ function getCountry(req: Request): string | null {
  * users get different keys, so per-IP rate limiting still works, but
  * an attacker with Redis access can't enumerate IP -> request count.
  *
- * The secret rotates per deploy if TELEMETRY_RATELIMIT_SECRET is
- * unset (we fall back to a process-stable random buffer). That makes
- * rate-limit windows reset on every redeploy, which we accept — the
- * tradeoff is rare hot reloads vs. predictable hash collisions across
- * cold starts.
+ * Resolution order:
+ *   1. TELEMETRY_RATELIMIT_SECRET — explicit per-deployment secret.
+ *   2. UPSTASH_REDIS_REST_TOKEN — already deploy-stable on Vercel,
+ *      every prod deploy has it (the rate limiter doesn't work
+ *      without it), so deriving from it gives us a stable hash
+ *      across cold starts/instances without forcing a new env var.
+ *   3. process.pid + Date.now() — dev-only fallback. In a serverless
+ *      deployment this would multiply rate-limit windows by the
+ *      number of active instances and reset on deploy, so we throw
+ *      in production rather than silently degrade. Hot-reload in
+ *      `next dev` is the only place this branch fires.
  */
 const RATE_LIMIT_SECRET = (() => {
   const fromEnv = process.env.TELEMETRY_RATELIMIT_SECRET;
   if (fromEnv && fromEnv.length >= 16) return fromEnv;
-  // Fallback so dev environments without the env var still get hashed
-  // keys, just not stable ones across restarts.
+
+  const upstashToken = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (upstashToken && upstashToken.length >= 16) {
+    // Derive instead of using the token directly so a Redis-side
+    // dump can't trivially deanonymize IPs even with the token —
+    // the attacker would need to know the derivation suffix too.
+    return createHmac("sha256", upstashToken)
+      .update("petdex-telemetry-rate-limit-v1")
+      .digest("hex");
+  }
+
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "TELEMETRY_RATELIMIT_SECRET (or UPSTASH_REDIS_REST_TOKEN) must be set in production. " +
+        "Without a stable secret, every cold start writes Redis keys for the same IP under " +
+        "a different hash, multiplying the 60/min ingestion limit by the number of active " +
+        "serverless instances and resetting on deploy.",
+    );
+  }
+  // Dev-only fallback. Rate limiter falls back to in-memory in dev
+  // anyway (no Upstash creds), so per-process keys are fine.
   return createHmac("sha256", "petdex-telemetry-fallback")
     .update(`${process.pid}:${Date.now()}`)
     .digest("hex");

@@ -986,16 +986,43 @@ fn writeActiveSlug(io: std.Io, config_dir: []const u8, slug: []const u8) !void {
 // pick the broken pet first; setActiveCmd would also persist it to
 // active.json before loadSpritesheet failed, poisoning future
 // launches until the user manually edited the file.
+// True only if the pet has a spritesheet file that loadSpritesheet
+// could actually read — that is, present AND within MAX_PET_BYTES.
+// Just checking openFile() would let a 50 MB spritesheet.webp pass
+// the listing filter, sort to the top alphabetically, and then
+// crash startup with FileTooLarge at main()'s loadSpritesheet call.
+// Mirroring the size cap here keeps the listing in lockstep with
+// what the loader can actually consume.
 fn hasSpritesheet(io: std.Io, parent: std.Io.Dir, slug: []const u8) bool {
     var pet_dir = parent.openDir(io, slug, .{}) catch return false;
     defer pet_dir.close(io);
-    inline for (.{ "spritesheet.webp", "spritesheet.png" }) |name| {
-        if (pet_dir.openFile(io, name, .{})) |file| {
-            file.close(io);
-            return true;
-        } else |_| {}
-    }
+    if (checkSpritesheetVariant(io, pet_dir, slug, "spritesheet.webp")) return true;
+    if (checkSpritesheetVariant(io, pet_dir, slug, "spritesheet.png")) return true;
     return false;
+}
+
+// Helper extracted from hasSpritesheet because Zig 0.16 forbids
+// `defer file.close()` inside an `inline for` body — the defer is
+// runtime, the loop is comptime, and the mix produces "comptime
+// control flow inside runtime block". Folding the body into a
+// regular fn keeps each variant's defer scope clean.
+fn checkSpritesheetVariant(
+    io: std.Io,
+    pet_dir: std.Io.Dir,
+    slug: []const u8,
+    name: []const u8,
+) bool {
+    var file = pet_dir.openFile(io, name, .{}) catch return false;
+    defer file.close(io);
+    const stat = file.stat(io) catch return false;
+    if (stat.size > MAX_PET_BYTES) {
+        std.debug.print(
+            "Skipping pet '{s}': {s} is {d} bytes, exceeds {d} byte cap\n",
+            .{ slug, name, stat.size, MAX_PET_BYTES },
+        );
+        return false;
+    }
+    return true;
 }
 
 fn listPets(allocator: std.mem.Allocator, io: std.Io, pets_dir: []const u8) !std.ArrayList(Pet) {
@@ -1553,6 +1580,78 @@ test "hasSpritesheet: true when only spritesheet.png exists" {
     try writeTestFile(sub, "spritesheet.png", "PRETEND-PNG");
 
     try testing.expect(hasSpritesheet(testing_io, tmp.dir, "png-only"));
+}
+
+test "hasSpritesheet: rejects spritesheets that exceed MAX_PET_BYTES" {
+    // Without this guard, a pet with a 50 MB spritesheet would pass
+    // the listing filter (the file opens fine), sort to the top of
+    // pets.items alphabetically, and crash startup with FileTooLarge
+    // when loadSpritesheet ran. Now the listing filter mirrors the
+    // loader's size cap so the bad pet never becomes the default.
+    //
+    // We don't want to actually allocate 16 MB+ of test bytes, so
+    // we use a temporary lower cap by writing just over MAX_PET_BYTES
+    // is not feasible — instead, this test verifies the IS-rejected
+    // path by reading the file we wrote at a stat-able size near
+    // the boundary. The real production path uses the same stat.size
+    // comparison, so any test that exercises the comparison branch
+    // is enough.
+    //
+    // We write 16 MB + 1 byte. That's 16 MiB of zeroes — manageable
+    // on dev/CI disks and inside the test allocator's lifetime.
+    var tmp = testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+
+    try tmp.dir.createDirPath(testing_io, "huge-sprite");
+    var sub = try tmp.dir.openDir(testing_io, "huge-sprite", .{});
+    defer sub.close(testing_io);
+
+    const oversize = MAX_PET_BYTES + 1;
+    const big = try testing.allocator.alloc(u8, oversize);
+    defer testing.allocator.free(big);
+    @memset(big, 0);
+    try writeTestFile(sub, "spritesheet.webp", big);
+
+    // The big file exists and opens fine, but stat.size > MAX_PET_BYTES.
+    // Old hasSpritesheet would have returned true; new one returns false.
+    try testing.expect(!hasSpritesheet(testing_io, tmp.dir, "huge-sprite"));
+}
+
+test "listPetsFromDir: oversized spritesheet pets are excluded from the listing" {
+    // End-to-end version of the above: an oversized pet must NOT
+    // appear in pets.items, because if it did it could become the
+    // sorted default and main() would crash before any other pet
+    // got a chance to render.
+    var tmp = testing.tmpDir(.{ .iterate = true });
+    defer tmp.cleanup();
+
+    // Pet a: oversized — must be skipped.
+    try tmp.dir.createDirPath(testing_io, "aa-bloated");
+    var bloated = try tmp.dir.openDir(testing_io, "aa-bloated", .{});
+    defer bloated.close(testing_io);
+    const bloated_bytes = try testing.allocator.alloc(u8, MAX_PET_BYTES + 1);
+    defer testing.allocator.free(bloated_bytes);
+    @memset(bloated_bytes, 0);
+    try writeTestFile(bloated, "spritesheet.webp", bloated_bytes);
+
+    // Pet b: small and valid — must be the only one returned.
+    try tmp.dir.createDirPath(testing_io, "bb-good");
+    var good = try tmp.dir.openDir(testing_io, "bb-good", .{});
+    defer good.close(testing_io);
+    try writeTestFile(good, "spritesheet.webp", "WEBP");
+
+    var pets = try listPetsFromDir(testing.allocator, testing_io, tmp.dir, "/test-root");
+    defer {
+        for (pets.items) |p| {
+            testing.allocator.free(p.slug);
+            testing.allocator.free(p.display_name);
+            testing.allocator.free(p.root);
+        }
+        pets.deinit(testing.allocator);
+    }
+
+    try testing.expectEqual(@as(usize, 1), pets.items.len);
+    try testing.expectEqualStrings("bb-good", pets.items[0].slug);
 }
 
 test "listPetsFromDir: filters out pet dirs without a spritesheet" {
