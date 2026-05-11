@@ -52,7 +52,7 @@
     "postcss": "^8.5.13",
     "react": "19.2.6",
     "react-dom": "19.2.6",
-    "recharts": "3.8.0",
+    "recharts": "3.8.1",
     "resend": "^6.12.2",
     "shadcn": "^4.7.0",
     "sharp": "^0.34.5",
