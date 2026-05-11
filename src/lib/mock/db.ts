@@ -286,16 +286,21 @@ async function seed(client: PGlite): Promise<void> {
     const slug = idea.id;
     const id = `pet_mock_${i.toString().padStart(3, "0")}`;
     const assetBase = `${MOCK_R2_PUBLIC_BASE}/curated/${slug}`;
+    const isCurated = MOCK_CURATED_ASSET_SLUGS.has(slug);
     const fallbackSpritesheet = mockSpritesheetDataUri(idea.name, slug);
-    const spritesheetUrl = MOCK_CURATED_ASSET_SLUGS.has(slug)
+    const spritesheetUrl = isCurated
       ? `${assetBase}/spritesheet.webp`
       : fallbackSpritesheet;
-    const petJsonUrl = MOCK_CURATED_ASSET_SLUGS.has(slug)
+    // Non-curated mocks have no real pet.json or zip on R2. Point at a
+    // recognizable mock:// URI so dev:mock testers see an honest 404 if
+    // they try install/download instead of receiving the SVG markup.
+    // pet_json_url and zip_url are NOT NULL in schema so we cannot null.
+    const petJsonUrl = isCurated
       ? `${assetBase}/pet.json`
-      : fallbackSpritesheet;
-    const zipUrl = MOCK_CURATED_ASSET_SLUGS.has(slug)
+      : `mock://no-asset/${slug}/pet.json`;
+    const zipUrl = isCurated
       ? `${assetBase}/${slug}.zip`
-      : fallbackSpritesheet;
+      : `mock://no-asset/${slug}/${slug}.zip`;
     await client.query(
       `INSERT INTO submitted_pets (
         id, slug, display_name, description, spritesheet_url,
