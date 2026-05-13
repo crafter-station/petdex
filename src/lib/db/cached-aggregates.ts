@@ -65,6 +65,14 @@ export function publicProfileCacheKey(userId: string): string {
   return `petdex:profile:${userId}:v1`;
 }
 
+export function handleForUserCacheKey(userId: string): string {
+  return `petdex:handle-for-user:${userId}:v1`;
+}
+
+export function userIdForHandleCacheKey(handle: string): string {
+  return `petdex:user-id-for-handle:${handle.trim().toLowerCase()}:v1`;
+}
+
 export async function invalidatePetCaches(...slugs: string[]): Promise<void> {
   const keys = slugs.filter(Boolean).map((slug) => petCacheKey(slug));
   if (keys.length > 0) {
@@ -91,7 +99,22 @@ export async function invalidatePublicProfileCaches(
   ...userIds: string[]
 ): Promise<void> {
   await invalidateAggregates(
-    ...userIds.filter(Boolean).map((userId) => publicProfileCacheKey(userId)),
+    ...userIds
+      .filter(Boolean)
+      .flatMap((userId) => [
+        publicProfileCacheKey(userId),
+        handleForUserCacheKey(userId),
+      ]),
+  );
+}
+
+export async function invalidatePublicHandleCaches(
+  ...handles: Array<string | null | undefined>
+): Promise<void> {
+  await invalidateAggregates(
+    ...handles
+      .filter((handle): handle is string => Boolean(handle))
+      .map((handle) => userIdForHandleCacheKey(handle)),
   );
 }
 

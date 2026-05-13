@@ -3,7 +3,10 @@ import { NextResponse } from "next/server";
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { and, eq, inArray, ne } from "drizzle-orm";
 
-import { invalidatePublicProfileCaches } from "@/lib/db/cached-aggregates";
+import {
+  invalidatePublicHandleCaches,
+  invalidatePublicProfileCaches,
+} from "@/lib/db/cached-aggregates";
 import { db, schema } from "@/lib/db/client";
 import {
   dedupePins,
@@ -205,6 +208,15 @@ export async function PATCH(req: Request): Promise<Response> {
     return NextResponse.json({ error: "nothing_to_update" }, { status: 400 });
   }
 
+  let previousHandle: string | null = null;
+  if (patch.handle !== undefined) {
+    const current = await db.query.userProfiles.findFirst({
+      columns: { handle: true },
+      where: eq(schema.userProfiles.userId, userId),
+    });
+    previousHandle = current?.handle ?? null;
+  }
+
   await db
     .insert(schema.userProfiles)
     .values({
@@ -223,7 +235,10 @@ export async function PATCH(req: Request): Promise<Response> {
         updatedAt: new Date(),
       },
     });
-  await invalidatePublicProfileCaches(userId);
+  await Promise.all([
+    invalidatePublicProfileCaches(userId),
+    invalidatePublicHandleCaches(previousHandle, patch.handle),
+  ]);
 
   // Sync Clerk username with the DB handle so the AuthBadge dropdown,
   // which reads from useUser() in the browser, also lands on the right
