@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { and, eq, ne, or, sql } from "drizzle-orm";
 
+import { invalidatePetCaches } from "@/lib/db/cached-aggregates";
 import { db, schema } from "@/lib/db/client";
 import { claimRatelimit } from "@/lib/ratelimit";
 import { requireSameOrigin } from "@/lib/same-origin";
@@ -150,6 +151,7 @@ export async function POST(req: Request): Promise<Response> {
     .update(schema.submittedPets)
     .set(update)
     .where(eq(schema.submittedPets.id, id));
+  await invalidatePetCaches(row.slug);
 
   return NextResponse.json({ ok: true, slug: row.slug });
 }

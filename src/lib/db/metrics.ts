@@ -150,7 +150,12 @@ const getMetricsIndexRows = cache(async (): Promise<MetricsIndexRow[]> => {
       ttlSeconds: METRICS_INDEX_TTL_SECONDS,
     },
     async () => {
-      const rows = await db.select().from(schema.petMetrics);
+      let rows: Array<typeof schema.petMetrics.$inferSelect>;
+      try {
+        rows = await db.select().from(schema.petMetrics);
+      } catch {
+        return [];
+      }
       return rows.map((row) => ({
         petSlug: row.petSlug,
         installCount: row.installCount,
