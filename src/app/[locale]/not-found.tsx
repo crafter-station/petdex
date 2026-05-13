@@ -7,8 +7,6 @@ import { CommandLine } from "@/components/command-line";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 
-export const dynamic = "force-dynamic";
-
 export async function generateMetadata({
   params,
 }: {
