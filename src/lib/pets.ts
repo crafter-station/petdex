@@ -30,6 +30,7 @@ const EMPTY_METRICS: Metrics = {
 
 const PET_CACHE_TTL_SECONDS = 300;
 const APPROVED_CATALOG_TTL_SECONDS = 300;
+const FEATURED_PETS_TTL_SECONDS = 300;
 
 type PetRow = Pick<
   typeof schema.submittedPets.$inferSelect,
@@ -125,23 +126,34 @@ export async function getStaticPetSlugs(): Promise<string[]> {
 export async function getFeaturedPetsWithMetrics(
   limit = 6,
 ): Promise<PetWithMetrics[]> {
-  const rows = await db
-    .select()
-    .from(schema.submittedPets)
-    .where(
-      and(
-        eq(schema.submittedPets.status, "approved"),
-        eq(schema.submittedPets.featured, true),
-      ),
-    )
-    .limit(limit);
-
-  if (rows.length === 0) return [];
-  const metrics = await getMetricsBySlugs(rows.map((row) => row.slug));
-  return rows.map((row) => ({
-    ...rowToPet(row),
-    metrics: metrics.get(row.slug) ?? EMPTY_METRICS,
+  const pets = (await getFeaturedPets()).slice(0, limit);
+  if (pets.length === 0) return [];
+  const metrics = await getMetricsBySlugs(pets.map((pet) => pet.slug));
+  return pets.map((pet) => ({
+    ...pet,
+    metrics: metrics.get(pet.slug) ?? EMPTY_METRICS,
   }));
+}
+
+async function getFeaturedPets(): Promise<PetdexPet[]> {
+  return cachedAggregate(
+    {
+      key: AGGREGATE_KEYS.featuredPets,
+      ttlSeconds: FEATURED_PETS_TTL_SECONDS,
+    },
+    async () => {
+      const rows = await db
+        .select()
+        .from(schema.submittedPets)
+        .where(
+          and(
+            eq(schema.submittedPets.status, "approved"),
+            eq(schema.submittedPets.featured, true),
+          ),
+        );
+      return rows.map(rowToPet);
+    },
+  );
 }
 
 export async function getAllApprovedPets(): Promise<PetdexPet[]> {
