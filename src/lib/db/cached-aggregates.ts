@@ -43,6 +43,7 @@ export const AGGREGATE_KEYS = {
   variantIndex: "petdex:agg:variant-index:v1",
   approvedCatalog: "petdex:agg:approved-catalog:v1",
   slimManifest: "petdex:agg:slim-manifest:v1",
+  metricsIndex: "petdex:agg:metrics-index:v1",
 } as const;
 
 export function petCacheKey(slug: string): string {

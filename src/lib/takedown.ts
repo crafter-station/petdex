@@ -108,6 +108,7 @@ export async function takedownPet(
       AGGREGATE_KEYS.facets,
       AGGREGATE_KEYS.approvedCount,
       AGGREGATE_KEYS.metricsSummary,
+      AGGREGATE_KEYS.metricsIndex,
       AGGREGATE_KEYS.batches,
       AGGREGATE_KEYS.variantIndex,
     );

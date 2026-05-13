@@ -1,3 +1,5 @@
+import { cache } from "react";
+
 import { eq, inArray, sql } from "drizzle-orm";
 
 import {
@@ -10,6 +12,15 @@ import {
 import { db, schema } from "./client";
 
 const PET_METRICS_TTL_SECONDS = 60;
+const METRICS_INDEX_TTL_SECONDS = 60;
+const METRICS_INDEX_MIN_BATCH_SIZE = 50;
+
+type MetricsIndexRow = {
+  petSlug: string;
+  installCount: number;
+  zipDownloadCount: number;
+  likeCount: number;
+};
 
 export async function incrementInstallCount(slug: string): Promise<void> {
   await db
@@ -29,7 +40,10 @@ export async function incrementInstallCount(slug: string): Promise<void> {
     });
   // maxInstallCount in the cached summary may have moved.
   await Promise.all([
-    invalidateAggregates(AGGREGATE_KEYS.metricsSummary),
+    invalidateAggregates(
+      AGGREGATE_KEYS.metricsSummary,
+      AGGREGATE_KEYS.metricsIndex,
+    ),
     invalidateMetricCaches(slug),
   ]);
 }
@@ -48,7 +62,10 @@ export async function incrementZipDownloadCount(slug: string): Promise<void> {
         updatedAt: new Date(),
       },
     });
-  await invalidateMetricCaches(slug);
+  await Promise.all([
+    invalidateAggregates(AGGREGATE_KEYS.metricsIndex),
+    invalidateMetricCaches(slug),
+  ]);
 }
 
 export async function setLikeCount(slug: string, count: number): Promise<void> {
@@ -61,7 +78,10 @@ export async function setLikeCount(slug: string, count: number): Promise<void> {
     });
   // maxLikeCount in the cached summary may have moved.
   await Promise.all([
-    invalidateAggregates(AGGREGATE_KEYS.metricsSummary),
+    invalidateAggregates(
+      AGGREGATE_KEYS.metricsSummary,
+      AGGREGATE_KEYS.metricsIndex,
+    ),
     invalidateMetricCaches(slug),
   ]);
 }
@@ -83,7 +103,7 @@ export type MetricsSummary = {
  * which only loads the rows you actually need.
  */
 export async function getAllMetrics(): Promise<Map<string, Metrics>> {
-  const rows = await db.select().from(schema.petMetrics);
+  const rows = await getMetricsIndexRows();
   const map = new Map<string, Metrics>();
   for (const row of rows) {
     map.set(row.petSlug, {
@@ -99,6 +119,15 @@ export async function getMetricsBySlugs(
   slugs: string[],
 ): Promise<Map<string, Metrics>> {
   if (slugs.length === 0) return new Map();
+  if (slugs.length >= METRICS_INDEX_MIN_BATCH_SIZE) {
+    const index = await getAllMetrics();
+    const map = new Map<string, Metrics>();
+    for (const slug of slugs) {
+      const metrics = index.get(slug);
+      if (metrics) map.set(slug, metrics);
+    }
+    return map;
+  }
   const rows = await db
     .select()
     .from(schema.petMetrics)
@@ -113,6 +142,24 @@ export async function getMetricsBySlugs(
   }
   return map;
 }
+
+const getMetricsIndexRows = cache(async (): Promise<MetricsIndexRow[]> => {
+  return cachedAggregate(
+    {
+      key: AGGREGATE_KEYS.metricsIndex,
+      ttlSeconds: METRICS_INDEX_TTL_SECONDS,
+    },
+    async () => {
+      const rows = await db.select().from(schema.petMetrics);
+      return rows.map((row) => ({
+        petSlug: row.petSlug,
+        installCount: row.installCount,
+        zipDownloadCount: row.zipDownloadCount,
+        likeCount: row.likeCount,
+      }));
+    },
+  );
+});
 
 export async function getMetricsForSlug(slug: string): Promise<Metrics> {
   return cachedAggregate(
