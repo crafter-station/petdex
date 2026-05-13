@@ -108,14 +108,14 @@ export async function takedownPet(
       AGGREGATE_KEYS.facets,
       AGGREGATE_KEYS.approvedCount,
       AGGREGATE_KEYS.metricsSummary,
-      AGGREGATE_KEYS.metricsIndex,
       AGGREGATE_KEYS.batches,
       AGGREGATE_KEYS.variantIndex,
     );
     await invalidatePetCaches(pet.slug);
     await invalidateCollectionBacklinks(pet.slug);
-    await invalidateMetricCaches(pet.slug);
   }
+  await invalidateAggregates(AGGREGATE_KEYS.metricsIndex);
+  await invalidateMetricCaches(pet.slug);
 
   // 6. Best-effort R2 cleanup. We derive keys from the URLs the
   //    submission stored; anything off-host (legacy or external credit
