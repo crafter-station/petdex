@@ -7,6 +7,7 @@ import {
   AGGREGATE_KEYS,
   invalidateAggregates,
   invalidateCollectionBacklinks,
+  invalidateMetricCaches,
   invalidatePetCaches,
 } from "@/lib/db/cached-aggregates";
 import { db, schema } from "@/lib/db/client";
@@ -112,6 +113,7 @@ export async function takedownPet(
     );
     await invalidatePetCaches(pet.slug);
     await invalidateCollectionBacklinks(pet.slug);
+    await invalidateMetricCaches(pet.slug);
   }
 
   // 6. Best-effort R2 cleanup. We derive keys from the URLs the

@@ -4,8 +4,12 @@ import {
   AGGREGATE_KEYS,
   cachedAggregate,
   invalidateAggregates,
+  invalidateMetricCaches,
+  petMetricsCacheKey,
 } from "./cached-aggregates";
 import { db, schema } from "./client";
+
+const PET_METRICS_TTL_SECONDS = 60;
 
 export async function incrementInstallCount(slug: string): Promise<void> {
   await db
@@ -24,7 +28,10 @@ export async function incrementInstallCount(slug: string): Promise<void> {
       },
     });
   // maxInstallCount in the cached summary may have moved.
-  await invalidateAggregates(AGGREGATE_KEYS.metricsSummary);
+  await Promise.all([
+    invalidateAggregates(AGGREGATE_KEYS.metricsSummary),
+    invalidateMetricCaches(slug),
+  ]);
 }
 
 export async function incrementZipDownloadCount(slug: string): Promise<void> {
@@ -41,6 +48,7 @@ export async function incrementZipDownloadCount(slug: string): Promise<void> {
         updatedAt: new Date(),
       },
     });
+  await invalidateMetricCaches(slug);
 }
 
 export async function setLikeCount(slug: string, count: number): Promise<void> {
@@ -52,7 +60,10 @@ export async function setLikeCount(slug: string, count: number): Promise<void> {
       set: { likeCount: count, updatedAt: new Date() },
     });
   // maxLikeCount in the cached summary may have moved.
-  await invalidateAggregates(AGGREGATE_KEYS.metricsSummary);
+  await Promise.all([
+    invalidateAggregates(AGGREGATE_KEYS.metricsSummary),
+    invalidateMetricCaches(slug),
+  ]);
 }
 
 export type Metrics = {
@@ -104,14 +115,19 @@ export async function getMetricsBySlugs(
 }
 
 export async function getMetricsForSlug(slug: string): Promise<Metrics> {
-  const row = await db.query.petMetrics.findFirst({
-    where: (t, { eq }) => eq(t.petSlug, slug),
-  });
-  return {
-    installCount: row?.installCount ?? 0,
-    zipDownloadCount: row?.zipDownloadCount ?? 0,
-    likeCount: row?.likeCount ?? 0,
-  };
+  return cachedAggregate(
+    { key: petMetricsCacheKey(slug), ttlSeconds: PET_METRICS_TTL_SECONDS },
+    async () => {
+      const row = await db.query.petMetrics.findFirst({
+        where: (t, { eq }) => eq(t.petSlug, slug),
+      });
+      return {
+        installCount: row?.installCount ?? 0,
+        zipDownloadCount: row?.zipDownloadCount ?? 0,
+        likeCount: row?.likeCount ?? 0,
+      };
+    },
+  );
 }
 
 export async function getMetricsSummary(): Promise<MetricsSummary> {
