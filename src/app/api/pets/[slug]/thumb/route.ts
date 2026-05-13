@@ -10,10 +10,9 @@
 
 import { NextResponse } from "next/server";
 
-import { eq } from "drizzle-orm";
 import sharp from "sharp";
 
-import { db, schema } from "@/lib/db/client";
+import { getPet } from "@/lib/pets";
 import { isAllowedAssetUrl } from "@/lib/url-allowlist";
 
 export const runtime = "nodejs";
@@ -39,22 +38,19 @@ export async function GET(
 ): Promise<Response> {
   const { slug } = await ctx.params;
 
-  const pet = await db.query.submittedPets.findFirst({
-    where: eq(schema.submittedPets.slug, slug),
-    columns: { spritesheetUrl: true, status: true },
-  });
+  const pet = await getPet(slug);
 
-  if (!pet || pet.status !== "approved") {
+  if (!pet) {
     return new NextResponse("not found", { status: 404 });
   }
 
-  if (!isAllowedAssetUrl(pet.spritesheetUrl)) {
+  if (!isAllowedAssetUrl(pet.spritesheetPath)) {
     return new NextResponse("forbidden", { status: 403 });
   }
 
   let buf: Buffer;
   try {
-    const res = await fetch(pet.spritesheetUrl, { redirect: "error" });
+    const res = await fetch(pet.spritesheetPath, { redirect: "error" });
     if (!res.ok) {
       return new NextResponse("upstream", { status: 502 });
     }

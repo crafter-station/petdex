@@ -16,10 +16,8 @@
 
 import { NextResponse } from "next/server";
 
-import { eq } from "drizzle-orm";
-
-import { db, schema } from "@/lib/db/client";
 import type { PetStateId } from "@/lib/pet-states";
+import { getPet } from "@/lib/pets";
 import { renderSticker, type StickerFormat } from "@/lib/sticker-renderer";
 import { isAllowedAssetUrl } from "@/lib/url-allowlist";
 
@@ -65,22 +63,19 @@ export async function GET(
   const format = parseFormat(url.searchParams.get("format"));
   const isDownload = url.searchParams.get("download") === "1";
 
-  const pet = await db.query.submittedPets.findFirst({
-    where: eq(schema.submittedPets.slug, slug),
-    columns: { spritesheetUrl: true, status: true, displayName: true },
-  });
+  const pet = await getPet(slug);
 
-  if (!pet || pet.status !== "approved") {
+  if (!pet) {
     return new NextResponse("not found", { status: 404 });
   }
 
-  if (!isAllowedAssetUrl(pet.spritesheetUrl)) {
+  if (!isAllowedAssetUrl(pet.spritesheetPath)) {
     return new NextResponse("forbidden", { status: 403 });
   }
 
   let result: Awaited<ReturnType<typeof renderSticker>>;
   try {
-    result = await renderSticker(pet.spritesheetUrl, { state, format });
+    result = await renderSticker(pet.spritesheetPath, { state, format });
   } catch (err) {
     const message =
       err instanceof Error && err.message.startsWith("upstream")
