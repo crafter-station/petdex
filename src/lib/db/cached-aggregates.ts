@@ -45,6 +45,7 @@ export const AGGREGATE_KEYS = {
   slimManifest: "petdex:agg:slim-manifest:v1",
   metricsIndex: "petdex:agg:metrics-index:v1",
   featuredPets: "petdex:agg:featured-pets:v1",
+  dexNumbers: "petdex:agg:dex-numbers:v1",
 } as const;
 
 export function petCacheKey(slug: string): string {
@@ -66,6 +67,7 @@ export async function invalidatePetCaches(...slugs: string[]): Promise<void> {
       AGGREGATE_KEYS.approvedCatalog,
       AGGREGATE_KEYS.slimManifest,
       AGGREGATE_KEYS.featuredPets,
+      AGGREGATE_KEYS.dexNumbers,
     );
   }
   await invalidateAggregates(...keys);
@@ -93,6 +95,7 @@ export async function invalidateCollectionBacklinks(
 // a stale value on a hot lambda and repopulate Upstash with it.
 const NEXT_TAGS_FOR_KEY: Record<string, string[]> = {
   [AGGREGATE_KEYS.facets]: ["petdex:facets"],
+  [AGGREGATE_KEYS.dexNumbers]: ["petdex:dex"],
 };
 
 // Invalidate keys after writes that change the aggregate (approve,

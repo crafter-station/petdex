@@ -17,27 +17,37 @@ import { cache } from "react";
 
 import { sql } from "drizzle-orm";
 
+import { AGGREGATE_KEYS, cachedAggregate } from "@/lib/db/cached-aggregates";
 import { db } from "@/lib/db/client";
 import { withNextDataCache } from "@/lib/next-data-cache";
 
 export type DexEntry = { slug: string; dexNumber: number };
+const DEX_NUMBERS_TTL_SECONDS = 300;
 
 const getDexEntries = withNextDataCache(
   async (): Promise<DexEntry[]> => {
-    const result = (await db.execute(sql`
+    return cachedAggregate(
+      {
+        key: AGGREGATE_KEYS.dexNumbers,
+        ttlSeconds: DEX_NUMBERS_TTL_SECONDS,
+      },
+      async () => {
+        const result = (await db.execute(sql`
         SELECT slug,
                ROW_NUMBER() OVER (ORDER BY approved_at ASC, created_at ASC)::int AS dex_number
         FROM submitted_pets
         WHERE status = 'approved'
           AND source <> 'discover'
       `)) as unknown as {
-      rows: Array<{ slug: string; dex_number: number }>;
-    };
+          rows: Array<{ slug: string; dex_number: number }>;
+        };
 
-    return result.rows.map((row) => ({
-      slug: row.slug,
-      dexNumber: row.dex_number,
-    }));
+        return result.rows.map((row) => ({
+          slug: row.slug,
+          dexNumber: row.dex_number,
+        }));
+      },
+    );
   },
   ["petdex-dex-numbers"],
   { tags: ["petdex:dex"], revalidate: 300 },
