@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { and, eq, inArray, ne } from "drizzle-orm";
 
+import { invalidatePublicProfileCaches } from "@/lib/db/cached-aggregates";
 import { db, schema } from "@/lib/db/client";
 import {
   dedupePins,
@@ -222,6 +223,7 @@ export async function PATCH(req: Request): Promise<Response> {
         updatedAt: new Date(),
       },
     });
+  await invalidatePublicProfileCaches(userId);
 
   // Sync Clerk username with the DB handle so the AuthBadge dropdown,
   // which reads from useUser() in the browser, also lands on the right

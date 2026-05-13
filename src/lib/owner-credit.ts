@@ -17,6 +17,10 @@ import { cache } from "react";
 import { clerkClient } from "@clerk/nextjs/server";
 import { inArray } from "drizzle-orm";
 
+import {
+  cachedAggregate,
+  publicProfileCacheKey,
+} from "@/lib/db/cached-aggregates";
 import { db, schema } from "@/lib/db/client";
 
 export type OwnerExternal = {
@@ -55,6 +59,13 @@ export type RowCreditFallback = {
    */
   ownerIsProxy?: boolean;
 };
+
+type StoredPublicProfile = {
+  displayName: string | null;
+  handle: string | null;
+};
+
+const PUBLIC_PROFILE_TTL_SECONDS = 300;
 
 function fallbackHandle(userId: string): string {
   return userId.slice(-8).toLowerCase();
@@ -272,18 +283,7 @@ export async function resolveStoredOwnerCreditFor(
     null;
 
   if (!row.ownerIsProxy) {
-    try {
-      const [storedProfile] = await db
-        .select({
-          displayName: schema.userProfiles.displayName,
-          handle: schema.userProfiles.handle,
-        })
-        .from(schema.userProfiles)
-        .where(inArray(schema.userProfiles.userId, [row.ownerId]));
-      profile = storedProfile ?? null;
-    } catch {
-      profile = null;
-    }
+    profile = await getStoredPublicProfile(row.ownerId);
   }
 
   const externals: OwnerExternal[] = [];
@@ -312,4 +312,29 @@ export async function resolveStoredOwnerCreditFor(
     externals,
     imageUrl: row.creditImage,
   };
+}
+
+async function getStoredPublicProfile(
+  userId: string,
+): Promise<StoredPublicProfile | null> {
+  return cachedAggregate(
+    {
+      key: publicProfileCacheKey(userId),
+      ttlSeconds: PUBLIC_PROFILE_TTL_SECONDS,
+    },
+    async () => {
+      try {
+        const [storedProfile] = await db
+          .select({
+            displayName: schema.userProfiles.displayName,
+            handle: schema.userProfiles.handle,
+          })
+          .from(schema.userProfiles)
+          .where(inArray(schema.userProfiles.userId, [userId]));
+        return storedProfile ?? { displayName: null, handle: null };
+      } catch {
+        return null;
+      }
+    },
+  );
 }

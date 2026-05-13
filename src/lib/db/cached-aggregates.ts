@@ -60,6 +60,10 @@ export function petMetricsCacheKey(slug: string): string {
   return `petdex:metrics:${slug}:v1`;
 }
 
+export function publicProfileCacheKey(userId: string): string {
+  return `petdex:profile:${userId}:v1`;
+}
+
 export async function invalidatePetCaches(...slugs: string[]): Promise<void> {
   const keys = slugs.filter(Boolean).map((slug) => petCacheKey(slug));
   if (keys.length > 0) {
@@ -78,6 +82,14 @@ export async function invalidateMetricCaches(
 ): Promise<void> {
   await invalidateAggregates(
     ...slugs.filter(Boolean).map((slug) => petMetricsCacheKey(slug)),
+  );
+}
+
+export async function invalidatePublicProfileCaches(
+  ...userIds: string[]
+): Promise<void> {
+  await invalidateAggregates(
+    ...userIds.filter(Boolean).map((userId) => publicProfileCacheKey(userId)),
   );
 }
 
