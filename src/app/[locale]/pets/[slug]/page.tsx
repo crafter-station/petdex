@@ -1,14 +1,14 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { eq, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { Layers, Shuffle, Sparkles } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 
 import { getCollectionsContainingPet } from "@/lib/collections";
 import { db, schema } from "@/lib/db/client";
 import { getMetricsForSlug, getMetricsSummary } from "@/lib/db/metrics";
-import { formatDexNumber, getDexNumberMap } from "@/lib/dex";
+import { formatDexNumber, getDexEntryMap } from "@/lib/dex";
 import { formatLocalizedNumber } from "@/lib/format-number";
 import { buildLocaleAlternates } from "@/lib/locale-routing";
 import { resolveStoredOwnerCreditFor } from "@/lib/owner-credit";
@@ -131,50 +131,34 @@ export default async function PetPage({ params }: PageProps) {
     notFound();
   }
 
-  const dexMap = await getDexNumberMap();
-  const currentDexNumber = dexMap.get(slug) ?? null;
+  const dexMap = await getDexEntryMap();
+  const currentDexNumber = dexMap.get(slug)?.dexNumber ?? null;
 
   let prevSlug: string | null = null;
   let nextSlug: string | null = null;
   if (currentDexNumber != null) {
-    for (const [entrySlug, dexNumber] of dexMap.entries()) {
-      if (dexNumber === currentDexNumber - 1) prevSlug = entrySlug;
-      if (dexNumber === currentDexNumber + 1) nextSlug = entrySlug;
+    for (const [entrySlug, entry] of dexMap.entries()) {
+      if (entry.dexNumber === currentDexNumber - 1) prevSlug = entrySlug;
+      if (entry.dexNumber === currentDexNumber + 1) nextSlug = entrySlug;
     }
   }
 
-  const neighborSlugs = [prevSlug, nextSlug].filter((value): value is string =>
-    Boolean(value),
-  );
-  const neighborRows =
-    neighborSlugs.length > 0
-      ? await db
-          .select({
-            slug: schema.submittedPets.slug,
-            displayName: schema.submittedPets.displayName,
-          })
-          .from(schema.submittedPets)
-          .where(inArray(schema.submittedPets.slug, neighborSlugs))
-      : [];
-  const neighborNameMap = new Map(
-    neighborRows.map((row) => [row.slug, row.displayName]),
-  );
-  const prevDexNumber = prevSlug ? dexMap.get(prevSlug) : undefined;
-  const nextDexNumber = nextSlug ? dexMap.get(nextSlug) : undefined;
+  const prevEntry = prevSlug ? dexMap.get(prevSlug) : undefined;
+  const nextEntry = nextSlug ? dexMap.get(nextSlug) : undefined;
   const prevPet =
-    prevSlug && prevDexNumber !== undefined
+    prevSlug && prevEntry
       ? {
           slug: prevSlug,
-          displayName: neighborNameMap.get(prevSlug) ?? prevSlug,
-          dexNumber: prevDexNumber,
+          displayName: prevEntry.displayName,
+          dexNumber: prevEntry.dexNumber,
         }
       : null;
   const nextPet =
-    nextSlug && nextDexNumber !== undefined
+    nextSlug && nextEntry
       ? {
           slug: nextSlug,
-          displayName: neighborNameMap.get(nextSlug) ?? nextSlug,
-          dexNumber: nextDexNumber,
+          displayName: nextEntry.displayName,
+          dexNumber: nextEntry.dexNumber,
         }
       : null;
 

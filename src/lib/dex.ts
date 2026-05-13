@@ -21,7 +21,7 @@ import { AGGREGATE_KEYS, cachedAggregate } from "@/lib/db/cached-aggregates";
 import { db } from "@/lib/db/client";
 import { withNextDataCache } from "@/lib/next-data-cache";
 
-export type DexEntry = { slug: string; dexNumber: number };
+export type DexEntry = { slug: string; displayName: string; dexNumber: number };
 const DEX_NUMBERS_TTL_SECONDS = 300;
 
 const getDexEntries = withNextDataCache(
@@ -34,32 +34,48 @@ const getDexEntries = withNextDataCache(
       async () => {
         const result = (await db.execute(sql`
         SELECT slug,
+               display_name,
                ROW_NUMBER() OVER (ORDER BY approved_at ASC, created_at ASC)::int AS dex_number
         FROM submitted_pets
         WHERE status = 'approved'
           AND source <> 'discover'
       `)) as unknown as {
-          rows: Array<{ slug: string; dex_number: number }>;
+          rows: Array<{
+            slug: string;
+            display_name: string;
+            dex_number: number;
+          }>;
         };
 
         return result.rows.map((row) => ({
           slug: row.slug,
+          displayName: row.display_name,
           dexNumber: row.dex_number,
         }));
       },
     );
   },
-  ["petdex-dex-numbers"],
+  ["petdex-dex-numbers-v2"],
   { tags: ["petdex:dex"], revalidate: 300 },
 );
 
 // Cached for the lifetime of a single render pass — every call inside
 // one request returns the same Map without rebuilding it. The underlying
 // ROW_NUMBER query is cached across requests by Next's data cache.
+export const getDexEntryMap = cache(
+  async (): Promise<Map<string, DexEntry>> => {
+    const out = new Map<string, DexEntry>();
+    for (const row of await getDexEntries()) {
+      out.set(row.slug, row);
+    }
+    return out;
+  },
+);
+
 export const getDexNumberMap = cache(async (): Promise<Map<string, number>> => {
   const out = new Map<string, number>();
-  for (const row of await getDexEntries()) {
-    out.set(row.slug, row.dexNumber);
+  for (const [slug, row] of await getDexEntryMap()) {
+    out.set(slug, row.dexNumber);
   }
   return out;
 });
