@@ -29,6 +29,7 @@ const EMPTY_METRICS: Metrics = {
 };
 
 const PET_CACHE_TTL_SECONDS = 300;
+const APPROVED_CATALOG_TTL_SECONDS = 300;
 
 type PetRow = Pick<
   typeof schema.submittedPets.$inferSelect,
@@ -144,11 +145,19 @@ export async function getFeaturedPetsWithMetrics(
 }
 
 export async function getAllApprovedPets(): Promise<PetdexPet[]> {
-  const rows = await db
-    .select()
-    .from(schema.submittedPets)
-    .where(eq(schema.submittedPets.status, "approved"));
-  return rows.map(rowToPet);
+  return cachedAggregate(
+    {
+      key: AGGREGATE_KEYS.approvedCatalog,
+      ttlSeconds: APPROVED_CATALOG_TTL_SECONDS,
+    },
+    async () => {
+      const rows = await db
+        .select()
+        .from(schema.submittedPets)
+        .where(eq(schema.submittedPets.status, "approved"));
+      return rows.map(rowToPet);
+    },
+  );
 }
 
 export type ApprovedPetSlim = {
@@ -166,27 +175,32 @@ export type ApprovedPetSlim = {
 // this shape is ~200 bytes, which compounds across the CLI traffic that
 // hits the slim manifest on every `petdex list` / `petdex install`.
 export async function getApprovedPetsForManifest(): Promise<ApprovedPetSlim[]> {
-  const rows = await db
-    .select({
-      slug: schema.submittedPets.slug,
-      displayName: schema.submittedPets.displayName,
-      kind: schema.submittedPets.kind,
-      spritesheetUrl: schema.submittedPets.spritesheetUrl,
-      petJsonUrl: schema.submittedPets.petJsonUrl,
-      zipUrl: schema.submittedPets.zipUrl,
-      creditName: schema.submittedPets.creditName,
-    })
-    .from(schema.submittedPets)
-    .where(eq(schema.submittedPets.status, "approved"));
-  return rows.map((row) => ({
-    slug: row.slug,
-    displayName: row.displayName,
-    kind: row.kind as PetKind,
-    spritesheetUrl: row.spritesheetUrl,
-    petJsonUrl: row.petJsonUrl,
-    zipUrl: row.zipUrl,
-    creditName: row.creditName,
-  }));
+  return cachedAggregate(
+    { key: AGGREGATE_KEYS.slimManifest, ttlSeconds: 300 },
+    async () => {
+      const rows = await db
+        .select({
+          slug: schema.submittedPets.slug,
+          displayName: schema.submittedPets.displayName,
+          kind: schema.submittedPets.kind,
+          spritesheetUrl: schema.submittedPets.spritesheetUrl,
+          petJsonUrl: schema.submittedPets.petJsonUrl,
+          zipUrl: schema.submittedPets.zipUrl,
+          creditName: schema.submittedPets.creditName,
+        })
+        .from(schema.submittedPets)
+        .where(eq(schema.submittedPets.status, "approved"));
+      return rows.map((row) => ({
+        slug: row.slug,
+        displayName: row.displayName,
+        kind: row.kind as PetKind,
+        spritesheetUrl: row.spritesheetUrl,
+        petJsonUrl: row.petJsonUrl,
+        zipUrl: row.zipUrl,
+        creditName: row.creditName,
+      }));
+    },
+  );
 }
 
 export async function getLatestApprovedPets(limit = 5): Promise<PetdexPet[]> {

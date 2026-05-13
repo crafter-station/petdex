@@ -7,6 +7,8 @@
 import { neon } from "@neondatabase/serverless";
 import { Resend } from "resend";
 
+import { invalidatePetCaches } from "../src/lib/db/cached-aggregates";
+
 const PROD_URL = "https://petdex.crafter.run";
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -38,6 +40,7 @@ async function main() {
   console.log(`Found ${rows.length} rejected pets to revive.`);
   if (rows.length === 0) return;
 
+  const revivedSlugs: string[] = [];
   for (const row of rows) {
     const installCmd = `curl -sSf ${PROD_URL}/install/${row.slug} | sh`;
     const url = `${PROD_URL}/pets/${row.slug}`;
@@ -57,6 +60,7 @@ async function main() {
           rejection_reason = NULL
       WHERE id = ${row.id}
     `;
+    revivedSlugs.push(row.slug);
 
     if (resend && row.owner_email) {
       try {
@@ -94,6 +98,7 @@ async function main() {
 
   // Best-effort embedding refresh so the revived pets show up in vibe search.
   if (!dryRun) {
+    await invalidatePetCaches(...revivedSlugs);
     console.log("\nKick off similarity refresh via /api/admin/edits is not");
     console.log("strictly needed — the daily auto-tag cron picks them up.");
     console.log(

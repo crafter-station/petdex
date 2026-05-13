@@ -41,6 +41,8 @@ export const AGGREGATE_KEYS = {
   metricsSummary: "petdex:agg:metrics-summary:v1",
   batches: "petdex:agg:batches:v1",
   variantIndex: "petdex:agg:variant-index:v1",
+  approvedCatalog: "petdex:agg:approved-catalog:v1",
+  slimManifest: "petdex:agg:slim-manifest:v1",
 } as const;
 
 export function petCacheKey(slug: string): string {
@@ -52,9 +54,11 @@ export function collectionBacklinksCacheKey(slug: string): string {
 }
 
 export async function invalidatePetCaches(...slugs: string[]): Promise<void> {
-  await invalidateAggregates(
-    ...slugs.filter(Boolean).map((slug) => petCacheKey(slug)),
-  );
+  const keys = slugs.filter(Boolean).map((slug) => petCacheKey(slug));
+  if (keys.length > 0) {
+    keys.push(AGGREGATE_KEYS.approvedCatalog, AGGREGATE_KEYS.slimManifest);
+  }
+  await invalidateAggregates(...keys);
 }
 
 export async function invalidateCollectionBacklinks(

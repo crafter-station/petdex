@@ -23,6 +23,7 @@ import { eq } from "drizzle-orm";
 import JSZip from "jszip";
 import sharp from "sharp";
 
+import { invalidatePetCaches } from "@/lib/db/cached-aggregates";
 import { db, schema } from "@/lib/db/client";
 import { R2_BUCKET, R2_PUBLIC_BASE, r2 } from "@/lib/r2";
 
@@ -219,6 +220,9 @@ async function main() {
     creditImage: null,
     approvedAt: args.approve ? new Date() : null,
   });
+  if (args.approve) {
+    await invalidatePetCaches(slug);
+  }
 
   console.log(
     `\nDB row inserted: ${id} (slug=${slug}, status=${args.approve ? "approved" : "pending"})`,

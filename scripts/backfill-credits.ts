@@ -10,6 +10,7 @@
 
 import { and, eq, isNull, or } from "drizzle-orm";
 
+import { invalidatePetCaches } from "../src/lib/db/cached-aggregates";
 import { db, schema } from "../src/lib/db/client";
 
 const args = new Set(process.argv.slice(2));
@@ -117,6 +118,7 @@ async function main() {
   // Cache per ownerId — many pets share owners (vl.tansky, serhatandic, etc.)
   const cache = new Map<string, ClerkUser | null>();
 
+  const touchedSlugs: string[] = [];
   for (const row of rows) {
     let user = cache.get(row.ownerId);
     if (user === undefined) {
@@ -144,7 +146,10 @@ async function main() {
         creditImage: credit.imageUrl,
       })
       .where(eq(schema.submittedPets.id, row.id));
+    touchedSlugs.push(row.slug);
   }
+
+  await invalidatePetCaches(...touchedSlugs);
 
   console.log("done.");
 }
