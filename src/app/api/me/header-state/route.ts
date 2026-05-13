@@ -1,13 +1,19 @@
 import { NextResponse } from "next/server";
 
 import { auth } from "@clerk/nextjs/server";
-import { and, sql as dsql, eq, inArray, isNull } from "drizzle-orm";
+import { sql as dsql } from "drizzle-orm";
 
 import { isAdmin } from "@/lib/admin";
-import { getCaughtSlugSet } from "@/lib/catch-status";
-import { db, schema } from "@/lib/db/client";
+import { db } from "@/lib/db/client";
 
 export const runtime = "nodejs";
+
+type HeaderStateRow = {
+  notification_count: number | string;
+  feedback_count: number | string;
+  admin_count: number | string;
+  caught_slugs: unknown;
+};
 
 // GET /api/me/header-state -> single aggregate the SiteHeader needs on
 // every page-view. Combines what used to be three separate endpoints
@@ -40,85 +46,91 @@ export async function GET(): Promise<Response> {
   }
 
   const headers = { "Cache-Control": "private, no-store" };
-
-  const [unreadNotifRows, caughtSet, myFeedback] = await Promise.all([
-    db
-      .select({ id: schema.notifications.id })
-      .from(schema.notifications)
-      .where(
-        and(
-          eq(schema.notifications.userId, userId),
-          isNull(schema.notifications.readAt),
-        ),
-      ),
-    getCaughtSlugSet(userId),
-    db
-      .select({
-        id: schema.feedback.id,
-        userLastReadAt: schema.feedback.userLastReadAt,
-      })
-      .from(schema.feedback)
-      .where(eq(schema.feedback.userId, userId)),
-  ]);
-
-  let feedbackCount = 0;
-  if (myFeedback.length > 0) {
-    const ids = myFeedback.map((r) => r.id);
-    const adminReplies = await db
-      .select({
-        feedbackId: schema.feedbackReplies.feedbackId,
-        latestAdminReply: dsql<Date>`MAX(${schema.feedbackReplies.createdAt})`,
-      })
-      .from(schema.feedbackReplies)
-      .where(
-        and(
-          eq(schema.feedbackReplies.authorKind, "admin"),
-          inArray(schema.feedbackReplies.feedbackId, ids),
-        ),
-      )
-      .groupBy(schema.feedbackReplies.feedbackId);
-
-    const lastReadById = new Map(
-      myFeedback.map((r) => [r.id, r.userLastReadAt]),
-    );
-    feedbackCount = adminReplies.filter((r) => {
-      const lastRead = lastReadById.get(r.feedbackId);
-      return !lastRead || new Date(r.latestAdminReply) > new Date(lastRead);
-    }).length;
-  }
-
-  let adminCount = 0;
-  if (isAdmin(userId)) {
-    const rows = await db
-      .select({
-        feedbackId: schema.feedbackReplies.feedbackId,
-        latestUserReply: dsql<Date>`MAX(${schema.feedbackReplies.createdAt})`,
-        adminLastReadAt: schema.feedback.adminLastReadAt,
-      })
-      .from(schema.feedbackReplies)
-      .innerJoin(
-        schema.feedback,
-        eq(schema.feedback.id, schema.feedbackReplies.feedbackId),
-      )
-      .where(eq(schema.feedbackReplies.authorKind, "user"))
-      .groupBy(
-        schema.feedbackReplies.feedbackId,
-        schema.feedback.adminLastReadAt,
-      );
-    adminCount = rows.filter(
-      (r) =>
-        !r.adminLastReadAt ||
-        new Date(r.latestUserReply) > new Date(r.adminLastReadAt),
-    ).length;
-  }
+  const admin = isAdmin(userId);
+  const result = (await db.execute(dsql`
+    WITH notification_state AS (
+      SELECT count(*)::int AS notification_count
+      FROM notifications
+      WHERE user_id = ${userId}
+        AND read_at IS NULL
+    ),
+    caught_state AS (
+      SELECT coalesce(jsonb_agg(pet_slug ORDER BY pet_slug), '[]'::jsonb) AS caught_slugs
+      FROM pet_likes
+      WHERE user_id = ${userId}
+    ),
+    feedback_state AS (
+      SELECT count(*)::int AS feedback_count
+      FROM feedback f
+      WHERE f.user_id = ${userId}
+        AND EXISTS (
+          SELECT 1
+          FROM feedback_replies fr
+          WHERE fr.feedback_id = f.id
+            AND fr.author_kind = 'admin'
+            AND (
+              f.user_last_read_at IS NULL
+              OR fr.created_at > f.user_last_read_at
+            )
+        )
+    ),
+    admin_feedback_state AS (
+      SELECT
+        CASE
+          WHEN ${admin}::boolean THEN count(*)::int
+          ELSE 0
+        END AS admin_count
+      FROM feedback f
+      WHERE ${admin}::boolean
+        AND EXISTS (
+          SELECT 1
+          FROM feedback_replies fr
+          WHERE fr.feedback_id = f.id
+            AND fr.author_kind = 'user'
+            AND (
+              f.admin_last_read_at IS NULL
+              OR fr.created_at > f.admin_last_read_at
+            )
+        )
+    )
+    SELECT
+      notification_state.notification_count,
+      caught_state.caught_slugs,
+      feedback_state.feedback_count,
+      admin_feedback_state.admin_count
+    FROM notification_state, caught_state, feedback_state, admin_feedback_state
+  `)) as unknown as { rows: HeaderStateRow[] };
+  const row = result.rows[0];
 
   return NextResponse.json(
     {
       signedIn: true,
-      notifications: { unreadCount: unreadNotifRows.length },
-      feedback: { count: feedbackCount, adminCount },
-      caught: Array.from(caughtSet),
+      notifications: { unreadCount: toNumber(row?.notification_count) },
+      feedback: {
+        count: toNumber(row?.feedback_count),
+        adminCount: toNumber(row?.admin_count),
+      },
+      caught: toStringArray(row?.caught_slugs),
     },
     { headers },
   );
+}
+
+function toNumber(value: number | string | undefined): number {
+  return typeof value === "number" ? value : Number(value ?? 0);
+}
+
+function toStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) return value.filter(isString);
+  if (typeof value !== "string") return [];
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter(isString) : [];
+  } catch {
+    return [];
+  }
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === "string";
 }
