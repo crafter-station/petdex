@@ -9,6 +9,10 @@ import {
   inArray,
 } from "drizzle-orm";
 
+import {
+  cachedAggregate,
+  collectionBacklinksCacheKey,
+} from "@/lib/db/cached-aggregates";
 import { db, schema } from "@/lib/db/client";
 import { getMetricsBySlugs, type Metrics } from "@/lib/db/metrics";
 import { type PetWithMetrics, rowToPet } from "@/lib/pets";
@@ -18,6 +22,7 @@ const EMPTY_METRICS: Metrics = {
   zipDownloadCount: 0,
   likeCount: 0,
 };
+const COLLECTION_BACKLINKS_TTL_SECONDS = 600;
 
 export type PetCollection = typeof schema.petCollections.$inferSelect;
 
@@ -349,30 +354,41 @@ export async function getCollectionCandidatesForPet(
 export async function getCollectionsContainingPet(
   petSlug: string,
 ): Promise<Array<Pick<PetCollection, "slug" | "title" | "ownerId">>> {
-  try {
-    const rows = await db
-      .select({
-        slug: schema.petCollections.slug,
-        title: schema.petCollections.title,
-        ownerId: schema.petCollections.ownerId,
-      })
-      .from(schema.petCollectionItems)
-      .innerJoin(
-        schema.petCollections,
-        eq(schema.petCollectionItems.collectionId, schema.petCollections.id),
-      )
-      .where(
-        and(
-          eq(schema.petCollectionItems.petSlug, petSlug),
-          eq(schema.petCollections.featured, true),
-        ),
-      )
-      .orderBy(asc(schema.petCollections.title));
-    return rows;
-  } catch (error) {
-    if (isMissingCollectionTableError(error)) return [];
-    throw error;
-  }
+  return cachedAggregate(
+    {
+      key: collectionBacklinksCacheKey(petSlug),
+      ttlSeconds: COLLECTION_BACKLINKS_TTL_SECONDS,
+    },
+    async () => {
+      try {
+        const rows = await db
+          .select({
+            slug: schema.petCollections.slug,
+            title: schema.petCollections.title,
+            ownerId: schema.petCollections.ownerId,
+          })
+          .from(schema.petCollectionItems)
+          .innerJoin(
+            schema.petCollections,
+            eq(
+              schema.petCollectionItems.collectionId,
+              schema.petCollections.id,
+            ),
+          )
+          .where(
+            and(
+              eq(schema.petCollectionItems.petSlug, petSlug),
+              eq(schema.petCollections.featured, true),
+            ),
+          )
+          .orderBy(asc(schema.petCollections.title));
+        return rows;
+      } catch (error) {
+        if (isMissingCollectionTableError(error)) return [];
+        throw error;
+      }
+    },
+  );
 }
 
 function isMissingCollectionTableError(error: unknown): boolean {

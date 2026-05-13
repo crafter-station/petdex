@@ -6,6 +6,7 @@ import { Resend } from "resend";
 import {
   AGGREGATE_KEYS,
   invalidateAggregates,
+  invalidateCollectionBacklinks,
   invalidatePetCaches,
 } from "@/lib/db/cached-aggregates";
 import { db, schema } from "@/lib/db/client";
@@ -110,6 +111,7 @@ export async function takedownPet(
       AGGREGATE_KEYS.variantIndex,
     );
     await invalidatePetCaches(pet.slug);
+    await invalidateCollectionBacklinks(pet.slug);
   }
 
   // 6. Best-effort R2 cleanup. We derive keys from the URLs the

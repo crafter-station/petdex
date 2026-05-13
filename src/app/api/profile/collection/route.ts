@@ -4,6 +4,7 @@ import { auth } from "@clerk/nextjs/server";
 import { and, eq } from "drizzle-orm";
 
 import { canManageCreatorCollections } from "@/lib/collection-access";
+import { invalidateCollectionBacklinks } from "@/lib/db/cached-aggregates";
 import { db, schema } from "@/lib/db/client";
 import { validateProfileHandle } from "@/lib/profiles";
 import { requireSameOrigin } from "@/lib/same-origin";
@@ -81,6 +82,9 @@ export async function PATCH(req: Request): Promise<Response> {
     .where(eq(schema.petCollections.ownerId, userId))
     .limit(1);
 
+  let oldFeaturedPetSlugs: string[] = [];
+  let shouldInvalidateCollectionBacklinks = false;
+
   if (!collection) {
     const profile = await db.query.userProfiles.findFirst({
       where: eq(schema.userProfiles.userId, userId),
@@ -110,6 +114,15 @@ export async function PATCH(req: Request): Promise<Response> {
       updatedAt: new Date(),
     };
   } else {
+    if (collection.featured) {
+      const rows = await db
+        .select({ slug: schema.petCollectionItems.petSlug })
+        .from(schema.petCollectionItems)
+        .where(eq(schema.petCollectionItems.collectionId, collection.id));
+      oldFeaturedPetSlugs = rows.map((row) => row.slug);
+      shouldInvalidateCollectionBacklinks = true;
+    }
+
     await db
       .update(schema.petCollections)
       .set({
@@ -134,6 +147,10 @@ export async function PATCH(req: Request): Promise<Response> {
         position: index + 1,
       })),
     );
+  }
+
+  if (shouldInvalidateCollectionBacklinks) {
+    await invalidateCollectionBacklinks(...oldFeaturedPetSlugs, ...petSlugs);
   }
 
   return NextResponse.json({

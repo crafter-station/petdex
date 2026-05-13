@@ -47,9 +47,21 @@ export function petCacheKey(slug: string): string {
   return `petdex:pet:${slug}:v1`;
 }
 
+export function collectionBacklinksCacheKey(slug: string): string {
+  return `petdex:collection-backlinks:${slug}:v1`;
+}
+
 export async function invalidatePetCaches(...slugs: string[]): Promise<void> {
   await invalidateAggregates(
     ...slugs.filter(Boolean).map((slug) => petCacheKey(slug)),
+  );
+}
+
+export async function invalidateCollectionBacklinks(
+  ...slugs: string[]
+): Promise<void> {
+  await invalidateAggregates(
+    ...slugs.filter(Boolean).map((slug) => collectionBacklinksCacheKey(slug)),
   );
 }
 
