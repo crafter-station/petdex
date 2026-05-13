@@ -14,6 +14,7 @@ import { neon } from "@neondatabase/serverless";
 import { and, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/neon-http";
 
+import { invalidateCollectionBacklinks } from "../src/lib/db/cached-aggregates";
 import * as schema from "../src/lib/db/schema";
 
 if (!process.env.DATABASE_URL) {
@@ -363,6 +364,11 @@ async function main() {
       .where(eq(schema.petCollections.slug, col.slug))
       .limit(1);
 
+    const oldItems = await db
+      .select({ slug: schema.petCollectionItems.petSlug })
+      .from(schema.petCollectionItems)
+      .where(eq(schema.petCollectionItems.collectionId, collectionId));
+
     // Reset items: delete existing then insert in position order. Simpler
     // than diffing for an idempotent seed.
     await db
@@ -375,6 +381,11 @@ async function main() {
         petSlug,
         position,
       })),
+    );
+
+    await invalidateCollectionBacklinks(
+      ...oldItems.map((row) => row.slug),
+      ...validPets,
     );
 
     console.log(
