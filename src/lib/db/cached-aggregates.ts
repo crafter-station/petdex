@@ -46,6 +46,7 @@ export const AGGREGATE_KEYS = {
   metricsIndex: "petdex:agg:metrics-index:v1",
   featuredPets: "petdex:agg:featured-pets:v1",
   dexNumbers: "petdex:agg:dex-numbers:v1",
+  randomPetPool: "petdex:agg:random-pet-pool:v1",
 } as const;
 
 export function petCacheKey(slug: string): string {
@@ -72,6 +73,7 @@ export async function invalidatePetCaches(...slugs: string[]): Promise<void> {
       AGGREGATE_KEYS.slimManifest,
       AGGREGATE_KEYS.featuredPets,
       AGGREGATE_KEYS.dexNumbers,
+      AGGREGATE_KEYS.randomPetPool,
     );
   }
   await invalidateAggregates(...keys);

@@ -1,11 +1,21 @@
 import { NextResponse } from "next/server";
 
-import { sql } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 
+import { AGGREGATE_KEYS, cachedAggregate } from "@/lib/db/cached-aggregates";
 import { db, schema } from "@/lib/db/client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const RANDOM_POOL_TTL_SECONDS = 300;
+
+type RandomPet = {
+  slug: string;
+  displayName: string;
+  description: string;
+  spritesheetPath: string;
+};
 
 // GET /api/pets/random?exclude=current-slug
 //
@@ -23,26 +33,11 @@ export async function GET(req: Request): Promise<Response> {
     "application/json",
   );
 
-  const rows = await db
-    .select({
-      slug: schema.submittedPets.slug,
-      displayName: schema.submittedPets.displayName,
-      description: schema.submittedPets.description,
-      spritesheetPath: schema.submittedPets.spritesheetUrl,
-    })
-    .from(schema.submittedPets)
-    .where(
-      exclude
-        ? sql`${schema.submittedPets.status} = 'approved'
-              AND ${schema.submittedPets.source} <> 'discover'
-              AND ${schema.submittedPets.slug} <> ${exclude}`
-        : sql`${schema.submittedPets.status} = 'approved'
-              AND ${schema.submittedPets.source} <> 'discover'`,
-    )
-    .orderBy(sql`random()`)
-    .limit(1);
-
-  const next = rows[0];
+  const pool = await getRandomPetPool();
+  const candidates = exclude
+    ? pool.filter((pet) => pet.slug !== exclude)
+    : pool;
+  const next = candidates[Math.floor(Math.random() * candidates.length)];
 
   if (wantsJson) {
     if (!next) {
@@ -65,4 +60,28 @@ export async function GET(req: Request): Promise<Response> {
     return NextResponse.redirect(new URL("/", req.url), 302);
   }
   return NextResponse.redirect(new URL(`/pets/${next.slug}`, req.url), 302);
+}
+
+async function getRandomPetPool(): Promise<RandomPet[]> {
+  return cachedAggregate(
+    {
+      key: AGGREGATE_KEYS.randomPetPool,
+      ttlSeconds: RANDOM_POOL_TTL_SECONDS,
+    },
+    async () =>
+      db
+        .select({
+          slug: schema.submittedPets.slug,
+          displayName: schema.submittedPets.displayName,
+          description: schema.submittedPets.description,
+          spritesheetPath: schema.submittedPets.spritesheetUrl,
+        })
+        .from(schema.submittedPets)
+        .where(
+          and(
+            eq(schema.submittedPets.status, "approved"),
+            ne(schema.submittedPets.source, "discover"),
+          ),
+        ),
+  );
 }
