@@ -62,6 +62,10 @@ export function petMetricsCacheKey(slug: string): string {
   return `petdex:metrics:${slug}:v1`;
 }
 
+export function petOwnerCreditCacheKey(slug: string): string {
+  return `petdex:pet-owner-credit:${slug}:v1`;
+}
+
 export function publicProfileCacheKey(userId: string): string {
   return `petdex:profile:${userId}:v1`;
 }
@@ -77,6 +81,9 @@ export function userIdForHandleCacheKey(handle: string): string {
 export async function invalidatePetCaches(...slugs: string[]): Promise<void> {
   const keys = slugs.filter(Boolean).map((slug) => petCacheKey(slug));
   if (keys.length > 0) {
+    keys.push(
+      ...slugs.filter(Boolean).map((slug) => petOwnerCreditCacheKey(slug)),
+    );
     keys.push(
       AGGREGATE_KEYS.approvedCatalog,
       AGGREGATE_KEYS.slimManifest,

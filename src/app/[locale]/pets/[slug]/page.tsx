@@ -1,17 +1,15 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { eq } from "drizzle-orm";
 import { Layers, Shuffle, Sparkles } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 
 import { getCollectionsContainingPet } from "@/lib/collections";
-import { db, schema } from "@/lib/db/client";
 import { getMetricsForSlug, getMetricsSummary } from "@/lib/db/metrics";
 import { formatDexNumber, getDexEntryMap } from "@/lib/dex";
 import { formatLocalizedNumber } from "@/lib/format-number";
 import { buildLocaleAlternates } from "@/lib/locale-routing";
-import { resolveStoredOwnerCreditFor } from "@/lib/owner-credit";
+import { resolveStoredOwnerCreditForSlug } from "@/lib/owner-credit";
 import { computeStatsFromSummary } from "@/lib/pet-stats";
 import { getPet, getStaticPetSlugs } from "@/lib/pets";
 import { getVariantsFor } from "@/lib/variants";
@@ -162,23 +160,20 @@ export default async function PetPage({ params }: PageProps) {
         }
       : null;
 
-  const [metrics, metricsSummary, ownerRow, variants, memberOfCollections] =
-    await Promise.all([
-      getMetricsForSlug(slug),
-      getMetricsSummary(),
-      db.query.submittedPets.findFirst({
-        columns: {
-          ownerId: true,
-          creditName: true,
-          creditUrl: true,
-          creditImage: true,
-          source: true,
-        },
-        where: eq(schema.submittedPets.slug, slug),
-      }),
-      getVariantsFor(slug),
-      getCollectionsContainingPet(slug),
-    ]);
+  const [
+    metrics,
+    metricsSummary,
+    ownerCreditResult,
+    variants,
+    memberOfCollections,
+  ] = await Promise.all([
+    getMetricsForSlug(slug),
+    getMetricsSummary(),
+    resolveStoredOwnerCreditForSlug(slug),
+    getVariantsFor(slug),
+    getCollectionsContainingPet(slug),
+  ]);
+  const ownerCredit = ownerCreditResult?.credit ?? null;
   const stats = computeStatsFromSummary(
     {
       importedAt: pet.importedAt,
@@ -186,29 +181,6 @@ export default async function PetPage({ params }: PageProps) {
     },
     metricsSummary,
   );
-
-  // Resolve public credit from local data so the ISR shell is not blocked by
-  // a per-request Clerk lookup. Profile sync keeps userProfiles fresh enough.
-  const ownerCredit = ownerRow
-    ? await resolveStoredOwnerCreditFor({
-        ownerId: ownerRow.ownerId,
-        creditName: ownerRow.creditName,
-        creditUrl: ownerRow.creditUrl,
-        // Discovered rows can carry a stale credit_image from the seed
-        // import that belongs to a *different* user (the importer's
-        // primary login or whichever Clerk profile was active during
-        // the bulk insert). Drop it for discovered rows so we never
-        // show another person's avatar; we still show the right name +
-        // GitHub url because those came from the seed enrichment.
-        creditImage:
-          ownerRow.source === "discover" ? null : ownerRow.creditImage,
-        // For 'discover' rows the ownerId is the admin who imported
-        // on the author's behalf, NOT the author. Use stored credit_*
-        // exclusively so the author keeps the byline. Claimed/submit rows
-        // use stored credit plus local userProfiles so this route stays ISR.
-        ownerIsProxy: ownerRow.source === "discover",
-      })
-    : null;
 
   const url = `${SITE_URL}/pets/${pet.slug}`;
   const jsonLd = [
@@ -515,7 +487,7 @@ export default async function PetPage({ params }: PageProps) {
         {ownerCredit ? (
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <SubmittedBy credit={ownerCredit} />
-            {ownerRow?.source === "discover" ? (
+            {ownerCreditResult?.ownerIsProxy ? (
               <ClaimCTA
                 petName={pet.displayName}
                 authorLabel={ownerCredit.name}
