@@ -31,6 +31,7 @@ const EMPTY_METRICS: Metrics = {
 const PET_CACHE_TTL_SECONDS = 300;
 const APPROVED_CATALOG_TTL_SECONDS = 300;
 const FEATURED_PETS_TTL_SECONDS = 300;
+const LATEST_APPROVED_PETS_TTL_SECONDS = 300;
 
 type PetRow = Pick<
   typeof schema.submittedPets.$inferSelect,
@@ -216,6 +217,19 @@ export async function getApprovedPetsForManifest(): Promise<ApprovedPetSlim[]> {
 }
 
 export async function getLatestApprovedPets(limit = 5): Promise<PetdexPet[]> {
+  if (limit === 5) {
+    return cachedAggregate(
+      {
+        key: AGGREGATE_KEYS.latestApprovedPets,
+        ttlSeconds: LATEST_APPROVED_PETS_TTL_SECONDS,
+      },
+      async () => queryLatestApprovedPets(limit),
+    );
+  }
+  return queryLatestApprovedPets(limit);
+}
+
+async function queryLatestApprovedPets(limit: number): Promise<PetdexPet[]> {
   // approved_at is nullable (older curated rows have NULL). NULLS LAST so
   // freshly approved pets surface first; coalesce-on-tie via created_at.
   const rows = await db
