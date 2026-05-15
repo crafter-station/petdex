@@ -69,7 +69,7 @@ export function PetRadar(props: PetRadarProps) {
   return (
     <svg
       viewBox={`0 0 ${SIZE} ${SIZE}`}
-      className="mx-auto block aspect-square h-auto w-full max-w-[200px]"
+      className="mx-auto block aspect-square h-auto w-full max-w-[200px] overflow-visible"
       role="img"
       aria-label={props.ariaLabel}
     >
