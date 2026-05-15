@@ -28,7 +28,7 @@ const AXES = [
     key: "popularity",
     pointDx: 88,
     pointDy: 0,
-    labelX: 160,
+    labelX: 174,
     labelY: CENTER,
   },
   {
@@ -42,7 +42,7 @@ const AXES = [
     key: "freshness",
     pointDx: -88,
     pointDy: 0,
-    labelX: 40,
+    labelX: 26,
     labelY: CENTER,
   },
 ] as const satisfies ReadonlyArray<{
