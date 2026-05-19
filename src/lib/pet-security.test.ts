@@ -104,6 +104,33 @@ describe("scanPetSecurity", () => {
     );
   });
 
+  it("holds credential references in free-text descriptions", () => {
+    const result = scanPetSecurity({
+      petJson: {
+        displayName: "Boba",
+        description: "No .env file is included and localStorage is unused.",
+      },
+    });
+
+    expect(result.decision).toBe("hold");
+    expect(result.findings[0]?.severity).toBe("hold");
+    expect(result.findings[0]?.code).toBe("credential_exfiltration_reference");
+  });
+
+  it("fails credential references in structured metadata", () => {
+    const result = scanPetSecurity({
+      petJson: {
+        displayName: "Boba",
+        spritesheetPath: "~/.ssh/id_rsa",
+      },
+    });
+
+    expect(result.decision).toBe("fail");
+    expect(result.findings.map((finding) => finding.code)).toContain(
+      "credential_exfiltration_reference",
+    );
+  });
+
   it("redacts sensitive values from findings and reasons", () => {
     const result = scanPetSecurity({
       petJson: {

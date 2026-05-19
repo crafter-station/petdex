@@ -35,6 +35,8 @@ const executableKey =
   /^(command|cmd|exec|shell|script|scripts|postinstall|preinstall|installcommand|hook|hooks|launchagent|plist)$/i;
 const sensitiveKey =
   /^(apikey|api_key|authtoken|auth_token|secret|token|env|envfile|env_file)$/i;
+const freeTextKey =
+  /^(displayname|display_name|name|title|description|summary|bio|notes?|author)$/i;
 const credentialReferenceRe =
   /(?:~\/\.ssh|\/\.ssh\/|id_rsa|id_ed25519|\.env\b|OPENAI_API_KEY|ANTHROPIC_API_KEY|GITHUB_TOKEN|CLERK_SECRET_KEY|process\.env|document\.cookie|localStorage)/i;
 const tokenValueRe =
@@ -60,10 +62,6 @@ const failPatterns: Array<{ code: string; re: RegExp }> = [
   {
     code: "destructive_shell_command",
     re: /\b(?:rm\s+-rf|chmod\s+\+x|chown\s+|launchctl\s+(?:load|bootstrap)|crontab\s+-|nc\s+-e|mkfifo\s+)\b/i,
-  },
-  {
-    code: "credential_exfiltration_reference",
-    re: credentialReferenceRe,
   },
   {
     code: "active_script_url",
@@ -148,6 +146,15 @@ export function scanPetSecurity(input: ScanInput): PetSecurityScan {
 
     for (const pattern of failPatterns) {
       if (pattern.re.test(value)) add("fail", pattern.code, path, value, key);
+    }
+    if (credentialReferenceRe.test(value)) {
+      add(
+        isFreeTextField(path, key) ? "hold" : "fail",
+        "credential_exfiltration_reference",
+        path,
+        value,
+        key,
+      );
     }
     for (const pattern of holdPatterns) {
       if (pattern.re.test(value)) add("hold", pattern.code, path, value, key);
@@ -303,6 +310,17 @@ function scanFromFindings(
   };
 }
 
+export function petSecurityReason(
+  scan: PetSecurityScan,
+  preferredSeverity?: PetSecurityFinding["severity"],
+): string | null {
+  const finding = preferredSeverity
+    ? scan.findings.find((finding) => finding.severity === preferredSeverity)
+    : scan.findings[0];
+  if (finding) return `${finding.code}: ${finding.evidence}`;
+  return scan.reasons[0] ?? null;
+}
+
 function prefixFindings(
   findings: PetSecurityFinding[],
   prefix: string,
@@ -337,6 +355,14 @@ function hasBlockedControlCharacter(value: string): boolean {
     if (code === 0 || code === 27 || code === 127) return true;
   }
   return false;
+}
+
+function isFreeTextField(path: string, key?: string): boolean {
+  return (
+    path === "submitted.displayName" ||
+    path === "submitted.description" ||
+    (key !== undefined && freeTextKey.test(key))
+  );
 }
 
 function redactEvidence(code: string, evidence: string, key?: string): string {

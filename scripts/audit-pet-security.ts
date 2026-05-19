@@ -4,6 +4,7 @@ import JSZip from "jszip";
 import * as schema from "@/lib/db/schema";
 import {
   type PetSecurityScan,
+  petSecurityReason,
   scanPetManifestsSecurity,
   scanPetSecurity,
 } from "@/lib/pet-security";
@@ -276,7 +277,7 @@ async function maybeApplySecurityRejection(
     {
       action: "reject",
       reason:
-        scan.reasons[0] ??
+        petSecurityReason(scan, "fail") ??
         "Pet metadata contains a high-confidence executable payload.",
     },
     { actor: "auto-review", db: actionDb, skipSideEffects: !args.notify },
@@ -437,7 +438,7 @@ async function recordSecurityReview(
     decision: "auto_reject",
     reasonCode: "security_malicious_pet_json",
     summary:
-      scan.reasons[0] ??
+      petSecurityReason(scan, "fail") ??
       "Pet metadata contains a high-confidence executable payload.",
     confidence: 100,
     checks,

@@ -1,3 +1,4 @@
+import { petSecurityReason } from "@/lib/pet-security";
 import type {
   ReviewChecks,
   ReviewEvidenceMatch,
@@ -31,7 +32,7 @@ export function decideAutomatedReview(
       decision: "auto_reject",
       reasonCode: "security_malicious_pet_json",
       summary:
-        security.reasons[0] ??
+        petSecurityReason(security, "fail") ??
         "Pet metadata contains a high-confidence executable payload.",
       confidence: 1,
     });

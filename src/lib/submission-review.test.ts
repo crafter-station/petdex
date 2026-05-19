@@ -86,6 +86,38 @@ describe("decideAutomatedReview", () => {
     expect(result.canApply).toBe(true);
   });
 
+  it("uses fail-severity security findings for auto-reject summaries", () => {
+    const checks = cleanChecks();
+    checks.security = {
+      decision: "fail",
+      reasons: [
+        "external_url_in_pet_json: https://example.com",
+        "shell_command_substitution: $(touch /tmp/pwned)",
+      ],
+      findings: [
+        {
+          code: "external_url_in_pet_json",
+          severity: "hold",
+          path: "$.homepage",
+          evidence: "https://example.com",
+        },
+        {
+          code: "shell_command_substitution",
+          severity: "fail",
+          path: "$.displayName",
+          evidence: "$(touch /tmp/pwned)",
+        },
+      ],
+    };
+
+    const result = decideAutomatedReview(checks);
+
+    expect(result.decision).toBe("auto_reject");
+    expect(result.summary).toBe(
+      "shell_command_substitution: $(touch /tmp/pwned)",
+    );
+  });
+
   it("holds suspicious pet.json security findings", () => {
     const checks = cleanChecks();
     checks.security = {
