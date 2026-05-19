@@ -1,7 +1,12 @@
 import { and, eq, inArray } from "drizzle-orm";
+import JSZip from "jszip";
 
 import * as schema from "@/lib/db/schema";
-import { type PetSecurityScan, scanPetSecurity } from "@/lib/pet-security";
+import {
+  type PetSecurityScan,
+  scanPetManifestsSecurity,
+  scanPetSecurity,
+} from "@/lib/pet-security";
 import { applySubmissionAction } from "@/lib/submission-decisions";
 import type { ReviewChecks } from "@/lib/submission-review-types";
 
@@ -26,6 +31,7 @@ type Row = {
   displayName: string;
   description: string;
   petJsonUrl: string;
+  zipUrl: string | null;
 };
 
 type AuditResult = {
@@ -37,6 +43,7 @@ type AuditResult = {
 };
 
 const MAX_PET_JSON_BYTES = 1024 * 1024;
+const MAX_ZIP_BYTES = 20 * 1024 * 1024;
 const PUBLIC_MANIFEST_URL = "https://petdex.crafter.run/api/manifest";
 
 const args = parseArgs();
@@ -99,6 +106,7 @@ async function loadRows(): Promise<Row[]> {
       displayName: schema.submittedPets.displayName,
       description: schema.submittedPets.description,
       petJsonUrl: schema.submittedPets.petJsonUrl,
+      zipUrl: schema.submittedPets.zipUrl,
     })
     .from(schema.submittedPets)
     .where(where)
@@ -128,6 +136,7 @@ async function loadManifestRows(url: string): Promise<Row[]> {
         pet.petJsonUrl,
         `pets[${index}].petJsonUrl`,
       ),
+      zipUrl: stringField(pet.zipUrl),
     };
   });
 }
@@ -188,39 +197,58 @@ async function auditRow(row: Row): Promise<AuditResult> {
     displayName: row.displayName,
     description: row.description,
   });
-  const fetched = await fetchPetJson(row.petJsonUrl);
-  if (!fetched.ok) {
-    if (metadataScan.decision !== "pass") {
-      const scan = {
-        ...metadataScan,
-        reasons: [
-          ...metadataScan.reasons,
-          `pet.json unavailable: ${fetched.reason}`,
-        ],
-      };
-      const applied = await maybeApplySecurityRejection(row, scan);
+  const [fetched, zipFetched] = await Promise.all([
+    fetchPetJson(row.petJsonUrl),
+    fetchZipPetJson(row.zipUrl),
+  ]);
+  if (!fetched.ok && !zipFetched.ok) {
+    if (metadataScan.decision === "pass") {
       return {
         slug: row.slug,
         status: row.status,
-        decision: scan.decision,
-        reasons: scan.reasons,
-        applied,
+        decision: "error",
+        reasons: [fetched.reason, zipFetched.reason],
+        applied: false,
       };
     }
+    const scan = {
+      ...metadataScan,
+      reasons: [
+        ...metadataScan.reasons,
+        `pet.json unavailable: ${fetched.reason}`,
+        `zip pet.json unavailable: ${zipFetched.reason}`,
+      ],
+    };
+    const applied = await maybeApplySecurityRejection(row, scan);
+    return {
+      slug: row.slug,
+      status: row.status,
+      decision: scan.decision,
+      reasons: scan.reasons,
+      applied,
+    };
+  }
+
+  const unavailableReasons = [
+    fetched.ok ? null : `pet.json unavailable: ${fetched.reason}`,
+    zipFetched.ok ? null : `zip pet.json unavailable: ${zipFetched.reason}`,
+  ].filter((reason): reason is string => Boolean(reason));
+  const scan = scanPetManifestsSecurity({
+    petJson: fetched.ok ? fetched.petJson : {},
+    zipPetJson: zipFetched.ok ? zipFetched.petJson : undefined,
+    displayName: row.displayName,
+    description: row.description,
+  });
+  if (scan.decision === "pass" && unavailableReasons.length > 0) {
     return {
       slug: row.slug,
       status: row.status,
       decision: "error",
-      reasons: [fetched.reason],
+      reasons: unavailableReasons,
       applied: false,
     };
   }
-
-  const scan = scanPetSecurity({
-    petJson: fetched.petJson,
-    displayName: row.displayName,
-    description: row.description,
-  });
+  if (unavailableReasons.length > 0) scan.reasons.push(...unavailableReasons);
 
   const applied = await maybeApplySecurityRejection(row, scan);
 
@@ -260,6 +288,49 @@ async function maybeApplySecurityRejection(
 async function fetchPetJson(
   url: string,
 ): Promise<{ ok: true; petJson: unknown } | { ok: false; reason: string }> {
+  const fetched = await fetchBuffer(url, MAX_PET_JSON_BYTES);
+  if (!fetched.ok) return fetched;
+  try {
+    return { ok: true, petJson: JSON.parse(fetched.buffer.toString("utf8")) };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+async function fetchZipPetJson(
+  url: string | null,
+): Promise<{ ok: true; petJson: unknown } | { ok: false; reason: string }> {
+  if (!url) return { ok: false, reason: "zipUrl is missing" };
+  const fetched = await fetchBuffer(url, MAX_ZIP_BYTES);
+  if (!fetched.ok) return fetched;
+  try {
+    const archive = await JSZip.loadAsync(fetched.buffer);
+    const names = Object.keys(archive.files).filter((name) => {
+      const file = archive.files[name];
+      return !file?.dir && name.split("/").pop() === "pet.json";
+    });
+    if (names.length === 0)
+      return { ok: false, reason: "zip missing pet.json" };
+    if (names.length > 1) {
+      return { ok: false, reason: "zip contains multiple pet.json files" };
+    }
+    const raw = await archive.files[names[0]].async("string");
+    return { ok: true, petJson: JSON.parse(raw) };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+async function fetchBuffer(
+  url: string,
+  maxBytes: number,
+): Promise<{ ok: true; buffer: Buffer } | { ok: false; reason: string }> {
   for (let attempt = 0; attempt <= args.retries; attempt++) {
     try {
       const res = await fetch(url, {
@@ -274,14 +345,14 @@ async function fetchPetJson(
         return { ok: false, reason: `pet.json fetch ${res.status}` };
       }
       const contentLength = Number(res.headers.get("content-length") ?? 0);
-      if (contentLength > MAX_PET_JSON_BYTES) {
-        return { ok: false, reason: "pet.json exceeds maximum audit size" };
+      if (contentLength > maxBytes) {
+        return { ok: false, reason: "asset exceeds maximum audit size" };
       }
       const buffer = Buffer.from(await res.arrayBuffer());
-      if (buffer.byteLength > MAX_PET_JSON_BYTES) {
-        return { ok: false, reason: "pet.json exceeds maximum audit size" };
+      if (buffer.byteLength > maxBytes) {
+        return { ok: false, reason: "asset exceeds maximum audit size" };
       }
-      return { ok: true, petJson: JSON.parse(buffer.toString("utf8")) };
+      return { ok: true, buffer };
     } catch (error) {
       if (attempt < args.retries) {
         await sleep(retryDelayMs(attempt));
@@ -293,7 +364,7 @@ async function fetchPetJson(
       };
     }
   }
-  return { ok: false, reason: "pet.json fetch failed" };
+  return { ok: false, reason: "asset fetch failed" };
 }
 
 async function recordSecurityReview(

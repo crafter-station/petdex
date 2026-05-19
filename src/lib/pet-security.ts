@@ -19,6 +19,10 @@ type ScanInput = {
   description?: string | null;
 };
 
+type ManifestScanInput = ScanInput & {
+  zipPetJson?: unknown;
+};
+
 const MAX_FINDINGS = 24;
 const MAX_DEPTH = 12;
 const MAX_NODES = 3000;
@@ -207,6 +211,73 @@ export function scanPetSecurity(input: ScanInput): PetSecurityScan {
   };
 }
 
+export function scanPetManifestsSecurity(
+  input: ManifestScanInput,
+): PetSecurityScan {
+  const findings = [
+    ...prefixFindings(
+      scanPetSecurity({ petJson: input.petJson }).findings,
+      "petJsonUrl",
+    ),
+    ...prefixFindings(
+      scanPetSecurity({
+        petJson: {},
+        displayName: input.displayName,
+        description: input.description,
+      }).findings,
+      "submitted",
+    ),
+  ];
+
+  if (input.zipPetJson !== undefined) {
+    findings.push(
+      ...prefixFindings(
+        scanPetSecurity({ petJson: input.zipPetJson }).findings,
+        "zip.petJson",
+      ),
+    );
+    if (stableJson(input.petJson) !== stableJson(input.zipPetJson)) {
+      findings.push({
+        code: "pet_json_manifest_mismatch",
+        severity: "hold",
+        path: "zip.petJson",
+        evidence: "zip pet.json differs from standalone petJsonUrl",
+      });
+    }
+  }
+
+  return scanFromFindings(findings);
+}
+
+function scanFromFindings(findings: PetSecurityFinding[]): PetSecurityScan {
+  const hasFail = findings.some((finding) => finding.severity === "fail");
+  const hasHold = findings.some((finding) => finding.severity === "hold");
+  const decision: ReviewCheckDecision = hasFail
+    ? "fail"
+    : hasHold
+      ? "hold"
+      : "pass";
+
+  return {
+    decision,
+    reasons: findings.map((finding) => `${finding.code}: ${finding.evidence}`),
+    findings,
+  };
+}
+
+function prefixFindings(
+  findings: PetSecurityFinding[],
+  prefix: string,
+): PetSecurityFinding[] {
+  return findings.map((finding) => ({
+    ...finding,
+    path:
+      finding.path === "$"
+        ? prefix
+        : `${prefix}${finding.path.startsWith("$") ? finding.path.slice(1) : `.${finding.path}`}`,
+  }));
+}
+
 function joinPath(parent: string, key: string): string {
   return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key)
     ? `${parent}.${key}`
@@ -239,4 +310,15 @@ function redactEvidence(code: string, evidence: string): string {
     return key ? `${key}: [redacted]` : "[redacted sensitive value]";
   }
   return evidence;
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (isPlainRecord(value)) {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
 }

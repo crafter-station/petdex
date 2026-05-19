@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 
-import { scanPetSecurity } from "@/lib/pet-security";
+import { scanPetManifestsSecurity, scanPetSecurity } from "@/lib/pet-security";
 
 describe("scanPetSecurity", () => {
   it("passes normal pet metadata", () => {
@@ -90,5 +90,35 @@ describe("scanPetSecurity", () => {
     expect(serialized).not.toContain("sk-live-real-secret-value");
     expect(serialized).not.toContain("OPENAI_API_KEY");
     expect(serialized).toContain("[redacted]");
+  });
+
+  it("fails malicious zip pet.json even when standalone pet.json is clean", () => {
+    const result = scanPetManifestsSecurity({
+      petJson: { displayName: "Boba", states: { idle: { row: 0 } } },
+      zipPetJson: {
+        displayName: "Boba $(touch /tmp/pwned)",
+        states: { idle: { row: 0 } },
+      },
+    });
+
+    expect(result.decision).toBe("fail");
+    expect(result.findings.map((finding) => finding.path)).toContain(
+      "zip.petJson.displayName",
+    );
+    expect(result.findings.map((finding) => finding.code)).toContain(
+      "pet_json_manifest_mismatch",
+    );
+  });
+
+  it("holds when standalone and zip pet manifests differ", () => {
+    const result = scanPetManifestsSecurity({
+      petJson: { displayName: "Boba", states: { idle: { row: 0 } } },
+      zipPetJson: { displayName: "Boba", states: { idle: { row: 1 } } },
+    });
+
+    expect(result.decision).toBe("hold");
+    expect(result.findings.map((finding) => finding.code)).toContain(
+      "pet_json_manifest_mismatch",
+    );
   });
 });

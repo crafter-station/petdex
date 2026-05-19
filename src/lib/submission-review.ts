@@ -12,7 +12,7 @@ import {
   embedTextValue,
   PETDEX_EMBEDDING_MODEL,
 } from "@/lib/embeddings";
-import { scanPetSecurity } from "@/lib/pet-security";
+import { scanPetManifestsSecurity } from "@/lib/pet-security";
 import { decideAutomatedReview } from "@/lib/submission-review-decision";
 import { preparePolicyReviewImage } from "@/lib/submission-review-image";
 import {
@@ -347,6 +347,8 @@ async function analyzeAssets(row: SubmittedPet): Promise<AssetAnalysis> {
     }
   }
 
+  let zipPetJson: unknown;
+  let hasZipPetJson = false;
   if (zip.ok) {
     try {
       const archive = await JSZip.loadAsync(zip.buffer);
@@ -357,10 +359,25 @@ async function analyzeAssets(row: SubmittedPet): Promise<AssetAnalysis> {
       if (names.some(hasUnsafeZipPath)) {
         reasons.push("zip contains unsafe paths.");
       }
-      const basenames = new Set(names.map((name) => name.split("/").pop()));
-      if (!basenames.has("pet.json")) {
+      const petJsonNames = names.filter((name) => {
+        const file = archive.files[name];
+        return !file?.dir && name.split("/").pop() === "pet.json";
+      });
+      if (petJsonNames.length === 0) {
         reasons.push("zip does not contain pet.json.");
+      } else {
+        if (petJsonNames.length > 1) {
+          reasons.push("zip contains multiple pet.json files.");
+        }
+        try {
+          const raw = await archive.files[petJsonNames[0]].async("string");
+          zipPetJson = JSON.parse(raw);
+          hasZipPetJson = true;
+        } catch {
+          reasons.push("zip pet.json could not be parsed as JSON.");
+        }
       }
+      const basenames = new Set(names.map((name) => name.split("/").pop()));
       if (
         !basenames.has("spritesheet.webp") &&
         !basenames.has("spritesheet.png")
@@ -399,8 +416,9 @@ async function analyzeAssets(row: SubmittedPet): Promise<AssetAnalysis> {
     petJsonSha256: petJson.ok ? sha256(petJson.buffer) : null,
     zipSha256: zip.ok ? sha256(zip.buffer) : null,
   };
-  const security = scanPetSecurity({
+  const security = scanPetManifestsSecurity({
     petJson: parsedJson,
+    zipPetJson: hasZipPetJson ? zipPetJson : undefined,
     displayName: row.displayName,
     description: row.description,
   });
