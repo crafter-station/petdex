@@ -36,6 +36,11 @@ type Row = {
   zipUrl: string | null;
 };
 
+type ZipPetJson = {
+  name: string;
+  petJson: unknown;
+};
+
 type AuditResult = {
   slug: string;
   status: Row["status"];
@@ -235,12 +240,20 @@ async function auditRow(row: Row): Promise<AuditResult> {
     fetched.ok ? null : `pet.json unavailable: ${fetched.reason}`,
     zipFetched.ok ? null : `zip pet.json unavailable: ${zipFetched.reason}`,
   ].filter((reason): reason is string => Boolean(reason));
+  const zipPetJsons = zipFetched.ok ? zipFetched.petJsons : [];
   const scan = scanPetManifestsSecurity({
     petJson: fetched.ok ? fetched.petJson : {},
-    zipPetJson: zipFetched.ok ? zipFetched.petJson : undefined,
+    zipPetJson: zipPetJsons[0]?.petJson,
     displayName: row.displayName,
     description: row.description,
   });
+  if (zipFetched.ok) scan.reasons.push(...zipFetched.reasons);
+  for (const entry of zipPetJsons.slice(1)) {
+    appendZipPetJsonScan(scan, entry);
+  }
+  if (scan.decision === "pass" && zipFetched.ok && zipFetched.reasons.length) {
+    scan.decision = "hold";
+  }
   if (scan.decision === "pass" && unavailableReasons.length > 0) {
     return {
       slug: row.slug,
@@ -261,6 +274,25 @@ async function auditRow(row: Row): Promise<AuditResult> {
     reasons: scan.reasons,
     applied,
   };
+}
+
+function appendZipPetJsonScan(scan: PetSecurityScan, entry: ZipPetJson) {
+  const entryScan = scanPetSecurity({ petJson: entry.petJson });
+  scan.findings.push(
+    ...entryScan.findings.map((finding) => ({
+      ...finding,
+      path: `zip.petJson[${entry.name}]${finding.path === "$" ? "" : finding.path.startsWith("$") ? finding.path.slice(1) : `.${finding.path}`}`,
+    })),
+  );
+  scan.reasons.push(
+    ...entryScan.findings.map(
+      (finding) => `zip ${entry.name}: ${finding.code}: ${finding.evidence}`,
+    ),
+  );
+  if (entryScan.decision === "fail") scan.decision = "fail";
+  if (scan.decision === "pass" && entryScan.decision === "hold") {
+    scan.decision = "hold";
+  }
 }
 
 async function maybeApplySecurityRejection(
@@ -307,7 +339,10 @@ async function fetchPetJson(
 
 async function fetchZipPetJson(
   url: string | null,
-): Promise<{ ok: true; petJson: unknown } | { ok: false; reason: string }> {
+): Promise<
+  | { ok: true; petJsons: ZipPetJson[]; reasons: string[] }
+  | { ok: false; reason: string }
+> {
   if (!url) return { ok: false, reason: "zipUrl is missing" };
   if (!isAllowedAssetUrl(url)) {
     return { ok: false, reason: "zip URL is not allowed" };
@@ -322,10 +357,30 @@ async function fetchZipPetJson(
     });
     if (names.length === 0)
       return { ok: false, reason: "zip missing pet.json" };
-    if (names.length > 1) {
-      return { ok: false, reason: "zip contains multiple pet.json files" };
+    const reasons =
+      names.length > 1 ? ["zip contains multiple pet.json files"] : [];
+    const petJsons: ZipPetJson[] = [];
+    for (const name of names) {
+      const read = await readZipPetJson(
+        archive.files[name],
+        MAX_PET_JSON_BYTES,
+      );
+      if (read.ok) {
+        petJsons.push({ name, petJson: read.petJson });
+      } else {
+        reasons.push(`zip ${name}: ${read.reason}`);
+      }
     }
-    return await readZipPetJson(archive.files[names[0]], MAX_PET_JSON_BYTES);
+    if (petJsons.length === 0) {
+      return {
+        ok: false,
+        reason: reasons.join("; ") || "zip pet.json could not be scanned",
+      };
+    }
+    if (names.length > 1) {
+      return { ok: true, petJsons, reasons };
+    }
+    return { ok: true, petJsons, reasons };
   } catch (error) {
     return {
       ok: false,
