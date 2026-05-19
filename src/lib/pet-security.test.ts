@@ -76,4 +76,19 @@ describe("scanPetSecurity", () => {
       "path_traversal",
     );
   });
+
+  it("redacts sensitive values from findings and reasons", () => {
+    const result = scanPetSecurity({
+      petJson: {
+        apiKey: "sk-live-real-secret-value",
+        description: "reads process.env.OPENAI_API_KEY",
+      },
+    });
+    const serialized = JSON.stringify(result);
+
+    expect(result.decision).toBe("fail");
+    expect(serialized).not.toContain("sk-live-real-secret-value");
+    expect(serialized).not.toContain("OPENAI_API_KEY");
+    expect(serialized).toContain("[redacted]");
+  });
 });

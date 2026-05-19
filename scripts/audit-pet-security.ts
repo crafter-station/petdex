@@ -191,15 +191,20 @@ async function auditRow(row: Row): Promise<AuditResult> {
   const fetched = await fetchPetJson(row.petJsonUrl);
   if (!fetched.ok) {
     if (metadataScan.decision !== "pass") {
-      return {
-        slug: row.slug,
-        status: row.status,
-        decision: metadataScan.decision,
+      const scan = {
+        ...metadataScan,
         reasons: [
           ...metadataScan.reasons,
           `pet.json unavailable: ${fetched.reason}`,
         ],
-        applied: false,
+      };
+      const applied = await maybeApplySecurityRejection(row, scan);
+      return {
+        slug: row.slug,
+        status: row.status,
+        decision: scan.decision,
+        reasons: scan.reasons,
+        applied,
       };
     }
     return {
@@ -217,26 +222,7 @@ async function auditRow(row: Row): Promise<AuditResult> {
     description: row.description,
   });
 
-  let applied = false;
-  if (args.apply && scan.decision === "fail") {
-    const db = await getDb();
-    await recordSecurityReview(row, scan, false, db);
-    const actionDb = db as NonNullable<
-      Parameters<typeof applySubmissionAction>[2]
-    >["db"];
-    const result = await applySubmissionAction(
-      row.id,
-      {
-        action: "reject",
-        reason:
-          scan.reasons[0] ??
-          "Pet metadata contains a high-confidence executable payload.",
-      },
-      { actor: "auto-review", db: actionDb, skipSideEffects: !args.notify },
-    );
-    applied = result.ok;
-    if (!result.ok) scan.reasons.unshift(result.body.error);
-  }
+  const applied = await maybeApplySecurityRejection(row, scan);
 
   return {
     slug: row.slug,
@@ -245,6 +231,30 @@ async function auditRow(row: Row): Promise<AuditResult> {
     reasons: scan.reasons,
     applied,
   };
+}
+
+async function maybeApplySecurityRejection(
+  row: Row,
+  scan: PetSecurityScan,
+): Promise<boolean> {
+  if (!args.apply || scan.decision !== "fail") return false;
+  const db = await getDb();
+  await recordSecurityReview(row, scan, false, db);
+  const actionDb = db as NonNullable<
+    Parameters<typeof applySubmissionAction>[2]
+  >["db"];
+  const result = await applySubmissionAction(
+    row.id,
+    {
+      action: "reject",
+      reason:
+        scan.reasons[0] ??
+        "Pet metadata contains a high-confidence executable payload.",
+    },
+    { actor: "auto-review", db: actionDb, skipSideEffects: !args.notify },
+  );
+  if (!result.ok) scan.reasons.unshift(result.body.error);
+  return result.ok;
 }
 
 async function fetchPetJson(

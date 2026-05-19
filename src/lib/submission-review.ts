@@ -182,8 +182,7 @@ export async function reviewSubmission(
             ? { action: "approve" }
             : {
                 action: "reject",
-                reason:
-                  "This submission appears to duplicate an existing pet pack. If you believe this is incorrect, contact support with the submission ID.",
+                reason: rejectionReasonForDecision(decision),
               },
           {
             actor: "auto-review",
@@ -317,6 +316,14 @@ async function finishReview(
     throw new Error(`review ${reviewId} disappeared before completion`);
   }
   return { review, applied: args.applied };
+}
+
+function rejectionReasonForDecision(decision: {
+  reasonCode: string;
+  summary: string;
+}): string {
+  if (decision.reasonCode.startsWith("security_")) return decision.summary;
+  return "This submission appears to duplicate an existing pet pack. If you believe this is incorrect, contact support with the submission ID.";
 }
 
 async function analyzeAssets(row: SubmittedPet): Promise<AssetAnalysis> {

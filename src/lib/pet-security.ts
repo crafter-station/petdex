@@ -87,7 +87,10 @@ export function scanPetSecurity(input: ScanInput): PetSecurityScan {
     evidence: string,
   ) => {
     if (findings.length >= MAX_FINDINGS) return;
-    const clipped = evidence.replace(/\s+/g, " ").trim().slice(0, 220);
+    const clipped = redactEvidence(code, evidence)
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 220);
     if (
       findings.some(
         (finding) =>
@@ -225,4 +228,15 @@ function hasBlockedControlCharacter(value: string): boolean {
     if (code === 0 || code === 27 || code === 127) return true;
   }
   return false;
+}
+
+function redactEvidence(code: string, evidence: string): string {
+  if (code === "credential_exfiltration_reference") {
+    return "[redacted credential reference]";
+  }
+  if (code === "sensitive_metadata_key") {
+    const key = evidence.split(":")[0]?.trim();
+    return key ? `${key}: [redacted]` : "[redacted sensitive value]";
+  }
+  return evidence;
 }
