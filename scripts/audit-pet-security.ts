@@ -303,7 +303,6 @@ async function maybeApplySecurityRejection(
 ): Promise<boolean> {
   if (!args.apply || scan.decision !== "fail") return false;
   const db = await getDb();
-  await recordSecurityReview(row, scan, false, db);
   const actionDb = db as NonNullable<
     Parameters<typeof applySubmissionAction>[2]
   >["db"];
@@ -318,6 +317,14 @@ async function maybeApplySecurityRejection(
     { actor: "auto-review", db: actionDb, skipNotifications: !args.notify },
   );
   if (!result.ok) scan.reasons.unshift(result.body.error);
+  await recordSecurityReview(
+    row,
+    scan,
+    false,
+    db,
+    result.ok,
+    result.ok ? null : result.body.error,
+  );
   return result.ok;
 }
 
@@ -479,6 +486,8 @@ async function recordSecurityReview(
   scan: PetSecurityScan,
   dryRun: boolean,
   db: Awaited<ReturnType<typeof getDb>>,
+  applied: boolean,
+  applyReason: string | null,
 ) {
   const now = new Date();
   const reviewId = `review_${crypto.randomUUID().replace(/-/g, "").slice(0, 22)}`;
@@ -501,7 +510,7 @@ async function recordSecurityReview(
       semanticMatches: [],
       metadataMatches: [],
     },
-    autopilot: { applied: false, dryRun, reason: null },
+    autopilot: { applied, dryRun, reason: applyReason },
   };
 
   await db.insert(schema.submissionReviews).values({
