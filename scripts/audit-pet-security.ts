@@ -10,6 +10,7 @@ import {
 } from "@/lib/pet-security";
 import { applySubmissionAction } from "@/lib/submission-decisions";
 import type { ReviewChecks } from "@/lib/submission-review-types";
+import { isAllowedAssetUrl } from "@/lib/url-allowlist";
 
 type Args = {
   apply: boolean;
@@ -289,6 +290,9 @@ async function maybeApplySecurityRejection(
 async function fetchPetJson(
   url: string,
 ): Promise<{ ok: true; petJson: unknown } | { ok: false; reason: string }> {
+  if (!isAllowedAssetUrl(url)) {
+    return { ok: false, reason: "pet.json URL is not allowed" };
+  }
   const fetched = await fetchBuffer(url, MAX_PET_JSON_BYTES);
   if (!fetched.ok) return fetched;
   try {
@@ -305,6 +309,9 @@ async function fetchZipPetJson(
   url: string | null,
 ): Promise<{ ok: true; petJson: unknown } | { ok: false; reason: string }> {
   if (!url) return { ok: false, reason: "zipUrl is missing" };
+  if (!isAllowedAssetUrl(url)) {
+    return { ok: false, reason: "zip URL is not allowed" };
+  }
   const fetched = await fetchBuffer(url, MAX_ZIP_BYTES);
   if (!fetched.ok) return fetched;
   try {

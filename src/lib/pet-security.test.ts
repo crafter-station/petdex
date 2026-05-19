@@ -186,6 +186,38 @@ describe("scanPetSecurity", () => {
     expect(serialized).toContain("[redacted secret]");
   });
 
+  it("detects sensitive env-style keys with token-shaped values", () => {
+    const result = scanPetSecurity({
+      petJson: {
+        OPENAI_API_KEY: "sk-proj-real-secret-token",
+        openaiApiKey: "sk-live-real-secret-token",
+      },
+    });
+    const serialized = JSON.stringify(result);
+
+    expect(result.decision).toBe("fail");
+    expect(result.findings.map((finding) => finding.code)).toContain(
+      "credential_exfiltration_reference",
+    );
+    expect(serialized).not.toContain("sk-proj-real-secret-token");
+    expect(serialized).not.toContain("sk-live-real-secret-token");
+  });
+
+  it("fails command payloads in object keys", () => {
+    const result = scanPetSecurity({
+      petJson: {
+        states: {
+          "$(touch /tmp/pwned)": { row: 0 },
+        },
+      },
+    });
+
+    expect(result.decision).toBe("fail");
+    expect(result.findings.map((finding) => finding.code)).toContain(
+      "shell_command_substitution",
+    );
+  });
+
   it("keeps fail decisions after the visible findings cap is reached", () => {
     const result = scanPetSecurity({
       petJson: {

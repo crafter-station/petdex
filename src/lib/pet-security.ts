@@ -33,8 +33,12 @@ const CAPPED_FAIL_EVIDENCE =
 
 const executableKey =
   /^(command|cmd|exec|shell|script|scripts|postinstall|preinstall|installcommand|hook|hooks|launchagent|plist)$/i;
-const sensitiveKey =
+const exactSensitiveKey =
   /^(apikey|api_key|authtoken|auth_token|secret|token|env|envfile|env_file)$/i;
+const normalizedSensitiveKey =
+  /(?:apikey|authtoken|accesstoken|refreshtoken|secret|token|envfile|privatekey)$/i;
+const providerSecretKey =
+  /^(?:openai|anthropic|github|clerk|vercel|stripe|supabase|neon).*(?:key|token|secret)$/i;
 const freeTextKey =
   /^(displayname|display_name|name|title|description|summary|bio|notes?|author)$/i;
 const credentialReferenceRe =
@@ -156,6 +160,9 @@ export function scanPetSecurity(input: ScanInput): PetSecurityScan {
         key,
       );
     }
+    if (hasTokenValue(value)) {
+      add("hold", "secret_token_value", path, value, key);
+    }
     for (const pattern of holdPatterns) {
       if (pattern.re.test(value)) add("hold", pattern.code, path, value, key);
     }
@@ -163,7 +170,7 @@ export function scanPetSecurity(input: ScanInput): PetSecurityScan {
     if (key && executableKey.test(key) && value.trim()) {
       add("fail", "executable_metadata_key", path, `${key}: ${value}`, key);
     }
-    if (key && sensitiveKey.test(key) && value.trim()) {
+    if (key && isSensitiveKey(key) && value.trim()) {
       add("hold", "sensitive_metadata_key", path, `${key}: ${value}`, key);
     }
     if (key && /path$/i.test(key)) {
@@ -203,6 +210,7 @@ export function scanPetSecurity(input: ScanInput): PetSecurityScan {
     if (value && typeof value === "object") {
       const record = value as Record<string, unknown>;
       for (const [childKey, childValue] of Object.entries(record)) {
+        scanText(joinPath(path, childKey), childKey);
         if (executableKey.test(childKey) && typeof childValue !== "string") {
           add(
             "hold",
@@ -211,7 +219,7 @@ export function scanPetSecurity(input: ScanInput): PetSecurityScan {
             childKey,
           );
         }
-        if (sensitiveKey.test(childKey) && typeof childValue !== "string") {
+        if (isSensitiveKey(childKey) && typeof childValue !== "string") {
           add(
             "hold",
             "sensitive_metadata_key",
@@ -365,8 +373,22 @@ function isFreeTextField(path: string, key?: string): boolean {
   );
 }
 
+function isSensitiveKey(key: string): boolean {
+  const normalized = key.replace(/[^a-z0-9]/gi, "");
+  return (
+    exactSensitiveKey.test(key) ||
+    normalizedSensitiveKey.test(normalized) ||
+    providerSecretKey.test(normalized)
+  );
+}
+
+function hasTokenValue(value: string): boolean {
+  tokenValueRe.lastIndex = 0;
+  return tokenValueRe.test(value);
+}
+
 function redactEvidence(code: string, evidence: string, key?: string): string {
-  if (key && sensitiveKey.test(key)) {
+  if (key && isSensitiveKey(key)) {
     return `${key}: [redacted]`;
   }
   if (
@@ -379,6 +401,7 @@ function redactEvidence(code: string, evidence: string, key?: string): string {
     const key = evidence.split(":")[0]?.trim();
     return key ? `${key}: [redacted]` : "[redacted sensitive value]";
   }
+  tokenValueRe.lastIndex = 0;
   return evidence.replace(tokenValueRe, "[redacted secret]");
 }
 
