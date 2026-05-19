@@ -161,7 +161,13 @@ export function scanPetSecurity(input: ScanInput): PetSecurityScan {
       );
     }
     if (hasTokenValue(value)) {
-      add("hold", "secret_token_value", path, value, key);
+      add(
+        key && isSensitiveKey(key) ? "fail" : "hold",
+        "secret_token_value",
+        path,
+        value,
+        key,
+      );
     }
     for (const pattern of holdPatterns) {
       if (pattern.re.test(value)) add("hold", pattern.code, path, value, key);

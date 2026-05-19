@@ -51,6 +51,8 @@ type AuditResult = {
 
 const MAX_PET_JSON_BYTES = 1024 * 1024;
 const MAX_ZIP_BYTES = 20 * 1024 * 1024;
+const MAX_ZIP_PET_JSON_SCAN_ENTRIES = 16;
+const MAX_ZIP_PET_JSON_TOTAL_BYTES = MAX_PET_JSON_BYTES;
 const PUBLIC_MANIFEST_URL = "https://petdex.crafter.run/api/manifest";
 
 const args = parseArgs();
@@ -360,13 +362,22 @@ async function fetchZipPetJson(
     const reasons =
       names.length > 1 ? ["zip contains multiple pet.json files"] : [];
     const petJsons: ZipPetJson[] = [];
+    let totalBytes = 0;
     for (const name of names) {
-      const read = await readZipPetJson(
-        archive.files[name],
-        MAX_PET_JSON_BYTES,
-      );
+      if (petJsons.length >= MAX_ZIP_PET_JSON_SCAN_ENTRIES) {
+        reasons.push("zip pet.json scan entry limit reached");
+        break;
+      }
+      const entry = archive.files[name];
+      const size = zipEntryUncompressedSize(entry);
+      if (size !== null && totalBytes + size > MAX_ZIP_PET_JSON_TOTAL_BYTES) {
+        reasons.push("zip pet.json total size exceeds audit scan limit");
+        break;
+      }
+      const read = await readZipPetJson(entry, MAX_PET_JSON_BYTES);
       if (read.ok) {
         petJsons.push({ name, petJson: read.petJson });
+        totalBytes += size ?? 0;
       } else {
         reasons.push(`zip ${name}: ${read.reason}`);
       }

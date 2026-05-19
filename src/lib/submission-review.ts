@@ -38,6 +38,8 @@ import { isAllowedAssetUrl } from "@/lib/url-allowlist";
 
 const MAX_ASSET_BYTES = 8 * 1024 * 1024;
 const MAX_ZIP_ENTRIES = 80;
+const MAX_ZIP_PET_JSON_SCAN_ENTRIES = 16;
+const MAX_ZIP_PET_JSON_TOTAL_BYTES = MAX_ASSET_BYTES;
 const MIN_SPRITE_DIM = 256;
 const FRAME_W = 192;
 const FRAME_H = 208;
@@ -390,13 +392,25 @@ async function analyzeAssets(row: SubmittedPet): Promise<AssetAnalysis> {
         if (petJsonNames.length > 1) {
           reasons.push("zip contains multiple pet.json files.");
         }
+        let zipPetJsonTotalBytes = 0;
         for (const name of petJsonNames) {
-          const zipped = await readZipPetJson(
-            archive.files[name],
-            MAX_ASSET_BYTES,
-          );
+          if (zipPetJsons.length >= MAX_ZIP_PET_JSON_SCAN_ENTRIES) {
+            reasons.push("zip pet.json scan entry limit reached.");
+            break;
+          }
+          const entry = archive.files[name];
+          const size = zipEntryUncompressedSize(entry);
+          if (
+            size !== null &&
+            zipPetJsonTotalBytes + size > MAX_ZIP_PET_JSON_TOTAL_BYTES
+          ) {
+            reasons.push("zip pet.json total size exceeds the scan limit.");
+            break;
+          }
+          const zipped = await readZipPetJson(entry, MAX_ASSET_BYTES);
           if (zipped.ok) {
             zipPetJsons.push({ name, petJson: zipped.petJson });
+            zipPetJsonTotalBytes += size ?? 0;
           } else {
             reasons.push(`zip ${name}: ${zipped.reason}`);
           }

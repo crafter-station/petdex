@@ -203,6 +203,21 @@ describe("scanPetSecurity", () => {
     expect(serialized).not.toContain("sk-live-real-secret-token");
   });
 
+  it("fails token-shaped values in camelCase sensitive keys", () => {
+    const result = scanPetSecurity({
+      petJson: {
+        openaiApiKey: "sk-live-real-secret-token",
+      },
+    });
+    const serialized = JSON.stringify(result);
+
+    expect(result.decision).toBe("fail");
+    expect(result.findings.map((finding) => finding.code)).toContain(
+      "secret_token_value",
+    );
+    expect(serialized).not.toContain("sk-live-real-secret-token");
+  });
+
   it("fails command payloads in object keys", () => {
     const result = scanPetSecurity({
       petJson: {
