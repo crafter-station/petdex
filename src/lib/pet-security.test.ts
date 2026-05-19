@@ -22,6 +22,33 @@ describe("scanPetSecurity", () => {
     expect(result.findings).toEqual([]);
   });
 
+  it("allows free-text file labels in submitted metadata", () => {
+    const result = scanPetSecurity({
+      petJson: {
+        displayName: "Boba",
+        spritesheetPath: "spritesheet.webp",
+      },
+      description: "source file: spritesheet.webp",
+    });
+
+    expect(result.decision).toBe("pass");
+    expect(result.findings).toEqual([]);
+  });
+
+  it("fails real active script URLs", () => {
+    const result = scanPetSecurity({
+      petJson: {
+        displayName: "Boba",
+        homepage: "file:///tmp/pwned",
+      },
+    });
+
+    expect(result.decision).toBe("fail");
+    expect(result.findings.map((finding) => finding.code)).toContain(
+      "active_script_url",
+    );
+  });
+
   it("fails shell command substitution payloads", () => {
     const result = scanPetSecurity({
       petJson: {
@@ -91,6 +118,22 @@ describe("scanPetSecurity", () => {
     expect(serialized).not.toContain("OPENAI_API_KEY");
     expect(serialized).not.toContain("touch /tmp/pwned");
     expect(serialized).toContain("[redacted]");
+  });
+
+  it("redacts token-shaped values from non-sensitive findings", () => {
+    const result = scanPetSecurity({
+      petJson: {
+        description: "sk-proj-real-secret-token $(touch /tmp/pwned)",
+      },
+    });
+    const serialized = JSON.stringify(result);
+
+    expect(result.decision).toBe("fail");
+    expect(result.findings.map((finding) => finding.code)).toContain(
+      "shell_command_substitution",
+    );
+    expect(serialized).not.toContain("sk-proj-real-secret-token");
+    expect(serialized).toContain("[redacted secret]");
   });
 
   it("keeps fail decisions after the visible findings cap is reached", () => {

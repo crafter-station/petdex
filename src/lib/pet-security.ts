@@ -35,6 +35,8 @@ const sensitiveKey =
   /^(apikey|api_key|authtoken|auth_token|secret|token|env|envfile|env_file)$/i;
 const credentialReferenceRe =
   /(?:~\/\.ssh|\/\.ssh\/|id_rsa|id_ed25519|\.env\b|OPENAI_API_KEY|ANTHROPIC_API_KEY|GITHUB_TOKEN|CLERK_SECRET_KEY|process\.env|document\.cookie|localStorage)/i;
+const tokenValueRe =
+  /\b(?:sk-(?:proj|live|test|ant|admin)-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9_]{16,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|(?:pk|sk)_(?:live|test)_[A-Za-z0-9]{8,}|rk_(?:live|test)_[A-Za-z0-9]{8,}|[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,})\b/g;
 
 const failPatterns: Array<{ code: string; re: RegExp }> = [
   {
@@ -63,7 +65,7 @@ const failPatterns: Array<{ code: string; re: RegExp }> = [
   },
   {
     code: "active_script_url",
-    re: /\b(?:javascript|vbscript|file):/i,
+    re: /\b(?:javascript|vbscript):[^\s"'<>]+|\bfile:\/\/[^\s"'<>]+/i,
   },
   {
     code: "html_data_url",
@@ -327,7 +329,7 @@ function redactEvidence(code: string, evidence: string, key?: string): string {
     const key = evidence.split(":")[0]?.trim();
     return key ? `${key}: [redacted]` : "[redacted sensitive value]";
   }
-  return evidence;
+  return evidence.replace(tokenValueRe, "[redacted secret]");
 }
 
 function stableJson(value: unknown): string {
