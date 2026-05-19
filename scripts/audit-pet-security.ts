@@ -462,11 +462,7 @@ async function fetchBuffer(
       if (contentLength > maxBytes) {
         return { ok: false, reason: "asset exceeds maximum audit size" };
       }
-      const buffer = Buffer.from(await res.arrayBuffer());
-      if (buffer.byteLength > maxBytes) {
-        return { ok: false, reason: "asset exceeds maximum audit size" };
-      }
-      return { ok: true, buffer };
+      return await readResponseBuffer(res, maxBytes);
     } catch (error) {
       if (attempt < args.retries) {
         await sleep(retryDelayMs(attempt));
@@ -479,6 +475,27 @@ async function fetchBuffer(
     }
   }
   return { ok: false, reason: "asset fetch failed" };
+}
+
+async function readResponseBuffer(
+  res: Response,
+  maxBytes: number,
+): Promise<{ ok: true; buffer: Buffer } | { ok: false; reason: string }> {
+  const reader = res.body?.getReader();
+  if (!reader) return { ok: false, reason: "asset response body is empty" };
+  const chunks: Buffer[] = [];
+  let total = 0;
+  while (true) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    total += chunk.value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => {});
+      return { ok: false, reason: "asset exceeds maximum audit size" };
+    }
+    chunks.push(Buffer.from(chunk.value));
+  }
+  return { ok: true, buffer: Buffer.concat(chunks, total) };
 }
 
 async function recordSecurityReview(
