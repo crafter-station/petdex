@@ -1,3 +1,5 @@
+import type { Readable } from "node:stream";
+
 import { and, eq, inArray } from "drizzle-orm";
 import JSZip from "jszip";
 
@@ -424,11 +426,14 @@ async function readZipPetJson(
   if (size > maxBytes) {
     return { ok: false, reason: "zip pet.json exceeds maximum audit size" };
   }
+  const streamed = await readZipEntryBuffer(
+    entry,
+    maxBytes,
+    "zip pet.json exceeds maximum audit size",
+  );
+  if (!streamed.ok) return streamed;
   try {
-    const bytes = Buffer.from(await entry.async("uint8array"));
-    if (bytes.byteLength > maxBytes) {
-      return { ok: false, reason: "zip pet.json exceeds maximum audit size" };
-    }
+    const bytes = streamed.buffer;
     return { ok: true, petJson: JSON.parse(bytes.toString("utf8")) };
   } catch (error) {
     return {
@@ -436,6 +441,42 @@ async function readZipPetJson(
       reason: error instanceof Error ? error.message : String(error),
     };
   }
+}
+
+function readZipEntryBuffer(
+  entry: JSZip.JSZipObject,
+  maxBytes: number,
+  sizeReason: string,
+): Promise<{ ok: true; buffer: Buffer } | { ok: false; reason: string }> {
+  return new Promise((resolve) => {
+    const stream = entry.nodeStream("nodebuffer") as Readable;
+    const chunks: Buffer[] = [];
+    let total = 0;
+    let settled = false;
+    const finish = (
+      result: { ok: true; buffer: Buffer } | { ok: false; reason: string },
+    ) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+    stream.on("data", (chunk) => {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      total += buffer.byteLength;
+      if (total > maxBytes) {
+        stream.destroy();
+        finish({ ok: false, reason: sizeReason });
+        return;
+      }
+      chunks.push(buffer);
+    });
+    stream.on("error", () => {
+      finish({ ok: false, reason: "zip pet.json could not be read" });
+    });
+    stream.on("end", () => {
+      finish({ ok: true, buffer: Buffer.concat(chunks, total) });
+    });
+  });
 }
 
 function zipEntryUncompressedSize(entry: JSZip.JSZipObject): number | null {
