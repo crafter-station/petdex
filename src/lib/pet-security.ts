@@ -33,6 +33,8 @@ const executableKey =
   /^(command|cmd|exec|shell|script|scripts|postinstall|preinstall|installcommand|hook|hooks|launchagent|plist)$/i;
 const sensitiveKey =
   /^(apikey|api_key|authtoken|auth_token|secret|token|env|envfile|env_file)$/i;
+const credentialReferenceRe =
+  /(?:~\/\.ssh|\/\.ssh\/|id_rsa|id_ed25519|\.env\b|OPENAI_API_KEY|ANTHROPIC_API_KEY|GITHUB_TOKEN|CLERK_SECRET_KEY|process\.env|document\.cookie|localStorage)/i;
 
 const failPatterns: Array<{ code: string; re: RegExp }> = [
   {
@@ -57,7 +59,7 @@ const failPatterns: Array<{ code: string; re: RegExp }> = [
   },
   {
     code: "credential_exfiltration_reference",
-    re: /(?:~\/\.ssh|\/\.ssh\/|id_rsa|id_ed25519|\.env\b|OPENAI_API_KEY|ANTHROPIC_API_KEY|GITHUB_TOKEN|CLERK_SECRET_KEY|process\.env|document\.cookie|localStorage)/i,
+    re: credentialReferenceRe,
   },
   {
     code: "active_script_url",
@@ -82,6 +84,8 @@ const holdPatterns: Array<{ code: string; re: RegExp }> = [
 
 export function scanPetSecurity(input: ScanInput): PetSecurityScan {
   const findings: PetSecurityFinding[] = [];
+  let hasFail = false;
+  let hasHold = false;
   let nodes = 0;
 
   const add = (
@@ -89,9 +93,11 @@ export function scanPetSecurity(input: ScanInput): PetSecurityScan {
     code: string,
     path: string,
     evidence: string,
+    key?: string,
   ) => {
-    if (findings.length >= MAX_FINDINGS) return;
-    const clipped = redactEvidence(code, evidence)
+    if (severity === "fail") hasFail = true;
+    if (severity === "hold") hasHold = true;
+    const clipped = redactEvidence(code, evidence, key)
       .replace(/\s+/g, " ")
       .trim()
       .slice(0, 220);
@@ -105,36 +111,43 @@ export function scanPetSecurity(input: ScanInput): PetSecurityScan {
     ) {
       return;
     }
+    if (findings.length >= MAX_FINDINGS) return;
     findings.push({ severity, code, path, evidence: clipped });
   };
 
   const scanText = (path: string, value: string, key?: string) => {
     if (value.length > MAX_STRING_LENGTH) {
-      add("hold", "large_string_value", path, `String length ${value.length}`);
+      add(
+        "hold",
+        "large_string_value",
+        path,
+        `String length ${value.length}`,
+        key,
+      );
     }
     if (hasBlockedControlCharacter(value)) {
-      add("fail", "control_character_payload", path, value);
+      add("fail", "control_character_payload", path, value, key);
     }
 
     for (const pattern of failPatterns) {
-      if (pattern.re.test(value)) add("fail", pattern.code, path, value);
+      if (pattern.re.test(value)) add("fail", pattern.code, path, value, key);
     }
     for (const pattern of holdPatterns) {
-      if (pattern.re.test(value)) add("hold", pattern.code, path, value);
+      if (pattern.re.test(value)) add("hold", pattern.code, path, value, key);
     }
 
     if (key && executableKey.test(key) && value.trim()) {
-      add("fail", "executable_metadata_key", path, `${key}: ${value}`);
+      add("fail", "executable_metadata_key", path, `${key}: ${value}`, key);
     }
     if (key && sensitiveKey.test(key) && value.trim()) {
-      add("hold", "sensitive_metadata_key", path, `${key}: ${value}`);
+      add("hold", "sensitive_metadata_key", path, `${key}: ${value}`, key);
     }
     if (key && /path$/i.test(key)) {
       if (/^\s*(?:\/|~\/|[a-z]:\\|\\\\|https?:\/\/)/i.test(value)) {
-        add("hold", "absolute_or_remote_path", path, `${key}: ${value}`);
+        add("hold", "absolute_or_remote_path", path, `${key}: ${value}`, key);
       }
       if (/(?:^|[\\/])\.\.(?:[\\/]|$)/.test(value)) {
-        add("fail", "path_traversal", path, `${key}: ${value}`);
+        add("fail", "path_traversal", path, `${key}: ${value}`, key);
       }
     }
   };
@@ -196,8 +209,6 @@ export function scanPetSecurity(input: ScanInput): PetSecurityScan {
   if (input.displayName) scanText("submitted.displayName", input.displayName);
   if (input.description) scanText("submitted.description", input.description);
 
-  const hasFail = findings.some((finding) => finding.severity === "fail");
-  const hasHold = findings.some((finding) => finding.severity === "hold");
   const decision: ReviewCheckDecision = hasFail
     ? "fail"
     : hasHold
@@ -214,28 +225,22 @@ export function scanPetSecurity(input: ScanInput): PetSecurityScan {
 export function scanPetManifestsSecurity(
   input: ManifestScanInput,
 ): PetSecurityScan {
+  const petJsonScan = scanPetSecurity({ petJson: input.petJson });
+  const submittedScan = scanPetSecurity({
+    petJson: {},
+    displayName: input.displayName,
+    description: input.description,
+  });
+  const decisions = [petJsonScan.decision, submittedScan.decision];
   const findings = [
-    ...prefixFindings(
-      scanPetSecurity({ petJson: input.petJson }).findings,
-      "petJsonUrl",
-    ),
-    ...prefixFindings(
-      scanPetSecurity({
-        petJson: {},
-        displayName: input.displayName,
-        description: input.description,
-      }).findings,
-      "submitted",
-    ),
+    ...prefixFindings(petJsonScan.findings, "petJsonUrl"),
+    ...prefixFindings(submittedScan.findings, "submitted"),
   ];
 
   if (input.zipPetJson !== undefined) {
-    findings.push(
-      ...prefixFindings(
-        scanPetSecurity({ petJson: input.zipPetJson }).findings,
-        "zip.petJson",
-      ),
-    );
+    const zipScan = scanPetSecurity({ petJson: input.zipPetJson });
+    decisions.push(zipScan.decision);
+    findings.push(...prefixFindings(zipScan.findings, "zip.petJson"));
     if (stableJson(input.petJson) !== stableJson(input.zipPetJson)) {
       findings.push({
         code: "pet_json_manifest_mismatch",
@@ -246,12 +251,19 @@ export function scanPetManifestsSecurity(
     }
   }
 
-  return scanFromFindings(findings);
+  return scanFromFindings(findings, decisions);
 }
 
-function scanFromFindings(findings: PetSecurityFinding[]): PetSecurityScan {
-  const hasFail = findings.some((finding) => finding.severity === "fail");
-  const hasHold = findings.some((finding) => finding.severity === "hold");
+function scanFromFindings(
+  findings: PetSecurityFinding[],
+  decisions: ReviewCheckDecision[] = [],
+): PetSecurityScan {
+  const hasFail =
+    decisions.includes("fail") ||
+    findings.some((finding) => finding.severity === "fail");
+  const hasHold =
+    decisions.includes("hold") ||
+    findings.some((finding) => finding.severity === "hold");
   const decision: ReviewCheckDecision = hasFail
     ? "fail"
     : hasHold
@@ -301,8 +313,14 @@ function hasBlockedControlCharacter(value: string): boolean {
   return false;
 }
 
-function redactEvidence(code: string, evidence: string): string {
-  if (code === "credential_exfiltration_reference") {
+function redactEvidence(code: string, evidence: string, key?: string): string {
+  if (key && sensitiveKey.test(key)) {
+    return `${key}: [redacted]`;
+  }
+  if (
+    code === "credential_exfiltration_reference" ||
+    credentialReferenceRe.test(evidence)
+  ) {
     return "[redacted credential reference]";
   }
   if (code === "sensitive_metadata_key") {

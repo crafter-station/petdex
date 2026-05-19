@@ -80,7 +80,7 @@ describe("scanPetSecurity", () => {
   it("redacts sensitive values from findings and reasons", () => {
     const result = scanPetSecurity({
       petJson: {
-        apiKey: "sk-live-real-secret-value",
+        apiKey: "sk-live-real-secret-value $(touch /tmp/pwned)",
         description: "reads process.env.OPENAI_API_KEY",
       },
     });
@@ -89,7 +89,23 @@ describe("scanPetSecurity", () => {
     expect(result.decision).toBe("fail");
     expect(serialized).not.toContain("sk-live-real-secret-value");
     expect(serialized).not.toContain("OPENAI_API_KEY");
+    expect(serialized).not.toContain("touch /tmp/pwned");
     expect(serialized).toContain("[redacted]");
+  });
+
+  it("keeps fail decisions after the visible findings cap is reached", () => {
+    const result = scanPetSecurity({
+      petJson: {
+        links: Array.from(
+          { length: 30 },
+          (_, index) => `https://example.com/${index}`,
+        ),
+        displayName: "Boba $(touch /tmp/pwned)",
+      },
+    });
+
+    expect(result.findings).toHaveLength(24);
+    expect(result.decision).toBe("fail");
   });
 
   it("fails malicious zip pet.json even when standalone pet.json is clean", () => {

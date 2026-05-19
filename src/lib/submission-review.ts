@@ -369,12 +369,15 @@ async function analyzeAssets(row: SubmittedPet): Promise<AssetAnalysis> {
         if (petJsonNames.length > 1) {
           reasons.push("zip contains multiple pet.json files.");
         }
-        try {
-          const raw = await archive.files[petJsonNames[0]].async("string");
-          zipPetJson = JSON.parse(raw);
+        const zipped = await readZipPetJson(
+          archive.files[petJsonNames[0]],
+          MAX_ASSET_BYTES,
+        );
+        if (zipped.ok) {
+          zipPetJson = zipped.petJson;
           hasZipPetJson = true;
-        } catch {
-          reasons.push("zip pet.json could not be parsed as JSON.");
+        } else {
+          reasons.push(zipped.reason);
         }
       }
       const basenames = new Set(names.map((name) => name.split("/").pop()));
@@ -1228,6 +1231,43 @@ function sha256(buffer: Buffer): string {
 
 function hasUnsafeZipPath(name: string): boolean {
   return name.startsWith("/") || name.split("/").includes("..");
+}
+
+type ZipEntryWithData = JSZip.JSZipObject & {
+  _data?: { uncompressedSize?: unknown };
+};
+
+async function readZipPetJson(
+  entry: JSZip.JSZipObject,
+  maxBytes: number,
+): Promise<{ ok: true; petJson: unknown } | { ok: false; reason: string }> {
+  const size = zipEntryUncompressedSize(entry);
+  if (size === null) {
+    return { ok: false, reason: "zip pet.json size could not be verified." };
+  }
+  if (size > maxBytes) {
+    return {
+      ok: false,
+      reason: "zip pet.json exceeds the maximum allowed size.",
+    };
+  }
+  try {
+    const bytes = Buffer.from(await entry.async("uint8array"));
+    if (bytes.byteLength > maxBytes) {
+      return {
+        ok: false,
+        reason: "zip pet.json exceeds the maximum allowed size.",
+      };
+    }
+    return { ok: true, petJson: JSON.parse(bytes.toString("utf8")) };
+  } catch {
+    return { ok: false, reason: "zip pet.json could not be parsed as JSON." };
+  }
+}
+
+function zipEntryUncompressedSize(entry: JSZip.JSZipObject): number | null {
+  const size = (entry as ZipEntryWithData)._data?.uncompressedSize;
+  return typeof size === "number" && Number.isFinite(size) ? size : null;
 }
 
 function normalizeText(value: string): string {

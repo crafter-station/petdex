@@ -317,14 +317,47 @@ async function fetchZipPetJson(
     if (names.length > 1) {
       return { ok: false, reason: "zip contains multiple pet.json files" };
     }
-    const raw = await archive.files[names[0]].async("string");
-    return { ok: true, petJson: JSON.parse(raw) };
+    return await readZipPetJson(archive.files[names[0]], MAX_PET_JSON_BYTES);
   } catch (error) {
     return {
       ok: false,
       reason: error instanceof Error ? error.message : String(error),
     };
   }
+}
+
+type ZipEntryWithData = JSZip.JSZipObject & {
+  _data?: { uncompressedSize?: unknown };
+};
+
+async function readZipPetJson(
+  entry: JSZip.JSZipObject,
+  maxBytes: number,
+): Promise<{ ok: true; petJson: unknown } | { ok: false; reason: string }> {
+  const size = zipEntryUncompressedSize(entry);
+  if (size === null) {
+    return { ok: false, reason: "zip pet.json size could not be verified" };
+  }
+  if (size > maxBytes) {
+    return { ok: false, reason: "zip pet.json exceeds maximum audit size" };
+  }
+  try {
+    const bytes = Buffer.from(await entry.async("uint8array"));
+    if (bytes.byteLength > maxBytes) {
+      return { ok: false, reason: "zip pet.json exceeds maximum audit size" };
+    }
+    return { ok: true, petJson: JSON.parse(bytes.toString("utf8")) };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+function zipEntryUncompressedSize(entry: JSZip.JSZipObject): number | null {
+  const size = (entry as ZipEntryWithData)._data?.uncompressedSize;
+  return typeof size === "number" && Number.isFinite(size) ? size : null;
 }
 
 async function fetchBuffer(
