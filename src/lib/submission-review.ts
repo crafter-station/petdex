@@ -12,7 +12,11 @@ import {
   embedTextValue,
   PETDEX_EMBEDDING_MODEL,
 } from "@/lib/embeddings";
-import { scanPetManifestsSecurity, scanPetSecurity } from "@/lib/pet-security";
+import {
+  petSecurityPathSegment,
+  scanPetManifestsSecurity,
+  scanPetSecurity,
+} from "@/lib/pet-security";
 import { decideAutomatedReview } from "@/lib/submission-review-decision";
 import { preparePolicyReviewImage } from "@/lib/submission-review-image";
 import {
@@ -483,15 +487,16 @@ function appendZipPetJsonSecurity(
   entry: ZipPetJson,
 ) {
   const entryScan = scanPetSecurity({ petJson: entry.petJson });
+  const entryName = petSecurityPathSegment(entry.name);
   security.findings.push(
     ...entryScan.findings.map((finding) => ({
       ...finding,
-      path: `zip.petJson[${entry.name}]${finding.path === "$" ? "" : finding.path.startsWith("$") ? finding.path.slice(1) : `.${finding.path}`}`,
+      path: `zip.petJson[${JSON.stringify(entryName)}]${finding.path === "$" ? "" : finding.path.startsWith("$") ? finding.path.slice(1) : `.${finding.path}`}`,
     })),
   );
   security.reasons.push(
     ...entryScan.findings.map(
-      (finding) => `zip ${entry.name}: ${finding.code}: ${finding.evidence}`,
+      (finding) => `zip ${entryName}: ${finding.code}: ${finding.evidence}`,
     ),
   );
   if (entryScan.decision === "fail") security.decision = "fail";

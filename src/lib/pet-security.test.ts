@@ -233,6 +233,19 @@ describe("scanPetSecurity", () => {
     );
   });
 
+  it("redacts token-shaped object keys from stored paths", () => {
+    const result = scanPetSecurity({
+      petJson: {
+        "sk-live-real-secret-token": "$(touch /tmp/pwned)",
+      },
+    });
+    const serialized = JSON.stringify(result);
+
+    expect(result.decision).toBe("fail");
+    expect(serialized).not.toContain("sk-live-real-secret-token");
+    expect(serialized).toContain("redactedKey");
+  });
+
   it("keeps fail decisions after the visible findings cap is reached", () => {
     const result = scanPetSecurity({
       petJson: {

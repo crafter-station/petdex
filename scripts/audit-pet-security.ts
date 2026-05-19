@@ -4,6 +4,7 @@ import JSZip from "jszip";
 import * as schema from "@/lib/db/schema";
 import {
   type PetSecurityScan,
+  petSecurityPathSegment,
   petSecurityReason,
   scanPetManifestsSecurity,
   scanPetSecurity,
@@ -280,15 +281,16 @@ async function auditRow(row: Row): Promise<AuditResult> {
 
 function appendZipPetJsonScan(scan: PetSecurityScan, entry: ZipPetJson) {
   const entryScan = scanPetSecurity({ petJson: entry.petJson });
+  const entryName = petSecurityPathSegment(entry.name);
   scan.findings.push(
     ...entryScan.findings.map((finding) => ({
       ...finding,
-      path: `zip.petJson[${entry.name}]${finding.path === "$" ? "" : finding.path.startsWith("$") ? finding.path.slice(1) : `.${finding.path}`}`,
+      path: `zip.petJson[${JSON.stringify(entryName)}]${finding.path === "$" ? "" : finding.path.startsWith("$") ? finding.path.slice(1) : `.${finding.path}`}`,
     })),
   );
   scan.reasons.push(
     ...entryScan.findings.map(
-      (finding) => `zip ${entry.name}: ${finding.code}: ${finding.evidence}`,
+      (finding) => `zip ${entryName}: ${finding.code}: ${finding.evidence}`,
     ),
   );
   if (entryScan.decision === "fail") scan.decision = "fail";

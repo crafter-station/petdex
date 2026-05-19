@@ -335,6 +335,10 @@ export function petSecurityReason(
   return scan.reasons[0] ?? null;
 }
 
+export function petSecurityPathSegment(value: string): string {
+  return isUnsafePathSegment(value) ? "redactedKey" : value;
+}
+
 function prefixFindings(
   findings: PetSecurityFinding[],
   prefix: string,
@@ -349,9 +353,10 @@ function prefixFindings(
 }
 
 function joinPath(parent: string, key: string): string {
-  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key)
-    ? `${parent}.${key}`
-    : `${parent}[${JSON.stringify(key)}]`;
+  const segment = petSecurityPathSegment(key);
+  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(segment)
+    ? `${parent}.${segment}`
+    : `${parent}[${JSON.stringify(segment)}]`;
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -388,6 +393,13 @@ function isSensitiveKey(key: string): boolean {
   );
 }
 
+function isUnsafePathSegment(value: string): boolean {
+  if (hasTokenValue(value)) return true;
+  if (credentialReferenceRe.test(value)) return true;
+  if (hasBlockedControlCharacter(value)) return true;
+  return failPatterns.some((pattern) => pattern.re.test(value));
+}
+
 function hasTokenValue(value: string): boolean {
   tokenValueRe.lastIndex = 0;
   return tokenValueRe.test(value);
@@ -395,7 +407,7 @@ function hasTokenValue(value: string): boolean {
 
 function redactEvidence(code: string, evidence: string, key?: string): string {
   if (key && isSensitiveKey(key)) {
-    return `${key}: [redacted]`;
+    return `${petSecurityPathSegment(key)}: [redacted]`;
   }
   if (
     code === "credential_exfiltration_reference" ||
@@ -405,7 +417,9 @@ function redactEvidence(code: string, evidence: string, key?: string): string {
   }
   if (code === "sensitive_metadata_key") {
     const key = evidence.split(":")[0]?.trim();
-    return key ? `${key}: [redacted]` : "[redacted sensitive value]";
+    return key
+      ? `${petSecurityPathSegment(key)}: [redacted]`
+      : "[redacted sensitive value]";
   }
   tokenValueRe.lastIndex = 0;
   return evidence.replace(tokenValueRe, "[redacted secret]");
