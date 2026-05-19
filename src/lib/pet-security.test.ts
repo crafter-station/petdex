@@ -63,6 +63,29 @@ describe("scanPetSecurity", () => {
     expect(result.findings[0]?.path).toBe("$.displayName");
   });
 
+  it("allows harmless backticks in free-text descriptions", () => {
+    const result = scanPetSecurity({
+      petJson: {
+        displayName: "Boba",
+        description: "Uses `pet.json` and `spritesheet.webp`.",
+      },
+    });
+
+    expect(result.decision).toBe("pass");
+    expect(result.findings).toEqual([]);
+  });
+
+  it("fails shell-like backtick command substitutions", () => {
+    const result = scanPetSecurity({
+      petJson: {
+        displayName: "`touch /tmp/pwned`",
+      },
+    });
+
+    expect(result.decision).toBe("fail");
+    expect(result.findings[0]?.code).toBe("shell_command_substitution");
+  });
+
   it("fails executable metadata keys", () => {
     const result = scanPetSecurity({
       petJson: {

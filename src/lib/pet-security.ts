@@ -45,7 +45,7 @@ const tokenValueRe =
 const failPatterns: Array<{ code: string; re: RegExp }> = [
   {
     code: "shell_command_substitution",
-    re: /\$\([^)\r\n]{1,500}\)|`[^`\r\n]{1,500}`/,
+    re: /\$\([^)\r\n]{1,500}\)|`(?=[^`\r\n]{0,500}\b(?:curl|wget|rm|chmod|chown|bash|sh|zsh|fish|cmd\.exe|powershell|pwsh|osascript|python3?|node|ruby|perl|touch|nc|mkfifo|launchctl|crontab)\b)[^`\r\n]{1,500}`/i,
   },
   {
     code: "shell_download_pipe",

@@ -148,10 +148,26 @@ export async function reviewSubmission(
     const assets = await analyzeAssets(row);
     await persistAssetSignals(row.id, assets);
 
-    const [policy, duplicates] = await Promise.all([
-      analyzePolicy(row, assets),
-      analyzeDuplicates(row, assets),
-    ]);
+    let policy: ReviewChecks["policy"] = {
+      decision: "hold",
+      confidence: 0,
+      reasons: ["Skipped because security review failed."],
+      flags: [],
+    };
+    let duplicates: ReviewChecks["duplicates"] = {
+      decision: "hold",
+      reasons: ["Skipped because security review failed."],
+      exactMatches: [],
+      visualMatches: [],
+      semanticMatches: [],
+      metadataMatches: [],
+    };
+    if (assets.security?.decision !== "fail") {
+      [policy, duplicates] = await Promise.all([
+        analyzePolicy(row, assets),
+        analyzeDuplicates(row, assets),
+      ]);
+    }
 
     checks = {
       security: assets.security,
