@@ -1651,6 +1651,7 @@
     "noSummary": "Sin resumen.",
     "confidence": "Confianza: {confidence}%.",
     "evidenceAssets": "Archivos",
+    "evidenceSecurity": "Seguridad",
     "evidencePolicy": "Política",
     "evidenceVisualText": "Texto visual",
     "evidenceVisualSignals": "Señales visuales"

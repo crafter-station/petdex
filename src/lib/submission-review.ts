@@ -12,6 +12,7 @@ import {
   embedTextValue,
   PETDEX_EMBEDDING_MODEL,
 } from "@/lib/embeddings";
+import { scanPetSecurity } from "@/lib/pet-security";
 import { decideAutomatedReview } from "@/lib/submission-review-decision";
 import { preparePolicyReviewImage } from "@/lib/submission-review-image";
 import {
@@ -63,6 +64,7 @@ export type ReviewSubmissionResult = {
 
 type AssetAnalysis = {
   check: ReviewChecks["assets"];
+  security: NonNullable<ReviewChecks["security"]>;
   spriteBuffer: Buffer | null;
   petJson: unknown;
   dhash: string | null;
@@ -152,6 +154,7 @@ export async function reviewSubmission(
     ]);
 
     checks = {
+      security: assets.security,
       assets: assets.check,
       policy,
       duplicates,
@@ -389,6 +392,11 @@ async function analyzeAssets(row: SubmittedPet): Promise<AssetAnalysis> {
     petJsonSha256: petJson.ok ? sha256(petJson.buffer) : null,
     zipSha256: zip.ok ? sha256(zip.buffer) : null,
   };
+  const security = scanPetSecurity({
+    petJson: parsedJson,
+    displayName: row.displayName,
+    description: row.description,
+  });
 
   return {
     check: {
@@ -396,6 +404,7 @@ async function analyzeAssets(row: SubmittedPet): Promise<AssetAnalysis> {
       reasons,
       hashes,
     },
+    security,
     spriteBuffer: sprite.ok ? sprite.buffer : null,
     petJson: parsedJson,
     dhash,
@@ -1119,6 +1128,11 @@ function buildPolicyUserPrompt(row: SubmittedPet, petJson: unknown): string {
 
 function emptyChecks(dryRun: boolean): ReviewChecks {
   return {
+    security: {
+      decision: "hold",
+      reasons: ["Security review has not run yet."],
+      findings: [],
+    },
     assets: { decision: "hold", reasons: ["Review has not run yet."] },
     policy: { decision: "hold", confidence: 0, reasons: [], flags: [] },
     duplicates: {

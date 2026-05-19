@@ -1,0 +1,440 @@
+import { and, eq, inArray } from "drizzle-orm";
+
+import * as schema from "@/lib/db/schema";
+import { type PetSecurityScan, scanPetSecurity } from "@/lib/pet-security";
+import { applySubmissionAction } from "@/lib/submission-decisions";
+import type { ReviewChecks } from "@/lib/submission-review-types";
+
+type Args = {
+  apply: boolean;
+  notify: boolean;
+  includePending: boolean;
+  json: boolean;
+  limit: number;
+  concurrency: number;
+  timeoutMs: number;
+  retries: number;
+  delayMs: number;
+  slug: string | null;
+  manifestUrl: string | null;
+};
+
+type Row = {
+  id: string;
+  slug: string;
+  status: "pending" | "approved" | "rejected";
+  displayName: string;
+  description: string;
+  petJsonUrl: string;
+};
+
+type AuditResult = {
+  slug: string;
+  status: Row["status"];
+  decision: PetSecurityScan["decision"] | "error";
+  reasons: string[];
+  applied: boolean;
+};
+
+const MAX_PET_JSON_BYTES = 1024 * 1024;
+const PUBLIC_MANIFEST_URL = "https://petdex.crafter.run/api/manifest";
+
+const args = parseArgs();
+const results: AuditResult[] = [];
+
+async function main() {
+  if (args.apply && args.manifestUrl) {
+    throw new Error("--apply requires DATABASE_URL mode, not --manifest-url");
+  }
+  const rows = await loadRows();
+
+  log(
+    `auditing ${rows.length} pets source=${args.manifestUrl ?? "database"} apply=${args.apply ? "YES" : "no"} notify=${args.notify ? "YES" : "no"} concurrency=${args.concurrency}`,
+  );
+
+  let nextIndex = 0;
+  async function worker(workerId: number) {
+    while (true) {
+      const index = nextIndex++;
+      if (index >= rows.length) return;
+      const row = rows[index] as Row;
+      const result = await auditRow(row);
+      results.push(result);
+      log(
+        `[${index + 1}/${rows.length}] worker=${workerId} ${row.slug} ${result.status} -> ${result.decision}${result.applied ? " applied" : ""}${result.reasons[0] ? ` ${result.reasons[0]}` : ""}`,
+      );
+      if (args.delayMs > 0) await sleep(args.delayMs);
+    }
+  }
+
+  await Promise.all(
+    Array.from(
+      { length: Math.min(args.concurrency, rows.length || 1) },
+      (_, index) => worker(index + 1),
+    ),
+  );
+
+  printSummary();
+}
+
+async function loadRows(): Promise<Row[]> {
+  if (args.manifestUrl) return loadManifestRows(args.manifestUrl);
+
+  const db = await getDb();
+  const statuses: Row["status"][] = args.includePending
+    ? ["approved", "pending"]
+    : ["approved"];
+  const where = args.slug
+    ? and(
+        eq(schema.submittedPets.slug, args.slug),
+        inArray(schema.submittedPets.status, statuses),
+      )
+    : inArray(schema.submittedPets.status, statuses);
+
+  const rows = await db
+    .select({
+      id: schema.submittedPets.id,
+      slug: schema.submittedPets.slug,
+      status: schema.submittedPets.status,
+      displayName: schema.submittedPets.displayName,
+      description: schema.submittedPets.description,
+      petJsonUrl: schema.submittedPets.petJsonUrl,
+    })
+    .from(schema.submittedPets)
+    .where(where)
+    .limit(args.limit);
+
+  return rows as Row[];
+}
+
+async function loadManifestRows(url: string): Promise<Row[]> {
+  const res = await fetch(url, {
+    redirect: "error",
+    signal: AbortSignal.timeout(args.timeoutMs),
+  });
+  if (!res.ok) throw new Error(`manifest fetch ${res.status}`);
+  const json = await res.json();
+  const pets = isRecord(json) && Array.isArray(json.pets) ? json.pets : [];
+  return pets.slice(0, args.limit).map((pet, index) => {
+    if (!isRecord(pet)) throw new Error(`manifest pet ${index} is not object`);
+    const slug = stringField(pet.slug) ?? `manifest-${index}`;
+    return {
+      id: slug,
+      slug,
+      status: "approved",
+      displayName: stringField(pet.displayName) ?? slug,
+      description: "",
+      petJsonUrl: requiredStringField(
+        pet.petJsonUrl,
+        `pets[${index}].petJsonUrl`,
+      ),
+    };
+  });
+}
+
+function printSummary() {
+  const fail = results.filter((result) => result.decision === "fail");
+  const hold = results.filter((result) => result.decision === "hold");
+  const error = results.filter((result) => result.decision === "error");
+  const applied = results.filter((result) => result.applied);
+
+  if (args.json) {
+    console.log(
+      JSON.stringify(
+        {
+          total: results.length,
+          counts: {
+            fail: fail.length,
+            hold: hold.length,
+            error: error.length,
+            applied: applied.length,
+          },
+          fail,
+          hold,
+          error,
+          applied,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  console.log("");
+  console.log(
+    `done total=${results.length} fail=${fail.length} hold=${hold.length} error=${error.length} applied=${applied.length}`,
+  );
+
+  for (const group of [
+    ["fail", fail],
+    ["hold", hold],
+    ["error", error],
+  ] as const) {
+    if (group[1].length === 0) continue;
+    console.log("");
+    console.log(`${group[0]}:`);
+    for (const result of group[1]) {
+      console.log(
+        `- ${result.slug} [${result.status}] ${result.reasons.join("; ")}`,
+      );
+    }
+  }
+}
+
+async function auditRow(row: Row): Promise<AuditResult> {
+  const metadataScan = scanPetSecurity({
+    petJson: {},
+    displayName: row.displayName,
+    description: row.description,
+  });
+  const fetched = await fetchPetJson(row.petJsonUrl);
+  if (!fetched.ok) {
+    if (metadataScan.decision !== "pass") {
+      return {
+        slug: row.slug,
+        status: row.status,
+        decision: metadataScan.decision,
+        reasons: [
+          ...metadataScan.reasons,
+          `pet.json unavailable: ${fetched.reason}`,
+        ],
+        applied: false,
+      };
+    }
+    return {
+      slug: row.slug,
+      status: row.status,
+      decision: "error",
+      reasons: [fetched.reason],
+      applied: false,
+    };
+  }
+
+  const scan = scanPetSecurity({
+    petJson: fetched.petJson,
+    displayName: row.displayName,
+    description: row.description,
+  });
+
+  let applied = false;
+  if (args.apply && scan.decision === "fail") {
+    const db = await getDb();
+    await recordSecurityReview(row, scan, false, db);
+    const actionDb = db as NonNullable<
+      Parameters<typeof applySubmissionAction>[2]
+    >["db"];
+    const result = await applySubmissionAction(
+      row.id,
+      {
+        action: "reject",
+        reason:
+          scan.reasons[0] ??
+          "Pet metadata contains a high-confidence executable payload.",
+      },
+      { actor: "auto-review", db: actionDb, skipSideEffects: !args.notify },
+    );
+    applied = result.ok;
+    if (!result.ok) scan.reasons.unshift(result.body.error);
+  }
+
+  return {
+    slug: row.slug,
+    status: row.status,
+    decision: scan.decision,
+    reasons: scan.reasons,
+    applied,
+  };
+}
+
+async function fetchPetJson(
+  url: string,
+): Promise<{ ok: true; petJson: unknown } | { ok: false; reason: string }> {
+  for (let attempt = 0; attempt <= args.retries; attempt++) {
+    try {
+      const res = await fetch(url, {
+        redirect: "error",
+        signal: AbortSignal.timeout(args.timeoutMs),
+      });
+      if (!res.ok) {
+        if (shouldRetryStatus(res.status) && attempt < args.retries) {
+          await sleep(retryDelayMs(attempt, res.headers));
+          continue;
+        }
+        return { ok: false, reason: `pet.json fetch ${res.status}` };
+      }
+      const contentLength = Number(res.headers.get("content-length") ?? 0);
+      if (contentLength > MAX_PET_JSON_BYTES) {
+        return { ok: false, reason: "pet.json exceeds maximum audit size" };
+      }
+      const buffer = Buffer.from(await res.arrayBuffer());
+      if (buffer.byteLength > MAX_PET_JSON_BYTES) {
+        return { ok: false, reason: "pet.json exceeds maximum audit size" };
+      }
+      return { ok: true, petJson: JSON.parse(buffer.toString("utf8")) };
+    } catch (error) {
+      if (attempt < args.retries) {
+        await sleep(retryDelayMs(attempt));
+        continue;
+      }
+      return {
+        ok: false,
+        reason: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+  return { ok: false, reason: "pet.json fetch failed" };
+}
+
+async function recordSecurityReview(
+  row: Row,
+  scan: PetSecurityScan,
+  dryRun: boolean,
+  db: Awaited<ReturnType<typeof getDb>>,
+) {
+  const now = new Date();
+  const reviewId = `review_${crypto.randomUUID().replace(/-/g, "").slice(0, 22)}`;
+  const checks: ReviewChecks = {
+    security: scan,
+    assets: { decision: "pass", reasons: [] },
+    policy: {
+      decision: "hold",
+      confidence: 0,
+      reasons: [
+        "Policy review skipped after deterministic security rejection.",
+      ],
+      flags: [],
+    },
+    duplicates: {
+      decision: "pass",
+      reasons: [],
+      exactMatches: [],
+      visualMatches: [],
+      semanticMatches: [],
+      metadataMatches: [],
+    },
+    autopilot: { applied: false, dryRun, reason: null },
+  };
+
+  await db.insert(schema.submissionReviews).values({
+    id: reviewId,
+    submittedPetId: row.id,
+    status: "completed",
+    decision: "auto_reject",
+    reasonCode: "security_malicious_pet_json",
+    summary:
+      scan.reasons[0] ??
+      "Pet metadata contains a high-confidence executable payload.",
+    confidence: 100,
+    checks,
+    model: "deterministic-security-scan",
+    dryRun,
+    error: null,
+    reviewedAt: now,
+    createdAt: now,
+    updatedAt: now,
+  });
+}
+
+function parseArgs(): Args {
+  const out: Args = {
+    apply: false,
+    notify: false,
+    includePending: false,
+    json: false,
+    limit: 5000,
+    concurrency: 16,
+    timeoutMs: 5_000,
+    retries: 2,
+    delayMs: 0,
+    slug: null,
+    manifestUrl: null,
+  };
+  const argv = process.argv.slice(2);
+  for (let index = 0; index < argv.length; index++) {
+    const arg = argv[index];
+    if (arg === "--apply") out.apply = true;
+    else if (arg === "--notify") out.notify = true;
+    else if (arg === "--include-pending") out.includePending = true;
+    else if (arg === "--json") out.json = true;
+    else if (arg === "--public") out.manifestUrl = PUBLIC_MANIFEST_URL;
+    else if (arg === "--limit")
+      out.limit = readNumber(argv[++index], out.limit);
+    else if (arg === "--timeout-ms")
+      out.timeoutMs = readNumber(argv[++index], out.timeoutMs);
+    else if (arg === "--retries")
+      out.retries = readNonNegativeNumber(argv[++index], out.retries);
+    else if (arg === "--delay-ms")
+      out.delayMs = readNonNegativeNumber(argv[++index], out.delayMs);
+    else if (arg === "--concurrency") {
+      out.concurrency = Math.min(
+        Math.max(readNumber(argv[++index], out.concurrency), 1),
+        32,
+      );
+    } else if (arg === "--slug") {
+      out.slug = argv[++index] ?? null;
+    } else if (arg === "--manifest-url") {
+      out.manifestUrl = argv[++index] ?? null;
+    }
+  }
+  return out;
+}
+
+function readNumber(value: string | undefined, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+}
+
+function readNonNegativeNumber(
+  value: string | undefined,
+  fallback: number,
+): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : fallback;
+}
+
+function log(message: string) {
+  if (!args.json) console.log(message);
+}
+
+async function getDb() {
+  return (await import("@/lib/db/runtime")).runtimeDb;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stringField(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function requiredStringField(value: unknown, path: string): string {
+  const field = stringField(value);
+  if (!field) throw new Error(`${path} is missing`);
+  return field;
+}
+
+function shouldRetryStatus(status: number): boolean {
+  return status === 429 || status >= 500;
+}
+
+function retryDelayMs(attempt: number, headers?: Headers): number {
+  const retryAfter = headers?.get("retry-after");
+  if (retryAfter) {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds) && seconds > 0) {
+      return Math.min(seconds * 1000, 4_000);
+    }
+  }
+  return Math.min(500 * 2 ** attempt, 4_000);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

@@ -599,6 +599,20 @@ function AutomationEvidence({ review }: { review: SubmissionReview | null }) {
             items={checks.assets.reasons}
           />
         ) : null}
+        {checks.security?.findings?.length ? (
+          <EvidenceGroup
+            title={t("evidenceSecurity")}
+            items={checks.security.findings.map(
+              (finding) =>
+                `${finding.code} (${finding.path}): ${finding.evidence}`,
+            )}
+          />
+        ) : checks.security?.reasons?.length ? (
+          <EvidenceGroup
+            title={t("evidenceSecurity")}
+            items={checks.security.reasons}
+          />
+        ) : null}
         {checks.policy?.flags?.length ? (
           <EvidenceGroup
             title={t("evidencePolicy")}

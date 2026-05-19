@@ -1651,6 +1651,7 @@
     "noSummary": "No summary.",
     "confidence": "Confidence: {confidence}%.",
     "evidenceAssets": "Assets",
+    "evidenceSecurity": "Security",
     "evidencePolicy": "Policy",
     "evidenceVisualText": "Visual text",
     "evidenceVisualSignals": "Visual signals"

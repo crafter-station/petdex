@@ -1888,6 +1888,7 @@
     "noSummary": "暂无摘要。",
     "confidence": "置信度：{confidence}%。",
     "evidenceAssets": "素材",
+    "evidenceSecurity": "安全",
     "evidencePolicy": "政策",
     "evidenceVisualText": "图中文字",
     "evidenceVisualSignals": "视觉信号"

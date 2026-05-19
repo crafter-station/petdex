@@ -28,7 +28,19 @@ export type PolicyFlag = {
   evidence: string;
 };
 
+export type SecurityFinding = {
+  code: string;
+  severity: "fail" | "hold";
+  path: string;
+  evidence: string;
+};
+
 export type ReviewChecks = {
+  security?: {
+    decision: ReviewCheckDecision;
+    reasons: string[];
+    findings: SecurityFinding[];
+  };
   assets: {
     decision: ReviewCheckDecision;
     reasons: string[];
