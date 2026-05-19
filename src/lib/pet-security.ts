@@ -28,6 +28,8 @@ const MAX_DEPTH = 12;
 const MAX_NODES = 3000;
 const MAX_ARRAY_ITEMS = 120;
 const MAX_STRING_LENGTH = 4000;
+const CAPPED_FAIL_EVIDENCE =
+  "[redacted security finding omitted by evidence cap]";
 
 const executableKey =
   /^(command|cmd|exec|shell|script|scripts|postinstall|preinstall|installcommand|hook|hooks|launchagent|plist)$/i;
@@ -113,7 +115,20 @@ export function scanPetSecurity(input: ScanInput): PetSecurityScan {
     ) {
       return;
     }
-    if (findings.length >= MAX_FINDINGS) return;
+    if (findings.length >= MAX_FINDINGS) {
+      if (
+        severity === "fail" &&
+        !findings.some((finding) => finding.severity === "fail")
+      ) {
+        findings[MAX_FINDINGS - 1] = {
+          severity,
+          code,
+          path,
+          evidence: CAPPED_FAIL_EVIDENCE,
+        };
+      }
+      return;
+    }
     findings.push({ severity, code, path, evidence: clipped });
   };
 
@@ -243,7 +258,16 @@ export function scanPetManifestsSecurity(
     const zipScan = scanPetSecurity({ petJson: input.zipPetJson });
     decisions.push(zipScan.decision);
     findings.push(...prefixFindings(zipScan.findings, "zip.petJson"));
-    if (stableJson(input.petJson) !== stableJson(input.zipPetJson)) {
+    const petJsonStable = stableJson(input.petJson);
+    const zipPetJsonStable = stableJson(input.zipPetJson);
+    if (!petJsonStable || !zipPetJsonStable) {
+      findings.push({
+        code: "pet_json_manifest_comparison_limit",
+        severity: "hold",
+        path: "zip.petJson",
+        evidence: "manifest comparison exceeded safety limits",
+      });
+    } else if (petJsonStable !== zipPetJsonStable) {
       findings.push({
         code: "pet_json_manifest_mismatch",
         severity: "hold",
@@ -332,13 +356,38 @@ function redactEvidence(code: string, evidence: string, key?: string): string {
   return evidence.replace(tokenValueRe, "[redacted secret]");
 }
 
-function stableJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
-  if (isPlainRecord(value)) {
-    return `{${Object.keys(value)
-      .sort()
-      .map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value);
+function stableJson(value: unknown): string | null {
+  let nodes = 0;
+
+  const visit = (node: unknown, depth: number): string | null => {
+    nodes += 1;
+    if (nodes > MAX_NODES || depth > MAX_DEPTH) return null;
+    if (typeof node === "string" && node.length > MAX_STRING_LENGTH) {
+      return null;
+    }
+    if (Array.isArray(node)) {
+      if (node.length > MAX_ARRAY_ITEMS) return null;
+      const items = [];
+      for (const item of node) {
+        const value = visit(item, depth + 1);
+        if (value === null) return null;
+        items.push(value);
+      }
+      return `[${items.join(",")}]`;
+    }
+    if (isPlainRecord(node)) {
+      const keys = Object.keys(node).sort();
+      if (keys.length > MAX_ARRAY_ITEMS) return null;
+      const entries = [];
+      for (const key of keys) {
+        const value = visit(node[key], depth + 1);
+        if (value === null) return null;
+        entries.push(`${JSON.stringify(key)}:${value}`);
+      }
+      return `{${entries.join(",")}}`;
+    }
+    return JSON.stringify(node);
+  };
+
+  return visit(value, 0);
 }

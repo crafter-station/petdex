@@ -149,6 +149,12 @@ describe("scanPetSecurity", () => {
 
     expect(result.findings).toHaveLength(24);
     expect(result.decision).toBe("fail");
+    expect(result.findings.some((finding) => finding.severity === "fail")).toBe(
+      true,
+    );
+    expect(result.findings.map((finding) => finding.code)).toContain(
+      "shell_command_substitution",
+    );
   });
 
   it("fails malicious zip pet.json even when standalone pet.json is clean", () => {
@@ -166,6 +172,26 @@ describe("scanPetSecurity", () => {
     );
     expect(result.findings.map((finding) => finding.code)).toContain(
       "pet_json_manifest_mismatch",
+    );
+  });
+
+  it("holds instead of throwing when manifest comparison exceeds safety limits", () => {
+    const deepPetJson: Record<string, unknown> = { displayName: "Boba" };
+    let cursor = deepPetJson;
+    for (let index = 0; index < 2000; index++) {
+      const next: Record<string, unknown> = {};
+      cursor.child = next;
+      cursor = next;
+    }
+
+    const result = scanPetManifestsSecurity({
+      petJson: deepPetJson,
+      zipPetJson: { displayName: "Boba" },
+    });
+
+    expect(result.decision).toBe("hold");
+    expect(result.findings.map((finding) => finding.code)).toContain(
+      "pet_json_manifest_comparison_limit",
     );
   });
 
