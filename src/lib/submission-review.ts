@@ -12,7 +12,7 @@ import {
   embedTextValue,
   PETDEX_EMBEDDING_MODEL,
 } from "@/lib/embeddings";
-import { scanPetManifestsSecurity } from "@/lib/pet-security";
+import { scanPetManifestsSecurity, scanPetSecurity } from "@/lib/pet-security";
 import { decideAutomatedReview } from "@/lib/submission-review-decision";
 import { preparePolicyReviewImage } from "@/lib/submission-review-image";
 import {
@@ -68,6 +68,11 @@ type AssetAnalysis = {
   spriteBuffer: Buffer | null;
   petJson: unknown;
   dhash: string | null;
+};
+
+type ZipPetJson = {
+  name: string;
+  petJson: unknown;
 };
 
 type VisualMatchScan = {
@@ -204,6 +209,7 @@ export async function reviewSubmission(
             actor: "auto-review",
             db,
             skipSideEffects: process.env.PETDEX_REVIEW_DB === "runtime",
+            skipNotifications: process.env.PETDEX_REVIEW_DB === "runtime",
           },
         );
         applied = actionResult.ok;
@@ -363,8 +369,7 @@ async function analyzeAssets(row: SubmittedPet): Promise<AssetAnalysis> {
     }
   }
 
-  let zipPetJson: unknown;
-  let hasZipPetJson = false;
+  const zipPetJsons: ZipPetJson[] = [];
   if (zip.ok) {
     try {
       const archive = await JSZip.loadAsync(zip.buffer);
@@ -385,15 +390,16 @@ async function analyzeAssets(row: SubmittedPet): Promise<AssetAnalysis> {
         if (petJsonNames.length > 1) {
           reasons.push("zip contains multiple pet.json files.");
         }
-        const zipped = await readZipPetJson(
-          archive.files[petJsonNames[0]],
-          MAX_ASSET_BYTES,
-        );
-        if (zipped.ok) {
-          zipPetJson = zipped.petJson;
-          hasZipPetJson = true;
-        } else {
-          reasons.push(zipped.reason);
+        for (const name of petJsonNames) {
+          const zipped = await readZipPetJson(
+            archive.files[name],
+            MAX_ASSET_BYTES,
+          );
+          if (zipped.ok) {
+            zipPetJsons.push({ name, petJson: zipped.petJson });
+          } else {
+            reasons.push(`zip ${name}: ${zipped.reason}`);
+          }
         }
       }
       const basenames = new Set(names.map((name) => name.split("/").pop()));
@@ -437,10 +443,13 @@ async function analyzeAssets(row: SubmittedPet): Promise<AssetAnalysis> {
   };
   const security = scanPetManifestsSecurity({
     petJson: parsedJson,
-    zipPetJson: hasZipPetJson ? zipPetJson : undefined,
+    zipPetJson: zipPetJsons[0]?.petJson,
     displayName: row.displayName,
     description: row.description,
   });
+  for (const entry of zipPetJsons.slice(1)) {
+    appendZipPetJsonSecurity(security, entry);
+  }
 
   return {
     check: {
@@ -453,6 +462,28 @@ async function analyzeAssets(row: SubmittedPet): Promise<AssetAnalysis> {
     petJson: parsedJson,
     dhash,
   };
+}
+
+function appendZipPetJsonSecurity(
+  security: NonNullable<ReviewChecks["security"]>,
+  entry: ZipPetJson,
+) {
+  const entryScan = scanPetSecurity({ petJson: entry.petJson });
+  security.findings.push(
+    ...entryScan.findings.map((finding) => ({
+      ...finding,
+      path: `zip.petJson[${entry.name}]${finding.path === "$" ? "" : finding.path.startsWith("$") ? finding.path.slice(1) : `.${finding.path}`}`,
+    })),
+  );
+  security.reasons.push(
+    ...entryScan.findings.map(
+      (finding) => `zip ${entry.name}: ${finding.code}: ${finding.evidence}`,
+    ),
+  );
+  if (entryScan.decision === "fail") security.decision = "fail";
+  if (security.decision === "pass" && entryScan.decision === "hold") {
+    security.decision = "hold";
+  }
 }
 
 async function analyzePolicy(

@@ -313,7 +313,7 @@ async function maybeApplySecurityRejection(
         petSecurityReason(scan, "fail") ??
         "Pet metadata contains a high-confidence executable payload.",
     },
-    { actor: "auto-review", db: actionDb, skipSideEffects: !args.notify },
+    { actor: "auto-review", db: actionDb, skipNotifications: !args.notify },
   );
   if (!result.ok) scan.reasons.unshift(result.body.error);
   return result.ok;

@@ -40,6 +40,7 @@ export async function applySubmissionAction(
     actor?: SubmissionActionActor;
     db?: SubmissionActionDb;
     skipSideEffects?: boolean;
+    skipNotifications?: boolean;
   } = {},
 ): Promise<SubmissionActionResult> {
   const actor = options.actor ?? "admin";
@@ -129,7 +130,7 @@ export async function applySubmissionAction(
   }
 
   if (
-    !options.skipSideEffects &&
+    !options.skipNotifications &&
     (body.action === "approve" || body.action === "reject")
   ) {
     await notifySubmissionOwner(row);
