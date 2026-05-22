@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import {
   createServer,
   type IncomingMessage,
@@ -9,7 +15,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { requestSidecarHandoff } from "./update";
+import { requestSidecarHandoff, runUpdate } from "./update";
 
 // These tests pin the deadlock fix from opencode-bot review:
 // requestSidecarHandoff must POST to /update/handoff with the token
@@ -27,6 +33,66 @@ import { requestSidecarHandoff } from "./update";
 const HOST = "127.0.0.1";
 const PROBE_PORT = 47821;
 const TOKEN_HEADER = "x-petdex-update-token";
+
+describe("runUpdate", () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "petdex-update-"));
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("fresh-install DMG path creates the version directory before writing", async () => {
+    const dmgAsset = {
+      name: "Petdex-arm64.dmg",
+      browser_download_url: "https://github.test/Petdex-arm64.dmg",
+      size: 1234,
+    };
+    const release = {
+      tag_name: "desktop-v0.2.1",
+      assets: [dmgAsset],
+    };
+    const versionFile = join(dir, "home", ".petdex", "version");
+    let installedApp = false;
+    let refreshedHooks = false;
+
+    await runUpdate(["--silent", "--force"], "0.4.1", {
+      versionFile,
+      fetchLatestRelease: async () => release,
+      desktopBinPath: () =>
+        join(dir, "home", ".petdex", "bin", "petdex-desktop"),
+      appBundleRootFor: () => null,
+      desktopStatus: () => ({ state: "stopped" }),
+      resolveDesktopInstallPlan: () => ({
+        kind: "macos-dmg",
+        target: {
+          osLabel: "darwin",
+          archLabel: "arm64",
+          assetSuffix: "darwin-arm64",
+        },
+        dmgAsset,
+      }),
+      installAppBundleFromDmg: async () => {
+        installedApp = true;
+        return {
+          appBundleRoot: join(dir, "home", "Applications", "Petdex.app"),
+          dmgAsset,
+        };
+      },
+      hookRefresh: async () => {
+        refreshedHooks = true;
+      },
+    });
+
+    expect(installedApp).toBe(true);
+    expect(refreshedHooks).toBe(true);
+    expect(existsSync(versionFile)).toBe(true);
+    expect(readFileSync(versionFile, "utf8")).toBe("desktop-v0.2.1\n");
+  });
+});
 
 type FakeSidecarOptions = {
   expectedToken: string;

@@ -108,7 +108,7 @@ async function getAuth(): Promise<ClerkCliAuth> {
   return _auth;
 }
 
-const VERSION = "0.4.0";
+const VERSION = "0.4.1";
 
 // ─── entrypoint ────────────────────────────────────────────────────────────
 main().catch((err) => {
