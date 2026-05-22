@@ -16,8 +16,8 @@
  * `petdex-desktop-sidecar.js`.
  */
 import { randomBytes } from "node:crypto";
-import { existsSync, statSync } from "node:fs";
-import { chmod, mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { existsSync, lstatSync, statSync } from "node:fs";
+import { chmod, copyFile, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { homedir, arch as nodeArch, platform as nodePlatform } from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
@@ -1074,4 +1074,170 @@ export async function _streamDownload(
   const reader = Readable.fromWeb(res.body as never);
   const { createWriteStream } = await import("node:fs");
   await pipeline(reader, createWriteStream(destPath));
+}
+
+// ─── install from local path ────────────────────────────────────────────────
+
+export interface RunInstallFromPathDeps {
+  lstat: (p: string) => import("node:fs").Stats;
+  copyFile: (src: string, dest: string) => Promise<void>;
+  rename: (src: string, dest: string) => Promise<void>;
+  chmod: (p: string, mode: number) => Promise<void>;
+  rm: (p: string, opts?: { force?: boolean }) => Promise<void>;
+  mkdir: (p: string, opts?: { recursive?: boolean }) => Promise<string | undefined>;
+  writeFile: (p: string, data: string) => Promise<void>;
+  stripQuarantine: (p: string) => void;
+  stopDesktop: () => Promise<unknown>;
+  startDesktop: () => Promise<unknown>;
+  hookRefresh: () => Promise<unknown>;
+  platform: () => string;
+}
+
+export type RunInstallDesktopFromPathResult = { tag: string };
+
+const VERSION_LABEL_RE = /^[a-zA-Z0-9._-]{1,80}$/;
+
+function sanitizeVersionLabel(label: string | undefined): string {
+  const resolved = (label ?? "local-build").trim();
+  if (!VERSION_LABEL_RE.test(resolved)) {
+    throw new Error(
+      `--version-label "${resolved}" is invalid. ` +
+        `Must match ^[a-zA-Z0-9._-]{1,80}$ (allowed: letters, digits, . _ -; max 80 chars).`,
+    );
+  }
+  return resolved;
+}
+
+async function stageLocalBinary(
+  fromPath: string,
+  destPath: string,
+  deps: RunInstallFromPathDeps,
+): Promise<void> {
+  const tmpPath = `${destPath}.tmp`;
+  try {
+    await deps.copyFile(fromPath, tmpPath);
+    await deps.rename(tmpPath, destPath);
+  } catch (err) {
+    try {
+      await deps.rm(tmpPath, { force: true });
+    } catch {
+      // best-effort
+    }
+    throw err;
+  }
+}
+
+export async function _runInstallFromPathForTest(
+  fromPath: string,
+  opts?: { versionLabel?: string },
+  deps?: Partial<RunInstallFromPathDeps>,
+): Promise<RunInstallDesktopFromPathResult> {
+  // Validation — all checks happen BEFORE any filesystem mutation.
+  const stat = (deps?.lstat ?? lstatSync)(fromPath);
+  if (stat.isSymbolicLink()) {
+    throw new Error(`--from-path must not be a symlink: ${fromPath}`);
+  }
+  if (stat.isDirectory()) {
+    throw new Error(`--from-path expected a file, got a directory: ${fromPath}`);
+  }
+  if (!stat.isFile()) {
+    throw new Error(`--from-path expected a regular file: ${fromPath}`);
+  }
+  const platform = (deps?.platform ?? nodePlatform)();
+  if (platform !== "win32" && (stat.mode & 0o111) === 0) {
+    throw new Error(
+      `--from-path file is not executable: ${fromPath} (run chmod +x first)`,
+    );
+  }
+  const label = sanitizeVersionLabel(opts?.versionLabel);
+
+  // Real deps for any not overridden by the caller.
+  const realDeps: RunInstallFromPathDeps = {
+    lstat: lstatSync,
+    copyFile,
+    rename,
+    chmod,
+    rm,
+    mkdir,
+    writeFile: (p, data) => writeFile(p, data),
+    stripQuarantine: (p) => {
+      if (nodePlatform() !== "darwin") return;
+      try {
+        const { spawnSync: sp } = require("node:child_process") as typeof import("node:child_process");
+        sp("xattr", ["-d", "com.apple.quarantine", p], { stdio: "ignore" });
+      } catch {
+        // best-effort
+      }
+    },
+    stopDesktop: async () => {
+      const { stopDesktop: sd } = await import("./process.js");
+      return sd();
+    },
+    startDesktop: async () => {
+      const { startDesktop: sd } = await import("./process.js");
+      return sd();
+    },
+    hookRefresh: async () => {
+      const { runRefresh } = await import("../hooks/refresh.js");
+      return runRefresh();
+    },
+    platform: nodePlatform,
+  };
+
+  const d: RunInstallFromPathDeps = { ...realDeps, ...deps };
+
+  // Mutation begins here.
+  await d.stopDesktop();
+
+  const destPath = desktopBinPath();
+  await d.mkdir(path.dirname(destPath), { recursive: true });
+  await stageLocalBinary(fromPath, destPath, d);
+  await d.chmod(destPath, 0o755);
+
+  if (d.platform() === "darwin") {
+    d.stripQuarantine(destPath);
+  }
+
+  // Sidecar: copy server.js sibling if present (and not a symlink).
+  const serverJsSrc = path.join(path.dirname(fromPath), "server.js");
+  let sidecarPresent = false;
+  try {
+    const sjs = lstatSync(serverJsSrc);
+    if (sjs.isFile() && !sjs.isSymbolicLink()) sidecarPresent = true;
+  } catch {
+    // does not exist — skip
+  }
+  if (sidecarPresent) {
+    const sidecarDest = sidecarPath();
+    await d.mkdir(path.dirname(sidecarDest), { recursive: true });
+    await d.copyFile(serverJsSrc, sidecarDest);
+  }
+
+  // Version file.
+  const versionFile = path.join(homeDir(), ".petdex", "version");
+  await d.mkdir(path.dirname(versionFile), { recursive: true });
+  await d.writeFile(versionFile, `${label}\n`);
+
+  // Hook refresh — non-fatal.
+  try {
+    await d.hookRefresh();
+  } catch (err) {
+    console.warn(`[petdex] hook refresh failed: ${(err as Error).message}`);
+  }
+
+  // Start desktop — non-fatal.
+  try {
+    await d.startDesktop();
+  } catch (err) {
+    console.warn(`[petdex] desktop start failed: ${(err as Error).message}`);
+  }
+
+  return { tag: label };
+}
+
+export async function runInstallDesktopFromPath(
+  fromPath: string,
+  opts?: { versionLabel?: string },
+): Promise<RunInstallDesktopFromPathResult> {
+  return _runInstallFromPathForTest(fromPath, opts);
 }
