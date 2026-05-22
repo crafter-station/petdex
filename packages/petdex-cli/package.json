@@ -5,7 +5,7 @@
   "homepage": "https://petdex.crafter.run",
   "repository": {
     "type": "git",
-    "url": "https://github.com/crafter-station/petdex",
+    "url": "git+https://github.com/crafter-station/petdex.git",
     "directory": "packages/petdex-cli"
   },
   "license": "MIT",
@@ -14,7 +14,7 @@
     "node": ">=20"
   },
   "bin": {
-    "petdex": "./dist/petdex.js"
+    "petdex": "dist/petdex.js"
   },
   "files": [
     "dist",
