@@ -77,6 +77,7 @@ If hooks are installed, you can also type `/petdex status` inside a supported ag
 | --- | --- |
 | Browse pets | Visit [petdex.crafter.run](https://petdex.crafter.run) |
 | Install a pet | `npx petdex install <slug>` |
+| Switch active mascot | `npx petdex select` (interactive picker) or `npx petdex select <slug>` |
 | Run the desktop floater | `npx petdex init` (downloads the `.dmg` and wires Codex/Claude Code hooks) |
 | Make a pet | Use the `hatch-pet` skill inside Codex, or build one with the [Petdex creator tools](https://petdex.crafter.run/create) |
 | Submit a pet | `npx petdex submit ./my-pet/` or drop it through the web submitter |
@@ -104,7 +105,7 @@ crafter-station/petdex
 │   ├── app/api/admin/         Admin review surface for submissions, edits, collection requests
 │   └── lib/db/schema.ts       Drizzle schema (Postgres)
 ├── packages/
-│   ├── petdex-cli/            npm `petdex` (auth, list, install, submit, hooks, init)
+│   ├── petdex-cli/            npm `petdex` (auth, list, install, select, submit, hooks, init)
 │   ├── petdex-desktop/        Zig + WebKit floating mascot for macOS
 │   └── discord-bot/           Discord.js bot for the Petdex server
 ├── public/built-with/         Screenshots for the community page

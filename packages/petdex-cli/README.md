@@ -24,13 +24,15 @@ Requires Node.js 20+ (also runs on Bun).
 petdex login                       # opens browser, OAuth + PKCE via Clerk
 petdex list                        # browse approved pets
 petdex install boba                # drops boba into ~/.codex/pets/boba/
+petdex select                      # pick active mascot from installed pets (interactive)
+petdex select boba                 # set active mascot directly
 petdex submit ~/.codex/pets/boba   # share a single pet
 petdex submit ~/.codex/pets        # bulk submit every subfolder
 petdex whoami                      # confirm signed-in identity
 petdex logout                      # clear stored credentials
 ```
 
-After installing a pet, activate it inside Codex: **Settings → Appearance → Pets → Select**. Use `/pet` inside Codex to wake or tuck it away.
+After installing a pet, set it as active with `petdex select` or inside Codex: **Settings → Appearance → Pets → Select**. Use `/pet` inside Codex to wake or tuck it away.
 
 ## Commands
 
@@ -40,7 +42,8 @@ After installing a pet, activate it inside Codex: **Settings → Appearance → 
 | `petdex logout` | Clear local credentials. |
 | `petdex whoami` | Print the signed-in user's identity. |
 | `petdex list` | List approved pets in the gallery. |
-| `petdex install <slug>` | Install a pet into `~/.codex/pets/<slug>/`. |
+| `petdex install <slug>` | Install a pet into `~/.codex/pets/<slug>/` and `~/.petdex/pets/<slug>/`. |
+| `petdex select [slug]` | Set the active pet shown by Petdex Desktop. No args = interactive picker; pass a slug to skip the prompt. |
 | `petdex submit <path>` | Submit a pet folder, zip, or parent of pets (bulk). |
 | `petdex --version` | Print the CLI version. |
 
