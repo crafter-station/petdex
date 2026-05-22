@@ -3015,7 +3015,6 @@ pub fn main(init: std.process.Init) !void {
         .frameless = true,
         .transparent = true,
         .always_on_top = true,
-        .focusable = false,
     };
 
     const security_policy: zero_native.SecurityPolicy = .{
