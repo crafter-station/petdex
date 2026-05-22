@@ -554,17 +554,23 @@ async function cmdList() {
 async function cmdSelect(args: string[]) {
   p.intro(pc.bgMagenta(pc.white(" petdex select ")));
 
-  const petsDir = path.join(homedir(), ".petdex", "pets");
-  let installedSlugs: string[] = [];
-  try {
-    const entries = await readdir(petsDir, { withFileTypes: true });
-    installedSlugs = entries
-      .filter((e) => e.isDirectory())
-      .map((e) => e.name)
-      .sort();
-  } catch {
-    // petsDir doesn't exist yet — no pets installed
+  // Scan both pet roots the desktop uses, deduplicated.
+  const petRoots = [
+    path.join(homedir(), ".petdex", "pets"),
+    path.join(homedir(), ".codex", "pets"),
+  ];
+  const slugSet = new Set<string>();
+  for (const dir of petRoots) {
+    try {
+      const entries = await readdir(dir, { withFileTypes: true });
+      for (const e of entries) {
+        if (e.isDirectory()) slugSet.add(e.name);
+      }
+    } catch {
+      // directory doesn't exist — skip
+    }
   }
+  const installedSlugs = [...slugSet].sort();
 
   if (installedSlugs.length === 0) {
     p.cancel(
@@ -595,7 +601,20 @@ async function cmdSelect(args: string[]) {
   const activeJsonPath = path.join(homedir(), ".petdex", "active.json");
   await writeFile(activeJsonPath, JSON.stringify({ slug }) + "\n", "utf8");
 
-  p.outro(`${pc.green("✓")} Active pet set to ${pc.cyan(slug)}`);
+  // Restart the desktop so the new active pet is visible immediately.
+  // Non-fatal: if the desktop isn't running the stop is a no-op and
+  // the start will launch it fresh.
+  const s = p.spinner();
+  s.start("Reloading desktop…");
+  try {
+    await stopDesktop();
+    await startDesktop();
+    s.stop(`${pc.green("✓")} Active pet set to ${pc.cyan(slug)}`);
+  } catch {
+    s.stop(
+      `${pc.green("✓")} Active pet set to ${pc.cyan(slug)} — restart the desktop to see the change`,
+    );
+  }
 }
 
 async function cmdSubmit(args: string[]) {
