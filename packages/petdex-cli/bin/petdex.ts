@@ -178,6 +178,9 @@ async function main() {
     case "list":
       await cmdList();
       break;
+    case "select":
+      await cmdSelect(args.slice(1));
+      break;
     case "hooks":
       await cmdHooks(args.slice(1));
       break;
@@ -238,6 +241,7 @@ function printHelp() {
       `    ${pc.bold("install")} <slug...>  Install one or more pets into ~/.petdex/pets and ~/.codex/pets`,
       `    ${pc.bold("install desktop")}    Install the petdex-desktop binary (alternative to the .dmg)`,
       `    ${pc.bold("list")}               List approved pets`,
+      `    ${pc.bold("select")} [slug]      Set the active pet shown by the desktop mascot`,
       `    ${pc.bold("mcp-server")}          Start the MCP protocol server for Antigravity integration`,
       `    ${pc.bold("hooks install")}      Wire petdex-desktop into your coding agents`,
       `    ${pc.bold("toggle")}             One-shot wake/sleep. Flips the mascot on or off depending on current state`,
@@ -254,6 +258,8 @@ function printHelp() {
       `    ${dim("$")} petdex submit ~/.codex/pets/boba       ${dim("# single folder")}`,
       `    ${dim("$")} petdex install boba                    ${dim("# install a pet by slug")}`,
       `    ${dim("$")} petdex install boba doraemon mochi     ${dim("# install several at once")}`,
+      `    ${dim("$")} petdex select                          ${dim("# pick active mascot from installed pets")}`,
+      `    ${dim("$")} petdex select boba                     ${dim("# set active mascot directly")}`,
       `    ${dim("$")} petdex toggle                          ${dim("# wake or sleep the mascot")}`,
       `    ${dim("$")} petdex doctor                          ${dim("# diagnose install + agents")}`,
       `    ${dim("$")} petdex update                          ${dim("# pull the latest release")}`,
@@ -543,6 +549,53 @@ async function cmdList() {
   console.log(
     `\n${pc.dim("Install with")} ${pc.cyan("petdex install <slug>")}\n${pc.dim("Browse:")} ${pc.underline(PETDEX_URL)}`,
   );
+}
+
+async function cmdSelect(args: string[]) {
+  p.intro(pc.bgMagenta(pc.white(" petdex select ")));
+
+  const petsDir = path.join(homedir(), ".petdex", "pets");
+  let installedSlugs: string[] = [];
+  try {
+    const entries = await readdir(petsDir, { withFileTypes: true });
+    installedSlugs = entries
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
+      .sort();
+  } catch {
+    // petsDir doesn't exist yet — no pets installed
+  }
+
+  if (installedSlugs.length === 0) {
+    p.cancel(
+      `No pets installed. Run ${pc.cyan("petdex install <slug>")} first.`,
+    );
+    process.exit(1);
+  }
+
+  let slug = args[0];
+
+  if (!slug) {
+    const choice = await p.select({
+      message: "Which pet should the desktop mascot show?",
+      options: installedSlugs.map((s) => ({ value: s, label: s })),
+    });
+    if (p.isCancel(choice)) {
+      p.cancel("Cancelled.");
+      process.exit(0);
+    }
+    slug = choice as string;
+  } else if (!installedSlugs.includes(slug)) {
+    p.cancel(
+      `${pc.cyan(slug)} is not installed. Run ${pc.cyan(`petdex install ${slug}`)} first.`,
+    );
+    process.exit(1);
+  }
+
+  const activeJsonPath = path.join(homedir(), ".petdex", "active.json");
+  await writeFile(activeJsonPath, JSON.stringify({ slug }) + "\n", "utf8");
+
+  p.outro(`${pc.green("✓")} Active pet set to ${pc.cyan(slug)}`);
 }
 
 async function cmdSubmit(args: string[]) {
