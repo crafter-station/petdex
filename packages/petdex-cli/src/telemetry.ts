@@ -48,6 +48,7 @@ type TelemetryConfig = {
 
 export type TelemetryEvent =
   | "cli_install_desktop_success"
+  | "cli_install_desktop_local_success"
   | "cli_hooks_install_success"
   | "cli_desktop_start_success"
   | "cli_update_applied"
@@ -58,6 +59,7 @@ export type TelemetryEvent =
 export type TelemetryPayload = {
   cli_version?: string;
   binary_version?: string;
+  version_label?: string;
   os?: string;
   arch?: string;
   agents?: string[];

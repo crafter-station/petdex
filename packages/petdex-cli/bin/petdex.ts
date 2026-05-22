@@ -14,6 +14,7 @@ import {
   ensureStarterPet,
   isTrustedAssetUrl,
   runInstallDesktop,
+  runInstallDesktopFromPath,
 } from "../src/desktop/install.js";
 import {
   cmdDesktopStart,
@@ -237,6 +238,7 @@ function printHelp() {
       `    ${pc.bold("edit")} <slug>        Edit a pet you own (--desc, --displayName, --sprite, --meta, --zip)`,
       `    ${pc.bold("install")} <slug...>  Install one or more pets into ~/.petdex/pets and ~/.codex/pets`,
       `    ${pc.bold("install desktop")}    Install the petdex-desktop binary (alternative to the .dmg)`,
+      `    ${pc.bold("install desktop --from-path <bin>")}  Install a locally-built binary (e.g. from zig build)`,
       `    ${pc.bold("list")}               List approved pets`,
       `    ${pc.bold("mcp-server")}          Start the MCP protocol server for Antigravity integration`,
       `    ${pc.bold("hooks install")}      Wire petdex-desktop into your coding agents`,
@@ -384,6 +386,13 @@ async function installOne(pet: ManifestPet): Promise<void> {
   );
 }
 
+function flagValue(args: string[], flag: string): string | null {
+  const idx = args.indexOf(flag);
+  if (idx === -1) return null;
+  const val = args[idx + 1];
+  return typeof val === "string" && !val.startsWith("--") ? val : null;
+}
+
 async function cmdInstall(args: string[]) {
   const first = args[0];
   if (!first) {
@@ -393,6 +402,30 @@ async function cmdInstall(args: string[]) {
     process.exit(1);
   }
   if (first === "desktop") {
+    const fromPath = flagValue(args, "--from-path");
+    if (fromPath) {
+      const versionLabel = flagValue(args, "--version-label") ?? undefined;
+      p.intro(pc.bgMagenta(pc.white(" petdex install desktop --from-path ")));
+      const s = p.spinner();
+      s.start(`Staging ${pc.cyan(path.resolve(fromPath))}`);
+      let result: { tag: string };
+      try {
+        result = await runInstallDesktopFromPath(path.resolve(fromPath), { versionLabel });
+      } catch (err) {
+        s.stop(pc.red("failed"));
+        throw err;
+      }
+      s.stop(
+        `${pc.green("✓")} Installed — version label: ${pc.bold(result.tag)}`,
+      );
+      emit("cli_install_desktop_local_success", {
+        cli_version: VERSION,
+        os: process.platform,
+        arch: process.arch,
+        version_label: result.tag,
+      });
+      return;
+    }
     const { tag } = await runInstallDesktop();
     emit("cli_install_desktop_success", {
       cli_version: VERSION,
@@ -735,18 +768,11 @@ async function cmdEdit(args: string[]): Promise<void> {
     process.exit(1);
   }
 
-  function flagValue(flag: string): string | null {
-    const idx = args.indexOf(flag);
-    if (idx === -1) return null;
-    const val = args[idx + 1];
-    return typeof val === "string" && !val.startsWith("--") ? val : null;
-  }
-
-  const descArg = flagValue("--desc");
-  const displayNameArg = flagValue("--displayName");
-  const spritePath = flagValue("--sprite");
-  const metaPath = flagValue("--meta");
-  const zipPath = flagValue("--zip");
+  const descArg = flagValue(args, "--desc");
+  const displayNameArg = flagValue(args, "--displayName");
+  const spritePath = flagValue(args, "--sprite");
+  const metaPath = flagValue(args, "--meta");
+  const zipPath = flagValue(args, "--zip");
 
   if (!descArg && !displayNameArg && !spritePath && !metaPath && !zipPath) {
     p.cancel("Nothing to edit. Provide at least one flag.");
