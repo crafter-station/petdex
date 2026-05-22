@@ -1,7 +1,7 @@
 .{
     .name = .petdex_desktop,
     .fingerprint = 0x8bf769b722fabe52,
-    .version = "0.2.1",
+    .version = "0.2.2",
     .minimum_zig_version = "0.16.0",
     .dependencies = .{},
     .paths = .{ "build.zig", "build.zig.zon", "src", "assets", "frontend", "app.zon", "README.md" },
