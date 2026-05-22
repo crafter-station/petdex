@@ -599,6 +599,7 @@ async function cmdSelect(args: string[]) {
   }
 
   const activeJsonPath = path.join(homedir(), ".petdex", "active.json");
+  await mkdir(path.dirname(activeJsonPath), { recursive: true });
   await writeFile(activeJsonPath, JSON.stringify({ slug }) + "\n", "utf8");
 
   // Restart the desktop so the new active pet is visible immediately.
