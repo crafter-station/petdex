@@ -180,7 +180,12 @@ fn prepareStateStore(io: std.Io, env_map: *std.process.Environ.Map, app_info: *z
     const store = zero_native.window_state.Store.init(io, paths.state_dir, paths.file_path);
     if (app_info.main_window.restore_state) {
         if (store.loadWindow(app_info.main_window.label, &buffers.read) catch null) |saved| {
-            app_info.main_window.default_frame = saved.frame;
+            // Restore position only — keep the default compact dimensions so a
+            // quit while the picker was open never relaunches at menu size (480×420).
+            var f = app_info.main_window.default_frame;
+            f.x = saved.frame.x;
+            f.y = saved.frame.y;
+            app_info.main_window.default_frame = f;
         }
     }
     return store;
