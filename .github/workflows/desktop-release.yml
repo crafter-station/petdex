@@ -160,10 +160,13 @@ jobs:
         run: |
           mkdir -p release
           find artifacts -type f -name "petdex-desktop-*" -exec cp {} release/ \;
-          # Rename sidecar so the asset name is unambiguous in GH Releases.
           if [ -f artifacts/petdex-desktop-sidecar/server.js ]; then
             cp artifacts/petdex-desktop-sidecar/server.js release/petdex-desktop-sidecar.js
           fi
+          test -f release/petdex-desktop-sidecar.js
+          test -f release/petdex-desktop-darwin-arm64
+          test -f release/petdex-desktop-darwin-x64
+          test -f release/petdex-desktop-win32-x64.exe
           ls -lh release/
 
       - name: Create GitHub Release

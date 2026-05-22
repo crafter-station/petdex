@@ -29,8 +29,12 @@ import { emit } from "../telemetry.js";
 import {
   appBundleRootFor,
   commitDesktopAssets,
+  defaultUserAppBundleRoot,
   desktopBinPath,
+  desktopInstallPlanError,
   fetchLatestRelease,
+  installAppBundleFromDmg,
+  resolveDesktopInstallPlan,
   stageDesktopAssets,
   updateAppBundleFromDmg,
 } from "./install.js";
@@ -240,6 +244,55 @@ export async function runUpdate(
       silent
         ? `${note} (relaunch Petdex from /Applications to use it)`
         : `${pc.green("✓")} ${note}\n${pc.dim("  Relaunch Petdex from /Applications to use it.")}`,
+    );
+    return;
+  }
+
+  const installPlan = resolveDesktopInstallPlan(release);
+  if (installPlan.kind === "unsupported") {
+    throw desktopInstallPlanError(installPlan);
+  }
+  if (installPlan.kind === "macos-dmg") {
+    if (wasRunning) {
+      info(
+        silent
+          ? "Stopping running petdex-desktop"
+          : `${pc.dim("•")} Stopping running petdex-desktop`,
+      );
+      await stopDesktop();
+    }
+    const dl = makeSpinner();
+    dl.start(`Installing ${release.tag_name} app`);
+    let result: Awaited<ReturnType<typeof installAppBundleFromDmg>>;
+    try {
+      result = await installAppBundleFromDmg(
+        release,
+        defaultUserAppBundleRoot(),
+      );
+    } catch (err) {
+      dl.stop(silent ? "failed" : pc.red("failed"));
+      throw err;
+    }
+    dl.stop(
+      silent
+        ? `Installed ${result.appBundleRoot} (${formatBytes(result.dmgAsset.size)})`
+        : `${pc.green("✓")} Installed ${pc.bold(result.appBundleRoot)} (${formatBytes(result.dmgAsset.size)})`,
+    );
+    await writeFile(VERSION_FILE, `${release.tag_name}\n`);
+    emit("cli_update_applied", {
+      cli_version: cliVersion,
+      from_version: installed ?? undefined,
+      to_version: release.tag_name,
+      duration_ms: Date.now() - updateStartedAt,
+    });
+    await runHookRefresh(info, warn, silent);
+    const note = installed
+      ? `${installed}  ->  ${release.tag_name}`
+      : release.tag_name;
+    outro(
+      silent
+        ? `${note} (run petdex up to launch the app)`
+        : `${pc.green("✓")} ${note}\n${pc.dim("  Run petdex up to launch the app.")}`,
     );
     return;
   }

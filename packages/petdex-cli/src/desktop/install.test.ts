@@ -14,8 +14,10 @@ import {
   _commitStagedForTest,
   _hasAnyInstalledPetForTest,
   _installStarterPetForTest,
+  desktopInstallPlanError,
   fetchLatestRelease,
   isTrustedAssetUrl,
+  resolveDesktopInstallPlan,
   type StagedFile,
 } from "./install";
 
@@ -327,6 +329,95 @@ describe("fetchLatestRelease", () => {
         status: 403,
       })) as unknown as typeof fetch;
     await expect(fetchLatestRelease()).rejects.toThrow(/403/);
+  });
+});
+
+describe("resolveDesktopInstallPlan", () => {
+  test("uses a bare binary when the release has one", () => {
+    const release = {
+      tag_name: "desktop-v0.3.0",
+      assets: [
+        {
+          name: "Petdex-arm64.dmg",
+          browser_download_url: "https://github.test/Petdex-arm64.dmg",
+          size: 10,
+        },
+        {
+          name: "petdex-desktop-darwin-arm64",
+          browser_download_url:
+            "https://github.test/petdex-desktop-darwin-arm64",
+          size: 20,
+        },
+        {
+          name: "petdex-desktop-sidecar.js",
+          browser_download_url: "https://github.test/petdex-desktop-sidecar.js",
+          size: 30,
+        },
+      ],
+    };
+
+    const plan = resolveDesktopInstallPlan(release, {
+      osLabel: "darwin",
+      archLabel: "arm64",
+      assetSuffix: "darwin-arm64",
+    });
+
+    expect(plan.kind).toBe("bare");
+    if (plan.kind !== "bare") throw new Error("expected bare plan");
+    expect(plan.binAsset.name).toBe("petdex-desktop-darwin-arm64");
+    expect(plan.sidecarAsset?.name).toBe("petdex-desktop-sidecar.js");
+  });
+
+  test("falls back to the macOS DMG when a release has no bare binary", () => {
+    const release = {
+      tag_name: "desktop-v0.2.0",
+      assets: [
+        {
+          name: "Petdex-arm64.dmg",
+          browser_download_url: "https://github.test/Petdex-arm64.dmg",
+          size: 10,
+        },
+      ],
+    };
+
+    const plan = resolveDesktopInstallPlan(release, {
+      osLabel: "darwin",
+      archLabel: "arm64",
+      assetSuffix: "darwin-arm64",
+    });
+
+    expect(plan.kind).toBe("macos-dmg");
+    if (plan.kind !== "macos-dmg") throw new Error("expected dmg plan");
+    expect(plan.dmgAsset.name).toBe("Petdex-arm64.dmg");
+  });
+
+  test("returns an explicit hooks-only Linux plan when no Linux binary exists", () => {
+    const release = {
+      tag_name: "desktop-v0.2.0",
+      assets: [
+        {
+          name: "Petdex-arm64.dmg",
+          browser_download_url: "https://github.test/Petdex-arm64.dmg",
+          size: 10,
+        },
+      ],
+    };
+
+    const plan = resolveDesktopInstallPlan(release, {
+      osLabel: "linux",
+      archLabel: "x64",
+      assetSuffix: "linux-x64",
+    });
+
+    expect(plan.kind).toBe("unsupported");
+    if (plan.kind !== "unsupported") {
+      throw new Error("expected unsupported plan");
+    }
+    expect(plan.reason).toContain("No Linux desktop binary");
+    expect(plan.hint).toContain("issue #296");
+    expect(desktopInstallPlanError(plan).message).toContain(
+      "petdex hooks install",
+    );
   });
 });
 

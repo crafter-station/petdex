@@ -1,9 +1,9 @@
 /**
- * `petdex install desktop` — downloads the petdex-desktop binary AND the
- * Node sidecar (`server.js`) for the current platform from GitHub Releases
- * and drops them under ~/.petdex/.
+ * `petdex install desktop` installs Petdex Desktop from GitHub Releases.
+ * Bare binary releases land under ~/.petdex/; DMG-only macOS releases land
+ * under ~/Applications/Petdex.app.
  *
- * Layout after install:
+ * Bare layout after install:
  *   ~/.petdex/bin/petdex-desktop          (platform-specific binary, executable)
  *   ~/.petdex/sidecar/server.js           (cross-platform Node script)
  *   ~/.petdex/version                     (tag name of the installed release)
@@ -98,10 +98,11 @@ export function desktopBinPath(): string {
   // work.
   const ext = nodePlatform() === "win32" ? ".exe" : "";
   if (nodePlatform() === "darwin") {
+    const home = homeDir();
     const appCandidates = [
       "/Applications/Petdex.app/Contents/MacOS/petdex-desktop",
       path.join(
-        homedir(),
+        home,
         "Applications",
         "Petdex.app",
         "Contents",
@@ -124,10 +125,11 @@ export function sidecarPath(): string {
   // first when running inside an .app), so `petdex doctor` and the
   // sidecar-status checks find the same file the desktop actually loads.
   if (nodePlatform() === "darwin") {
+    const home = homeDir();
     const appCandidates = [
       "/Applications/Petdex.app/Contents/Resources/sidecar/server.js",
       path.join(
-        homedir(),
+        home,
         "Applications",
         "Petdex.app",
         "Contents",
@@ -202,6 +204,74 @@ export function findBinaryAsset(
 
 export function findSidecarAsset(release: Release): ReleaseAsset | null {
   return release.assets.find((a) => a.name === SIDECAR_ASSET_NAME) ?? null;
+}
+
+export type DesktopInstallPlan =
+  | {
+      kind: "bare";
+      target: Target;
+      binAsset: ReleaseAsset;
+      sidecarAsset: ReleaseAsset | null;
+    }
+  | {
+      kind: "macos-dmg";
+      target: Target;
+      dmgAsset: ReleaseAsset;
+    }
+  | {
+      kind: "unsupported";
+      target: Target;
+      reason: string;
+      hint: string;
+    };
+
+export function resolveDesktopInstallPlan(
+  release: Release,
+  target = detectTarget(),
+): DesktopInstallPlan {
+  const wanted = `petdex-desktop-${target.assetSuffix}`;
+  const binAsset =
+    release.assets.find((a) => a.name === wanted) ??
+    release.assets.find((a) => a.name.startsWith(wanted));
+
+  if (binAsset) {
+    return {
+      kind: "bare",
+      target,
+      binAsset,
+      sidecarAsset: findSidecarAsset(release),
+    };
+  }
+
+  if (target.osLabel === "darwin") {
+    const dmgAsset = findDmgAsset(release, target.archLabel);
+    if (dmgAsset) {
+      return { kind: "macos-dmg", target, dmgAsset };
+    }
+  }
+
+  if (target.osLabel === "linux") {
+    return {
+      kind: "unsupported",
+      target,
+      reason: `No Linux desktop binary for ${target.archLabel} in ${release.tag_name}.`,
+      hint: "Hooks-only setup still works on Linux: run `petdex hooks install`. Desktop Linux support is tracked in issue #296.",
+    };
+  }
+
+  return {
+    kind: "unsupported",
+    target,
+    reason: `No desktop binary for ${target.assetSuffix} in ${release.tag_name}.`,
+    hint: "Run `petdex hooks install` for hooks-only setup, or download a supported desktop build from https://petdex.crafter.run/download.",
+  };
+}
+
+export function desktopInstallPlanError(plan: DesktopInstallPlan): Error {
+  if (plan.kind !== "unsupported") {
+    return new Error("Desktop install plan is supported");
+  }
+  return new Error(`${plan.reason}\n   ${plan.hint}`);
 }
 
 // macOS DMG asset for a given arch. Used by the app-bundle update path
@@ -383,9 +453,15 @@ export type StagedDesktopAssets = {
 export async function stageDesktopAssets(
   release: Release,
 ): Promise<StagedDesktopAssets> {
-  const target = detectTarget();
-  const binAsset = findBinaryAsset(release, target.assetSuffix);
-  const sidecarAsset = findSidecarAsset(release);
+  const plan = resolveDesktopInstallPlan(release);
+  if (plan.kind === "unsupported") throw desktopInstallPlanError(plan);
+  if (plan.kind === "macos-dmg") {
+    throw new Error(
+      `No bare desktop binary for ${plan.target.assetSuffix} in ${release.tag_name}. Use the DMG install path instead.`,
+    );
+  }
+  const binAsset = plan.binAsset;
+  const sidecarAsset = plan.sidecarAsset;
 
   const binPath = desktopBinPath();
   const sidecar = sidecarPath();
@@ -564,6 +640,18 @@ export async function updateAppBundleFromDmg(
   return { appBundleRoot, dmgAsset };
 }
 
+export function defaultUserAppBundleRoot(): string {
+  return path.join(homeDir(), "Applications", "Petdex.app");
+}
+
+export async function installAppBundleFromDmg(
+  release: Release,
+  appBundleRoot = defaultUserAppBundleRoot(),
+): Promise<AppBundleUpdateResult> {
+  await mkdir(path.dirname(appBundleRoot), { recursive: true });
+  return updateAppBundleFromDmg(release, appBundleRoot);
+}
+
 function parseHdiutilMount(stdout: string): string | null {
   // hdiutil attach's plain output is column-aligned with the mount
   // point in the last column. We grep for /Volumes/ and take the
@@ -693,6 +781,17 @@ async function hasAnyInstalledPet(): Promise<boolean> {
     }
   }
   return false;
+}
+
+export type StarterPetResult =
+  | { status: "present" }
+  | { status: "installed"; slug: string }
+  | { status: "missing" };
+
+export async function ensureStarterPet(): Promise<StarterPetResult> {
+  if (await hasAnyInstalledPet()) return { status: "present" };
+  const slug = await installStarterPet();
+  return slug ? { status: "installed", slug } : { status: "missing" };
 }
 
 // Best-effort install of the canonical starter pet. Called at the
@@ -881,46 +980,61 @@ export async function runInstallDesktop(): Promise<RunInstallDesktopResult> {
   }
   s.stop(`${pc.green("✓")} Latest: ${pc.bold(release.tag_name)}`);
 
-  const dl = p.spinner();
-  dl.start("Downloading desktop binary and sidecar");
-  let result: Awaited<ReturnType<typeof downloadDesktopAssets>>;
-  try {
-    result = await downloadDesktopAssets(release);
-  } catch (err) {
-    dl.stop(pc.red("failed"));
-    throw err;
+  const plan = resolveDesktopInstallPlan(release);
+  if (plan.kind === "unsupported") throw desktopInstallPlanError(plan);
+
+  if (plan.kind === "bare") {
+    const dl = p.spinner();
+    dl.start("Downloading desktop binary and sidecar");
+    let result: Awaited<ReturnType<typeof downloadDesktopAssets>>;
+    try {
+      result = await downloadDesktopAssets(release);
+    } catch (err) {
+      dl.stop(pc.red("failed"));
+      throw err;
+    }
+
+    const binPath = desktopBinPath();
+    const sidecarMsg = result.sidecarAsset
+      ? `\n${pc.dim("•")} Sidecar at ${pc.cyan(tildeify(sidecarPath()))} (${formatBytes(result.sidecarAsset.size)})`
+      : `\n${pc.yellow("!")} No sidecar in this release. Hooks won't reach the mascot until a release ships ${SIDECAR_ASSET_NAME}.`;
+    dl.stop(
+      `${pc.green("✓")} Binary at ${pc.cyan(tildeify(binPath))} (${formatBytes(result.binAsset.size)})${sidecarMsg}`,
+    );
+  } else {
+    const dl = p.spinner();
+    dl.start("Installing macOS app from DMG");
+    try {
+      await installAppBundleFromDmg(release);
+    } catch (err) {
+      dl.stop(pc.red("failed"));
+      throw err;
+    }
+    dl.stop(
+      `${pc.green("✓")} App at ${pc.cyan(tildeify(defaultUserAppBundleRoot()))} (${formatBytes(plan.dmgAsset.size)})`,
+    );
   }
 
-  const binPath = desktopBinPath();
-  const versionFile = path.join(homedir(), ".petdex", "version");
+  const versionFile = path.join(homeDir(), ".petdex", "version");
+  await mkdir(path.dirname(versionFile), { recursive: true });
   await writeFile(versionFile, `${release.tag_name}\n`);
-
-  const sidecarMsg = result.sidecarAsset
-    ? `\n${pc.dim("•")} Sidecar at ${pc.cyan(tildeify(sidecarPath()))} (${formatBytes(result.sidecarAsset.size)})`
-    : `\n${pc.yellow("!")} No sidecar in this release. Hooks won't reach the mascot until a release ships ${SIDECAR_ASSET_NAME}.`;
-  dl.stop(
-    `${pc.green("✓")} Binary at ${pc.cyan(tildeify(binPath))} (${formatBytes(result.binAsset.size)})${sidecarMsg}`,
-  );
 
   // Make sure the user has at least one pet to look at when they
   // run `petdex desktop start`. Without this, a fresh install (no
   // ?next=install/<slug> hint, no manual `petdex install <slug>`)
   // exits at startup with "No pets found, install one with..." —
   // the documented happy path silently dead-ends.
-  let starterSlug: string | null = null;
-  if (!(await hasAnyInstalledPet())) {
-    const ps = p.spinner();
-    ps.start("Installing a starter pet so the desktop has something to show");
-    starterSlug = await installStarterPet();
-    if (starterSlug) {
-      ps.stop(`${pc.green("✓")} Starter pet: ${pc.bold(starterSlug)}`);
-    } else {
-      // Non-fatal: binary still landed. Tell the user how to recover
-      // so they don't hit a confusing "No pets found" later.
-      ps.stop(
-        `${pc.yellow("!")} Could not download a starter pet. Run \`petdex install <slug>\` before \`petdex desktop start\`.`,
-      );
-    }
+  const ps = p.spinner();
+  ps.start("Checking starter pet");
+  const starter = await ensureStarterPet();
+  if (starter.status === "installed") {
+    ps.stop(`${pc.green("✓")} Starter pet: ${pc.bold(starter.slug)}`);
+  } else if (starter.status === "present") {
+    ps.stop(`${pc.green("✓")} Pet library ready`);
+  } else {
+    ps.stop(
+      `${pc.yellow("!")} Could not download a starter pet. Run \`petdex install <slug>\` before \`petdex desktop start\`.`,
+    );
   }
 
   const nextLines = [
