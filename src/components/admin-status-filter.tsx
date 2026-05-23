@@ -32,6 +32,7 @@ const FILTERS: Array<{
 
 export function AdminStatusFilter({
   counts,
+  basePath = "/admin",
 }: {
   counts: {
     all: number;
@@ -44,6 +45,7 @@ export function AdminStatusFilter({
     rejected: number;
     discovered: number;
   };
+  basePath?: "/admin" | "/collaborator";
 }) {
   const t = useTranslations("admin.status");
   const locale = useLocale();
@@ -65,8 +67,8 @@ export function AdminStatusFilter({
         const active = current === f.value;
         const href =
           f.value === "pending"
-            ? localizePath(locale, "/admin")
-            : `${localizePath(locale, "/admin")}?status=${f.value}`;
+            ? localizePath(locale, basePath)
+            : `${localizePath(locale, basePath)}?status=${f.value}`;
         const count = counts[f.value];
         return (
           <Link

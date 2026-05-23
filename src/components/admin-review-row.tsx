@@ -34,7 +34,8 @@ import {
   visualDistanceSimilarityScore,
 } from "@/lib/submission-similarity";
 
-type AdminReviewPet = SubmittedPet & {
+type AdminReviewPet = Omit<SubmittedPet, "ownerEmail"> & {
+  ownerEmail?: SubmittedPet["ownerEmail"];
   latestReview?: SubmissionReview | null;
 };
 
@@ -45,6 +46,7 @@ type AdminReviewRowProps = {
   stateCount: number;
   /** Pre-resolved profile handle for the submitter (Clerk username, fallback to userId tail). */
   ownerHandle?: string;
+  actionScope?: "admin" | "collaborator";
 };
 
 // Lima time, en-US so the format stays predictable. The admin only
@@ -86,6 +88,7 @@ export function AdminReviewRow({
   pet,
   stateCount,
   ownerHandle,
+  actionScope = "admin",
 }: AdminReviewRowProps) {
   const t = useTranslations("adminReview");
   const [status, setStatus] = useState(pet.status);
@@ -105,6 +108,7 @@ export function AdminReviewRow({
   }, []);
 
   const isUntitled = pet.displayName === "Untitled pet";
+  const canUseAdminOnlyActions = actionScope === "admin";
   const createdAtDate = new Date(pet.createdAt);
   // stateCount is intentionally read here (linter would otherwise flag
   // the unused param) — the count never varies per row but the prop
@@ -130,13 +134,20 @@ export function AdminReviewRow({
     const res = await fetch(`/api/admin/${pet.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        action: apiAction,
-        reason,
-        displayName,
-        description,
-        slug,
-      }),
+      body: JSON.stringify(
+        canUseAdminOnlyActions
+          ? {
+              action: apiAction,
+              reason,
+              displayName,
+              description,
+              slug,
+            }
+          : {
+              action: apiAction,
+              reason,
+            },
+      ),
     });
 
     if (!res.ok) {
@@ -314,15 +325,17 @@ export function AdminReviewRow({
               </span>
               <StatusBadge status={status} />
               <AutomationBadge review={pet.latestReview ?? null} />
-              <button
-                type="button"
-                onClick={() => setEditing(true)}
-                aria-label={t("editAria")}
-                className="inline-flex items-center gap-1 rounded-full border border-border-base bg-surface px-2 py-0.5 font-mono text-[10px] tracking-[0.12em] text-muted-2 uppercase transition hover:border-border-strong hover:text-foreground"
-              >
-                <Pencil className="size-3" />
-                Edit
-              </button>
+              {canUseAdminOnlyActions ? (
+                <button
+                  type="button"
+                  onClick={() => setEditing(true)}
+                  aria-label={t("editAria")}
+                  className="inline-flex items-center gap-1 rounded-full border border-border-base bg-surface px-2 py-0.5 font-mono text-[10px] tracking-[0.12em] text-muted-2 uppercase transition hover:border-border-strong hover:text-foreground"
+                >
+                  <Pencil className="size-3" />
+                  Edit
+                </button>
+              ) : null}
             </div>
             <p className="line-clamp-2 text-sm text-muted-2">{description}</p>
           </>
@@ -394,7 +407,7 @@ export function AdminReviewRow({
       </div>
 
       <div className="flex shrink-0 items-center gap-2 md:flex-col md:items-stretch">
-        {editing ? (
+        {editing && canUseAdminOnlyActions ? (
           <>
             <button
               type="button"
@@ -444,7 +457,7 @@ export function AdminReviewRow({
               Reject
             </button>
           </>
-        ) : status === "rejected" ? (
+        ) : status === "rejected" && canUseAdminOnlyActions ? (
           <>
             <button
               type="button"
@@ -469,7 +482,7 @@ export function AdminReviewRow({
               Take down
             </button>
           </>
-        ) : status === "approved" ? (
+        ) : status === "approved" && canUseAdminOnlyActions ? (
           <>
             <AdminFeatureToggle
               petId={pet.id}
@@ -492,7 +505,7 @@ export function AdminReviewRow({
             </button>
           </>
         ) : null}
-        {!editing ? (
+        {!editing && canUseAdminOnlyActions ? (
           <button
             type="button"
             onClick={() => void rerunReview()}

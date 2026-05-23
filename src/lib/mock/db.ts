@@ -108,6 +108,18 @@ async function bootstrap(client: PGlite): Promise<void> {
       "updated_at" timestamp with time zone NOT NULL DEFAULT now()
     )`,
     `ALTER TABLE "pet_requests" ADD COLUMN IF NOT EXISTS "embedding_model" text`,
+    `CREATE TABLE IF NOT EXISTS "pet_request_candidates" (
+      "pet_id" text NOT NULL,
+      "request_id" text NOT NULL,
+      "similarity" real,
+      "source" text NOT NULL,
+      "status" text NOT NULL DEFAULT 'pending',
+      "rejection_reason" text,
+      "suggested_at" timestamp with time zone NOT NULL DEFAULT now(),
+      "resolved_at" timestamp with time zone,
+      "resolved_by" text,
+      PRIMARY KEY ("pet_id", "request_id")
+    )`,
     `CREATE TABLE IF NOT EXISTS "feedback" (
       "id" text PRIMARY KEY NOT NULL,
       "kind" text NOT NULL DEFAULT 'suggestion',

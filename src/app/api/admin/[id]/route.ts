@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { eq } from "drizzle-orm";
 
-import { isAdmin } from "@/lib/admin";
+import { canReviewPetSubmissions, isAdmin } from "@/lib/admin";
 import { db, schema } from "@/lib/db/client";
 import { requireSameOrigin } from "@/lib/same-origin";
 import { applySubmissionAction } from "@/lib/submission-decisions";
@@ -31,7 +31,8 @@ export async function PATCH(
   if (csrf) return csrf;
 
   const { userId } = await auth();
-  if (!isAdmin(userId)) {
+  const admin = isAdmin(userId);
+  if (!canReviewPetSubmissions(userId)) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
@@ -51,6 +52,17 @@ export async function PATCH(
     body.action !== "pending"
   ) {
     return NextResponse.json({ error: "invalid_action" }, { status: 400 });
+  }
+  if (!admin && body.action !== "approve" && body.action !== "reject") {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
+  if (
+    !admin &&
+    (body.displayName !== undefined ||
+      body.description !== undefined ||
+      body.slug !== undefined)
+  ) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
   const result = await applySubmissionAction(id, body, { actor: "admin" });

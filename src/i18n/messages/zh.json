@@ -816,6 +816,19 @@
       }
     }
   },
+  "collaborator": {
+    "metadata": {
+      "title": "Petdex Collaborator"
+    },
+    "tabs": {
+      "ariaLabel": "协作者分区",
+      "submissions": "提交",
+      "edits": "元数据编辑",
+      "requests": "宠物请求",
+      "collections": "合集",
+      "wechatQr": "WeChat QR"
+    }
+  },
   "requests": {
     "metadata": {
       "title": "宠物请求",

@@ -791,6 +791,19 @@
       }
     }
   },
+  "collaborator": {
+    "metadata": {
+      "title": "Petdex Collaborator"
+    },
+    "tabs": {
+      "ariaLabel": "Collaborator sections",
+      "submissions": "Submissions",
+      "edits": "Metadata edits",
+      "requests": "Pet requests",
+      "collections": "Collections",
+      "wechatQr": "WeChat QR"
+    }
+  },
   "requests": {
     "metadata": {
       "title": "Pet requests",
