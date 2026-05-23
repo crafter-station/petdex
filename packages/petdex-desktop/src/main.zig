@@ -21,6 +21,20 @@ const MAX_INSTALL_SLUGS: usize = 24;
 // Room for `slugs=a,b,c` query values (24 slugs × ~65 chars, matches web cap).
 const MAX_SLUGS_QUERY_BYTES: usize = MAX_INSTALL_SLUGS * (MAX_SLUG_LEN + 1);
 
+fn petWindowOptions() zero_native.WindowOptions {
+    return .{
+        .label = "pet",
+        .title = "Petdex",
+        .default_frame = zero_native.geometry.RectF.init(0, 0, WINDOW_W, WINDOW_H),
+        .resizable = false,
+        .restore_state = true,
+        .frameless = true,
+        .transparent = true,
+        .always_on_top = true,
+        .focusable = false,
+    };
+}
+
 const DeepLink = union(enum) {
     none,
     activate: []const u8,
@@ -3006,16 +3020,7 @@ pub fn main(init: std.process.Init) !void {
 
     var app = PetDesktopApp{ .asset_root = asset_root };
 
-    const main_window: zero_native.WindowOptions = .{
-        .label = "pet",
-        .title = "Petdex",
-        .default_frame = zero_native.geometry.RectF.init(0, 0, WINDOW_W, WINDOW_H),
-        .resizable = false,
-        .restore_state = true,
-        .frameless = true,
-        .transparent = true,
-        .always_on_top = true,
-    };
+    const main_window = petWindowOptions();
 
     const security_policy: zero_native.SecurityPolicy = .{
         .navigation = .{ .allowed_origins = &.{ "zero://app", "zero://inline" } },
@@ -3050,6 +3055,16 @@ pub fn main(init: std.process.Init) !void {
 
 const testing = std.testing;
 const testing_io = std.testing.io;
+
+test "petWindowOptions: desktop pet uses nonactivating always-on-top window" {
+    const options = petWindowOptions();
+
+    try testing.expect(options.frameless);
+    try testing.expect(options.transparent);
+    try testing.expect(options.always_on_top);
+    try testing.expect(!options.focusable);
+    try testing.expect(!options.resizable);
+}
 
 fn writeTestFile(dir: std.Io.Dir, name: []const u8, contents: []const u8) !void {
     var f = try dir.createFile(testing_io, name, .{ .truncate = true });
