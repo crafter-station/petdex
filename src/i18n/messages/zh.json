@@ -823,10 +823,21 @@
     "tabs": {
       "ariaLabel": "协作者分区",
       "submissions": "提交",
+      "moderation": "已发布审核",
       "edits": "元数据编辑",
       "requests": "宠物请求",
       "collections": "合集",
       "wechatQr": "WeChat QR"
+    },
+    "moderation": {
+      "eyebrow": "审核",
+      "title": "已发布宠物",
+      "searchPlaceholder": "按名称、slug、描述或 owner 搜索",
+      "search": "搜索",
+      "clear": "清除",
+      "previous": "上一页",
+      "next": "下一页",
+      "empty": "没有匹配的已发布宠物。"
     }
   },
   "requests": {

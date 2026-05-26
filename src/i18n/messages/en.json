@@ -798,10 +798,21 @@
     "tabs": {
       "ariaLabel": "Collaborator sections",
       "submissions": "Submissions",
+      "moderation": "Published moderation",
       "edits": "Metadata edits",
       "requests": "Pet requests",
       "collections": "Collections",
       "wechatQr": "WeChat QR"
+    },
+    "moderation": {
+      "eyebrow": "Moderation",
+      "title": "Published pets",
+      "searchPlaceholder": "Search name, slug, description, or owner",
+      "search": "Search",
+      "clear": "Clear",
+      "previous": "Previous",
+      "next": "Next",
+      "empty": "No published pets match this filter."
     }
   },
   "requests": {

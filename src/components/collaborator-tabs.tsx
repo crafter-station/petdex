@@ -9,13 +9,24 @@ import { localizePath } from "@/i18n/config";
 
 const TABS: Array<{
   href: string;
-  key: "submissions" | "edits" | "requests" | "collections" | "wechatQr";
+  key:
+    | "submissions"
+    | "moderation"
+    | "edits"
+    | "requests"
+    | "collections"
+    | "wechatQr";
   match: (pathname: string) => boolean;
 }> = [
   {
     href: "/collaborator",
     key: "submissions",
     match: (p) => p === "/collaborator",
+  },
+  {
+    href: "/collaborator/moderation",
+    key: "moderation",
+    match: (p) => p.startsWith("/collaborator/moderation"),
   },
   {
     href: "/collaborator/edits",
@@ -41,17 +52,23 @@ const TABS: Array<{
 
 export function CollaboratorTabs({
   showReviewTabs = true,
+  showModerationTab = false,
+  showWeChatQrTab = true,
 }: {
   showReviewTabs?: boolean;
+  showModerationTab?: boolean;
+  showWeChatQrTab?: boolean;
 }) {
   const t = useTranslations("collaborator.tabs");
   const locale = useLocale();
   const pathname = usePathname() ?? "/collaborator";
   const normalizedPath =
     locale === "en" ? pathname : pathname.replace(`/${locale}`, "") || "/";
-  const tabs = showReviewTabs
-    ? TABS
-    : TABS.filter((tab) => tab.key === "wechatQr");
+  const tabs = TABS.filter((tab) => {
+    if (tab.key === "moderation") return showModerationTab;
+    if (tab.key === "wechatQr") return showWeChatQrTab;
+    return showReviewTabs;
+  });
 
   return (
     <nav

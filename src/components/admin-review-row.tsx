@@ -34,7 +34,19 @@ import {
   visualDistanceSimilarityScore,
 } from "@/lib/submission-similarity";
 
-type AdminReviewPet = Omit<SubmittedPet, "ownerEmail"> & {
+type AdminReviewPet = Pick<
+  SubmittedPet,
+  | "createdAt"
+  | "description"
+  | "displayName"
+  | "featured"
+  | "id"
+  | "petJsonUrl"
+  | "slug"
+  | "spritesheetUrl"
+  | "status"
+  | "zipUrl"
+> & {
   ownerEmail?: SubmittedPet["ownerEmail"];
   latestReview?: SubmissionReview | null;
 };
@@ -46,7 +58,7 @@ type AdminReviewRowProps = {
   stateCount: number;
   /** Pre-resolved profile handle for the submitter (Clerk username, fallback to userId tail). */
   ownerHandle?: string;
-  actionScope?: "admin" | "collaborator";
+  actionScope?: "admin" | "collaborator" | "moderator";
 };
 
 // Lima time, en-US so the format stays predictable. The admin only
@@ -109,6 +121,9 @@ export function AdminReviewRow({
 
   const isUntitled = pet.displayName === "Untitled pet";
   const canUseAdminOnlyActions = actionScope === "admin";
+  const canUseTakedownActions =
+    canUseAdminOnlyActions || actionScope === "moderator";
+  const showReviewMetadata = actionScope !== "moderator";
   const createdAtDate = new Date(pet.createdAt);
   // stateCount is intentionally read here (linter would otherwise flag
   // the unused param) — the count never varies per row but the prop
@@ -184,8 +199,17 @@ export function AdminReviewRow({
       }
       return;
     }
-    const reason =
-      window.prompt("Reason (sent to owner email, optional)") ?? "";
+    const reasonPrompt =
+      actionScope === "moderator"
+        ? "Reason (required; sent to owner email and audit log)"
+        : "Reason (sent to owner email, optional)";
+    const rawReason = window.prompt(reasonPrompt);
+    if (rawReason === null) return;
+    const reason = rawReason.trim();
+    if (actionScope === "moderator" && !reason) {
+      window.alert("A reason is required for moderator takedowns.");
+      return;
+    }
 
     setBusy(true);
     setError(null);
@@ -324,7 +348,9 @@ export function AdminReviewRow({
                 /{slug}
               </span>
               <StatusBadge status={status} />
-              <AutomationBadge review={pet.latestReview ?? null} />
+              {showReviewMetadata ? (
+                <AutomationBadge review={pet.latestReview ?? null} />
+              ) : null}
               {canUseAdminOnlyActions ? (
                 <button
                   type="button"
@@ -398,7 +424,9 @@ export function AdminReviewRow({
             pet.json
           </a>
         </div>
-        <AutomationEvidence review={pet.latestReview ?? null} />
+        {showReviewMetadata ? (
+          <AutomationEvidence review={pet.latestReview ?? null} />
+        ) : null}
         {error ? (
           <p className="rounded-md bg-chip-danger-bg px-2 py-1 text-xs text-chip-danger-fg">
             {error}
@@ -432,7 +460,7 @@ export function AdminReviewRow({
               Cancel
             </button>
           </>
-        ) : status === "pending" ? (
+        ) : status === "pending" && actionScope !== "moderator" ? (
           <>
             <button
               type="button"
@@ -482,14 +510,16 @@ export function AdminReviewRow({
               Take down
             </button>
           </>
-        ) : status === "approved" && canUseAdminOnlyActions ? (
+        ) : status === "approved" && canUseTakedownActions ? (
           <>
-            <AdminFeatureToggle
-              petId={pet.id}
-              initialFeatured={pet.featured}
-              petName={pet.displayName}
-              variant="solid"
-            />
+            {canUseAdminOnlyActions ? (
+              <AdminFeatureToggle
+                petId={pet.id}
+                initialFeatured={pet.featured}
+                petName={pet.displayName}
+                variant="solid"
+              />
+            ) : null}
             <button
               type="button"
               onClick={() => void takedown()}

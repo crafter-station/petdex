@@ -3,7 +3,11 @@ import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { eq } from "drizzle-orm";
 
-import { canReviewPetSubmissions, isAdmin } from "@/lib/admin";
+import {
+  canModeratePublishedPets,
+  canReviewPetSubmissions,
+  isAdmin,
+} from "@/lib/admin";
 import { db, schema } from "@/lib/db/client";
 import { requireSameOrigin } from "@/lib/same-origin";
 import { applySubmissionAction } from "@/lib/submission-decisions";
@@ -73,14 +77,6 @@ export async function PATCH(
   return NextResponse.json({ ok: true, status: result.row.status });
 }
 
-// Hard takedown. Removes the pet row, every cross-table reference that
-// stores its slug, and every R2 asset uploaded for the submission. The
-// slug is freed so the original author (or anyone else) can re-submit.
-//
-// Use case: rights-holder asks to take down their own pet, DMCA, or
-// any other reason where rejecting + leaving the row around isn't
-// enough. For routine "this submission isn't a fit" cases prefer
-// PATCH action: 'reject' so the audit trail stays.
 type DeleteBody = {
   reason?: string | null;
 };
@@ -93,7 +89,8 @@ export async function DELETE(
   if (csrf) return csrf;
 
   const { userId } = await auth();
-  if (!isAdmin(userId)) {
+  const admin = isAdmin(userId);
+  if (!canModeratePublishedPets(userId)) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
@@ -113,11 +110,17 @@ export async function DELETE(
   if (!pet) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
+  if (!admin && pet.status !== "approved") {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
+  if (!admin && !reason) {
+    return NextResponse.json({ error: "reason_required" }, { status: 400 });
+  }
 
   await takedownPet({
     pet,
     reason,
-    source: "admin",
+    source: admin ? "admin" : "moderator",
     actorId: userId ?? "unknown",
   });
 

@@ -20,6 +20,7 @@ import { useLocale, useTranslations } from "next-intl";
 
 import {
   canAccessCollaboratorAreaClientSafe,
+  canModeratePublishedPetsClientSafe,
   isAdminClientSafe,
   isCollaboratorClientSafe,
 } from "@/lib/admin";
@@ -97,9 +98,13 @@ function UserDropdown({ compact = false }: { compact?: boolean }) {
   const { signOut, openUserProfile } = useClerk();
   const showAdmin = isAdminClientSafe(user?.id);
   const showCollaborator = canAccessCollaboratorAreaClientSafe(user?.id);
-  const collaboratorHref = isCollaboratorClientSafe(user?.id)
+  const canReviewAsCollaborator = isCollaboratorClientSafe(user?.id);
+  const canModerate = canModeratePublishedPetsClientSafe(user?.id);
+  const collaboratorHref = canReviewAsCollaborator
     ? "/collaborator"
-    : "/collaborator/wechat-qr";
+    : canModerate
+      ? "/collaborator/moderation"
+      : "/collaborator/wechat-qr";
   const unread = useHeaderState().state.feedback.count;
   const t = useTranslations("header");
   const locale = useLocale();

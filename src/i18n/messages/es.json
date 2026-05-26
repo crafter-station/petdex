@@ -798,10 +798,21 @@
     "tabs": {
       "ariaLabel": "Secciones de colaborador",
       "submissions": "Envíos",
+      "moderation": "Moderación publicada",
       "edits": "Ediciones de metadata",
       "requests": "Pedidos de mascotas",
       "collections": "Colecciones",
       "wechatQr": "QR de WeChat"
+    },
+    "moderation": {
+      "eyebrow": "Moderación",
+      "title": "Mascotas publicadas",
+      "searchPlaceholder": "Busca por nombre, slug, descripción o owner",
+      "search": "Buscar",
+      "clear": "Limpiar",
+      "previous": "Anterior",
+      "next": "Siguiente",
+      "empty": "Ninguna mascota publicada coincide con este filtro."
     }
   },
   "requests": {
