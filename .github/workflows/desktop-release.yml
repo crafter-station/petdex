@@ -6,13 +6,21 @@ on:
       - "desktop-v*"
   workflow_dispatch:
     inputs:
-      tag:
-        description: "Tag to release (e.g. desktop-v0.1.0)"
-        required: true
+      release_tag:
+        description: "desktop-v* tag to publish (created from the selected branch if it doesn't exist). Leave empty to reuse the selected tag's name."
+        required: false
+      windows_only:
+        description: "Skip the macOS builds and release only the Windows portable exe (for fork/Windows testing)"
+        type: boolean
+        default: false
 
 jobs:
   build:
     name: build ${{ matrix.target }}
+    # Skipped on a windows_only manual run so a fork can cut a Windows-only
+    # test release without spending mac runner minutes or being blocked by
+    # the Zig/zero-native build. Tag pushes leave windows_only unset → runs.
+    if: ${{ !inputs.windows_only }}
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
@@ -26,10 +34,10 @@ jobs:
       - name: Checkout petdex
         uses: actions/checkout@v4
         with:
-          # Manual workflow_dispatch must build from inputs.tag, not from
-          # the branch the workflow file lives on. Tag pushes already
-          # arrive with github.ref pointing at the tag.
-          ref: ${{ inputs.tag || github.ref }}
+          # github.ref follows the ref selected for the run: the pushed
+          # desktop-v* tag on push, or the branch/tag picked in the
+          # "Run workflow" dropdown on manual dispatch.
+          ref: ${{ github.ref }}
 
       - name: Clone zero-native
         # build.zig resolves zero-native from -Dzero-native-path flag, the
@@ -69,6 +77,50 @@ jobs:
           name: petdex-desktop-${{ matrix.target }}
           path: packages/petdex-desktop/petdex-desktop-${{ matrix.target }}
 
+  build-windows:
+    name: build win32-x64 (portable exe)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: packages/petdex-desktop-windows
+    steps:
+      - name: Checkout petdex
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build frontend
+        run: npm run build
+
+      # --no-bundle: skip MSI/NSIS installers, we ship the portable exe so the
+      # CLI install model (~/.petdex/bin/petdex-desktop.exe) works like mac/linux.
+      # The exe embeds the frontend; only WebView2 (present on Win10/11) is needed.
+      - name: Build portable exe
+        run: npm run tauri-build -- --no-bundle
+
+      # Cargo bin name is `petdex-win` (see src-tauri/Cargo.toml [[bin]]); rename
+      # to the asset name the CLI's findBinaryAsset() expects for win32-x64.
+      - name: Rename to release asset name
+        shell: pwsh
+        run: |
+          Copy-Item "src-tauri/target/release/petdex-win.exe" "petdex-desktop-win32-x64.exe"
+          Get-Item "petdex-desktop-win32-x64.exe" | Format-List Name, Length
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: petdex-desktop-win32-x64
+          # path is relative to repo root, not the job's working-directory
+          path: packages/petdex-desktop-windows/petdex-desktop-win32-x64.exe
+
   sidecar:
     name: build sidecar (server.js)
     runs-on: ubuntu-latest
@@ -76,7 +128,7 @@ jobs:
       - name: Checkout petdex
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ github.ref }}
 
       - name: Install Bun
         uses: oven-sh/setup-bun@v2
@@ -96,7 +148,15 @@ jobs:
 
   release:
     name: publish github release
-    needs: [build, sidecar]
+    needs: [build, build-windows, sidecar]
+    # Publish as long as Windows + sidecar succeeded. mac is allowed to be
+    # 'skipped' (windows_only run) but a real mac 'failure' still blocks the
+    # release so production tag pushes never ship missing mac binaries.
+    if: >-
+      ${{ !cancelled()
+          && needs.build-windows.result == 'success'
+          && needs.sidecar.result == 'success'
+          && needs.build.result != 'failure' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -104,7 +164,7 @@ jobs:
       - name: Checkout petdex
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ github.ref }}
 
       - name: Download all binaries
         uses: actions/download-artifact@v4
@@ -124,11 +184,11 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          # `inputs.tag` is set on workflow_dispatch (manual run); on push of
-          # a desktop-v* tag, `github.ref_name` carries the tag. The
-          # `inputs.tag || github.ref_name` order works because `inputs.tag`
-          # is null on tag pushes.
-          tag_name: ${{ inputs.tag || github.ref_name }}
+          # On a tag push, github.ref_name is the desktop-v* tag. On manual
+          # dispatch from a branch, pass release_tag (e.g. desktop-v0.2.2-win)
+          # — action-gh-release creates the tag at the built commit. The tag
+          # must start with desktop-v so the CLI's release filter finds it.
+          tag_name: ${{ inputs.release_tag || github.ref_name }}
           files: release/*
           generate_release_notes: true
           fail_on_unmatched_files: true

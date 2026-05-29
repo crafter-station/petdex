@@ -33,8 +33,19 @@ import pc from "picocolors";
 // desktop-v* explicitly. We paginate through the list because a long
 // streak of web/sidecar releases between desktop tags would otherwise
 // hide the latest desktop release behind page 1.
-const RELEASES_API_BASE =
-  "https://api.github.com/repos/crafter-station/petdex/releases";
+// Release repo is overridable via PETDEX_RELEASE_REPO ("owner/repo") so a
+// fork can test its own desktop releases end-to-end (the published CLI
+// otherwise hardcodes the upstream repo). Falls back to upstream when the
+// var is unset or malformed. browser_download_url in the API response points
+// at the same repo, so downloads follow the override automatically.
+const DEFAULT_RELEASE_REPO = "crafter-station/petdex";
+function releaseRepo(): string {
+  const override = process.env.PETDEX_RELEASE_REPO?.trim();
+  return override && /^[\w.-]+\/[\w.-]+$/.test(override)
+    ? override
+    : DEFAULT_RELEASE_REPO;
+}
+const RELEASES_API_BASE = `https://api.github.com/repos/${releaseRepo()}/releases`;
 const RELEASES_PAGE_SIZE = 30;
 // Cap the search at 5 pages = 150 releases. Anything older than that
 // is almost certainly stale anyway, and searching forever would burn
