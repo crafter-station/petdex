@@ -1,0 +1,74 @@
+name: petdex-desktop-windows
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/desktop-windows.yml"
+      - "packages/petdex-desktop-windows/**"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/desktop-windows.yml"
+      - "packages/petdex-desktop-windows/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Check (cargo check + vite build)
+    runs-on: windows-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: packages/petdex-desktop-windows
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Check Rust
+        working-directory: packages/petdex-desktop-windows/src-tauri
+        run: cargo check
+
+  build:
+    name: Build Windows installer
+    runs-on: windows-latest
+    timeout-minutes: 15
+    needs: check
+    defaults:
+      run:
+        working-directory: packages/petdex-desktop-windows
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build Tauri
+        run: npm run tauri-build
+
+      - name: Upload installer artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: petdex-desktop-windows-${{ github.run_id }}
+          path: |
+            packages/petdex-desktop-windows/src-tauri/target/release/bundle/msi/*.msi
+            packages/petdex-desktop-windows/src-tauri/target/release/bundle/nsis/*.exe

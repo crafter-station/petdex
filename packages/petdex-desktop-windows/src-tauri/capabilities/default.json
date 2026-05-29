@@ -1,0 +1,54 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default capabilities for Petdex Desktop",
+  "windows": ["pet"],
+  "permissions": [
+    "core:default",
+    "core:window:default",
+    "core:window:allow-set-size",
+    "core:window:allow-set-position",
+    "core:window:allow-start-dragging",
+    "core:window:allow-close",
+    "core:window:allow-hide",
+    "core:window:allow-show",
+    "core:window:allow-set-focus",
+    "core:app:default",
+    "core:app:allow-show",
+    "core:app:allow-hide",
+    "core:event:default",
+    "core:event:allow-listen",
+    "core:event:allow-emit",
+    "core:event:allow-emit-to",
+    "core:path:default",
+    "core:path:allow-resolve-directory",
+    "core:fs:allow-read-file",
+    "core:fs:allow-write-file",
+    "core:fs:allow-read-dir",
+    "core:fs:allow-copy-file",
+    "core:fs:allow-create",
+    "core:fs:allow-remove",
+    "core:fs:allow-rename",
+    "core:fs:allow-exists",
+    "core:fs:allow-mkdir",
+    {
+      "identifier": "core:fs:scope",
+      "allow": [
+        { "path": "$HOME/.petdex/**" },
+        { "path": "$HOME/.codex/pets/**" }
+      ]
+    },
+    "core:process:allow-spawn",
+    "core:process:allow-kill",
+    {
+      "identifier": "http:allow-fetch",
+      "allow": [
+        { "url": "http://127.0.0.1:7777/**" }
+      ]
+    },
+    "deep-link:default",
+    "deep-link:allow-get-current",
+    "deep-link:allow-on-open-url",
+    "deep-link:allow-register"
+  ]
+}

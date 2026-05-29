@@ -1,0 +1,146 @@
+html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; width: 100%; height: 100%; font-family: -apple-system, system-ui, sans-serif; }
+body { -webkit-user-select: none; user-select: none; pointer-events: none; }
+.stage { position: fixed; left: 8px; pointer-events: none; }
+.pet {
+  aspect-ratio: 192 / 208;
+  width: 4.5rem;
+  image-rendering: pixelated;
+  background-image: url('spritesheet.webp');
+  background-repeat: no-repeat;
+  background-size: 800% 900%;
+  background-position: 0% 0%;
+  pointer-events: auto;
+  cursor: grab;
+}
+.pet.dragging { cursor: grabbing; }
+.menu { pointer-events: auto; }
+.menu {
+  position: fixed;
+  background: rgba(20, 20, 22, 0.96);
+  color: #f0f0f0;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 6px;
+  font-size: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  width: 168px;
+  z-index: 999;
+  backdrop-filter: blur(16px);
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.menu input {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #f0f0f0;
+  border-radius: 5px;
+  padding: 4px 8px;
+  font-size: 10px;
+  outline: none;
+  font-family: inherit;
+}
+.menu input:focus { border-color: rgba(255, 255, 255, 0.2); }
+.menu .scroller {
+  position: relative;
+  height: 240px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.menu .scroller::-webkit-scrollbar { width: 6px; }
+.menu .scroller::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+.menu .spacer { width: 100%; pointer-events: none; }
+.menu .viewport {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  will-change: transform;
+}
+.menu .cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 4px 2px;
+  border-radius: 5px;
+  cursor: pointer;
+  gap: 2px;
+  min-width: 0;
+  height: 60px;
+  box-sizing: border-box;
+}
+.menu .cell:hover { background: rgba(255, 255, 255, 0.08); }
+.menu .cell.active { background: rgba(0, 122, 255, 0.18); outline: 1px solid rgba(0, 122, 255, 0.4); }
+.menu .thumb {
+  width: 40px;
+  height: 40px;
+  image-rendering: pixelated;
+  background-repeat: no-repeat;
+  background-size: 800% 900%;
+  background-position: 0% 0%;
+  background-color: rgba(255,255,255,0.04);
+  border-radius: 4px;
+}
+.menu .label {
+  font-size: 8px;
+  color: rgba(255,255,255,0.7);
+  width: 100%;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.menu .empty {
+  color: rgba(255,255,255,0.3);
+  text-align: center;
+  padding: 12px 0;
+  font-size: 9px;
+}
+.menu .count {
+  font-size: 8px;
+  color: rgba(255,255,255,0.4);
+  text-align: right;
+  padding: 0 2px;
+}
+.menu .footer {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 6px;
+  display: flex;
+  justify-content: flex-end;
+}
+.menu .quit {
+  color: rgba(255, 136, 136, 0.85);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 9px;
+  transition: background 120ms ease;
+}
+.menu .quit:hover { background: rgba(255, 100, 100, 0.12); }
+.menu .quit-confirm {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  font-size: 9px;
+}
+.menu .quit-confirm span { color: rgba(255,255,255,0.5); }
+.menu .quit-confirm button {
+  background: transparent;
+  border: 1px solid rgba(255, 100, 100, 0.4);
+  color: #f88;
+  border-radius: 3px;
+  padding: 1px 6px;
+  font-size: 9px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.menu .quit-confirm button:hover { background: rgba(255, 100, 100, 0.12); }
+.menu .quit-confirm button.cancel {
+  border-color: rgba(255, 255, 255, 0.15);
+  color: rgba(255,255,255,0.6);
+}
+.menu .quit-confirm button.cancel:hover { background: rgba(255, 255, 255, 0.06); }
