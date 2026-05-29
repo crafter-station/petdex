@@ -38,8 +38,6 @@
         { "path": "$HOME/.codex/pets/**" }
       ]
     },
-    "process:allow-spawn",
-    "process:allow-kill",
     "http:default",
     "deep-link:default",
     "deep-link:allow-get-current",
