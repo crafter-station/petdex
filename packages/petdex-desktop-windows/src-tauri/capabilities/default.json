@@ -22,33 +22,27 @@
     "core:event:allow-emit-to",
     "core:path:default",
     "core:path:allow-resolve-directory",
-    "core:fs:allow-read-file",
-    "core:fs:allow-write-file",
-    "core:fs:allow-read-dir",
-    "core:fs:allow-copy-file",
-    "core:fs:allow-create",
-    "core:fs:allow-remove",
-    "core:fs:allow-rename",
-    "core:fs:allow-exists",
-    "core:fs:allow-mkdir",
+    "fs:allow-read-file",
+    "fs:allow-write-file",
+    "fs:allow-read-dir",
+    "fs:allow-copy-file",
+    "fs:allow-create",
+    "fs:allow-remove",
+    "fs:allow-rename",
+    "fs:allow-exists",
+    "fs:allow-mkdir",
     {
-      "identifier": "core:fs:scope",
+      "identifier": "fs:scope",
       "allow": [
         { "path": "$HOME/.petdex/**" },
         { "path": "$HOME/.codex/pets/**" }
       ]
     },
-    "core:process:allow-spawn",
-    "core:process:allow-kill",
-    {
-      "identifier": "http:allow-fetch",
-      "allow": [
-        { "url": "http://127.0.0.1:7777/**" }
-      ]
-    },
+    "process:allow-spawn",
+    "process:allow-kill",
+    "http:default",
     "deep-link:default",
     "deep-link:allow-get-current",
-    "deep-link:allow-on-open-url",
     "deep-link:allow-register"
   ]
 }
