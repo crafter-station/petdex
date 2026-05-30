@@ -987,12 +987,23 @@ const html_tail =
     \\  let samples = [];
     \\  let resetTimer = null;
     \\  let momentumTimer = null;
-    \\  async function moveWindowClamped(dx, dy) {
+    \\  async function moveWindowBy(dx, dy, clampToVisibleFrame) {
     \\    if (!(window.zero && window.zero.invoke)) return { hitX: false, hitY: false };
     \\    try {
-    \\      const r = await window.zero.invoke('zero-native.window.move', { dx, dy, clampToVisibleFrame: true });
-    \\      return { hitX: !!(r && r.hitX), hitY: !!(r && r.hitY) };
+    \\      const r = await window.zero.invoke('zero-native.window.move', { dx, dy, clampToVisibleFrame });
+    \\      return { hitX: !!(r && r.hitX), hitY: !!(r && r.hitY), x: r && r.x, y: r && r.y };
     \\    } catch (e) { return { hitX: false, hitY: false }; }
+    \\  }
+    \\  async function moveWindowClamped(dx, dy) {
+    \\    return moveWindowBy(dx, dy, true);
+    \\  }
+    \\  async function readWindowFrame() {
+    \\    if (!(window.zero && window.zero.invoke)) return null;
+    \\    try {
+    \\      const r = await window.zero.invoke('zero-native.window.move', { dx: 0, dy: 0, clampToVisibleFrame: false });
+    \\      if (!r || !Number.isFinite(r.x) || !Number.isFinite(r.y)) return null;
+    \\      return { x: r.x, y: r.y };
+    \\    } catch (e) { return null; }
     \\  }
     \\  function pushSample(e) {
     \\    const t = performance.now();
@@ -1069,6 +1080,7 @@ const html_tail =
     \\  pet.addEventListener('pointercancel', endDrag);
     \\  // Pet picker — grid of mini-sprites with search, positioned next to mascot.
     \\  let menuEl = null;
+    \\  let menuRestoreOffset = null;
     \\  async function resizeWindowTo(w, h) {
     \\    if (!(window.zero && window.zero.invoke)) return;
     \\    try { await window.zero.invoke('zero-native.window.resize', { width: w, height: h, anchor: 'top-left' }); } catch (e) {}
@@ -1078,9 +1090,13 @@ const html_tail =
     \\  // so post-install "Switch active pet?" does not flash a menu sliced at 140px.
     \\  function waitForWindowSize(w, h, timeoutMs) {
     \\    const deadline = Date.now() + (timeoutMs || 500);
+    \\    const startW = window.innerWidth;
+    \\    const startH = window.innerHeight;
     \\    return new Promise((resolve) => {
     \\      const tick = () => {
-    \\        if (window.innerWidth >= w - 2 && window.innerHeight >= h - 2) {
+    \\        const widthReady = startW > w + 2 ? window.innerWidth <= w + 2 : window.innerWidth >= w - 2;
+    \\        const heightReady = startH > h + 2 ? window.innerHeight <= h + 2 : window.innerHeight >= h - 2;
+    \\        if (widthReady && heightReady) {
     \\          resolve();
     \\          return;
     \\        }
@@ -1093,7 +1109,7 @@ const html_tail =
     \\      tick();
     \\    });
     \\  }
-    \\  function closeMenu() {
+    \\  async function closeMenu() {
     \\    const dismissPrompt = bubbleWithMenu;
     \\    bubbleWithMenu = false;
     \\    if (menuEl) { menuEl.remove(); menuEl = null; }
@@ -1102,12 +1118,20 @@ const html_tail =
     \\      if (bubbleTextEl) bubbleTextEl.textContent = '';
     \\    }
     \\    const data = window.__PETDEX__ || {};
-    \\    if (data.compactWidth && data.compactHeight) resizeWindowTo(data.compactWidth, data.compactHeight);
+    \\    const restoreOffset = menuRestoreOffset;
+    \\    menuRestoreOffset = null;
+    \\    if (data.compactWidth && data.compactHeight) {
+    \\      await resizeWindowTo(data.compactWidth, data.compactHeight);
+    \\      await waitForWindowSize(data.compactWidth, data.compactHeight);
+    \\      if (restoreOffset && (restoreOffset.dx !== 0 || restoreOffset.dy !== 0)) {
+    \\        await moveWindowBy(restoreOffset.dx, restoreOffset.dy, true);
+    \\      }
+    \\    }
     \\  }
     \\  async function selectPet(slug) {
     \\    const data = window.__PETDEX__ || {};
-    \\    if (slug === data.active) { closeMenu(); return; }
-    \\    closeMenu();
+    \\    if (slug === data.active) { await closeMenu(); return; }
+    \\    await closeMenu();
     \\    try {
     \\      await window.zero.invoke('petdex.set_active', { slug });
     \\      try { await window.zero.invoke('petdex.refresh_pets', {}); } catch (_) {}
@@ -1213,12 +1237,19 @@ const html_tail =
     \\  }
     \\  let virtualGrid = null;
     \\  async function openMenu() {
-    \\    if (menuEl) closeMenu();
+    \\    if (menuEl) await closeMenu();
     \\    if (virtualGrid) { virtualGrid.dispose(); virtualGrid = null; }
     \\    const data = window.__PETDEX__ || { pets: [], active: null };
     \\    if (data.menuWidth && data.menuHeight) {
+    \\      const compactFrame = await readWindowFrame();
     \\      await resizeWindowTo(data.menuWidth, data.menuHeight);
     \\      await waitForWindowSize(data.menuWidth, data.menuHeight);
+    \\      const expandedFrame = await moveWindowClamped(0, 0);
+    \\      if (compactFrame && expandedFrame && Number.isFinite(expandedFrame.x) && Number.isFinite(expandedFrame.y)) {
+    \\        menuRestoreOffset = { dx: compactFrame.x - expandedFrame.x, dy: compactFrame.y - expandedFrame.y };
+    \\      } else {
+    \\        menuRestoreOffset = null;
+    \\      }
     \\    }
     \\    // Snapshot pet position after the picker window has expanded.
     \\    const petRect = pet.getBoundingClientRect();
