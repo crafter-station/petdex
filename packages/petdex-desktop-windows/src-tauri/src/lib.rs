@@ -2,7 +2,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use serde_json::json;
+use tauri::{AppHandle, Emitter, Manager, State};
 
 // Bring in the Windows-only CommandExt trait so we can set creation_flags.
 #[cfg(windows)]
@@ -15,6 +16,23 @@ pub struct PetMeta {
     pub slug: String,
     pub name: String,
     pub sprite_path: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PetInfo {
+    pub slug: String,
+    pub display_name: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PetdexData {
+    pub pets: Vec<PetInfo>,
+    pub active: Option<String>,
+    pub compact_width: u32,
+    pub compact_height: u32,
+    pub menu_width: u32,
+    pub menu_height: u32,
 }
 
 // ── Sidecar state ─────────────────────────────────────────────────────────────
@@ -31,11 +49,71 @@ impl Default for SidecarState {
     }
 }
 
+// ── Utils ─────────────────────────────────────────────────────────────────────
+
+fn petdex_home() -> PathBuf {
+    dirs::home_dir().expect("HOME not set").join(".petdex")
+}
+
+fn codex_pets_dir() -> PathBuf {
+    dirs::home_dir().expect("HOME not set").join(".codex").join("pets")
+}
+
+fn petdex_pets_dir() -> PathBuf {
+    petdex_home().join("pets")
+}
+
+fn petdex_runtime_dir() -> PathBuf {
+    petdex_home().join("runtime")
+}
+
+fn petdex_webview_dir() -> PathBuf {
+    petdex_runtime_dir().join("webview")
+}
+
+fn petdex_sidecar_dir() -> PathBuf {
+    petdex_home().join("sidecar")
+}
+
+fn bootstrap_dirs() {
+    let dirs = [
+        petdex_home(),
+        petdex_pets_dir(),
+        petdex_runtime_dir(),
+        petdex_webview_dir(),
+        petdex_webview_dir().join("agents"),
+    ];
+    for dir in &dirs {
+        let _ = fs::create_dir_all(dir);
+    }
+}
+
+fn is_valid_slug(slug: &str) -> bool {
+    !slug.is_empty()
+        && slug.len() <= 64
+        && slug.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+fn read_runtime_file(name: &str) -> serde_json::Value {
+    let path = petdex_runtime_dir().join(name);
+    fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_else(|| default_runtime_value(name))
+}
+
+fn default_runtime_value(name: &str) -> serde_json::Value {
+    match name {
+        "state.json" => json!({"state":"idle","counter":0}),
+        "bubble.json" => json!({"text":"","counter":0}),
+        "update.json" => json!({"available":false,"status":"idle"}),
+        "init-status.json" => json!({"needsInit":false}),
+        _ => json!({}),
+    }
+}
+
 // ── Pet scanner ───────────────────────────────────────────────────────────────
 
-/// Spritesheet size cap — mirrors MAX_PET_BYTES in main.zig (16 MiB).
-/// Keeps listing behaviour in lockstep with the loader: a pet that
-/// would be rejected at load time is also excluded from the listing.
 const MAX_PET_BYTES: u64 = 16 * 1024 * 1024;
 
 fn pet_roots() -> Vec<PathBuf> {
@@ -47,9 +125,6 @@ fn pet_roots() -> Vec<PathBuf> {
     roots
 }
 
-/// Canonicalize `p` and strip the Windows verbatim prefix `\\?\` so that
-/// `starts_with` comparisons work correctly on all platforms.
-/// On non-Windows (and when canonicalization fails) returns the path as-is.
 fn canonical_normalize(p: &std::path::Path) -> PathBuf {
     match fs::canonicalize(p) {
         Ok(c) => {
@@ -64,9 +139,6 @@ fn canonical_normalize(p: &std::path::Path) -> PathBuf {
     }
 }
 
-/// Returns the path of the first valid sprite file found in `pet_dir`.
-/// Valid means: regular non-empty file, within MAX_PET_BYTES, one of the known extensions.
-/// pet.json is NOT required — the sprite file is the authoritative marker.
 fn find_valid_sprite(pet_dir: &std::path::Path) -> Option<PathBuf> {
     for name in &[
         "spritesheet.webp",
@@ -86,11 +158,7 @@ fn find_valid_sprite(pet_dir: &std::path::Path) -> Option<PathBuf> {
 
 fn load_pet_from_dir(slug: &str, dir: &std::path::Path) -> Option<PetMeta> {
     let pet_dir = dir.join(slug);
-
-    // Sprite file is required; no valid sprite → this slug is not a usable pet.
     let sprite_path = find_valid_sprite(&pet_dir)?;
-
-    // pet.json is best-effort: missing or malformed falls back to slug as name.
     let name = fs::read_to_string(pet_dir.join("pet.json"))
         .ok()
         .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
@@ -109,8 +177,6 @@ fn load_pet_from_dir(slug: &str, dir: &std::path::Path) -> Option<PetMeta> {
     })
 }
 
-/// Read the active slug from ~/.petdex/active.json ({"slug":"<slug>"}).
-/// Returns None if the file is absent, unreadable, or malformed.
 fn read_active_slug() -> Option<String> {
     let path = dirs::home_dir()?.join(".petdex").join("active.json");
     let raw = fs::read_to_string(&path).ok()?;
@@ -118,12 +184,19 @@ fn read_active_slug() -> Option<String> {
     val.get("slug").and_then(|v| v.as_str()).map(|s| s.to_string())
 }
 
+fn find_pet_root(slug: &str) -> Option<PathBuf> {
+    for root in pet_roots() {
+        let path = root.join(slug);
+        if path.exists() {
+            return Some(path);
+        }
+    }
+    None
+}
+
 // ── Sidecar helpers ───────────────────────────────────────────────────────────
 
-/// Resolve the node executable — tries common install locations so we work
-/// even when app.exe inherits a PATH that doesn't include nodejs.
 fn find_node() -> PathBuf {
-    // Try PATH first (works in dev when launched from a node-aware shell)
     if let Ok(out) = std::process::Command::new("where.exe").arg("node").output() {
         if out.status.success() {
             if let Ok(s) = std::str::from_utf8(&out.stdout) {
@@ -134,7 +207,6 @@ fn find_node() -> PathBuf {
             }
         }
     }
-    // Common fixed install paths on Windows
     for candidate in &[
         r"C:\Program Files\nodejs\node.exe",
         r"C:\Program Files (x86)\nodejs\node.exe",
@@ -142,19 +214,16 @@ fn find_node() -> PathBuf {
         let p = PathBuf::from(candidate);
         if p.exists() { return p; }
     }
-    // Final fallback — let OS resolve it
     PathBuf::from("node")
 }
 
 fn find_sidecar_js() -> Option<PathBuf> {
-    // Production install path (set by `petdex install desktop`)
     if let Some(home) = dirs::home_dir() {
         let installed = home.join(".petdex").join("sidecar").join("server.js");
         if installed.exists() {
             return Some(installed);
         }
     }
-    // Dev/CI override — set PETDEX_SIDECAR_PATH to the absolute path of server.js
     if let Ok(env_path) = std::env::var("PETDEX_SIDECAR_PATH") {
         let p = PathBuf::from(&env_path);
         if p.exists() {
@@ -164,8 +233,6 @@ fn find_sidecar_js() -> Option<PathBuf> {
     None
 }
 
-/// Port is fixed at 7777 (or PETDEX_PORT env var).
-/// Token is written by the sidecar to ~/.petdex/runtime/update-token as plain text.
 fn read_runtime_info() -> Option<(u16, String)> {
     let port: u16 = std::env::var("PETDEX_PORT")
         .ok()
@@ -189,10 +256,44 @@ fn read_runtime_info() -> Option<(u16, String)> {
     Some((port, token))
 }
 
-// ── Tauri commands — pet ──────────────────────────────────────────────────────
+fn spawn_sidecar_inner(state: &Mutex<SidecarState>) -> Result<u16, String> {
+    let sidecar_path = find_sidecar_js()
+        .ok_or_else(|| "sidecar server.js not found in ~/.petdex/sidecar/ or repo".to_string())?;
 
-/// Return the slugs of all pets that have a valid spritesheet.
-/// pet.json is not required — sprite presence is the authoritative check.
+    {
+        let mut s = state.lock().unwrap();
+        if let Some(mut old) = s.child.take() {
+            let _ = old.kill();
+        }
+    }
+
+    let node = find_node();
+    let mut cmd = std::process::Command::new(&node);
+    cmd.arg(&sidecar_path)
+        .env("PETDEX_PARENT_PID", std::process::id().to_string())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+
+    #[cfg(windows)]
+    cmd.creation_flags(0x0800_0000);
+
+    let child = cmd
+        .spawn()
+        .map_err(|e| format!("failed to spawn sidecar (node={:?}): {e}", node))?;
+
+    let (port, token) = read_runtime_info()
+        .ok_or_else(|| "could not determine port/token".to_string())?;
+
+    let mut s = state.lock().unwrap();
+    s.child = Some(child);
+    s.port = port;
+    s.token = token;
+
+    Ok(port)
+}
+
+// ── Tauri commands ────────────────────────────────────────────────────────────
+
 #[tauri::command]
 fn list_pets() -> Vec<String> {
     let mut slugs = Vec::new();
@@ -213,7 +314,6 @@ fn list_pets() -> Vec<String> {
     slugs
 }
 
-/// Load metadata for a specific pet by slug; returns None if not installed.
 #[tauri::command]
 fn get_pet(slug: String) -> Option<PetMeta> {
     for root in pet_roots() {
@@ -224,8 +324,6 @@ fn get_pet(slug: String) -> Option<PetMeta> {
     None
 }
 
-/// Return the active pet: reads ~/.petdex/active.json first, then iterates
-/// all pet roots in order until one loads. Mirrors main.zig's startup logic.
 #[tauri::command]
 fn get_active_pet() -> Option<PetMeta> {
     if let Some(slug) = read_active_slug() {
@@ -233,7 +331,6 @@ fn get_active_pet() -> Option<PetMeta> {
             return Some(meta);
         }
     }
-    // Fallback: first loadable pet across all roots in alphabetical order.
     for root in pet_roots() {
         if let Ok(entries) = fs::read_dir(&root) {
             let mut slugs: Vec<String> = entries
@@ -252,17 +349,6 @@ fn get_active_pet() -> Option<PetMeta> {
     None
 }
 
-/// Read a spritesheet and return its contents as a base64 string.
-///
-/// Security restrictions (both must hold):
-///   1. Canonical path must be inside one of the known pet roots
-///      (~/.petdex/pets/ or ~/.codex/pets/). This closes the path-traversal
-///      window: JS in the WebView cannot escape to arbitrary files.
-///   2. File size must be ≤ MAX_PET_BYTES (16 MiB). Mirrors the loader
-///      cap in main.zig so an oversized spritesheet can't crash the renderer.
-///
-/// Uses canonical_normalize to strip the Windows \\?\ verbatim prefix so
-/// the starts_with comparison against pet_roots() works correctly.
 #[tauri::command]
 fn read_file_as_base64(path: String) -> Result<String, String> {
     use std::io::Read;
@@ -313,14 +399,6 @@ fn base64_encode(input: &[u8]) -> String {
     out
 }
 
-// ── Tauri commands — runtime file reads ──────────────────────────────────────
-
-/// Read the sidecar state from ~/.petdex/runtime/state.json.
-///
-/// The sidecar writes this file on every state change (not on a timer), so
-/// reading it directly is both lower-latency and CORS-free compared to
-/// fetching from the sidecar's HTTP server from inside the WebView.
-/// Returns None if the file is absent, unreadable, or not valid JSON.
 #[tauri::command]
 fn read_runtime_state() -> Option<serde_json::Value> {
     let path = dirs::home_dir()?
@@ -331,11 +409,6 @@ fn read_runtime_state() -> Option<serde_json::Value> {
     serde_json::from_str(&raw).ok()
 }
 
-/// Read the sidecar bubble from ~/.petdex/runtime/bubble.json.
-///
-/// Same rationale as read_runtime_state: file-based reads sidestep
-/// the CORS issue that blocks cross-origin fetch() inside WebView2.
-/// Returns None if the file is absent, unreadable, or not valid JSON.
 #[tauri::command]
 fn read_runtime_bubble() -> Option<serde_json::Value> {
     let path = dirs::home_dir()?
@@ -346,59 +419,197 @@ fn read_runtime_bubble() -> Option<serde_json::Value> {
     serde_json::from_str(&raw).ok()
 }
 
-// ── Tauri commands — sidecar ──────────────────────────────────────────────────
-
-/// Spawn the sidecar server; kill any stale instance first. Returns the port (default 7777).
 #[tauri::command]
-fn spawn_sidecar(state: State<Mutex<SidecarState>>) -> Result<u16, String> {
-    let sidecar_path = find_sidecar_js()
-        .ok_or_else(|| "sidecar server.js not found in ~/.petdex/sidecar/ or repo".to_string())?;
+fn read_update_info() -> serde_json::Value {
+    read_runtime_file("update.json")
+}
 
-    // Kill any stale sidecar first so port 7777 is free
-    {
-        let mut s = state.lock().unwrap();
-        if let Some(mut old) = s.child.take() {
-            let _ = old.kill();
+#[tauri::command]
+fn read_init_status() -> serde_json::Value {
+    read_runtime_file("init-status.json")
+}
+
+#[tauri::command]
+fn read_petdex_data() -> PetdexData {
+    let all_pets = scan_pets();
+    let active = read_active_slug().or_else(|| {
+        all_pets.first().map(|p| p.slug.clone())
+    });
+
+    PetdexData {
+        pets: all_pets,
+        active,
+        compact_width: 192,
+        compact_height: 288,
+        menu_width: 480,
+        menu_height: 420,
+    }
+}
+
+fn scan_pets() -> Vec<PetInfo> {
+    let mut pets = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    for root in pet_roots() {
+        if let Ok(entries) = fs::read_dir(&root) {
+            for entry in entries.flatten() {
+                let slug = entry.file_name().to_string_lossy().to_string();
+                if !seen.insert(slug.clone()) {
+                    continue;
+                }
+                let pet_json = entry.path().join("pet.json");
+                if let Ok(content) = fs::read_to_string(&pet_json) {
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                        let display_name = json["displayName"]
+                            .as_str()
+                            .map(|s| s.to_string())
+                            .unwrap_or_else(|| slug.clone());
+                        pets.push(PetInfo { slug, display_name });
+                    }
+                }
+            }
         }
     }
 
-    let node = find_node();
-    let mut cmd = std::process::Command::new(&node);
-    cmd.arg(&sidecar_path)
-        // Tell the sidecar our PID so its parent-watchdog can exit cleanly
-        // when this desktop process terminates. Mirrors main.zig line 1086.
-        .env("PETDEX_PARENT_PID", std::process::id().to_string())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-
-    // Prevent a console window from appearing when node is spawned from a
-    // Windows GUI subsystem process (CREATE_NO_WINDOW = 0x08000000).
-    #[cfg(windows)]
-    cmd.creation_flags(0x0800_0000);
-
-    let child = cmd
-        .spawn()
-        .map_err(|e| format!("failed to spawn sidecar (node={:?}): {e}", node))?;
-
-    let (port, token) = read_runtime_info()
-        .ok_or_else(|| "could not determine port/token".to_string())?;
-
-    let mut s = state.lock().unwrap();
-    s.child = Some(child);
-    s.port = port;
-    s.token = token;
-
-    // Return port immediately — JS polls /health until sidecar is ready
-    Ok(port)
+    pets.sort_by(|a, b| a.display_name.cmp(&b.display_name));
+    pets
 }
 
-/// Return the port the sidecar is currently listening on (0 if not running).
+#[tauri::command]
+fn set_active(slug: String) -> Result<serde_json::Value, String> {
+    if !is_valid_slug(&slug) {
+        return Err("invalid_slug".to_string());
+    }
+
+    let pet_root = find_pet_root(&slug).ok_or("Pet not found")?;
+    let pet_json_path = pet_root.join("pet.json");
+    if !pet_json_path.exists() {
+        return Err("Pet not found".to_string());
+    }
+
+    let webp_path = pet_root.join("spritesheet.webp");
+    let png_path = pet_root.join("spritesheet.png");
+    let (sprite_path, ext) = if webp_path.exists() {
+        (webp_path, "webp")
+    } else if png_path.exists() {
+        (png_path, "png")
+    } else {
+        return Err("Spritesheet not found".to_string());
+    };
+
+    let webview_dir = petdex_webview_dir();
+    let dst = if ext == "webp" {
+        webview_dir.join("spritesheet.webp")
+    } else {
+        webview_dir.join("spritesheet.png")
+    };
+    fs::copy(&sprite_path, &dst).map_err(|e| e.to_string())?;
+
+    let active_path = petdex_runtime_dir().join("active.json");
+    let active_data = json!({
+        "slug": slug,
+        "dir": pet_root.to_string_lossy().to_string(),
+    });
+    fs::write(&active_path, active_data.to_string()).map_err(|e| e.to_string())?;
+
+    Ok(json!({"ok": true}))
+}
+
+#[tauri::command]
+async fn install_pet(slug: String) -> Result<serde_json::Value, String> {
+    if !is_valid_slug(&slug) {
+        return Ok(json!({"ok": false, "error": "invalid_slug"}));
+    }
+
+    let home = dirs::home_dir().ok_or("HOME not set")?;
+    let cli_path = home.join(".petdex").join("bin").join("petdex.js");
+
+    if !cli_path.exists() {
+        return Ok(json!({"ok": false, "error": "cli_not_persisted"}));
+    }
+
+    let output = tokio::process::Command::new("node")
+        .arg(&cli_path)
+        .arg("install")
+        .arg(&slug)
+        .output()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if output.status.success() {
+        Ok(json!({"ok": true}))
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Ok(json!({"ok": false, "error": format!("exit_{}: {}", output.status.code().unwrap_or(-1), stderr)}))
+    }
+}
+
+#[tauri::command]
+async fn set_mascot_state(state: String) -> Result<serde_json::Value, String> {
+    let token_path = petdex_runtime_dir().join("update-token");
+    let token = fs::read_to_string(&token_path).unwrap_or_default();
+    let token = token.trim();
+    if token.is_empty() {
+        return Ok(json!({"ok": false, "error": "no_token"}));
+    }
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post("http://127.0.0.1:7777/state")
+        .header("X-Petdex-Update-Token", token)
+        .header("Content-Type", "application/json")
+        .json(&json!({"state": state, "duration": 3000}))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if res.status().is_success() {
+        Ok(json!({"ok": true}))
+    } else {
+        Ok(json!({"ok": false, "error": format!("curl_exit_{}", res.status().as_u16())}))
+    }
+}
+
+#[tauri::command]
+async fn trigger_update() -> Result<serde_json::Value, String> {
+    let token_path = petdex_runtime_dir().join("update-token");
+    let token = fs::read_to_string(&token_path).unwrap_or_default();
+    let token = token.trim();
+    if token.is_empty() {
+        return Ok(json!({"ok": false, "error": "no_token"}));
+    }
+
+    let client = reqwest::Client::new();
+    let res = client
+        .post("http://127.0.0.1:7777/update")
+        .header("X-Petdex-Update-Token", token)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if res.status().is_success() {
+        Ok(json!({"ok": true}))
+    } else {
+        Ok(json!({"ok": false, "error": format!("curl_exit_{}", res.status().as_u16())}))
+    }
+}
+
+#[tauri::command]
+fn respawn_sidecar(state: State<Mutex<SidecarState>>) -> Result<serde_json::Value, String> {
+    spawn_sidecar_inner(state.inner()).map_err(|e| e.to_string())?;
+    Ok(json!({"ok": true}))
+}
+
+#[tauri::command]
+fn spawn_sidecar(state: State<Mutex<SidecarState>>) -> Result<u16, String> {
+    spawn_sidecar_inner(state.inner())
+}
+
 #[tauri::command]
 fn get_sidecar_port(state: State<Mutex<SidecarState>>) -> u16 {
     state.lock().unwrap().port
 }
 
-/// Kill the sidecar process and clear its port/token from state.
 #[tauri::command]
 fn stop_sidecar(state: State<Mutex<SidecarState>>) {
     let mut s = state.lock().unwrap();
@@ -409,12 +620,27 @@ fn stop_sidecar(state: State<Mutex<SidecarState>>) {
     s.token = String::new();
 }
 
-// ── Tauri commands — app ──────────────────────────────────────────────────────
-
-/// Exit the application cleanly (triggered by right-click).
 #[tauri::command]
-fn quit_app(app: tauri::AppHandle) {
+fn quit_app(app: AppHandle) {
     app.exit(0);
+}
+
+#[tauri::command]
+fn asset_url_for(name: String) -> Result<String, String> {
+    if name.contains("..") || name.contains('\\') || name.contains('/') {
+        return Err("invalid_name".to_string());
+    }
+    let webview_dir = petdex_webview_dir();
+    let path = webview_dir.join(&name);
+    let canonical_dir = webview_dir.canonicalize().unwrap_or_else(|_| webview_dir.clone());
+    let canonical_path = match path.canonicalize() {
+        Ok(p) => p,
+        Err(_) => return Err(format!("Asset not found: {}", name)),
+    };
+    if !canonical_path.starts_with(&canonical_dir) {
+        return Err("invalid_name".to_string());
+    }
+    Ok(path.to_string_lossy().to_string())
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────
@@ -422,7 +648,51 @@ fn quit_app(app: tauri::AppHandle) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_log::Builder::new().build())
+        .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_http::init())
+        .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if let Some(url) = args.iter().find(|a| a.starts_with("petdex://")) {
+                let _ = app.emit("petdex:deep-link", url.clone());
+            }
+            if let Some(window) = app.get_webview_window("pet") {
+                let _ = window.set_focus();
+            }
+        }))
         .manage(Mutex::new(SidecarState::default()))
+        .setup(|app| {
+            // Register deep link schemes
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                let _ = app.deep_link().register_all();
+            }
+
+            // Bootstrap directories
+            bootstrap_dirs();
+
+            // Init status detection: show banner when neither sidecar nor CLI is installed
+            {
+                let home = dirs::home_dir().expect("HOME not set");
+                let sidecar_js = home.join(".petdex").join("sidecar").join("server.js");
+                let cli_js = home.join(".petdex").join("bin").join("petdex.js");
+                let init_status = petdex_runtime_dir().join("init-status.json");
+                if !sidecar_js.exists() && !cli_js.exists() && !init_status.exists() {
+                    let _ = fs::write(&init_status, r#"{"needsInit":true}"#);
+                }
+            }
+
+            // Auto-spawn sidecar on startup
+            if let Some(state) = app.try_state::<Mutex<SidecarState>>() {
+                if let Err(e) = spawn_sidecar_inner(state.inner()) {
+                    eprintln!("Failed to auto-spawn sidecar: {}", e);
+                }
+            }
+
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             list_pets,
             get_pet,
@@ -430,10 +700,19 @@ pub fn run() {
             read_file_as_base64,
             read_runtime_state,
             read_runtime_bubble,
+            read_update_info,
+            read_init_status,
+            read_petdex_data,
+            set_active,
+            install_pet,
+            set_mascot_state,
+            trigger_update,
+            respawn_sidecar,
             quit_app,
             spawn_sidecar,
             get_sidecar_port,
             stop_sidecar,
+            asset_url_for,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

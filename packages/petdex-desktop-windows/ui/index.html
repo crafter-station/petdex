@@ -25,16 +25,11 @@
     }
     #root:active { cursor: grabbing; }
 
-    /* Verbatim from src/app/globals.css — .pet-sprite-frame and .pet-sprite.
-       background-image uses var(--sprite-url) which we set to the base64
-       data URI injected at runtime via read_file_as_base64. */
     .pet-sprite-frame {
       --pet-scale: 1;
       width: calc(192px * var(--pet-scale));
       height: calc(208px * var(--pet-scale));
       overflow: hidden;
-      /* Promote to its own paint layer so the browser does not evict the
-         WebP decode buffer when the window is off-screen. */
       contain: layout paint;
     }
 
@@ -50,8 +45,6 @@
       background-repeat: no-repeat;
       background-size: 1536px 1872px;
       image-rendering: pixelated;
-      /* translateZ(0) forces GPU-composited layer so animation stays
-         on the compositor thread instead of being re-rasterized. */
       transform: scale(var(--pet-scale)) translateZ(0);
       transform-origin: top left;
       will-change: background-position;
@@ -95,6 +88,24 @@
       color: rgba(255, 255, 255, 0.45);
       pointer-events: none;
     }
+
+    #init-banner, #update-card {
+      position: fixed;
+      left: 6px;
+      right: 6px;
+      bottom: 6px;
+      padding: 6px 9px;
+      border-radius: 9px;
+      background: #ffffff;
+      color: #111;
+      font: 600 11px system-ui, -apple-system, sans-serif;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.30);
+      display: none;
+      cursor: pointer;
+      pointer-events: auto;
+      line-height: 1.25;
+      text-align: center;
+    }
   </style>
 </head>
 <body>
@@ -111,12 +122,14 @@
     </div>
   </div>
   <div id="debug">loading...</div>
+  <div id="init-banner">Run `npx petdex init` to wire your agents</div>
+  <div id="update-card"></div>
 
 <script type="module">
 const { invoke } = window.__TAURI__.core;
 const { getCurrentWindow } = window.__TAURI__.window;
+const { listen } = window.__TAURI__.event;
 
-// Verbatim from src/lib/pet-states.ts
 const PET_STATES = {
   "idle":          { row: 0, frames: 6, durationMs: 1100 },
   "running-right": { row: 1, frames: 8, durationMs: 1060 },
@@ -157,33 +170,19 @@ async function boot() {
     applyState(DEFAULT_STATE);
     dbg(pet.name);
 
-    await bootSidecar();
+    startPolling();
   } catch (e) {
     dbg(`err: ${String(e).slice(0, 40)}`);
     console.error(e);
   }
 }
 
-// Polling reads runtime files written by the sidecar to ~/.petdex/runtime/.
-// File-based reads are CORS-free: the sidecar's HTTP server does not set
-// CORS headers, so Chromium (WebView2) blocks all cross-origin fetch() from
-// the WebView. Using Tauri invoke() calls instead sidesteps this entirely.
 function startPolling() {
-  // 200ms matches the trusted Zig desktop cadence.
-  // 3s / 2s intervals would miss short-lived states (waving 700ms, running 820ms).
   setInterval(pollState, 200);
   setInterval(pollBubble, 200);
-}
-
-async function bootSidecar() {
-  // Start polling immediately — file reads work whenever the sidecar has
-  // written its files, even from a previous session that left them on disk.
-  startPolling();
-  try {
-    await invoke("spawn_sidecar");
-  } catch (e) {
-    console.warn("sidecar spawn failed:", e);
-  }
+  setInterval(pollInitStatus, 5000);
+  setInterval(pollUpdate, 5000);
+  setInterval(probeSidecar, 5000);
 }
 
 async function pollState() {
@@ -202,7 +201,6 @@ async function pollBubble() {
     if (!data) return;
     if (data.counter === lastBubbleCounter) return;
     lastBubbleCounter = data.counter;
-    // Pass text directly — showBubble treats empty as the clear signal.
     showBubble(data.text ?? "");
   } catch {}
 }
@@ -210,19 +208,171 @@ async function pollBubble() {
 function showBubble(text) {
   const el = document.getElementById("bubble");
   if (!text) {
-    // Empty text is the sidecar's explicit clear signal (written on boot).
     el.textContent = "";
     el.classList.remove("visible");
     return;
   }
   el.textContent = text;
-  // Bubble persists until next update — no auto-hide timeout.
   el.classList.add("visible");
 }
+
+// ── Init banner ───────────────────────────────────────────────────────────────
+
+async function pollInitStatus() {
+  try {
+    const info = await invoke("read_init_status");
+    if (!info || typeof info !== "object") return;
+    const banner = document.getElementById("init-banner");
+    if (info.needsInit === true) {
+      banner.style.display = "block";
+    } else {
+      banner.style.display = "none";
+    }
+  } catch {}
+}
+
+document.getElementById("init-banner").addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText("npx petdex init");
+    const banner = document.getElementById("init-banner");
+    const prev = banner.textContent;
+    banner.textContent = "Command copied. Paste in your terminal.";
+    setTimeout(() => { banner.textContent = prev; }, 3000);
+  } catch {}
+});
+
+// ── Update card ───────────────────────────────────────────────────────────────
+
+let lastUpdateSig = "";
+
+function renderUpdate(info) {
+  const card = document.getElementById("update-card");
+  if (info.status === "idle" || (!info.available && info.status !== "error" && info.status !== "done")) {
+    card.style.display = "none";
+    return;
+  }
+  let text = "";
+  if (info.status === "available") {
+    text = "Update " + (info.latest || "available") + " - click to install";
+  } else if (info.status === "running") {
+    text = info.message || "Updating...";
+  } else if (info.status === "done") {
+    text = info.message || "Update installed. Restart Petdex.";
+  } else if (info.status === "error") {
+    text = info.message || "Update failed.";
+  }
+  card.textContent = text;
+  card.style.display = "block";
+}
+
+async function pollUpdate() {
+  try {
+    const info = await invoke("read_update_info");
+    if (!info || typeof info !== "object") return;
+    const sig = info.status + ":" + (info.latest || "") + ":" + (info.message || "");
+    if (sig === lastUpdateSig) return;
+    lastUpdateSig = sig;
+    renderUpdate(info);
+  } catch {}
+}
+
+document.getElementById("update-card").addEventListener("click", async () => {
+  try {
+    const r = await invoke("trigger_update");
+    if (r && r.ok === false) {
+      const code = r.error || "";
+      if (code.indexOf("curl_exit_") === 0 || code === "no_token" || code === "token_read" || code === "empty_token") {
+        renderUpdate({ status: "error", message: "Sidecar offline. Run: npx petdex@latest update" });
+        return;
+      }
+      renderUpdate({ status: "error", message: "Update failed (" + code + "). Run: npx petdex@latest update" });
+      return;
+    }
+    renderUpdate({ status: "running", message: "Updating..." });
+  } catch {
+    renderUpdate({ status: "error", message: "Update failed. Run: npx petdex@latest update" });
+  }
+});
+
+// ── Sidecar watchdog ──────────────────────────────────────────────────────────
+
+let sidecarFails = 0;
+let lastRespawnAt = 0;
+
+async function probeSidecar() {
+  try {
+    const r = await fetch("http://127.0.0.1:7777/health", {
+      signal: AbortSignal.timeout(500),
+    });
+    if (r.ok) {
+      sidecarFails = 0;
+      return;
+    }
+  } catch {}
+  sidecarFails += 1;
+  if (sidecarFails < 3) return;
+  const now = Date.now();
+  if (now - lastRespawnAt < 4000) return;
+  lastRespawnAt = now;
+  try {
+    await invoke("respawn_sidecar");
+    sidecarFails = 0;
+  } catch {}
+}
+
+// ── Drag ──────────────────────────────────────────────────────────────────────
 
 document.getElementById("root").addEventListener("mousedown", async () => {
   try { await getCurrentWindow().startDragging(); } catch {}
 });
+
+// ── Deep link ─────────────────────────────────────────────────────────────────
+
+listen("petdex:deep-link", (event) => {
+  const url = event.payload;
+  if (!url || !url.startsWith("petdex://")) return;
+  const slug = new URL(url).hostname;
+  if (/^[a-z0-9_-]{1,64}$/.test(slug)) {
+    activateOrInstall(slug);
+  }
+});
+
+async function activateOrInstall(slug) {
+  try {
+    await invoke("set_active", { slug });
+    location.reload();
+    return;
+  } catch {}
+  showBubble("Installing " + slug + "...");
+  try {
+    const r = await invoke("install_pet", { slug });
+    if (r && r.ok) {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          await invoke("set_active", { slug });
+          location.reload();
+          return;
+        } catch {
+          if (attempt === 0) {
+            await new Promise(res => setTimeout(res, 500));
+            continue;
+          }
+          showBubble("Installed. Restart Petdex to use " + slug);
+          return;
+        }
+      }
+      return;
+    }
+    const err = (r && r.error) || "unknown";
+    try { await invoke("set_mascot_state", { state: "failed" }); } catch {}
+    showBubble("Install failed: " + err);
+  } catch {
+    try { await invoke("set_mascot_state", { state: "failed" }); } catch {}
+    showBubble("Install crashed");
+  }
+}
+
+// ── Right-click quit ──────────────────────────────────────────────────────────
 
 window.addEventListener("contextmenu", async (e) => {
   e.preventDefault();
