@@ -17,53 +17,66 @@ permissions:
 
 jobs:
   check:
-    name: Check (cargo check + vite build)
+    name: Check (cargo check)
     runs-on: windows-latest
-    timeout-minutes: 10
-    defaults:
-      run:
-        working-directory: packages/petdex-desktop-windows
+    timeout-minutes: 15
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - name: Install Rust stable (x86_64-pc-windows-msvc)
+        uses: dtolnay/rust-toolchain@stable
         with:
-          node-version: 20
+          targets: x86_64-pc-windows-msvc
 
-      - name: Install dependencies
-        run: npm install
+      - name: Cache Rust/Cargo build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/petdex-desktop-windows/src-tauri -> target
 
-      - name: Build frontend
-        run: npm run build
+      - name: Generate Cargo.lock
+        working-directory: packages/petdex-desktop-windows/src-tauri
+        run: cargo generate-lockfile
+
+      - name: Upload generated Cargo.lock
+        uses: actions/upload-artifact@v4
+        with:
+          name: petdex-desktop-windows-Cargo.lock
+          path: packages/petdex-desktop-windows/src-tauri/Cargo.lock
 
       - name: Check Rust
         working-directory: packages/petdex-desktop-windows/src-tauri
-        run: cargo check
+        run: cargo check --locked
 
   build:
     name: Build Windows installer
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     needs: check
-    defaults:
-      run:
-        working-directory: packages/petdex-desktop-windows
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - name: Install Rust stable (x86_64-pc-windows-msvc)
+        uses: dtolnay/rust-toolchain@stable
         with:
-          node-version: 20
+          targets: x86_64-pc-windows-msvc
 
-      - name: Install dependencies
-        run: npm install
+      - name: Cache Rust/Cargo build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/petdex-desktop-windows/src-tauri -> target
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "^2" --locked
+
+      - name: Generate Cargo.lock
+        working-directory: packages/petdex-desktop-windows/src-tauri
+        run: cargo generate-lockfile
 
       - name: Build Tauri
-        run: npm run tauri-build
+        working-directory: packages/petdex-desktop-windows
+        run: cargo tauri build
 
       - name: Upload installer artifacts
         uses: actions/upload-artifact@v4

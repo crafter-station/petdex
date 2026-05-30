@@ -67,6 +67,10 @@ fn petdex_runtime_dir() -> PathBuf {
     petdex_home().join("runtime")
 }
 
+fn active_json_path() -> PathBuf {
+    petdex_runtime_dir().join("active.json")
+}
+
 fn petdex_webview_dir() -> PathBuf {
     petdex_runtime_dir().join("webview")
 }
@@ -178,10 +182,26 @@ fn load_pet_from_dir(slug: &str, dir: &std::path::Path) -> Option<PetMeta> {
 }
 
 fn read_active_slug() -> Option<String> {
-    let path = dirs::home_dir()?.join(".petdex").join("active.json");
-    let raw = fs::read_to_string(&path).ok()?;
-    let val: serde_json::Value = serde_json::from_str(&raw).ok()?;
-    val.get("slug").and_then(|v| v.as_str()).map(|s| s.to_string())
+    let paths = [
+        active_json_path(),
+        petdex_home().join("active.json"),
+    ];
+
+    for path in paths {
+        let raw = match fs::read_to_string(&path) {
+            Ok(raw) => raw,
+            Err(_) => continue,
+        };
+        let val: serde_json::Value = match serde_json::from_str(&raw) {
+            Ok(val) => val,
+            Err(_) => continue,
+        };
+        if let Some(slug) = val.get("slug").and_then(|v| v.as_str()) {
+            return Some(slug.to_string());
+        }
+    }
+
+    None
 }
 
 fn find_pet_root(slug: &str) -> Option<PathBuf> {
@@ -505,7 +525,7 @@ fn set_active(slug: String) -> Result<serde_json::Value, String> {
     };
     fs::copy(&sprite_path, &dst).map_err(|e| e.to_string())?;
 
-    let active_path = petdex_runtime_dir().join("active.json");
+    let active_path = active_json_path();
     let active_data = json!({
         "slug": slug,
         "dir": pet_root.to_string_lossy().to_string(),
