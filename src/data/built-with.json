@@ -1,7 +1,7 @@
 {
   "$schema": "./built-with.schema.json",
   "version": 1,
-  "lastUpdated": "2026-05-20",
+  "lastUpdated": "2026-05-30",
   "categories": {
     "desktop-companion": {
       "label": "Desktop companions",
@@ -316,6 +316,24 @@
         "url": "https://github.com/hyyhf/agent-book-code/blob/main/docs/funharness_studio.zh.md"
       },
       "screenshot": "/built-with/funharness-studio.webp"
+    },
+    {
+      "slug": "prosophor",
+      "name": "Prosophor",
+      "tagline": "Plugin-driven proactive agent desktop app that resolves role sprite IDs from bundled Petdex sprite assets.",
+      "category": "desktop-companion",
+      "repo": "Swair/prosophor",
+      "homepage": "http://aicodingbox.com/",
+      "stars": 42,
+      "language": "C++",
+      "platforms": ["Windows", "Linux"],
+      "addedAt": "2026-05-30",
+      "evidence": {
+        "type": "code",
+        "quote": "static const char* kPetdexDir = PROSOPHOR_SOURCE_DIR \"/assets/petdex-sprites/by-collection\";",
+        "url": "https://github.com/Swair/prosophor/blob/main/main_src/prosophor_core/managers/agent_role_loader.cc#L176-L178"
+      },
+      "screenshot": "/built-with/prosophor.png"
     }
   ]
 }
