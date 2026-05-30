@@ -81,6 +81,7 @@
     #bubble.visible { opacity: 1; }
 
     #debug {
+      display: none;
       position: fixed;
       top: 2px;
       left: 2px;
@@ -299,11 +300,16 @@ document.getElementById("update-card").addEventListener("click", async () => {
 let sidecarFails = 0;
 let lastRespawnAt = 0;
 
+function fetchWithTimeout(url, options = {}, timeoutMs = 800) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal })
+    .finally(() => clearTimeout(timer));
+}
+
 async function probeSidecar() {
   try {
-    const r = await fetch("http://127.0.0.1:7777/health", {
-      signal: AbortSignal.timeout(500),
-    });
+    const r = await fetchWithTimeout("http://127.0.0.1:7777/health", { cache: "no-store" });
     if (r.ok) {
       sidecarFails = 0;
       return;
@@ -381,6 +387,7 @@ window.addEventListener("contextmenu", async (e) => {
 });
 
 function dbg(msg) {
+  console.debug("[petdex]", msg);
   document.getElementById("debug").textContent = msg;
 }
 

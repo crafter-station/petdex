@@ -9,6 +9,9 @@ use tauri::{AppHandle, Emitter, Manager, State};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
 // ── Pet types ─────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -295,7 +298,7 @@ fn spawn_sidecar_inner(state: &Mutex<SidecarState>) -> Result<u16, String> {
         .stderr(std::process::Stdio::null());
 
     #[cfg(windows)]
-    cmd.creation_flags(0x0800_0000);
+    cmd.creation_flags(CREATE_NO_WINDOW);
 
     let child = cmd
         .spawn()
@@ -548,13 +551,14 @@ async fn install_pet(slug: String) -> Result<serde_json::Value, String> {
         return Ok(json!({"ok": false, "error": "cli_not_persisted"}));
     }
 
-    let output = tokio::process::Command::new("node")
-        .arg(&cli_path)
-        .arg("install")
-        .arg(&slug)
-        .output()
-        .await
-        .map_err(|e| e.to_string())?;
+    let node = find_node();
+    let mut cmd = tokio::process::Command::new(&node);
+    cmd.arg(&cli_path).arg("install").arg(&slug);
+
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+
+    let output = cmd.output().await.map_err(|e| e.to_string())?;
 
     if output.status.success() {
         Ok(json!({"ok": true}))
