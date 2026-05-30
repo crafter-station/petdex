@@ -32,11 +32,11 @@ import type { PetWithMetrics } from "@/lib/pets";
 import { MAX_PINNED_PETS } from "@/lib/profiles";
 
 import { PetCard } from "@/components/pet-gallery";
-import { ProfilePinButton } from "@/components/profile-pin-button";
 
 type PinnedReorderGridProps = {
   pets: PetWithMetrics[];
   petStateCount: number;
+  hideAuthor?: boolean;
 };
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -66,6 +66,7 @@ export function movePinnedPets<T>(items: T[], from: number, to: number): T[] {
 export function PinnedReorderGrid({
   pets,
   petStateCount,
+  hideAuthor,
 }: PinnedReorderGridProps) {
   const t = useTranslations("pinnedReorder");
   const orderRef = useRef<PetWithMetrics[]>(pets);
@@ -285,6 +286,7 @@ export function PinnedReorderGrid({
                 oneOnly={oneOnly}
                 petStateCount={petStateCount}
                 pinnedCount={order.length}
+                hideAuthor={hideAuthor}
               />
             ))}
           </div>
@@ -305,6 +307,8 @@ export function PinnedReorderGrid({
                   (pet) => pet.slug === activePet.slug,
                 )}
                 stateCount={petStateCount}
+                hideAuthor={hideAuthor}
+                actionMode="profilePinHover"
               />
             </div>
           ) : null}
@@ -321,6 +325,7 @@ type SortablePinnedPetProps = {
   oneOnly: boolean;
   petStateCount: number;
   pinnedCount: number;
+  hideAuthor?: boolean;
 };
 
 function SortablePinnedPet({
@@ -330,6 +335,7 @@ function SortablePinnedPet({
   oneOnly,
   petStateCount,
   pinnedCount,
+  hideAuthor,
 }: SortablePinnedPetProps) {
   const {
     attributes,
@@ -359,7 +365,14 @@ function SortablePinnedPet({
       }`}
     >
       <div className={isDragging ? "opacity-0" : ""}>
-        <PetCard pet={pet} index={index} stateCount={petStateCount} />
+        <PetCard
+          pet={pet}
+          index={index}
+          stateCount={petStateCount}
+          hideAuthor={hideAuthor}
+          pinState={{ isPinned: true, pinnedCount, maxPins: MAX_PINNED_PETS }}
+          actionMode="profilePinHover"
+        />
       </div>
 
       {!oneOnly && !isDragging ? (
@@ -368,23 +381,12 @@ function SortablePinnedPet({
           type="button"
           disabled={isSaving}
           aria-label={`Drag ${pet.displayName} to reorder`}
-          className="absolute top-3 left-3 z-40 grid size-8 cursor-grab touch-none place-items-center rounded-full bg-surface/95 text-muted-2 shadow-sm ring-1 ring-black/5 transition hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-50 dark:ring-white/10"
+          className="absolute top-6 right-4 z-40 grid size-8 -translate-y-1/2 cursor-grab touch-none place-items-center rounded-md text-muted-3 transition hover:bg-surface-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-50"
           {...attributes}
           {...listeners}
         >
           <GripVertical className="size-3.5" />
         </button>
-      ) : null}
-
-      {!isDragging ? (
-        <div className="absolute top-3 right-14">
-          <ProfilePinButton
-            slug={pet.slug}
-            isPinned
-            pinnedCount={pinnedCount}
-            maxPins={MAX_PINNED_PETS}
-          />
-        </div>
       ) : null}
     </div>
   );

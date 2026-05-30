@@ -208,7 +208,13 @@ function PetdexMark({ size }: { size: number }) {
       style={{ display: "flex" }}
     >
       <defs>
-        <linearGradient id="og-petdex-body-download" x1="8" y1="8" x2="56" y2="56">
+        <linearGradient
+          id="og-petdex-body-download"
+          x1="8"
+          y1="8"
+          x2="56"
+          y2="56"
+        >
           <stop stopColor="#3847f5" />
           <stop offset="1" stopColor="#1a1d2e" />
         </linearGradient>

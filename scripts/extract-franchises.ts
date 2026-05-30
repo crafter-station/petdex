@@ -708,6 +708,7 @@ for (const row of rows) {
   }
 
   if (matched) {
+    // biome-ignore lint/suspicious/noAssignInExpressions: intentional accumulator pattern
     (buckets[matched] ??= []).push(row.slug);
   } else {
     const evidence = ipFlags[0]?.evidence ?? "";

@@ -233,7 +233,7 @@ function CollectionForm({
   const [selected, setSelected] = useState<Set<string>>(
     () => new Set(collection?.petSlugs ?? []),
   );
-  const [coverSlug, setCoverSlug] = useState<string | null>(
+  const [coverSlug, _setCoverSlug] = useState<string | null>(
     collection?.coverPetSlug ?? null,
   );
   const [saving, setSaving] = useState(false);
@@ -269,7 +269,7 @@ function CollectionForm({
       const url =
         mode === "create"
           ? "/api/profile/collections"
-          : `/api/profile/collections/${collection!.id}`;
+          : `/api/profile/collections/${collection?.id}`;
       const method = mode === "create" ? "POST" : "PATCH";
       const res = await fetch(url, {
         method,

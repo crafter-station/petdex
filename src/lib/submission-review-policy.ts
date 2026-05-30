@@ -83,10 +83,31 @@ export const REVIEW_POLICY_CATEGORIES = [
     holdAboveConfidence: 0.6,
   },
   {
+    id: "portrait_likeness_rights",
+    label: "Portrait or likeness rights",
+    description:
+      "Recognizable real-person likenesses, celebrity portraits, influencers, actors, athletes, or identity features that may imply unauthorized portrait/publicity rights use.",
+    holdAboveConfidence: 0.45,
+  },
+  {
     id: "political_public_figure",
     label: "Political or contemporary public figure",
     description:
       "Parodies, caricatures, or recognizable depictions of current heads of state, sitting politicians, candidates for office, royalty, or contemporary news personalities. Historical figures (centuries-old religious, philosophical, or historical leaders) do not qualify.",
+    holdAboveConfidence: 0.4,
+  },
+  {
+    id: "historical_religious_figure",
+    label: "Historical or religious figure",
+    description:
+      "Recognizable depictions, names, slogans, symbols, or titles tied to historical, philosophical, religious, or culturally revered figures that may need sensitivity review.",
+    holdAboveConfidence: 0.45,
+  },
+  {
+    id: "embedded_text_sensitive_symbol",
+    label: "Embedded text or sensitive symbol",
+    description:
+      "Visible text, slogans, logos, uniforms, flags, gestures, symbols, or signs embedded in the image that may create legal, cultural, religious, political, or reputational risk.",
     holdAboveConfidence: 0.4,
   },
 ] as const satisfies ReviewPolicyCategory[];
@@ -95,20 +116,39 @@ export const REVIEW_POLICY_CATEGORY_IDS = new Set(
   REVIEW_POLICY_CATEGORIES.map((category) => category.id),
 );
 
-export function buildPolicyPrompt(): string {
+export type BuildPolicyPromptOptions = {
+  imageReview?: boolean;
+};
+
+export function buildPolicyPrompt(
+  options: BuildPolicyPromptOptions = {},
+): string {
+  const imageReview = options.imageReview ?? true;
   const categories = REVIEW_POLICY_CATEGORIES.map(
     (category) =>
       `- ${category.id}: ${category.label}. ${category.description}`,
   ).join("\n");
 
-  return [
+  const instructions = [
     "You moderate user-submitted animated pixel pets for a public gallery.",
     "Return strict JSON only. Do not include markdown or prose outside JSON.",
-    "Flag only content visible to the public or present in the pet pack metadata.",
-    "Pixel art can be ambiguous. If unsure, mark hold with a concise evidence string.",
+    imageReview
+      ? "Flag only content visible to the public or present in the pet pack metadata."
+      : "Flag only content present in the submitted text diff or metadata.",
+    ...(imageReview
+      ? [
+          "The image may be a contact sheet of sampled animation frames. Inspect every cell.",
+          "Perform OCR on visible text in the image, including tiny labels, slogans, symbols, uniforms, logos, and signs. Transcribe visible text when possible.",
+          "Pixel art can be ambiguous. If unsure, mark hold with a concise evidence string.",
+        ]
+      : [
+          "No image is attached. Do not infer visual risk unless the text itself names or describes the risky element.",
+          "If unsure from text alone, mark hold with a concise evidence string.",
+        ]),
     "Policy categories:",
     categories,
     "Output schema:",
-    '{"decision":"pass"|"hold","confidence":0..1,"summary":"short explanation","flags":[{"category":"category_id","severity":"low"|"medium"|"high","confidence":0..1,"evidence":"short evidence"}]}',
-  ].join("\n");
+    '{"decision":"pass"|"hold","confidence":0..1,"summary":"short explanation","visualText":["OCR text or empty"],"visualSignals":["short visual signal or empty"],"flags":[{"category":"category_id","severity":"low"|"medium"|"high","confidence":0..1,"evidence":"short evidence"}]}',
+  ];
+  return instructions.join("\n");
 }

@@ -192,7 +192,7 @@ describe("formatBubble - unknown tool", () => {
 
 describe("formatBubble - clipping", () => {
   test("very long basename gets ellipsized", () => {
-    const longName = "a".repeat(100) + ".ts";
+    const longName = `${"a".repeat(100)}.ts`;
     const text = formatBubble({
       kind: "tool",
       phase: "running",

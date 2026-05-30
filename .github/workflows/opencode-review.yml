@@ -8,10 +8,9 @@ jobs:
   review:
     runs-on: ubuntu-latest
     permissions:
-      id-token: write
       contents: read
-      pull-requests: write
-      issues: write
+      pull-requests: read
+      issues: read
     steps:
       - uses: actions/checkout@v6
         with:
@@ -23,29 +22,11 @@ jobs:
           curl -fsSL https://opencode.ai/install | bash
           echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
 
-      - name: Get opencode GitHub App token
-        run: |
-          oidc_response=$(curl -fsSL \
-            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=opencode-github-action")
-          oidc_token=$(node -e 'process.stdin.on("data", (data) => process.stdout.write(JSON.parse(data).value))' <<< "$oidc_response")
-          app_response=$(curl -fsSL \
-            -X POST \
-            -H "Authorization: Bearer $oidc_token" \
-            https://api.opencode.ai/exchange_github_app_token)
-          app_token=$(node -e 'process.stdin.on("data", (data) => process.stdout.write(JSON.parse(data).token))' <<< "$app_response")
-
-          echo "::add-mask::$app_token"
-          echo "GITHUB_TOKEN=$app_token" >> "$GITHUB_ENV"
-          echo "GH_TOKEN=$app_token" >> "$GITHUB_ENV"
-
       - name: Run opencode review
         env:
-          USE_GITHUB_TOKEN: "true"
+          GH_TOKEN: ${{ github.token }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           MODEL: openai/gpt-5.5
-          OPENCODE_EVENT: >-
-            {"eventName":"workflow_dispatch","actor":"github-actions[bot]","repo":{"owner":"${{ github.repository_owner }}","repo":"${{ github.event.repository.name }}"},"payload":{}}
           PROMPT: |
             Review this pull request following the repo-local
             code-review-excellence skill at
@@ -65,9 +46,7 @@ jobs:
               `gh pr diff ${{ github.event.pull_request.number }} --repo ${{ github.repository }}`.
             - Use `gh pr view ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --json title,body,files,commits,reviews,comments,baseRefName,headRefName`
               for PR metadata when needed.
-            - Publish your review result yourself with GitHub CLI. If you find
-              actionable issues, use `gh pr review ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --comment --body-file <file>`.
-              If you find no issues, use `gh pr comment ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --body-file <file>`.
+            - Return the review body only. The workflow publishes your output.
             - After identifying changed files from `gh pr diff` or the provided
               PR context, read only the relevant files and nearby dependencies.
             - Do not make code changes during review unless explicitly asked.
@@ -86,4 +65,30 @@ jobs:
             Use severity labels such as [blocking], [important], [nit],
             and [suggestion]. Keep feedback specific, constructive, and
             tied to affected files or lines when possible.
-        run: opencode github run --event "$OPENCODE_EVENT"
+        run: opencode run --model "$MODEL" "$PROMPT" > opencode-review.md
+
+      - name: Upload opencode review
+        uses: actions/upload-artifact@v4
+        with:
+          name: opencode-review
+          path: opencode-review.md
+          if-no-files-found: error
+
+  publish:
+    needs: review
+    runs-on: ubuntu-latest
+    if: always()
+    permissions:
+      actions: read
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Download opencode review
+        uses: actions/download-artifact@v4
+        with:
+          name: opencode-review
+
+      - name: Publish opencode review
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr comment ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --body-file opencode-review.md

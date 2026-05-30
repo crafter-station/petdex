@@ -4,7 +4,7 @@
  * Returns JSON metadata describing where to download a pet's pack files.
  * Used by:
  *   - The web "Open in Petdex Desktop" button (to validate slug + show display name)
- *   - The desktop binary's URL scheme handler (petdex://install/{slug})
+ *   - The desktop binary's URL scheme handler (`petdex://<slug>` and `petdex://install?...`)
  *
  * Distinct from /install/{slug} which serves a shell script for `curl | sh`
  * style installs. This one is a typed JSON contract for programmatic clients.

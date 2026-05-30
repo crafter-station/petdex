@@ -149,7 +149,9 @@ async function takedownOne(pet: Pet, reason: string) {
     )
     WHERE featured_pet_slugs @> to_jsonb(${slug}::text)
   `);
-  await db.delete(schema.submittedPets).where(eq(schema.submittedPets.id, pet.id));
+  await db
+    .delete(schema.submittedPets)
+    .where(eq(schema.submittedPets.id, pet.id));
 
   const keys = [
     keyFromR2Url(pet.spritesheetUrl),

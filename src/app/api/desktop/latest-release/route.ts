@@ -20,8 +20,7 @@ const DESKTOP_TAG_PREFIX = "desktop-v";
 // desktop release yet. The releases page itself isn't ideal (it can
 // show a non-desktop release at the top) but it's strictly better
 // than 5xx-ing the user.
-const RELEASES_PAGE =
-  "https://github.com/crafter-station/petdex/releases";
+const RELEASES_PAGE = "https://github.com/crafter-station/petdex/releases";
 
 // Hard-pin every redirect target to the petdex repo on github.com.
 // The html_url / browser_download_url fields on the response are
@@ -86,10 +85,7 @@ const PLATFORM_ASSET_PATTERNS: Record<string, RegExp[]> = {
     /^Petdex-arm64\.dmg$/, // signed + notarized DMG, drag-to-Applications UX
     /^petdex-desktop-darwin-arm64(\.zip)?$/, // bare binary, legacy CLI flow
   ],
-  "darwin-x64": [
-    /^Petdex-x64\.dmg$/,
-    /^petdex-desktop-darwin-x64(\.zip)?$/,
-  ],
+  "darwin-x64": [/^Petdex-x64\.dmg$/, /^petdex-desktop-darwin-x64(\.zip)?$/],
   "linux-x64": [/^petdex-desktop-linux-x64(\.tar\.gz)?$/],
   "linux-arm64": [/^petdex-desktop-linux-arm64(\.tar\.gz)?$/],
   "win32-x64": [/^petdex-desktop-win32-x64\.(exe|zip)$/],
@@ -117,8 +113,10 @@ function pickAssetForPlatform(
 
 function releasePageUrl(release: GhRelease | null): string {
   if (!release) return RELEASES_PAGE;
-  if (release.html_url && isTrustedUrl(release.html_url)) return release.html_url;
-  if (release.tag_name) return `${SAFE_URL_PREFIX}releases/tag/${release.tag_name}`;
+  if (release.html_url && isTrustedUrl(release.html_url))
+    return release.html_url;
+  if (release.tag_name)
+    return `${SAFE_URL_PREFIX}releases/tag/${release.tag_name}`;
   return RELEASES_PAGE;
 }
 

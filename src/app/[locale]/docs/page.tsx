@@ -1,8 +1,10 @@
 import Link from "next/link";
+import type React from "react";
 
 import { ArrowRight, Check } from "lucide-react";
+import { getTranslations } from "next-intl/server";
 
-import { buildLocaleAlternates } from "@/lib/locale-routing";
+import { buildLocaleAlternates, withLocale } from "@/lib/locale-routing";
 
 import { CommandLine } from "@/components/command-line";
 import { GithubIcon } from "@/components/github-icon";
@@ -11,71 +13,111 @@ import { SiteHeader } from "@/components/site-header";
 
 import { hasLocale } from "@/i18n/config";
 
+const NPM_URL = "https://www.npmjs.com/package/petdex";
+const REPO_URL = "https://github.com/crafter-station/petdex";
+const SKILL_URL = `${REPO_URL}/blob/main/.claude/skills/petdex/SKILL.md`;
+const DOC_SECTIONS = [
+  ["quick-start", "quickStart"],
+  ["install", "install"],
+  ["authenticate", "authenticate"],
+  ["commands", "commands"],
+  ["desktop", "desktop"],
+  ["distribute", "distribute"],
+  ["validation", "validation"],
+  ["failure", "failure"],
+  ["agents", "agentUsage"],
+  ["config", "config"],
+  ["contribute", "contribute"],
+] as const;
+
 export async function generateMetadata({
   params,
 }: {
   params: Promise<{ locale: string }>;
 }) {
   const { locale } = await params;
+  const t = await getTranslations({
+    locale: hasLocale(locale) ? locale : "en",
+    namespace: "docsPage",
+  });
   return {
-    title: "Docs · Petdex",
-    description:
-      "How to install, distribute, and automate Codex pets with the Petdex CLI.",
+    title: t("metadata.title"),
+    description: t("metadata.description"),
     alternates: buildLocaleAlternates(
       "/docs",
       hasLocale(locale) ? locale : undefined,
     ),
     openGraph: {
-      title: "Petdex CLI · Docs",
-      description:
-        "How to install, distribute, and automate Codex pets with the Petdex CLI.",
+      title: t("metadata.ogTitle"),
+      description: t("metadata.description"),
       images: ["/og.png"],
     },
   };
 }
 
-const NPM_URL = "https://www.npmjs.com/package/petdex";
-const REPO_URL = "https://github.com/crafter-station/petdex";
-const SKILL_URL = `${REPO_URL}/blob/main/.claude/skills/petdex/SKILL.md`;
+export default async function DocsPage({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}) {
+  const { locale } = await params;
+  const localeValue = hasLocale(locale) ? locale : "en";
+  const t = await getTranslations({
+    locale: localeValue,
+    namespace: "docsPage",
+  });
+  const placeholder = {
+    desktopAction: "<start | stop | status>",
+    path: t("placeholders.path"),
+    petName: t("placeholders.petName"),
+    yourPetName: t("placeholders.yourPetName"),
+  };
+  const rich = {
+    code: (chunks: React.ReactNode) => <code>{chunks}</code>,
+    em: (chunks: React.ReactNode) => <em>{chunks}</em>,
+    strong: (chunks: React.ReactNode) => <strong>{chunks}</strong>,
+    ...placeholder,
+  };
 
-export default function DocsPage() {
   return (
     <main className="min-h-dvh bg-background text-foreground">
       <SiteHeader />
       <section className="mx-auto grid w-full max-w-6xl gap-12 px-5 pt-8 pb-12 md:grid-cols-[220px_1fr] md:px-8 md:pb-16">
         <aside className="hidden md:block">
           <nav className="sticky top-24 flex flex-col gap-1.5 text-sm">
-            <NavHeader>Get started</NavHeader>
-            <NavLink href="#quick-start">Quick start</NavLink>
-            <NavLink href="#install">Install</NavLink>
-            <NavLink href="#authenticate">Authenticate</NavLink>
-            <NavHeader>CLI</NavHeader>
-            <NavLink href="#commands">Commands</NavLink>
-            <NavLink href="#desktop">Desktop app</NavLink>
-            <NavLink href="#distribute">Distribute pets</NavLink>
-            <NavLink href="#validation">Validation</NavLink>
-            <NavLink href="#failure">Failure modes</NavLink>
-            <NavHeader>Agents</NavHeader>
-            <NavLink href="#agents">Agent-first usage</NavLink>
-            <NavHeader>Reference</NavHeader>
-            <NavLink href="#config">Configuration</NavLink>
-            <NavLink href="#contribute">Contribute</NavLink>
+            <NavHeader>{t("nav.getStarted")}</NavHeader>
+            {DOC_SECTIONS.slice(0, 3).map(([id, label]) => (
+              <NavLink key={id} href={`#${id}`}>
+                {t(`nav.${label}`)}
+              </NavLink>
+            ))}
+            <NavHeader>{t("nav.cli")}</NavHeader>
+            {DOC_SECTIONS.slice(3, 8).map(([id, label]) => (
+              <NavLink key={id} href={`#${id}`}>
+                {t(`nav.${label}`)}
+              </NavLink>
+            ))}
+            <NavHeader>{t("nav.agents")}</NavHeader>
+            <NavLink href="#agents">{t("nav.agentUsage")}</NavLink>
+            <NavHeader>{t("nav.reference")}</NavHeader>
+            {DOC_SECTIONS.slice(9).map(([id, label]) => (
+              <NavLink key={id} href={`#${id}`}>
+                {t(`nav.${label}`)}
+              </NavLink>
+            ))}
           </nav>
         </aside>
 
         <article className="min-w-0 space-y-14">
           <header className="space-y-3">
             <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
-              Petdex CLI · v0.1
+              {t("hero.eyebrow")}
             </p>
             <h1 className="text-5xl font-medium tracking-tight md:text-6xl">
-              Docs
+              {t("hero.title")}
             </h1>
             <p className="max-w-2xl text-lg leading-8 text-muted-2">
-              The Petdex CLI lets you install, browse, and submit Codex pets
-              from your terminal. Authentication is OAuth 2.0 + PKCE through
-              Clerk. Tokens persist in your OS keychain. Same auth works across{" "}
-              <code className="text-sm">npx</code> and global installs.
+              {t("hero.description")}
             </p>
             <div className="flex flex-wrap items-center gap-3 pt-2">
               <a
@@ -84,7 +126,7 @@ export default function DocsPage() {
                 rel="noreferrer"
                 className="inline-flex h-10 items-center gap-2 rounded-full border border-border-base bg-surface px-4 text-sm font-medium transition hover:border-border-strong"
               >
-                npmjs.com/petdex
+                {t("hero.npmCta")}
                 <ArrowRight className="size-4" />
               </a>
               <a
@@ -94,50 +136,49 @@ export default function DocsPage() {
                 className="inline-flex h-10 items-center gap-2 rounded-full border border-border-base bg-surface px-4 text-sm font-medium transition hover:border-border-strong"
               >
                 <GithubIcon className="size-4" />
-                Repo
+                {t("hero.repoCta")}
               </a>
             </div>
           </header>
 
-          <Section id="quick-start" title="Quick start">
-            <p>
-              Install a curated pet into your Codex setup with one command. No
-              account required to install. Sign in only when you submit.
-            </p>
+          <Section id="quick-start" title={t("sections.quickStart.title")}>
+            <p>{t("sections.quickStart.intro")}</p>
             <CommandLine
               command="npx petdex install boba"
               source="docs-quickstart"
               className="w-full max-w-xl"
             />
             <p>
-              The CLI fetches the pet pack and drops it into{" "}
-              <code>~/.codex/pets/boba/</code>. To activate it inside Codex go
-              to <strong>Settings → Appearance → Pets</strong> and click{" "}
-              <strong>Select</strong>. Use <code>/pet</code> inside Codex to
-              wake or tuck it away.
+              {t.rich("sections.quickStart.afterCommand", {
+                code: (chunks) => <code>{chunks}</code>,
+                strong: (chunks) => <strong>{chunks}</strong>,
+              })}
             </p>
             <Callout>
-              Don't have a pet idea yet?{" "}
-              <Link
-                href="/create"
-                className="font-medium underline underline-offset-4"
-              >
-                Hatch your own
-              </Link>{" "}
-              with the Codex Hatch Pet skill, then come back to{" "}
-              <code>petdex submit</code>.
+              {t.rich("sections.quickStart.callout", {
+                code: (chunks) => <code>{chunks}</code>,
+                link: (chunks) => (
+                  <Link
+                    href={withLocale("/create", localeValue)}
+                    className="font-medium underline underline-offset-4"
+                  >
+                    {chunks}
+                  </Link>
+                ),
+              })}
             </Callout>
           </Section>
 
-          <Section id="install" title="Install">
-            <p>
-              The CLI runs on Node 20+ (or Bun). Pick the workflow that fits
-              you. Both are equivalent in capability and persistence.
-            </p>
+          <Section id="install" title={t("sections.install.title")}>
+            <p>{t("sections.install.intro")}</p>
 
-            <h3 className="font-semibold">Casual / one-off</h3>
+            <h3 className="font-semibold">
+              {t("sections.install.casualTitle")}
+            </h3>
             <p>
-              Use <code>npx</code>. No setup, package is cached after first run.
+              {t.rich("sections.install.casualBody", {
+                code: (chunks) => <code>{chunks}</code>,
+              })}
             </p>
             <CommandLine
               command="npx petdex install boba"
@@ -145,10 +186,10 @@ export default function DocsPage() {
               className="w-full max-w-xl"
             />
 
-            <h3 className="font-semibold">Power user</h3>
-            <p>
-              Install globally for instant invocation and easier muscle memory.
-            </p>
+            <h3 className="font-semibold">
+              {t("sections.install.powerTitle")}
+            </h3>
+            <p>{t("sections.install.powerBody")}</p>
             <CommandLine
               command="npm install -g petdex"
               source="docs-install-global"
@@ -156,32 +197,24 @@ export default function DocsPage() {
             />
 
             <p>
-              <strong>Auth persistence is identical in both.</strong> Tokens
-              live in your OS keychain (macOS Keychain, Windows Credential
-              Manager, Linux Secret Service) under the service name{" "}
-              <code>petdex-cli</code>. Even if npx clears its package cache,
-              your session survives.
+              {t.rich("sections.install.persistence", {
+                code: (chunks) => <code>{chunks}</code>,
+                strong: (chunks) => <strong>{chunks}</strong>,
+              })}
             </p>
           </Section>
 
-          <Section id="authenticate" title="Authenticate">
-            <p>
-              Sign in once, then any command that needs auth (e.g. submit) works
-              seamlessly.
-            </p>
+          <Section id="authenticate" title={t("sections.authenticate.title")}>
+            <p>{t("sections.authenticate.intro")}</p>
             <CommandLine
               command="npx petdex login"
               source="docs-auth-login"
               className="w-full max-w-xl"
             />
             <p className="text-sm text-muted-2">
-              The flow is OAuth 2.0 + PKCE: the CLI opens your browser, you sign
-              in with Clerk on <code>accounts.petdex.crafter.run</code>, and the
-              browser redirects to a one-shot localhost listener with the
-              authorization code. The CLI exchanges it for a token set and
-              stores it in the keychain. No secrets touch disk.
+              {t.rich("sections.authenticate.flow", rich)}
             </p>
-            <p>Other auth commands:</p>
+            <p>{t("sections.authenticate.otherCommands")}</p>
             <CommandLine
               command="npx petdex whoami"
               source="docs-auth-whoami"
@@ -194,20 +227,13 @@ export default function DocsPage() {
             />
           </Section>
 
-          <Section id="commands" title="Commands">
-            <p>
-              The CLI covers the full lifecycle: discover, install, hatch,
-              publish, plus the desktop app and agent hooks. All commands accept{" "}
-              <code>--help</code>.
-            </p>
+          <Section id="commands" title={t("sections.commands.title")}>
+            <p>{t.rich("sections.commands.intro", rich)}</p>
 
             <h3 className="mt-6 font-semibold">
               <code>petdex list</code>
             </h3>
-            <p>
-              Print every approved pet with credit. Useful for discovery before
-              installing.
-            </p>
+            <p>{t("sections.commands.listBody")}</p>
             <CommandLine
               command="npx petdex list"
               source="docs-cmd-list"
@@ -215,16 +241,9 @@ export default function DocsPage() {
             />
 
             <h3 className="mt-6 font-semibold">
-              <code>petdex install &lt;slug&gt;</code>
+              <code>{t("sections.commands.installSyntax", placeholder)}</code>
             </h3>
-            <p>
-              Drop a pet into <code>~/.codex/pets/&lt;slug&gt;/</code>.
-              Equivalent to{" "}
-              <code>
-                curl -sSf https://petdex.crafter.run/install/&lt;slug&gt; | sh
-              </code>
-              .
-            </p>
+            <p>{t.rich("sections.commands.installBody", rich)}</p>
             <CommandLine
               command="npx petdex install kebo"
               source="docs-cmd-install"
@@ -232,60 +251,41 @@ export default function DocsPage() {
             />
 
             <h3 className="mt-6 font-semibold">
-              <code>petdex submit &lt;path&gt;</code>
+              <code>{t("sections.commands.submitSyntax", placeholder)}</code>
             </h3>
-            <p>
-              Publish your pet(s) to the gallery. The CLI accepts three shapes:
-            </p>
+            <p>{t("sections.commands.submitIntro")}</p>
             <ul className="ml-6 list-disc space-y-1 text-muted-2">
-              <li>
-                <strong>Single folder</strong>:{" "}
-                <code>petdex submit ~/.codex/pets/boba</code>
-              </li>
-              <li>
-                <strong>Single zip</strong>:{" "}
-                <code>petdex submit ~/Downloads/boba.zip</code>
-              </li>
-              <li>
-                <strong>Bulk</strong>: <code>petdex submit ~/.codex/pets</code>:
-                every direct subfolder is treated as its own pet
-              </li>
+              <li>{t.rich("sections.commands.submitSingle", rich)}</li>
+              <li>{t.rich("sections.commands.submitZip", rich)}</li>
+              <li>{t.rich("sections.commands.submitBulk", rich)}</li>
             </ul>
-            <p>
-              Bulk mode shows a progress spinner per pet and a final summary of
-              failures. Slugs auto-deduplicate so you'll never get a "slug
-              taken" rebote.
-            </p>
+            <p>{t("sections.commands.bulkNote")}</p>
 
             <h3 className="mt-6 font-semibold">
               <code>petdex login / logout / whoami</code>
             </h3>
-            <p>See the Authenticate section above.</p>
+            <p>{t("sections.commands.authBody")}</p>
           </Section>
 
-          <Section id="desktop" title="Desktop app">
+          <Section id="desktop" title={t("sections.desktop.title")}>
             <p>
-              Petdex Desktop is a floating mascot that lives on top of your
-              workspace and reacts to your coding agent's tool calls. macOS
-              today, Linux and Windows soon. See{" "}
-              <Link
-                href="/download"
-                className="font-medium underline underline-offset-4"
-              >
-                /download
-              </Link>{" "}
-              for the visual tour.
+              {t.rich("sections.desktop.intro", {
+                ...rich,
+                download: (chunks) => (
+                  <Link
+                    href={withLocale("/download", localeValue)}
+                    className="font-medium underline underline-offset-4"
+                  >
+                    {chunks}
+                  </Link>
+                ),
+              })}
             </p>
 
             <h3 className="mt-6 font-semibold">
               <code>petdex install desktop</code>
             </h3>
-            <p>
-              Fetches the latest binary from GitHub Releases for your platform
-              and drops it at <code>~/.petdex/bin/petdex-desktop</code>. The CLI
-              strips the macOS quarantine attribute so the app opens without a
-              Gatekeeper prompt.
-            </p>
+            <p>{t.rich("sections.desktop.installDesktopBody", rich)}</p>
             <CommandLine
               command="npx petdex install desktop"
               source="docs-desktop-install"
@@ -295,11 +295,7 @@ export default function DocsPage() {
             <h3 className="mt-6 font-semibold">
               <code>petdex hooks install</code>
             </h3>
-            <p>
-              Wires the desktop app into your coding agents so the pet animates
-              as you work. Picks the agents present on your machine and writes
-              hooks for each:
-            </p>
+            <p>{t("sections.desktop.hooksInstallBody")}</p>
             <ul className="ml-6 list-disc space-y-1 text-muted-2">
               <li>
                 <strong>Claude Code</strong>:{" "}
@@ -317,13 +313,7 @@ export default function DocsPage() {
                 <code>~/.config/opencode/plugins/petdex.js</code>
               </li>
             </ul>
-            <p>
-              Tool events map to pet states: <code>tool.before</code> →{" "}
-              <code>running</code>, <code>tool.after</code> → <code>idle</code>,
-              <code>session.end</code> → <code>waving</code>,{" "}
-              <code>session.error</code> → <code>failed</code>. Each hook POSTs
-              to the local sidecar at <code>http://127.0.0.1:7777/state</code>.
-            </p>
+            <p>{t.rich("sections.desktop.hookEvents", rich)}</p>
             <CommandLine
               command="npx petdex hooks install"
               source="docs-desktop-hooks"
@@ -333,12 +323,7 @@ export default function DocsPage() {
             <h3 className="mt-6 font-semibold">
               <code>petdex desktop &lt;start | stop | status&gt;</code>
             </h3>
-            <p>
-              Manage the running pet. <code>start</code> spawns it detached (PID
-              at <code>~/.petdex/desktop.pid</code>, log at{" "}
-              <code>~/.petdex/desktop.log</code>). <code>stop</code> sends
-              SIGTERM. <code>status</code> reports running, stopped, or stale.
-            </p>
+            <p>{t.rich("sections.desktop.desktopManageBody", rich)}</p>
             <CommandLine
               command="npx petdex desktop start"
               source="docs-desktop-start"
@@ -348,13 +333,7 @@ export default function DocsPage() {
             <h3 className="mt-6 font-semibold">
               <code>petdex up / down / toggle</code>
             </h3>
-            <p>
-              One-shot wake/sleep for the mascot. <code>up</code> enables hooks
-              AND launches the desktop. <code>down</code> disables hooks AND
-              stops the desktop. <code>toggle</code> flips between them based on
-              current state. That's what the <code>/petdex</code> slash command
-              runs from inside your agent.
-            </p>
+            <p>{t.rich("sections.desktop.toggleBody", rich)}</p>
             <CommandLine
               command="npx petdex toggle"
               source="docs-desktop-toggle"
@@ -362,44 +341,21 @@ export default function DocsPage() {
             />
 
             <h3 className="mt-6 font-semibold">
-              <code>/petdex</code> (slash command)
+              <code>/petdex</code> {t("sections.desktop.slashTitleSuffix")}
             </h3>
-            <p>
-              Once <code>petdex hooks install</code> has run, every supported
-              agent (Claude Code, Codex, Gemini, OpenCode) gets a{" "}
-              <code>/petdex</code> command in its picker. Type it inside the
-              agent and the mascot wakes or sleeps without leaving the chat:
-            </p>
+            <p>{t.rich("sections.desktop.slashBody", rich)}</p>
             <ul className="ml-6 list-disc space-y-1 text-muted-2">
-              <li>
-                <code>/petdex</code>: toggle (wake if asleep, sleep if awake)
-              </li>
-              <li>
-                <code>/petdex up</code>: force-wake
-              </li>
-              <li>
-                <code>/petdex down</code>: force-sleep
-              </li>
-              <li>
-                <code>/petdex status</code>: show whether hooks are enabled
-              </li>
-              <li>
-                <code>/petdex doctor</code>: diagnose install + agent wiring
-              </li>
+              <li>{t.rich("sections.desktop.slashToggle", rich)}</li>
+              <li>{t.rich("sections.desktop.slashUp", rich)}</li>
+              <li>{t.rich("sections.desktop.slashDown", rich)}</li>
+              <li>{t.rich("sections.desktop.slashStatus", rich)}</li>
+              <li>{t.rich("sections.desktop.slashDoctor", rich)}</li>
             </ul>
 
             <h3 className="mt-6 font-semibold">
-              <code>petdex hooks</code> (kill-switch)
+              <code>petdex hooks</code> {t("sections.desktop.killSwitchSuffix")}
             </h3>
-            <p>
-              Even with hooks installed, you can pause them without touching
-              your agent's settings. <code>petdex hooks off</code> drops a flag
-              file at <code>~/.petdex/runtime/hooks-disabled</code>; every
-              installed hook checks for it first and exits 0 immediately.{" "}
-              <code>petdex hooks on</code> removes the file. Useful when a
-              sidecar has gone weird and you don't want stray curls in your
-              agent log.
-            </p>
+            <p>{t.rich("sections.desktop.hooksKillBody", rich)}</p>
             <CommandLine
               command="npx petdex hooks toggle"
               source="docs-hooks-toggle"
@@ -409,13 +365,7 @@ export default function DocsPage() {
             <h3 className="mt-6 font-semibold">
               <code>petdex hooks uninstall</code>
             </h3>
-            <p>
-              Reverses <code>hooks install</code>: removes the petdex entries
-              from each agent's config (preserving your own hooks), deletes the{" "}
-              <code>/petdex</code> slash command files, and removes the OpenCode
-              plugin. Pass <code>--remove-token</code> to also drop the auth
-              token at <code>~/.petdex/runtime/update-token</code>.
-            </p>
+            <p>{t.rich("sections.desktop.uninstallBody", rich)}</p>
             <CommandLine
               command="npx petdex hooks uninstall"
               source="docs-hooks-uninstall"
@@ -425,12 +375,7 @@ export default function DocsPage() {
             <h3 className="mt-6 font-semibold">
               <code>petdex doctor</code>
             </h3>
-            <p>
-              Diagnostic. Verifies binary, sidecar bundle, sidecar reachability,
-              pid file format, token mode, kill-switch state, hooks installed in
-              each agent, Codex's <code>codex_hooks</code> feature flag, and
-              usable pet count. Each failed check ships an actionable hint.
-            </p>
+            <p>{t.rich("sections.desktop.doctorBody", rich)}</p>
             <CommandLine
               command="npx petdex doctor"
               source="docs-doctor"
@@ -440,12 +385,7 @@ export default function DocsPage() {
             <h3 className="mt-6 font-semibold">
               <code>petdex update</code>
             </h3>
-            <p>
-              Compares your installed version against the latest GitHub Release
-              tag and downloads it if newer. If the desktop app was running, it
-              stops it, swaps the binary, and restarts. Pass{" "}
-              <code>--force</code> to re-download the same version.
-            </p>
+            <p>{t.rich("sections.desktop.updateBody", rich)}</p>
             <CommandLine
               command="npx petdex update"
               source="docs-desktop-update"
@@ -453,12 +393,7 @@ export default function DocsPage() {
             />
 
             <Callout>
-              The sidecar is a local HTTP server on port <code>7777</code>.
-              Anything that can <code>curl</code> + read the per-session token
-              at <code>~/.petdex/runtime/update-token</code> can drive the pet.
-              The token rotates every sidecar boot and lives at mode{" "}
-              <code>0600</code>, so only your user can read it. Browsers and
-              remote sites can't:
+              {t.rich("sections.desktop.sidecarCallout", rich)}
               <pre className="mt-3 overflow-x-auto rounded-lg bg-surface-muted p-3 font-mono text-xs leading-relaxed">
                 {[
                   `T="$(cat "$HOME/.petdex/runtime/update-token")"`,
@@ -471,205 +406,145 @@ export default function DocsPage() {
             </Callout>
           </Section>
 
-          <Section id="distribute" title="Distribute your pets">
-            <p>
-              Once you've hatched a pet inside Codex, sharing it takes one
-              command. Here's the full lifecycle:
-            </p>
+          <Section id="distribute" title={t("sections.distribute.title")}>
+            <p>{t("sections.distribute.intro")}</p>
 
             <ol className="ml-6 list-decimal space-y-3 text-muted-2">
               <li>
-                <strong>Create.</strong> In Codex Desktop, install the{" "}
-                <strong>Hatch Pet</strong> skill and run <code>/pet</code>.
-                Codex generates the spritesheet and pet.json into{" "}
-                <code>~/.codex/pets/&lt;slug&gt;/</code>. Full tutorial at{" "}
-                <Link
-                  href="/create"
-                  className="font-medium underline underline-offset-4"
-                >
-                  /create
-                </Link>
-                .
+                {t.rich("sections.distribute.create", {
+                  ...rich,
+                  create: (chunks) => (
+                    <Link
+                      href={withLocale("/create", localeValue)}
+                      className="font-medium underline underline-offset-4"
+                    >
+                      {chunks}
+                    </Link>
+                  ),
+                })}
               </li>
-              <li>
-                <strong>Sign in.</strong> <code>npx petdex login</code> if you
-                haven't.
-              </li>
-              <li>
-                <strong>Submit.</strong>{" "}
-                <code>npx petdex submit ~/.codex/pets/&lt;slug&gt;</code>. Or
-                bulk all at once with the parent dir.
-              </li>
-              <li>
-                <strong>Wait for review.</strong> Submissions land as "pending"
-                in the admin queue. You'll receive a Resend email when approved
-                or rejected (if rejected, the reason is included).
-              </li>
-              <li>
-                <strong>Anyone can install your pet.</strong> Once approved,
-                share <code>npx petdex install &lt;your-slug&gt;</code> with
-                anyone . They get your pet in their <code>~/.codex/pets/</code>{" "}
-                instantly.
-              </li>
+              <li>{t.rich("sections.distribute.signIn", rich)}</li>
+              <li>{t.rich("sections.distribute.submit", rich)}</li>
+              <li>{t.rich("sections.distribute.review", rich)}</li>
+              <li>{t.rich("sections.distribute.install", rich)}</li>
             </ol>
 
             <Callout>
-              Pets are user-submitted fan art. Petdex doesn't claim rights to
-              underlying IP. If you're a rights holder requesting a takedown,
-              see{" "}
-              <Link
-                href="/legal/takedown"
-                className="font-medium underline underline-offset-4"
-              >
-                /legal/takedown
-              </Link>
-              .
+              {t.rich("sections.distribute.callout", {
+                ...rich,
+                takedown: (chunks) => (
+                  <Link
+                    href={withLocale("/legal/takedown", localeValue)}
+                    className="font-medium underline underline-offset-4"
+                  >
+                    {chunks}
+                  </Link>
+                ),
+              })}
             </Callout>
           </Section>
 
-          <Section id="validation" title="Validation rules">
-            <p>The server enforces these rules; the CLI checks locally too.</p>
+          <Section id="validation" title={t("sections.validation.title")}>
+            <p>{t("sections.validation.intro")}</p>
             <ul className="ml-6 list-disc space-y-1 text-muted-2">
-              <li>
-                <code>pet.json</code> and <code>spritesheet.webp</code> (or{" "}
-                <code>.png</code>) must be at the root of the folder/zip.
-              </li>
-              <li>
-                Spritesheet ≥ 256×256. Recommended <strong>1536×1872</strong>{" "}
-                (8×9 frame grid).
-              </li>
-              <li>
-                Rate limit: <strong>10 submissions / 24h per user</strong>.
-                Admins bypass.
-              </li>
-              <li>
-                Slugs auto-deduplicate (<code>boba</code> → <code>boba-2</code>{" "}
-                → <code>boba-3</code> → …). You always get a successful
-                submission.
-              </li>
-              <li>
-                Identity (userId, email, credit) comes from the verified OAuth
-                token. Never trusted from request body.
-              </li>
+              <li>{t.rich("sections.validation.files", rich)}</li>
+              <li>{t.rich("sections.validation.spritesheet", rich)}</li>
+              <li>{t.rich("sections.validation.rateLimit", rich)}</li>
+              <li>{t.rich("sections.validation.slugs", rich)}</li>
+              <li>{t.rich("sections.validation.identity", rich)}</li>
             </ul>
           </Section>
 
-          <Section id="failure" title="Failure modes">
+          <Section id="failure" title={t("sections.failure.title")}>
             <div className="overflow-x-auto rounded-2xl border border-border-base bg-surface">
               <table className="w-full min-w-[520px] text-sm">
                 <thead className="border-b border-border-base bg-surface-muted">
                   <tr>
-                    <Th>Symptom</Th>
-                    <Th>Cause</Th>
-                    <Th>Fix</Th>
+                    <Th>{t("sections.failure.headers.symptom")}</Th>
+                    <Th>{t("sections.failure.headers.cause")}</Th>
+                    <Th>{t("sections.failure.headers.fix")}</Th>
                   </tr>
                 </thead>
                 <tbody>
                   <Tr
-                    sym="Not signed in"
-                    cause="No tokens or session expired"
+                    sym={t("sections.failure.rows.notSignedIn.symptom")}
+                    cause={t("sections.failure.rows.notSignedIn.cause")}
                     fix={<code>petdex login</code>}
                   />
                   <Tr
                     sym="presign 401"
-                    cause="Bearer rejected by Clerk userinfo"
+                    cause={t("sections.failure.rows.presign401.cause")}
                     fix={
                       <>
-                        <code>petdex logout</code> then{" "}
+                        <code>petdex logout</code> {t("sections.failure.then")}{" "}
                         <code>petdex login</code>
                       </>
                     }
                   />
                   <Tr
                     sym="presign 429"
-                    cause="10/24h rate limit hit"
+                    cause={t("sections.failure.rows.presign429.cause")}
                     fix={
                       <>
-                        Wait 24h or open a{" "}
+                        {t("sections.failure.rows.presign429.fixBefore")}{" "}
                         <a
                           href={`${REPO_URL}/issues/new?labels=submit-fallback`}
                           target="_blank"
                           rel="noreferrer"
                           className="underline underline-offset-4"
                         >
-                          submit-fallback issue
+                          {t("sections.failure.rows.presign429.fixLink")}
                         </a>
                       </>
                     }
                   />
                   <Tr
                     sym="register 400 invalid_spritesheet"
-                    cause="Sprite < 256×256"
-                    fix="Regenerate at 1536×1872"
+                    cause={t("sections.failure.rows.invalidSpritesheet.cause")}
+                    fix={t("sections.failure.rows.invalidSpritesheet.fix")}
                   />
                   <Tr
                     sym="register 400 missing_field"
-                    cause="Folder missing pet.json or spritesheet"
-                    fix="Inspect folder contents"
+                    cause={t("sections.failure.rows.missingField.cause")}
+                    fix={t("sections.failure.rows.missingField.fix")}
                   />
                   <Tr
                     sym="R2 PUT 403"
-                    cause="Presigned URL expired (60s TTL)"
-                    fix="Retry: CLI auto-presigns fresh URLs"
+                    cause={t("sections.failure.rows.r2Put403.cause")}
+                    fix={t("sections.failure.rows.r2Put403.fix")}
                   />
                 </tbody>
               </table>
             </div>
           </Section>
 
-          <Section id="agents" title="Agent-first usage (Skill)">
-            <p>
-              Petdex ships a Claude Code / Codex / Cursor compatible{" "}
-              <strong>skill</strong> at{" "}
-              <code>.claude/skills/petdex/SKILL.md</code>. Compatible agents
-              load it automatically and learn <em>when</em> and <em>how</em> to
-              call the CLI on your behalf.
-            </p>
+          <Section id="agents" title={t("sections.agents.title")}>
+            <p>{t.rich("sections.agents.intro", rich)}</p>
 
-            <h3 className="mt-6 font-semibold">What this enables</h3>
+            <h3 className="mt-6 font-semibold">
+              {t("sections.agents.enablesTitle")}
+            </h3>
             <ul className="ml-6 list-disc space-y-1 text-muted-2">
-              <li>
-                Say <em>"install something cozy for my Codex"</em> in any agent
-                tool. It runs <code>petdex list</code>, suggests Boba/Boxcat,
-                installs your pick, and reminds you to activate via{" "}
-                <strong>Settings → Appearance → Pets</strong>.
-              </li>
-              <li>
-                Say <em>"share all my pets"</em>. Agent runs{" "}
-                <code>petdex login</code> if needed, then{" "}
-                <code>petdex submit ~/.codex/pets</code>, surfaces the bulk
-                summary.
-              </li>
-              <li>
-                Say <em>"how do I make my own?"</em>. Agent walks you through
-                Codex Desktop → Hatch Pet skill → <code>/pet</code> →{" "}
-                <code>petdex submit</code>.
-              </li>
+              <li>{t.rich("sections.agents.enableCozy", rich)}</li>
+              <li>{t.rich("sections.agents.enableShare", rich)}</li>
+              <li>{t.rich("sections.agents.enableMake", rich)}</li>
             </ul>
 
-            <h3 className="mt-6 font-semibold">How to enable it</h3>
-            <p>
-              If you use Claude Code, save the skill globally so every project
-              has it:
-            </p>
+            <h3 className="mt-6 font-semibold">
+              {t("sections.agents.enableTitle")}
+            </h3>
+            <p>{t("sections.agents.enableIntro")}</p>
             <CommandLine
               command={`mkdir -p ~/.claude/skills/petdex && curl -sSf ${SKILL_URL.replace("/blob/", "/raw/")} -o ~/.claude/skills/petdex/SKILL.md`}
               source="docs-agents-install"
               className="w-full max-w-xl"
             />
-            <p>
-              Other agent tools can load the same SKILL.md from the repo. The
-              file is plain markdown with. No agent-specific syntax beyond{" "}
-              <code>allowed-tools</code>.
-            </p>
+            <p>{t.rich("sections.agents.enableOther", rich)}</p>
 
-            <h3 className="mt-6 font-semibold">Build your own skill on top</h3>
-            <p>
-              The CLI is the executable surface; the skill is the cognitive one.
-              If you build a derivative skill (e.g. one that auto-tags new pets
-              or curates a daily digest), you can use the Petdex skill as a
-              reference. Read it directly:
-            </p>
+            <h3 className="mt-6 font-semibold">
+              {t("sections.agents.buildTitle")}
+            </h3>
+            <p>{t("sections.agents.buildBody")}</p>
             <p>
               <a
                 href={SKILL_URL}
@@ -683,34 +558,21 @@ export default function DocsPage() {
             </p>
           </Section>
 
-          <Section id="config" title="Configuration">
-            <p>
-              The CLI ships with sensible defaults pointing at production. You
-              only need to override env vars if you're testing against a
-              non-production deployment.
-            </p>
+          <Section id="config" title={t("sections.config.title")}>
+            <p>{t("sections.config.intro")}</p>
             <ul className="ml-6 list-disc space-y-1 text-muted-2">
-              <li>
-                <code>PETDEX_URL</code>: base URL, default{" "}
-                <code>https://petdex.crafter.run</code>
-              </li>
-              <li>
-                <code>CLERK_ISSUER</code>: OAuth issuer, default{" "}
-                <code>https://clerk.petdex.crafter.run</code>
-              </li>
-              <li>
-                <code>CLERK_OAUTH_CLIENT_ID</code>: public client id (baked into
-                the CLI binary)
-              </li>
+              <li>{t.rich("sections.config.petdexUrl", rich)}</li>
+              <li>{t.rich("sections.config.clerkIssuer", rich)}</li>
+              <li>{t.rich("sections.config.clerkClientId", rich)}</li>
             </ul>
           </Section>
 
-          <Section id="contribute" title="Contribute">
+          <Section id="contribute" title={t("sections.contribute.title")}>
             <ul className="space-y-3 text-muted-2">
               <li className="flex items-start gap-2">
                 <Check className="mt-1 size-4 shrink-0 text-muted-3" />
                 <span>
-                  PRs welcome at{" "}
+                  {t("sections.contribute.prBefore")}{" "}
                   <a
                     href={REPO_URL}
                     target="_blank"
@@ -724,21 +586,21 @@ export default function DocsPage() {
               <li className="flex items-start gap-2">
                 <Check className="mt-1 size-4 shrink-0 text-muted-3" />
                 <span>
-                  Bug reports and feature requests:{" "}
+                  {t("sections.contribute.issuesBefore")}{" "}
                   <a
                     href={`${REPO_URL}/issues`}
                     target="_blank"
                     rel="noreferrer"
                     className="font-medium underline underline-offset-4"
                   >
-                    open an issue
+                    {t("sections.contribute.issueLink")}
                   </a>
                 </span>
               </li>
               <li className="flex items-start gap-2">
                 <Check className="mt-1 size-4 shrink-0 text-muted-3" />
                 <span>
-                  Sponsor on{" "}
+                  {t("sections.contribute.sponsorBefore")}{" "}
                   <a
                     href="https://github.com/sponsors/Railly"
                     target="_blank"
@@ -747,7 +609,7 @@ export default function DocsPage() {
                   >
                     GitHub Sponsors
                   </a>{" "}
-                  if Petdex saves you time.
+                  {t("sections.contribute.sponsorAfter")}
                 </span>
               </li>
             </ul>
@@ -760,28 +622,23 @@ export default function DocsPage() {
   );
 }
 
-function NavHeader({ children }: { children: React.ReactNode }) {
-  return (
-    <p className="mt-3 font-mono text-[10px] tracking-[0.18em] text-muted-3 uppercase first:mt-0">
-      {children}
-    </p>
-  );
-}
-
-function NavLink({
-  href,
-  children,
+function Tr({
+  sym,
+  cause,
+  fix,
 }: {
-  href: string;
-  children: React.ReactNode;
+  sym: string;
+  cause: string;
+  fix: React.ReactNode;
 }) {
   return (
-    <a
-      href={href}
-      className="rounded px-2 py-1 text-muted-2 transition hover:bg-white hover:text-foreground dark:hover:bg-stone-800"
-    >
-      {children}
-    </a>
+    <tr className="border-b border-black/[0.06] last:border-b-0 dark:border-white/[0.06]">
+      <td className="px-4 py-3 align-top font-mono text-xs text-rose-700 dark:text-rose-300">
+        {sym}
+      </td>
+      <td className="px-4 py-3 align-top text-muted-2">{cause}</td>
+      <td className="px-4 py-3 align-top text-foreground">{fix}</td>
+    </tr>
   );
 }
 
@@ -814,30 +671,35 @@ function Callout({ children }: { children: React.ReactNode }) {
   );
 }
 
+function NavHeader({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="mt-3 font-mono text-[10px] tracking-[0.18em] text-muted-3 uppercase first:mt-0">
+      {children}
+    </p>
+  );
+}
+
+function NavLink({
+  href,
+  children,
+}: {
+  href: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <a
+      href={href}
+      className="rounded px-2 py-1 text-muted-2 transition hover:bg-white hover:text-foreground dark:hover:bg-stone-800"
+    >
+      {children}
+    </a>
+  );
+}
+
 function Th({ children }: { children: React.ReactNode }) {
   return (
     <th className="px-4 py-2 text-left font-mono text-[10px] tracking-[0.18em] text-muted-2 uppercase">
       {children}
     </th>
-  );
-}
-
-function Tr({
-  sym,
-  cause,
-  fix,
-}: {
-  sym: string;
-  cause: string;
-  fix: React.ReactNode;
-}) {
-  return (
-    <tr className="border-b border-black/[0.06] last:border-b-0 dark:border-white/[0.06]">
-      <td className="px-4 py-3 align-top font-mono text-xs text-rose-700 dark:text-rose-300">
-        {sym}
-      </td>
-      <td className="px-4 py-3 align-top text-muted-2">{cause}</td>
-      <td className="px-4 py-3 align-top text-foreground">{fix}</td>
-    </tr>
   );
 }

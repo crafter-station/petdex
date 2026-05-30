@@ -2,12 +2,12 @@
 // Public: no auth required, no PII. Cached per-slug at the edge for
 // 24h since dominantColor only changes if the pet is re-uploaded.
 
-import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
-import { db, schema } from "@/lib/db/client";
+import { eq } from "drizzle-orm";
 
 import { buildCodexTheme, serializeCodexThemeVariant } from "@/lib/codex-theme";
+import { db, schema } from "@/lib/db/client";
 
 export const runtime = "nodejs";
 
@@ -31,7 +31,10 @@ export async function GET(_req: Request, { params }: Params) {
   }
   if (!pet.dominantColor) {
     return NextResponse.json(
-      { error: "no_color", message: "Pet has no extracted dominant color yet." },
+      {
+        error: "no_color",
+        message: "Pet has no extracted dominant color yet.",
+      },
       { status: 422 },
     );
   }

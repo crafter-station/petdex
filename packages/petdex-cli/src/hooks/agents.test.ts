@@ -2,9 +2,14 @@ import { describe, expect, test } from "bun:test";
 import { execSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
-import { AGENTS, resolveOpenCodeConfigDir, SIDECAR_URL } from "./agents";
+import {
+  AGENTS,
+  antigravityMcpConfigPath,
+  resolveOpenCodeConfigDir,
+  SIDECAR_URL,
+} from "./agents";
 
 // These tests pin the contract that bit us in production once: the
 // generated shell command must survive JSON.stringify (the agent
@@ -236,6 +241,25 @@ describe("Claude Code hook command", () => {
     } finally {
       rmSync(fakeHome, { recursive: true, force: true });
     }
+  });
+});
+
+describe("Antigravity config paths", () => {
+  test("agent configDir matches the platform MCP config directory", () => {
+    const agent = AGENTS.find((a) => a.id === "antigravity");
+    expect(agent?.configDir).toBe(dirname(antigravityMcpConfigPath()));
+  });
+});
+
+describe("Gemini slash command paths", () => {
+  test("uses Gemini CLI commands instead of Antigravity global workflows", () => {
+    const agent = AGENTS.find((a) => a.id === "gemini");
+    expect(agent?.slashCommandPath).toEndWith(
+      join(".gemini", "commands", "petdex.toml"),
+    );
+    expect(agent?.slashCommandPath).not.toContain(
+      join(".gemini", "antigravity", "global_workflows"),
+    );
   });
 });
 

@@ -1,7 +1,8 @@
 import { notFound } from "next/navigation";
 
-import { VIBE_COPY } from "@/lib/facet-copy";
-import { buildLocaleAlternates } from "@/lib/locale-routing";
+import { getTranslations } from "next-intl/server";
+
+import { buildLocaleAlternates, withLocale } from "@/lib/locale-routing";
 import { getApprovedPetsWithMetrics, type PetWithMetrics } from "@/lib/pets";
 import { PET_VIBES, type PetVibe } from "@/lib/types";
 
@@ -36,32 +37,40 @@ function resolveVibe(slug: string): PetVibe | null {
 
 export async function generateMetadata({ params }: Props) {
   const { vibe: raw, locale } = await params;
+  const t = await getTranslations({
+    locale: hasLocale(locale) ? locale : "en",
+    namespace: "facetPages",
+  });
   const vibe = resolveVibe(raw);
-  if (!vibe) return { title: "Vibe not found", robots: { index: false } };
-  const copy = VIBE_COPY[vibe];
+  if (!vibe) return { title: t("notFound.vibe"), robots: { index: false } };
   return {
-    title: copy.title,
-    description: copy.metaDescription,
+    title: t(`vibes.${vibe}.title`),
+    description: t(`vibes.${vibe}.metaDescription`),
     alternates: buildLocaleAlternates(
       `/vibe/${vibe}`,
       hasLocale(locale) ? locale : undefined,
     ),
     openGraph: {
-      title: copy.title,
-      description: copy.metaDescription,
+      title: t(`vibes.${vibe}.title`),
+      description: t(`vibes.${vibe}.metaDescription`),
       url: `${SITE_URL}/vibe/${vibe}`,
       type: "website",
     },
     twitter: {
       card: "summary_large_image",
-      title: copy.title,
-      description: copy.metaDescription,
+      title: t(`vibes.${vibe}.title`),
+      description: t(`vibes.${vibe}.metaDescription`),
     },
   };
 }
 
 export default async function VibePage({ params }: Props) {
-  const { vibe: raw } = await params;
+  const { vibe: raw, locale } = await params;
+  const localeValue = hasLocale(locale) ? locale : "en";
+  const t = await getTranslations({
+    locale: hasLocale(locale) ? locale : "en",
+    namespace: "facetPages",
+  });
   const vibe = resolveVibe(raw);
   if (!vibe) notFound();
 
@@ -69,8 +78,6 @@ export default async function VibePage({ params }: Props) {
   const filtered = curatedSort(all.filter((p) => p.vibes.includes(vibe)));
 
   if (filtered.length === 0) notFound();
-
-  const copy = VIBE_COPY[vibe];
 
   // Related vibes: top 6 other vibes by count, excluding current.
   const facetCounts = new Map<PetVibe, number>();
@@ -83,16 +90,16 @@ export default async function VibePage({ params }: Props) {
     .sort((a, b) => b[1] - a[1])
     .slice(0, 6)
     .map(([v, count]) => ({
-      href: `/vibe/${v}`,
-      label: v,
+      href: withLocale(`/vibe/${v}`, localeValue),
+      label: t(`vibes.${v}.label`),
       count,
     }));
 
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "CollectionPage",
-    name: copy.title,
-    description: copy.metaDescription,
+    name: t(`vibes.${vibe}.title`),
+    description: t(`vibes.${vibe}.metaDescription`),
     url: `${SITE_URL}/vibe/${vibe}`,
     isPartOf: { "@type": "WebSite", "@id": `${SITE_URL}/#website` },
     mainEntity: {
@@ -111,13 +118,13 @@ export default async function VibePage({ params }: Props) {
     <>
       <JsonLd data={jsonLd} />
       <FacetPage
-        eyebrow={`Vibe: ${vibe}`}
-        title={copy.title}
-        intro={copy.intro}
-        count={filtered.length}
+        eyebrow={t("vibeEyebrow", { vibe: t(`vibes.${vibe}.label`) })}
+        title={t(`vibes.${vibe}.title`)}
+        intro={t(`vibes.${vibe}.intro`)}
+        countLabel={t("count", { count: filtered.length })}
         pets={filtered}
         exampleSlug={filtered[0]?.slug}
-        relatedLabel="Related vibes"
+        relatedLabel={t("relatedVibes")}
         related={related}
       />
     </>

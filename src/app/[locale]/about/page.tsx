@@ -2,7 +2,7 @@ import Link from "next/link";
 
 import { getTranslations } from "next-intl/server";
 
-import { buildLocaleAlternates } from "@/lib/locale-routing";
+import { buildLocaleAlternates, withLocale } from "@/lib/locale-routing";
 import { getApprovedPetCount } from "@/lib/pets";
 
 import { CommandLine } from "@/components/command-line";
@@ -40,7 +40,13 @@ export async function generateMetadata({
   };
 }
 
-export default async function AboutPage() {
+export default async function AboutPage({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}) {
+  const { locale } = await params;
+  const localeValue = hasLocale(locale) ? locale : "en";
   const totalPets = await getApprovedPetCount();
   const t = await getTranslations("about");
   const faq = [
@@ -53,14 +59,14 @@ export default async function AboutPage() {
     { q: t("faq.items.money.q"), a: t("faq.items.money.a") },
   ];
   const browseLinks = [
-    [t("browse.links.creatures"), "/kind/creature"],
-    [t("browse.links.objects"), "/kind/object"],
-    [t("browse.links.characters"), "/kind/character"],
-    [t("browse.links.cozy"), "/vibe/cozy"],
-    [t("browse.links.playful"), "/vibe/playful"],
-    [t("browse.links.focused"), "/vibe/focused"],
-    [t("browse.links.mystical"), "/vibe/mystical"],
-    [t("browse.links.wholesome"), "/vibe/wholesome"],
+    [t("browse.links.creatures"), withLocale("/kind/creature", localeValue)],
+    [t("browse.links.objects"), withLocale("/kind/object", localeValue)],
+    [t("browse.links.characters"), withLocale("/kind/character", localeValue)],
+    [t("browse.links.cozy"), withLocale("/vibe/cozy", localeValue)],
+    [t("browse.links.playful"), withLocale("/vibe/playful", localeValue)],
+    [t("browse.links.focused"), withLocale("/vibe/focused", localeValue)],
+    [t("browse.links.mystical"), withLocale("/vibe/mystical", localeValue)],
+    [t("browse.links.wholesome"), withLocale("/vibe/wholesome", localeValue)],
   ] as const;
 
   const jsonLd = [
@@ -125,14 +131,14 @@ export default async function AboutPage() {
           <p className="text-base leading-7 text-muted-2 md:text-lg">
             {t("sections.what.body2.beforeCozy")}{" "}
             <Link
-              href="/vibe/cozy"
+              href={withLocale("/vibe/cozy", localeValue)}
               className="text-brand underline-offset-2 hover:underline"
             >
               {t("sections.what.body2.cozyLabel")}
             </Link>{" "}
             {t("sections.what.body2.middle")}{" "}
             <Link
-              href="/vibe/focused"
+              href={withLocale("/vibe/focused", localeValue)}
               className="text-brand underline-offset-2 hover:underline"
             >
               {t("sections.what.body2.focusedLabel")}

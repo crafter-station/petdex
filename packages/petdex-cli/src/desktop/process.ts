@@ -7,24 +7,17 @@
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import path from "node:path";
 
 import pc from "picocolors";
 
-import { desktopBinPath } from "./install.js";
+import { desktopBinPath, homeDir } from "./install.js";
 
-// Lazy resolution so tests can swap HOME and have the pid file
-// land in their tmpdir. os.homedir() ignores HOME on macOS (it
-// goes through getpwuid()), so we prefer process.env.HOME when
-// set — same trick the telemetry module uses.
 function pidFile(): string {
-  const home = process.env.HOME ?? homedir();
-  return path.join(home, ".petdex", "desktop.pid");
+  return path.join(homeDir(), ".petdex", "desktop.pid");
 }
 function logFile(): string {
-  const home = process.env.HOME ?? homedir();
-  return path.join(home, ".petdex", "desktop.log");
+  return path.join(homeDir(), ".petdex", "desktop.log");
 }
 
 // On-disk pid file shape. We store BOTH the pid and the process
@@ -79,7 +72,10 @@ function readPidFile(): PidRecord | null {
 // process's start time as a stable string ("Sat May  9 18:32:02 2026").
 // Exit code is non-zero when pid doesn't exist, so we return null.
 // We use execFileSync (no shell) to avoid quoting bugs.
+// Windows does not have ps; all callers already guard on platform,
+// but the early return makes the POSIX-only contract self-documenting.
 function processStartTime(pid: number): string | null {
+  if (process.platform === "win32") return null;
   try {
     const out = execFileSync("ps", ["-p", String(pid), "-o", "lstart="], {
       encoding: "utf8",
@@ -92,13 +88,75 @@ function processStartTime(pid: number): string | null {
   }
 }
 
-// True only if the live process at `pid` started at the same time as
-// the one we recorded. Pid recycle gives us either no live process
-// (lstart === null) or a different lstart, both of which fail this
-// check. Empty stored lstart (legacy pid file) is treated as failure
-// so we never blindly SIGTERM an unverified pid.
+// Return the lowercase exe basename of a running Windows process via tasklist.
+// Returns null if the process does not exist.
+// Output format: "petdex-desktop-win32-x64.exe","12345",...
+// wmic is absent on Windows 11 22H2+; tasklist is always present.
+function processExeName(pid: number): string | null {
+  try {
+    const out = execFileSync(
+      "tasklist",
+      ["/fi", `PID eq ${pid}`, "/fo", "csv", "/nh"],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+    );
+    // First CSV field is the exe name (double-quoted). No match means the
+    // process was not found ("INFO: No tasks are running...").
+    const match = out.match(/^"([^"]+)"/m);
+    return match ? match[1].toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
+// Returns the identity token to store alongside the pid.
+// On Windows: the lowercase exe basename so pidMatchesRecord() can detect
+// PID reuse by comparing the live name with the stored one.
+// On POSIX: the process start-time string from `ps -p … -o lstart=`.
+function recordLstart(pid: number): string {
+  if (process.platform === "win32") {
+    // We just spawned this process; the basename is known from the binary
+    // path rather than re-queried, which avoids a race where tasklist hasn't
+    // yet registered the process.
+    return path.basename(desktopBinPath()).toLowerCase();
+  }
+  return processStartTime(pid) ?? "";
+}
+
+/**
+ * Check whether a petdex-desktop process is alive at the given pid.
+ *
+ * On Windows: `tasklist` retrieves the exe name for the pid — this proves
+ * the process is running without relying on ps or wmic.
+ * On POSIX: `ps -p <pid>` exits 0 when the process exists.
+ *
+ * Exported so tests can verify the platform-specific branch.
+ */
+export function isPetdexPidAlive(pid: number): boolean {
+  if (process.platform === "win32") {
+    return processExeName(pid) !== null;
+  }
+  try {
+    execFileSync("ps", ["-p", String(pid)], {
+      stdio: ["ignore", "ignore", "ignore"],
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// True only if the live process at `pid` matches the identity we recorded.
+// On Windows: compares the live tasklist exe name with the stored exe name,
+// preventing false positives from OS pid reuse.
+// On POSIX: compares the live start-time string from `ps -o lstart=`.
+// Empty stored lstart (legacy pid file) is treated as failure — we never
+// blindly signal an unverified pid.
 function pidMatchesRecord(record: PidRecord): boolean {
   if (record.lstart.length === 0) return false;
+  if (process.platform === "win32") {
+    const live = processExeName(record.pid);
+    return live !== null && live === record.lstart;
+  }
   const live = processStartTime(record.pid);
   return live !== null && live === record.lstart;
 }
@@ -177,13 +235,10 @@ export async function startDesktop(): Promise<StartResult> {
     return { ok: false, reason: "Failed to spawn petdex-desktop" };
   }
 
-  // Capture the start-time NOW so a future `petdex desktop stop` can
-  // verify identity. The child has already been spawned, so `ps`
-  // will see it. If `ps` fails for some reason (sandbox, missing PATH)
-  // we still write the pid so legacy-path identity checks fail safe
-  // (status() returns stale rather than running, no signal is sent).
-  const lstart = processStartTime(child.pid) ?? "";
-  const record: PidRecord = { pid: child.pid, lstart };
+  // Capture the start-time so a future `petdex desktop stop` can
+  // verify identity before signalling. recordLstart() handles the
+  // POSIX (ps) and Windows (sentinel) cases.
+  const record: PidRecord = { pid: child.pid, lstart: recordLstart(child.pid) };
   await writeFile(pidFile(), JSON.stringify(record));
   return { ok: true, pid: child.pid, alreadyRunning: false };
 }
@@ -231,8 +286,7 @@ async function startViaOpen(appBundle: string): Promise<StartResult> {
     };
   }
 
-  const lstart = processStartTime(pid) ?? "";
-  const record: PidRecord = { pid, lstart };
+  const record: PidRecord = { pid, lstart: recordLstart(pid) };
   await writeFile(pidFile(), JSON.stringify(record));
   return { ok: true, pid, alreadyRunning: false };
 }
@@ -295,26 +349,54 @@ export async function stopDesktop(
       reason: `petdex-desktop exited before stop (pid ${pid} no longer alive)`,
     };
   }
-  try {
-    process.kill(pid, "SIGTERM");
-  } catch (err) {
-    clearPidFile();
-    const code = (err as NodeJS.ErrnoException).code;
-    // ESRCH means the process exited between our re-check and this
-    // kill (microsecond window). From the user's perspective "stop"
-    // succeeded — the process is gone.
-    if (code === "ESRCH") {
-      // Try the port wait anyway — the sidecar may still be alive
-      // because the desktop binary is its parent, not us.
-      const released = await waitForPortRelease(sidecarPort, {
-        timeoutMs: portWaitTimeoutMs,
+  if (process.platform === "win32") {
+    // SIGTERM via process.kill() maps to TerminateProcess() on Windows,
+    // which does not give the child a chance to clean up (no WM_QUIT).
+    // taskkill /t /f sends TerminateProcess to the whole process tree,
+    // which also kills the sidecar child — the desired behaviour.
+    try {
+      execFileSync("taskkill", ["/pid", String(pid), "/t", "/f"], {
+        stdio: "ignore",
+        timeout: 5000,
       });
-      return { ok: true, pid, portReleased: released };
+    } catch {
+      // taskkill can fail if the process exited between our liveness
+      // recheck and the kill call (tiny race window). Mirror POSIX ESRCH:
+      // if the process is already gone, that is success.
+      if (!isPetdexPidAlive(pid)) {
+        clearPidFile();
+        const released = await waitForPortRelease(sidecarPort, {
+          timeoutMs: portWaitTimeoutMs,
+        });
+        return { ok: true, pid, portReleased: released };
+      }
+      return {
+        ok: false,
+        reason: `taskkill failed and pid ${pid} is still alive`,
+      };
     }
-    return {
-      ok: false,
-      reason: `Failed to signal pid ${pid}: ${(err as Error).message}`,
-    };
+  } else {
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch (err) {
+      clearPidFile();
+      const code = (err as NodeJS.ErrnoException).code;
+      // ESRCH means the process exited between our re-check and this
+      // kill (microsecond window). From the user's perspective "stop"
+      // succeeded — the process is gone.
+      if (code === "ESRCH") {
+        // Try the port wait anyway — the sidecar may still be alive
+        // because the desktop binary is its parent, not us.
+        const released = await waitForPortRelease(sidecarPort, {
+          timeoutMs: portWaitTimeoutMs,
+        });
+        return { ok: true, pid, portReleased: released };
+      }
+      return {
+        ok: false,
+        reason: `Failed to signal pid ${pid}: ${(err as Error).message}`,
+      };
+    }
   }
   clearPidFile();
   // Wait for the sidecar to actually release :7777 before we tell

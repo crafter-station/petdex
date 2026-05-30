@@ -27,20 +27,36 @@ export type SetupStep = {
 
 type Translator = (key: string, values?: Record<string, string>) => string;
 
+const INSTALL_SLUG_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
+
+/** Parses `?next=install/<slug>` or `?next=install/a,b,c` for the download page. */
+export function parsePendingInstallSlugs(
+  next: string | string[] | undefined,
+): string[] | null {
+  const value = Array.isArray(next) ? next[0] : next;
+  if (!value?.startsWith("install/")) return null;
+  const rest = value.slice("install/".length);
+  if (!rest) return null;
+  const slugs = rest
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (slugs.length === 0) return null;
+  for (const slug of slugs) {
+    if (!INSTALL_SLUG_RE.test(slug)) return null;
+  }
+  return slugs;
+}
+
 export function parsePendingPet(
   next: string | string[] | undefined,
 ): string | null {
-  const value = Array.isArray(next) ? next[0] : next;
-  if (!value || !value.startsWith("install/")) return null;
-  const slug = value.slice("install/".length);
-  // Mirror the server slug regex so a malformed ?next= can't render anything.
-  if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(slug)) return null;
-  return slug;
+  return parsePendingInstallSlugs(next)?.[0] ?? null;
 }
 
 export function buildSetupSteps(
   t: Translator,
-  pendingPet: string | null,
+  pendingInstallSlugs: string[] | null,
 ): SetupStep[] {
   const steps: SetupStep[] = [
     {
@@ -51,12 +67,21 @@ export function buildSetupSteps(
     },
   ];
 
-  if (pendingPet) {
+  if (pendingInstallSlugs && pendingInstallSlugs.length > 0) {
+    const installCommand = `npx petdex install ${pendingInstallSlugs.join(" ")}`;
     steps.push({
       key: "installPet",
-      title: t("setup.installPet.title", { slug: pendingPet }),
-      command: `npx petdex install ${pendingPet}`,
-      hint: t("setup.installPet.hint"),
+      title:
+        pendingInstallSlugs.length === 1
+          ? t("setup.installPet.title", { slug: pendingInstallSlugs[0] })
+          : t("setup.installPets.title", {
+              count: String(pendingInstallSlugs.length),
+            }),
+      command: installCommand,
+      hint:
+        pendingInstallSlugs.length === 1
+          ? t("setup.installPet.hint")
+          : t("setup.installPets.hint"),
     });
   }
 

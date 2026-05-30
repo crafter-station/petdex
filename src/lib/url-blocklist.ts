@@ -117,7 +117,8 @@ export function containsUrl(
     if (!raw || raw.length === 0) continue;
     const normalized = normalizeText(raw);
     for (const { name, re } of URL_PATTERNS) {
-      const haystack = name === "bare_domain" ? stripLegitDomains(normalized) : normalized;
+      const haystack =
+        name === "bare_domain" ? stripLegitDomains(normalized) : normalized;
       if (re.test(haystack)) {
         return { hit: true, pattern: name, field: fieldName };
       }

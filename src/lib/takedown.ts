@@ -23,7 +23,7 @@ import { getPreferredLocaleForUser } from "@/lib/user-locale";
 //
 // Caller is responsible for authz — this helper trusts whoever invoked
 // it. Used by:
-//   - DELETE /api/admin/[id]   — admin takedown via UI
+//   - DELETE /api/admin/[id]   — admin or moderator takedown via UI
 //   - DELETE /api/pets/[slug]/owner — owner self-service via card menu
 //   - scripts/takedown-pet.ts  — one-shot CLI for ops
 type TakedownPetRow = typeof schema.submittedPets.$inferSelect;
@@ -34,10 +34,10 @@ export type TakedownContext = {
   reason?: string | null;
   /**
    * Who triggered the takedown. Goes to the structured log so the audit
-   * trail is searchable. 'admin' for /api/admin/[id], 'owner' for the
-   * self-service path, 'script' for ops CLIs.
+   * trail is searchable. 'admin' or 'moderator' for /api/admin/[id],
+   * 'owner' for the self-service path, 'script' for ops CLIs.
    */
-  source: "admin" | "owner" | "script";
+  source: "admin" | "moderator" | "owner" | "script";
   /** Clerk user id of the actor. Logged. */
   actorId: string;
   /**

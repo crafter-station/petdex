@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { auth } from "@clerk/nextjs/server";
-import { desc, eq, sql as dsql } from "drizzle-orm";
+import { desc, sql as dsql, eq } from "drizzle-orm";
 
 import { isAdmin } from "@/lib/admin";
 import {
@@ -30,7 +30,9 @@ async function loadCollections(): Promise<
       slug: schema.petCollections.slug,
       title: schema.petCollections.title,
       description: schema.petCollections.description,
-      pets: dsql<number>`count(${schema.petCollectionItems.petSlug})`.as("pets"),
+      pets: dsql<number>`count(${schema.petCollectionItems.petSlug})`.as(
+        "pets",
+      ),
     })
     .from(schema.petCollections)
     .leftJoin(

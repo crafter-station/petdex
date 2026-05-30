@@ -7,7 +7,6 @@ import { neon } from "@neondatabase/serverless";
 import { Resend } from "resend";
 
 import { renderDesktopLaunchEmail } from "../src/lib/email-templates/desktop-launch";
-
 import { requiredEnv } from "./env";
 
 const TARGET_EMAIL = process.argv[2];
@@ -33,7 +32,9 @@ if (!pref) {
   process.exit(1);
 }
 
-console.log(`Sending desktop_launch test to ${TARGET_EMAIL} (locale=${pref.locale})…`);
+console.log(
+  `Sending desktop_launch test to ${TARGET_EMAIL} (locale=${pref.locale})…`,
+);
 
 const { subject, html, text } = renderDesktopLaunchEmail(
   pref.locale as "en" | "es" | "zh",

@@ -13,11 +13,13 @@ export function ProfilePinButton({
   isPinned,
   pinnedCount,
   maxPins,
+  appearance = "default",
 }: {
   slug: string;
   isPinned: boolean;
   pinnedCount: number;
   maxPins: number;
+  appearance?: "default" | "subtle";
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -72,9 +74,13 @@ export function ProfilePinButton({
       aria-label={title}
       style={{ zIndex: 30 }}
       className={`inline-flex size-8 items-center justify-center rounded-full border backdrop-blur transition disabled:cursor-not-allowed disabled:opacity-60 ${
-        isPinned
-          ? "border-brand/40 bg-brand text-white hover:bg-brand-deep"
-          : "border-black/10 bg-surface/90 text-muted-2 hover:border-border-strong hover:text-black"
+        appearance === "subtle"
+          ? isPinned
+            ? "border-border-base bg-surface/90 text-brand hover:border-brand/30 hover:bg-brand-tint"
+            : "border-black/10 bg-surface/90 text-muted-2 hover:border-border-strong hover:text-black"
+          : isPinned
+            ? "border-brand/40 bg-brand text-white hover:bg-brand-deep"
+            : "border-black/10 bg-surface/90 text-muted-2 hover:border-border-strong hover:text-black"
       }`}
     >
       {busy ? (

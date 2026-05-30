@@ -55,6 +55,7 @@ const merged: Record<string, string[]> = {};
 for (const [canonical, variants] of Object.entries(ALIASES)) {
   for (const v of variants) {
     if (data.buckets[v]) {
+      // biome-ignore lint/suspicious/noAssignInExpressions: intentional accumulator pattern
       (merged[canonical] ??= []).push(...data.buckets[v]);
       delete data.buckets[v];
     }
@@ -63,6 +64,7 @@ for (const [canonical, variants] of Object.entries(ALIASES)) {
 
 // Add untouched buckets
 for (const [name, slugs] of Object.entries(data.buckets)) {
+  // biome-ignore lint/suspicious/noAssignInExpressions: intentional accumulator pattern
   (merged[name] ??= []).push(...slugs);
 }
 

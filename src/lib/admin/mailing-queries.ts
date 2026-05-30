@@ -99,7 +99,7 @@ export async function listSubscribers(opts: {
   const search = opts.search?.trim().toLowerCase();
 
   const where = search
-    ? dsql`lower(${schema.emailPreferences.email}) like ${"%" + search + "%"}`
+    ? dsql`lower(${schema.emailPreferences.email}) like ${`%${search}%`}`
     : undefined;
 
   const totalRow = await db

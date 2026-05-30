@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 
-import { buildSetupSteps, parsePendingPet } from "./setup-steps";
+import {
+  buildSetupSteps,
+  parsePendingInstallSlugs,
+  parsePendingPet,
+} from "./setup-steps";
 
 // A minimal stand-in for next-intl's translator. We only care about
 // what KEY was looked up and that {slug} interpolation works, not
@@ -59,6 +63,20 @@ describe("parsePendingPet", () => {
   });
 });
 
+describe("parsePendingInstallSlugs", () => {
+  test("returns all slugs for comma-separated install batch", () => {
+    expect(parsePendingInstallSlugs("install/boba,doraemon,mochi")).toEqual([
+      "boba",
+      "doraemon",
+      "mochi",
+    ]);
+  });
+
+  test("rejects batch when any slug is invalid", () => {
+    expect(parsePendingInstallSlugs("install/boba,NOTVALID")).toBeNull();
+  });
+});
+
 describe("buildSetupSteps", () => {
   test("default flow is two steps: init + stay-updated", () => {
     // The setup flow collapsed to a single user action (`npx petdex
@@ -81,7 +99,7 @@ describe("buildSetupSteps", () => {
   });
 
   test("install-pet step inserts after init when ?next=install/<slug>", () => {
-    const steps = buildSetupSteps(makeT(), "foxy");
+    const steps = buildSetupSteps(makeT(), ["foxy"]);
     expect(steps.map((s) => s.key)).toEqual([
       "step1",
       "installPet",
@@ -90,7 +108,7 @@ describe("buildSetupSteps", () => {
   });
 
   test("install-pet step uses the slug in the title and command", () => {
-    const steps = buildSetupSteps(makeT(), "foxy");
+    const steps = buildSetupSteps(makeT(), ["foxy"]);
     const installPet = steps.find((s) => s.key === "installPet");
     expect(installPet).toBeDefined();
     if (!installPet) return;
@@ -102,15 +120,25 @@ describe("buildSetupSteps", () => {
     expect(installPet.hint).toBe("T(setup.installPet.hint)");
   });
 
+  test("install-pet step uses batch title and command for multiple slugs", () => {
+    const steps = buildSetupSteps(makeT(), ["foxy", "boba"]);
+    const installPet = steps.find((s) => s.key === "installPet");
+    expect(installPet).toBeDefined();
+    if (!installPet) return;
+    expect(installPet.title).toBe("T(setup.installPets.title;count=2)");
+    expect(installPet.command).toBe("npx petdex install foxy boba");
+    expect(installPet.hint).toBe("T(setup.installPets.hint)");
+  });
+
   test("only the stayUpdated step is dimmed (it's the optional reminder)", () => {
-    const steps = buildSetupSteps(makeT(), "foxy");
+    const steps = buildSetupSteps(makeT(), ["foxy"]);
     const dimmed = steps.filter((s) => s.dimmed);
     expect(dimmed).toHaveLength(1);
     expect(dimmed[0]?.key).toBe("stayUpdated");
   });
 
   test("each step has a stable key for React reconciliation", () => {
-    const steps = buildSetupSteps(makeT(), "foxy");
+    const steps = buildSetupSteps(makeT(), ["foxy"]);
     const keys = steps.map((s) => s.key);
     expect(new Set(keys).size).toBe(keys.length);
   });

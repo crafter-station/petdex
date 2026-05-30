@@ -1,11 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { execFileSync, spawn } from "node:child_process";
-import {
-  existsSync,
-  mkdirSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

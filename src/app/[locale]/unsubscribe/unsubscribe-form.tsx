@@ -2,6 +2,8 @@
 
 import { useState, useTransition } from "react";
 
+import { useTranslations } from "next-intl";
+
 import { resubscribeAction, unsubscribeAction } from "./actions";
 
 type Props = {
@@ -15,6 +17,7 @@ export function UnsubscribeForm({
   email,
   initiallyUnsubscribed,
 }: Props) {
+  const t = useTranslations("unsubscribePage.form");
   const [unsubscribed, setUnsubscribed] = useState(initiallyUnsubscribed);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -24,7 +27,7 @@ export function UnsubscribeForm({
     startTransition(async () => {
       const res = await unsubscribeAction(token);
       if (res.ok) setUnsubscribed(true);
-      else setError("Could not update your preference. Try again.");
+      else setError(t("error"));
     });
   }
 
@@ -33,7 +36,7 @@ export function UnsubscribeForm({
     startTransition(async () => {
       const res = await resubscribeAction(token);
       if (res.ok) setUnsubscribed(false);
-      else setError("Could not update your preference. Try again.");
+      else setError(t("error"));
     });
   }
 
@@ -41,7 +44,7 @@ export function UnsubscribeForm({
     <div className="space-y-5 rounded-2xl border border-border-base bg-surface/76 p-6 backdrop-blur">
       <div>
         <p className="font-mono text-xs tracking-[0.22em] text-muted-3 uppercase">
-          Account
+          {t("account")}
         </p>
         <p className="mt-1 break-all text-sm text-muted-1">{email}</p>
       </div>
@@ -49,13 +52,9 @@ export function UnsubscribeForm({
       {unsubscribed ? (
         <>
           <div>
-            <p className="text-base font-semibold">
-              You're unsubscribed from Petdex updates.
-            </p>
+            <p className="text-base font-semibold">{t("unsubscribedTitle")}</p>
             <p className="mt-2 text-sm leading-6 text-muted-2">
-              You'll still get transactional notifications when your pet is
-              approved, your edits are reviewed, or someone replies to your
-              feedback.
+              {t("unsubscribedBody")}
             </p>
           </div>
           <button
@@ -64,19 +63,15 @@ export function UnsubscribeForm({
             disabled={pending}
             className="inline-flex h-11 items-center justify-center rounded-full border border-border-base bg-transparent px-5 text-sm font-medium transition hover:bg-surface disabled:opacity-50"
           >
-            {pending ? "Working…" : "Resubscribe"}
+            {pending ? t("working") : t("resubscribe")}
           </button>
         </>
       ) : (
         <>
           <div>
-            <p className="text-base font-semibold">
-              Stop getting Petdex newsletters?
-            </p>
+            <p className="text-base font-semibold">{t("subscribedTitle")}</p>
             <p className="mt-2 text-sm leading-6 text-muted-2">
-              We send a few curated updates a month: new collections, pet
-              drops, community moments. Transactional emails (pet approved,
-              feedback replies) are not affected.
+              {t("subscribedBody")}
             </p>
           </div>
           <button
@@ -85,7 +80,7 @@ export function UnsubscribeForm({
             disabled={pending}
             className="inline-flex h-11 items-center justify-center rounded-full bg-inverse px-5 text-sm font-medium text-on-inverse transition hover:bg-inverse-hover disabled:opacity-50"
           >
-            {pending ? "Working…" : "Unsubscribe"}
+            {pending ? t("working") : t("unsubscribe")}
           </button>
         </>
       )}

@@ -35,7 +35,10 @@ const STDIN_CAP = 64 * 1024;
  * Mirrors the matchers in agents.ts so the hook command is a single
  * `petdex bubble` invocation that sets BOTH state AND bubble.
  */
-export function stateForEvent(args: string[], toolName: string | null): string | null {
+export function stateForEvent(
+  args: string[],
+  toolName: string | null,
+): string | null {
   const phase = args[0];
   if (phase === "pre") {
     if (toolName) {
@@ -98,14 +101,18 @@ function parseStdin(text: string): {
   }
 }
 
-export function eventFromArgs(args: string[], stdin: string): BubbleEvent | null {
+export function eventFromArgs(
+  args: string[],
+  stdin: string,
+): BubbleEvent | null {
   const phase = args[0];
   if (!phase) return null;
 
   // Session-level events don't need stdin parsing — they're pure
   // signals. Run them first so we don't bother parsing JSON for
   // events that don't carry a tool payload.
-  if (phase === "stop" || phase === "session-end") return { kind: "session.end" };
+  if (phase === "stop" || phase === "session-end")
+    return { kind: "session.end" };
   if (phase === "user-prompt" || phase === "session-start")
     return { kind: "session.start" };
   if (phase === "waiting" || phase === "notification")
@@ -195,15 +202,13 @@ export async function runBubble(args: string[]): Promise<void> {
   // bubble latency to dominate state latency or vice versa.
   const tasks: Promise<unknown>[] = [];
   if (text) {
-    tasks.push(postJson(SIDECAR_BUBBLE_URL, { text, agent_source: agentSource }, token));
+    tasks.push(
+      postJson(SIDECAR_BUBBLE_URL, { text, agent_source: agentSource }, token),
+    );
   }
   if (state) {
     tasks.push(
-      postJson(
-        SIDECAR_STATE_URL,
-        { state, agent_source: agentSource },
-        token,
-      ),
+      postJson(SIDECAR_STATE_URL, { state, agent_source: agentSource }, token),
     );
   }
   await Promise.all(tasks);

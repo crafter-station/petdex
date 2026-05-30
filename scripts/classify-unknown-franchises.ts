@@ -138,6 +138,7 @@ for (const u of data.unknownFlagged) {
     stillUnknown.push(u);
     continue;
   }
+  // biome-ignore lint/suspicious/noAssignInExpressions: intentional accumulator pattern
   (merged[franchise] ??= []).push(u.slug);
 }
 

@@ -62,7 +62,9 @@ for (const r of rows) {
     const reason = r.current_collection_slug
       ? `Original target collection was removed in the May 2026 reorg. Pet has been auto-assigned to "${r.current_collection_slug}".`
       : "Original target collection was removed in the May 2026 reorg. Pet is not in any collection — submit a new request.";
-    console.log(`  REJECT (deleted-target): ${r.pet_slug.padEnd(28)} → ${reason.slice(0, 80)}…`);
+    console.log(
+      `  REJECT (deleted-target): ${r.pet_slug.padEnd(28)} → ${reason.slice(0, 80)}…`,
+    );
     if (!dryRun) {
       await sql`
         UPDATE pet_collection_requests
@@ -101,9 +103,7 @@ for (const r of rows) {
 
   // Case C: pet not in any collection AND target exists → approve
   approved++;
-  console.log(
-    `  APPROVE: ${r.pet_slug.padEnd(28)} → ${r.collection_slug}`,
-  );
+  console.log(`  APPROVE: ${r.pet_slug.padEnd(28)} → ${r.collection_slug}`);
   if (!dryRun) {
     // Add to collection
     await sql`

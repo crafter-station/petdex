@@ -23,8 +23,7 @@ const MIN_FRANCHISE = Number(
     2,
 );
 const MIN_CATEGORY = Number(
-  process.argv.find((a) => a.startsWith("--min-category="))?.split("=")[1] ??
-    8,
+  process.argv.find((a) => a.startsWith("--min-category="))?.split("=")[1] ?? 8,
 );
 
 type Merged = {

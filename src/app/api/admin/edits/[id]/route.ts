@@ -4,7 +4,7 @@ import { auth, clerkClient } from "@clerk/nextjs/server";
 import { eq } from "drizzle-orm";
 import { Resend } from "resend";
 
-import { isAdmin } from "@/lib/admin";
+import { canReviewMetadataEdits, isAdmin } from "@/lib/admin";
 import {
   AGGREGATE_KEYS,
   invalidateAggregates,
@@ -36,7 +36,8 @@ export async function PATCH(
   if (csrf) return csrf;
 
   const { userId } = await auth();
-  if (!isAdmin(userId)) {
+  const admin = isAdmin(userId);
+  if (!canReviewMetadataEdits(userId)) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
@@ -61,6 +62,9 @@ export async function PATCH(
   }
   if (!row.pendingSubmittedAt) {
     return NextResponse.json({ error: "no_pending_edit" }, { status: 400 });
+  }
+  if (!admin && hasPendingAssetEdit(row)) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
   if (body.action === "approve") {
@@ -229,4 +233,13 @@ export async function PATCH(
   }
 
   return NextResponse.json({ ok: true });
+}
+
+function hasPendingAssetEdit(row: typeof schema.submittedPets.$inferSelect) {
+  return Boolean(
+    row.pendingSpritesheetUrl ||
+      row.pendingPetJsonUrl ||
+      row.pendingZipUrl ||
+      row.pendingDhash,
+  );
 }

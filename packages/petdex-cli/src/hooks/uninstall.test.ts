@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
-import { stripPetdexHooks } from "./uninstall";
 import { PETDEX_PORT, SIDECAR_URL } from "./agents";
+import { stripPetdexHooks } from "./uninstall";
 
 // stripPetdexHooks is the pure-data half of `petdex hooks uninstall`.
 // It must:
@@ -70,9 +70,7 @@ describe("stripPetdexHooks", () => {
       hooks: {
         Stop: [
           {
-            hooks: [
-              { type: "command", command: `curl ${SIDECAR_URL}` },
-            ],
+            hooks: [{ type: "command", command: `curl ${SIDECAR_URL}` }],
           },
         ],
       },
@@ -91,9 +89,7 @@ describe("stripPetdexHooks", () => {
       hooks: {
         PreToolUse: [
           {
-            hooks: [
-              { type: "command", command: 'echo "user hook"' },
-            ],
+            hooks: [{ type: "command", command: 'echo "user hook"' }],
           },
         ],
       },

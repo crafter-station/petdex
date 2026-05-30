@@ -195,13 +195,15 @@ for (let i = 0; i < todo.length; i += BATCH) {
     const result = await callCodex(batch);
     for (const it of batch) {
       const row = result[it.slug];
-      if (row && row.franchise && Array.isArray(row.categories)) {
+      if (row?.franchise && Array.isArray(row.categories)) {
         cache[it.slug] = row;
         console.log(
           `  ${it.slug.padEnd(30)} → ${row.franchise.padEnd(22)} [${row.categories.join(", ")}]`,
         );
       } else {
-        console.log(`  ${it.slug.padEnd(30)} → (no answer, marking ORIGINAL/uncategorized)`);
+        console.log(
+          `  ${it.slug.padEnd(30)} → (no answer, marking ORIGINAL/uncategorized)`,
+        );
         cache[it.slug] = { franchise: "ORIGINAL", categories: [] };
       }
     }

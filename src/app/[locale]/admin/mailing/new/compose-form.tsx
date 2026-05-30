@@ -21,8 +21,7 @@ export function ComposeForm({ optedIn, byLocale, collectionsReady }: Props) {
   const [confirm, setConfirm] = useState<string>("");
   const [campaign, setCampaign] = useState<Campaign>("desktop_launch");
   const requiresCollections = campaign === "collections_drop";
-  const blockedByMissingCollections =
-    requiresCollections && !collectionsReady;
+  const blockedByMissingCollections = requiresCollections && !collectionsReady;
 
   const audienceCount = (() => {
     if (audienceLocale === "all") return optedIn;
@@ -83,9 +82,9 @@ export function ComposeForm({ optedIn, byLocale, collectionsReady }: Props) {
       <div className="rounded-2xl border border-border-base bg-surface/76 p-6 backdrop-blur">
         <h2 className="text-base font-semibold">Campaign</h2>
         <p className="mt-1 text-sm text-muted-2">
-          Pick which broadcast template to send. Each campaign uses its
-          own template + batch key, so the same audience can receive
-          multiple over time.
+          Pick which broadcast template to send. Each campaign uses its own
+          template + batch key, so the same audience can receive multiple over
+          time.
         </p>
         <div className="mt-4 flex flex-wrap gap-3">
           <label className="text-xs text-muted-3">

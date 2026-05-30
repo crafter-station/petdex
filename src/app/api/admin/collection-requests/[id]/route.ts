@@ -8,7 +8,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { and, desc, eq } from "drizzle-orm";
 
-import { isAdmin } from "@/lib/admin";
+import { canReviewCollectionRequests } from "@/lib/admin";
 import {
   invalidateCollectionBacklinks,
   revalidateCollectionTags,
@@ -32,7 +32,7 @@ export async function PATCH(
   if (csrf) return csrf;
 
   const { userId } = await auth();
-  if (!isAdmin(userId)) {
+  if (!canReviewCollectionRequests(userId)) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 

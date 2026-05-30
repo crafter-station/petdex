@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Petdex</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html, body {
+      background: transparent;
+      width: 192px;
+      height: 288px;
+      overflow: hidden;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    #root {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      width: 192px;
+      height: 208px;
+      cursor: grab;
+    }
+    #root:active { cursor: grabbing; }
+
+    /* Verbatim from src/app/globals.css — .pet-sprite-frame and .pet-sprite.
+       background-image uses var(--sprite-url) which we set to the base64
+       data URI injected at runtime via read_file_as_base64. */
+    .pet-sprite-frame {
+      --pet-scale: 1;
+      width: calc(192px * var(--pet-scale));
+      height: calc(208px * var(--pet-scale));
+      overflow: hidden;
+      /* Promote to its own paint layer so the browser does not evict the
+         WebP decode buffer when the window is off-screen. */
+      contain: layout paint;
+    }
+
+    .pet-sprite {
+      --sprite-row: 0;
+      --sprite-frames: 6;
+      --sprite-duration: 1100ms;
+      --sprite-y: calc(var(--sprite-row) * -208px);
+      --sprite-end-x: calc(var(--sprite-frames) * -192px);
+      width: 192px;
+      height: 208px;
+      background-image: var(--sprite-url);
+      background-repeat: no-repeat;
+      background-size: 1536px 1872px;
+      image-rendering: pixelated;
+      /* translateZ(0) forces GPU-composited layer so animation stays
+         on the compositor thread instead of being re-rasterized. */
+      transform: scale(var(--pet-scale)) translateZ(0);
+      transform-origin: top left;
+      will-change: background-position;
+      animation: pet-state var(--sprite-duration) steps(var(--sprite-frames)) infinite;
+    }
+
+    @keyframes pet-state {
+      from { background-position: 0 var(--sprite-y); }
+      to   { background-position: var(--sprite-end-x) var(--sprite-y); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .pet-sprite { animation: none; }
+    }
+
+    #bubble {
+      position: absolute;
+      bottom: calc(100% + 8px);
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(255, 255, 255, 0.93);
+      color: #111;
+      font: 11px/1.4 system-ui, sans-serif;
+      padding: 6px 10px;
+      border-radius: 8px;
+      max-width: 180px;
+      word-wrap: break-word;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+      opacity: 0;
+      transition: opacity 0.25s ease;
+      pointer-events: none;
+      white-space: pre-wrap;
+    }
+    #bubble.visible { opacity: 1; }
+
+    #debug {
+      position: fixed;
+      top: 2px;
+      left: 2px;
+      font: 9px monospace;
+      color: rgba(255, 255, 255, 0.45);
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="root">
+    <div id="bubble"></div>
+    <div
+      class="pet-sprite-frame"
+      id="sprite-frame"
+      role="img"
+      aria-label="Petdex pet"
+      style="--pet-scale: 1"
+    >
+      <div class="pet-sprite" id="sprite"></div>
+    </div>
+  </div>
+  <div id="debug">loading...</div>
+
+<script type="module">
+const { invoke } = window.__TAURI__.core;
+const { getCurrentWindow } = window.__TAURI__.window;
+
+// Verbatim from src/lib/pet-states.ts
+const PET_STATES = {
+  "idle":          { row: 0, frames: 6, durationMs: 1100 },
+  "running-right": { row: 1, frames: 8, durationMs: 1060 },
+  "running-left":  { row: 2, frames: 8, durationMs: 1060 },
+  "waving":        { row: 3, frames: 4, durationMs:  700 },
+  "jumping":       { row: 4, frames: 5, durationMs:  840 },
+  "failed":        { row: 5, frames: 8, durationMs: 1220 },
+  "waiting":       { row: 6, frames: 6, durationMs: 1010 },
+  "running":       { row: 7, frames: 6, durationMs:  820 },
+  "review":        { row: 8, frames: 6, durationMs: 1030 },
+};
+
+const DEFAULT_STATE = "idle";
+
+let lastStateCounter = 0;
+let lastBubbleCounter = 0;
+
+function applyState(stateId) {
+  const s = PET_STATES[stateId] ?? PET_STATES[DEFAULT_STATE];
+  const sprite = document.getElementById("sprite");
+  sprite.style.setProperty("--sprite-row", s.row);
+  sprite.style.setProperty("--sprite-frames", s.frames);
+  sprite.style.setProperty("--sprite-duration", `${s.durationMs}ms`);
+}
+
+async function boot() {
+  try {
+    const pet = await invoke("get_active_pet");
+    if (!pet) { dbg("no pet found"); return; }
+
+    const b64 = await invoke("read_file_as_base64", { path: pet.sprite_path })
+      .catch((err) => { throw new Error(`spritesheet load failed: ${err}`); });
+    const ext = pet.sprite_path.endsWith(".png") ? "png" : "webp";
+    document.getElementById("sprite").style.setProperty(
+      "--sprite-url",
+      `url("data:image/${ext};base64,${b64}")`
+    );
+    applyState(DEFAULT_STATE);
+    dbg(pet.name);
+
+    await bootSidecar();
+  } catch (e) {
+    dbg(`err: ${String(e).slice(0, 40)}`);
+    console.error(e);
+  }
+}
+
+// Polling reads runtime files written by the sidecar to ~/.petdex/runtime/.
+// File-based reads are CORS-free: the sidecar's HTTP server does not set
+// CORS headers, so Chromium (WebView2) blocks all cross-origin fetch() from
+// the WebView. Using Tauri invoke() calls instead sidesteps this entirely.
+function startPolling() {
+  // 200ms matches the trusted Zig desktop cadence.
+  // 3s / 2s intervals would miss short-lived states (waving 700ms, running 820ms).
+  setInterval(pollState, 200);
+  setInterval(pollBubble, 200);
+}
+
+async function bootSidecar() {
+  // Start polling immediately — file reads work whenever the sidecar has
+  // written its files, even from a previous session that left them on disk.
+  startPolling();
+  try {
+    await invoke("spawn_sidecar");
+  } catch (e) {
+    console.warn("sidecar spawn failed:", e);
+  }
+}
+
+async function pollState() {
+  try {
+    const data = await invoke("read_runtime_state");
+    if (!data) return;
+    if (data.counter === lastStateCounter) return;
+    lastStateCounter = data.counter;
+    applyState(data.state ?? DEFAULT_STATE);
+  } catch {}
+}
+
+async function pollBubble() {
+  try {
+    const data = await invoke("read_runtime_bubble");
+    if (!data) return;
+    if (data.counter === lastBubbleCounter) return;
+    lastBubbleCounter = data.counter;
+    // Pass text directly — showBubble treats empty as the clear signal.
+    showBubble(data.text ?? "");
+  } catch {}
+}
+
+function showBubble(text) {
+  const el = document.getElementById("bubble");
+  if (!text) {
+    // Empty text is the sidecar's explicit clear signal (written on boot).
+    el.textContent = "";
+    el.classList.remove("visible");
+    return;
+  }
+  el.textContent = text;
+  // Bubble persists until next update — no auto-hide timeout.
+  el.classList.add("visible");
+}
+
+document.getElementById("root").addEventListener("mousedown", async () => {
+  try { await getCurrentWindow().startDragging(); } catch {}
+});
+
+window.addEventListener("contextmenu", async (e) => {
+  e.preventDefault();
+  await invoke("stop_sidecar");
+  await invoke("quit_app");
+});
+
+function dbg(msg) {
+  document.getElementById("debug").textContent = msg;
+}
+
+boot();
+</script>
+</body>
+</html>

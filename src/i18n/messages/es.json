@@ -105,12 +105,13 @@
   "home": {
     "eyebrow": "El índice de mascotas de Codex",
     "title": "Petdex",
-    "tagline": "La galería pública de compañeros animados para <brand />. Explora más de {totalPets} compañeros open source, previsualiza sus estados e instala uno con un solo comando.",
+    "tagline": "La galería pública de compañeros animados para <brand>Codex</brand>. Explora más de {totalPets} compañeros open source, previsualiza sus estados e instala uno con un solo comando.",
     "heroCommand": "npx petdex install boba",
     "downloadCta": "Descargar Petdex Desktop",
     "submitCta": "Enviar",
     "browseGallery": "Ver galería",
     "joinDiscord": "Unirse al Discord",
+    "joinWeChat": "Unirse a WeChat",
     "openPet": "Abrir {name}",
     "petAnimated": "{name} animado",
     "petParadeAria": "Mascotas destacadas",
@@ -131,6 +132,48 @@
       "title": "Colecciones destacadas para instalar",
       "viewAll": "Ver todas",
       "petsCount": "{count, plural, =1 {1 mascota} other {# mascotas}}"
+    }
+  },
+  "community": {
+    "metadata": {
+      "title": "Comunidad de Petdex",
+      "description": "Únete a creadores, coleccionistas y al equipo de Petdex para ver creadores destacados, feedback de trabajos en progreso y builds semanales."
+    },
+    "eyebrow": "Comunidad Petdex",
+    "title": "Crea pixel pets en buena compañía",
+    "description": "La comunidad de Petdex reúne a creadores, coleccionistas y al equipo detrás de la galería. Recibe feedback de WIP, sigue builds semanales y conoce creadores destacados.",
+    "joinDiscord": "Unirse al Discord",
+    "joinWeChat": "Unirse a WeChat",
+    "starGithub": "Dar star en GitHub",
+    "sections": {
+      "spotlight": {
+        "title": "Los creadores destacados tienen foco",
+        "body": "GRAYCRAFT, Scientific Minds, Crafter Originals. Cada colección tiene una persona real detrás, y la comunidad es donde reciben feedback y deciden qué sale después."
+      },
+      "channels": {
+        "title": "Canales para shippear, no solo para conversar",
+        "body": "#wip para sprites en progreso, #cli-feedback para bugs, #ideas sincronizado con el wishlist público y #ship-or-sink para competencias de fin de semana."
+      },
+      "roles": {
+        "title": "Roles que ganas participando",
+        "body": "@Creator se desbloquea cuando aprueban tu primera mascota. @Collector con tres mascotas capturadas. @Featured Creator cuando tu set entra como colección curada."
+      },
+      "voice": {
+        "title": "Salas de voz con actividad real",
+        "body": "Co-working para foco silencioso, pixel-jam para collabs de sprite art en vivo y office-hours con el equipo de Petdex los viernes a las 4pm GMT-5."
+      }
+    },
+    "rules": {
+      "eyebrow": "Reglas",
+      "title": "Sé amable, sé específico, shippea algo",
+      "items": {
+        "respect": "Nada de racismo, sexismo o hate speech. Baneo inmediato.",
+        "spam": "Nada de spam, solicitud por DM o NFT shilling.",
+        "critique": "Critica sprites, no creadores. Honesto, amable, específico.",
+        "languages": "Canales en inglés, español y chino son bienvenidos. Elige el tuyo.",
+        "ip": "La IP de cada mascota pertenece a su creador original. Siempre da crédito.",
+        "modlog": "El mod log de Petdex Team es público en #bot-logs. Sin secretos."
+      }
     }
   },
   "gallery": {
@@ -748,6 +791,30 @@
       }
     }
   },
+  "collaborator": {
+    "metadata": {
+      "title": "Petdex Collaborator"
+    },
+    "tabs": {
+      "ariaLabel": "Secciones de colaborador",
+      "submissions": "Envíos",
+      "moderation": "Moderación publicada",
+      "edits": "Ediciones de metadata",
+      "requests": "Pedidos de mascotas",
+      "collections": "Colecciones",
+      "wechatQr": "QR de WeChat"
+    },
+    "moderation": {
+      "eyebrow": "Moderación",
+      "title": "Mascotas publicadas",
+      "searchPlaceholder": "Busca por nombre, slug, descripción o owner",
+      "search": "Buscar",
+      "clear": "Limpiar",
+      "previous": "Anterior",
+      "next": "Siguiente",
+      "empty": "Ninguna mascota publicada coincide con este filtro."
+    }
+  },
   "requests": {
     "metadata": {
       "title": "Pedidos de mascotas",
@@ -1298,7 +1365,9 @@
   },
   "commandLine": {
     "copyAria": "Copiar comando",
-    "openInCodexAria": "Abrir en Codex"
+    "openInCodexAria": "Abrir en Codex",
+    "copiedAria": "Comando copiado",
+    "failedAria": "No se pudo copiar el comando"
   },
   "profileShare": {
     "share": "Compartir",
@@ -1420,14 +1489,33 @@
     "backToCollections": "← Ver todas las colecciones"
   },
   "download": {
-    "eyebrow": "App de escritorio",
-    "title": "Petdex Desktop",
-    "subtitle": "Tu mascota, flotando junto a cada agente de programacion.",
+    "eyebrow": "Setup desde la terminal",
+    "title": "Corre un comando. Petdex hace el resto.",
+    "subtitle": "Instala la app de escritorio, conecta tus agentes y despierta tu mascota desde la terminal.",
     "hero": {
       "downloadCta": "Descargar para macOS",
-      "cliSubtext": "Despues corre esto para conectar tus agentes",
-      "comingSoon": "Pronto en {os}",
+      "primaryTitle": "Instalar y conectar Petdex",
+      "cliSubtext": "Copia el setup recomendado para terminal",
+      "manualLabel": "Descargar .dmg",
+      "manualSubtext": "Para terminales bloqueadas, instalacion manual en macOS o guardar el instalador localmente.",
+      "comingSoon": "Proximamente",
       "desktopOnly": "Solo escritorio. Visita desde una Mac"
+    },
+    "activation": {
+      "items": {
+        "hooks": "Hooks de agentes",
+        "desktop": "App de escritorio",
+        "pet": "Mascota despierta"
+      }
+    },
+    "preview": {
+      "title": "Petdex Desktop",
+      "status": "Una mascota flotante se queda junto a Codex, Claude, Gemini y OpenCode.",
+      "terminalLabel": "Terminal",
+      "agentLabel": "Hooks de agentes instalados",
+      "defaultPet": "Mascota despierta",
+      "demoPet": "{slug} despierta",
+      "pendingPet": "{slug} en cola"
     },
     "features": {
       "eyebrow": "Que hace",
@@ -1456,6 +1544,10 @@
         "title": "Instala {slug}",
         "hint": "Anade esta mascota a tu coleccion local"
       },
+      "installPets": {
+        "title": "Instala {count} mascotas",
+        "hint": "Anade estas mascotas a tu coleccion local"
+      },
       "stayUpdated": {
         "title": "Mantente actualizado",
         "hint": "Descarga la ultima version del escritorio y reinicia la mascota si estaba corriendo. Corre cuando quieras."
@@ -1483,8 +1575,8 @@
     "docsLink": "Leer la documentacion",
     "pendingPet": {
       "eyebrow": "Casi listo.",
-      "messageBefore": "Instala Petdex Desktop para probar",
-      "messageAfter": "en 1 clic.",
+      "messageBefore": "Mascota en cola:",
+      "messageAfter": "despues del setup.",
       "hint": "Solo macOS por ahora"
     }
   },
@@ -1519,6 +1611,12 @@
   "profileAnnouncement": {
     "dismissAria": "Descartar",
     "closeAria": "Cerrar"
+  },
+  "buildUpdate": {
+    "title": "Nueva versión disponible",
+    "body": "Actualiza para usar la versión más reciente de Petdex.",
+    "later": "Más tarde",
+    "refresh": "Actualizar"
   },
   "collectionsPage": {
     "metadata": {
@@ -1604,8 +1702,14 @@
     "namePlaceholder": "Nombre de la mascota",
     "descriptionPlaceholder": "Descripción",
     "editAria": "Editar mascota",
+    "automationEvidence": "Evidencia automática",
+    "noSummary": "Sin resumen.",
+    "confidence": "Confianza: {confidence}%.",
     "evidenceAssets": "Archivos",
-    "evidencePolicy": "Política"
+    "evidenceSecurity": "Seguridad",
+    "evidencePolicy": "Política",
+    "evidenceVisualText": "Texto visual",
+    "evidenceVisualSignals": "Señales visuales"
   },
   "sticker": {
     "ctaWeChat": "Guardar para WeChat",
@@ -1653,6 +1757,8 @@
   "collectionActionMenu": {
     "moreActions": "Más acciones para {title}",
     "closeMenu": "Cerrar menú",
+    "openInPetdex": "Abrir en Petdex Desktop",
+    "openInPetdexDesc": "Instala toda la colección",
     "openInCodex": "Abrir en Codex",
     "openInCodexDesc": "Codex Desktop ejecuta la instalación",
     "copyInstallAll": "Copiar instalar todo",
@@ -1664,5 +1770,376 @@
     "installHint": "{count, plural, =1 {1 mascota} other {# mascotas}}",
     "installHintTruncated": "{shown} de {total} mascotas · pega el resto manual",
     "shareXText": "Colección {title} de mascotas en Petdex - instala con una línea"
+  },
+  "takedownPage": {
+    "metadata": {
+      "title": "Takedown | Petdex",
+      "description": "How to report a pet that infringes your rights."
+    },
+    "eyebrow": "Legal · Takedown",
+    "title": "Report a pet",
+    "intro": "Petdex hosts user-submitted fan-art pixel pets. We don't claim rights to the underlying IP of any character a community member chose to interpret. If you're a rights holder or authorized representative and want a pet removed, the fastest path is a GitHub issue.",
+    "howItWorks": "How it works",
+    "steps": {
+      "open": "Open a takedown request with the link below.",
+      "identify": "Tell us which pet it is, using the slug from the URL, and your relationship to the IP.",
+      "review": "We review manually. Typical response is under 48 hours. Filings stay public on GitHub for transparency.",
+      "remove": "Approved takedowns remove the pet from the gallery and installer endpoints."
+    },
+    "nonIpBefore": "For non-IP issues, such as broken sprites or wrong descriptions, open a regular issue or contact us by",
+    "emailLink": "email",
+    "nonIpAfter": ".",
+    "openRequest": "Open takedown request",
+    "confirmation": "By submitting to Petdex you confirm you have rights to the artwork or are creating fan content. Petdex acts on good-faith takedown requests."
+  },
+  "unsubscribePage": {
+    "metadata": {
+      "title": "Unsubscribe | Petdex",
+      "description": "Manage your Petdex email preferences."
+    },
+    "eyebrow": "Email · Preferences",
+    "title": "Unsubscribe",
+    "invalidTitle": "This link looks invalid.",
+    "invalidBody": "We couldn't find that unsubscribe token. It may be expired or malformed. If you keep getting emails you don't want, reply to the latest one and we'll remove you manually.",
+    "form": {
+      "account": "Account",
+      "unsubscribedTitle": "You're unsubscribed from Petdex updates.",
+      "unsubscribedBody": "You'll still receive required notifications when your pet is approved, your edits are reviewed, or someone replies to your feedback.",
+      "subscribedTitle": "Stop receiving Petdex updates?",
+      "subscribedBody": "We send occasional curated updates: new collections, pet drops, and community moments. Required emails such as review results and feedback replies are not affected.",
+      "working": "Working…",
+      "resubscribe": "Resubscribe",
+      "unsubscribe": "Unsubscribe",
+      "error": "Could not update your preference. Try again."
+    }
+  },
+  "telemetryPage": {
+    "metadata": {
+      "title": "Telemetry | Petdex",
+      "description": "What petdex CLI telemetry collects and how to opt out."
+    },
+    "eyebrow": "Legal · Telemetry",
+    "title": "CLI telemetry",
+    "intro": "The petdex CLI collects anonymous usage statistics to help us understand install volume, supported platforms, and which coding agents people wire up. This page explains exactly what is collected and how to opt out.",
+    "collectTitle": "What we collect",
+    "table": {
+      "field": "Field",
+      "type": "Type",
+      "description": "Description"
+    },
+    "fields": {
+      "installId": "Random ID generated on first run and stored at <code>~/.petdex/telemetry.json</code>. Never linked to your account, email, or any other identity.",
+      "event": "Which lifecycle step fired: <code>cli_install_desktop_success</code>, <code>cli_hooks_install_success</code>, <code>cli_desktop_start_success</code>, or <code>desktop_first_state_received</code>. The desktop sidecar emits the last one once per session when a hook first reaches the mascot.",
+      "cliVersion": "Version of the petdex CLI package, for example <code>0.1.4</code>.",
+      "binaryVersion": "Version of the desktop binary that was installed, for example <code>0.1.4</code>. Only sent on <code>cli_install_desktop_success</code>.",
+      "os": "Operating system: <code>darwin</code>, <code>linux</code>, or <code>win32</code>.",
+      "arch": "CPU architecture: <code>arm64</code> or <code>x64</code>.",
+      "agents": "Which coding agents were wired up during <code>petdex hooks install</code>, for example <code>[\"claude-code\", \"codex\"]</code>. Only sent on <code>cli_hooks_install_success</code>.",
+      "state": "Sprite animation state the first hook triggered, for example <code>running</code>, <code>idle</code>, or <code>waving</code>. Only sent on <code>desktop_first_state_received</code>.",
+      "agentSource": "Optional self-reported label of the agent that fired the first hook, for example <code>claude-code</code>. Capped at 64 characters and only sent if the hook command included it.",
+      "country": "Two-letter ISO country code inferred from your IP by Vercel edge infrastructure. The raw IP is never stored."
+    },
+    "notCollectTitle": "What we do not collect",
+    "notCollect": {
+      "email": "Email address, username, or any account identifier.",
+      "files": "File names, file contents, or any data from your project directory.",
+      "ip": "Raw IP addresses. Only the country code inferred at the edge is stored.",
+      "crashes": "Crash reports, stack traces, or error messages from your local environment.",
+      "pets": "Any data from the pets you install or submit."
+    },
+    "optOutTitle": "How to opt out",
+    "optOutIntro": "Telemetry is on by default but can be turned off at any time. Settings are stored at <code>~/.petdex/telemetry.json</code> and persist across CLI updates.",
+    "codeComments": {
+      "disable": "# Disable telemetry",
+      "enable": "# Re-enable",
+      "status": "# Check current status"
+    },
+    "optOutEnv": "You can also set <code>PETDEX_TELEMETRY=0</code> to disable telemetry for one invocation or permanently in your shell profile.",
+    "retentionTitle": "Data retention",
+    "retentionBody": "Telemetry events are stored in a Postgres database hosted by Neon. Events older than 12 months may be deleted. No data is sold or shared with third parties."
+  },
+  "facetPages": {
+    "notFound": {
+      "kind": "Kind not found",
+      "vibe": "Vibe not found"
+    },
+    "kindEyebrow": "Kind: {kind}",
+    "vibeEyebrow": "Vibe: {vibe}",
+    "relatedKinds": "Other kinds",
+    "relatedVibes": "Related vibes",
+    "count": "{count, plural, =1 {1 pet in this collection} other {# pets in this collection}}",
+    "kinds": {
+      "creature": {
+        "label": "creature",
+        "title": "Codex creature pets",
+        "intro": "Animals, critters, and made-up beasts. The biggest collection in the index. Most contributors start here: otters, capybaras, foxes, and things with too many legs.",
+        "metaDescription": "Animated creature pets for Codex. Otters, capybaras, foxes and more, installable with one command."
+      },
+      "object": {
+        "label": "object",
+        "title": "Codex object pets",
+        "intro": "Pets that aren't alive but absolutely have personality. Paperclips, mugs, ice cream scoops: everyday objects that earned a soul.",
+        "metaDescription": "Codex object pets. Animated pixel companions made from everyday objects."
+      },
+      "character": {
+        "label": "character",
+        "title": "Codex character pets",
+        "intro": "Humanoids, mascots, fictional figures, original characters, and homages, all in 9-state pixel form.",
+        "metaDescription": "Animated character pets for Codex. Humanoid pixel companions installable with one command."
+      }
+    },
+    "vibes": {
+      "cozy": {
+        "label": "cozy",
+        "title": "Cozy Codex pets",
+        "intro": "Warm, soft companions with gentle poses, subtle blinks, and quiet idle states. Pick one to keep your terminal feeling easy to sit with.",
+        "metaDescription": "Cozy animated pixel pets for Codex. Soft, calming companions you can install with one command."
+      },
+      "calm": {
+        "label": "calm",
+        "title": "Calm Codex pets",
+        "intro": "Steady, low-key companions for focused sessions. Their idle animations breathe instead of bounce.",
+        "metaDescription": "Calm pixel pets for Codex. Low-motion animated companions for deep work."
+      },
+      "playful": {
+        "label": "playful",
+        "title": "Playful Codex pets",
+        "intro": "Bouncy companions that refuse to sit still. Expect tail wags, spins, and little interruptions beside your prompt.",
+        "metaDescription": "Playful animated companions for Codex. Bouncy pixel art you can install with one command."
+      },
+      "cheerful": {
+        "label": "cheerful",
+        "title": "Cheerful Codex pets",
+        "intro": "The optimists of the index. Bright palettes, smiling sprites, and idle states that seem glad you opened the terminal.",
+        "metaDescription": "Cheerful Codex pets. Bright, smiling animated companions installable with one command."
+      },
+      "focused": {
+        "label": "focused",
+        "title": "Focused Codex pets",
+        "intro": "Companions in deep work mode. Headphones, monitors, concentrated stares, and ready-to-ship energy.",
+        "metaDescription": "Focused Codex pets. Concentrated, deep-work companions for Codex."
+      },
+      "mischievous": {
+        "label": "mischievous",
+        "title": "Mischievous Codex pets",
+        "intro": "Sneaky idle poses, side-eye, and the suspicion that your linter errors might be their fault.",
+        "metaDescription": "Mischievous Codex pets. Sneaky animated pixel companions for your terminal."
+      },
+      "heroic": {
+        "label": "heroic",
+        "title": "Heroic Codex pets",
+        "intro": "Capes, stances, and saving-the-day energy. These pets believe in you and your unmerged PR.",
+        "metaDescription": "Heroic Codex pets. Brave, animated pixel companions installable with one command."
+      },
+      "edgy": {
+        "label": "edgy",
+        "title": "Edgy Codex pets",
+        "intro": "Darker palettes, sharper silhouettes, and more attitude for terminals that need a little bite.",
+        "metaDescription": "Edgy Codex pets. Bold, animated pixel companions for Codex."
+      },
+      "mystical": {
+        "label": "mystical",
+        "title": "Mystical Codex pets",
+        "intro": "Moons, sparkles, robes, and the feeling that this companion knows the answer before the model does.",
+        "metaDescription": "Mystical Codex pets. Magical animated pixel companions for Codex."
+      },
+      "wholesome": {
+        "label": "wholesome",
+        "title": "Wholesome Codex pets",
+        "intro": "Pure-hearted companions with big eyes and small gestures. A little softness for your workspace.",
+        "metaDescription": "Wholesome Codex pets. Sweet animated pixel companions installable with one command."
+      },
+      "chaotic": {
+        "label": "chaotic",
+        "title": "Chaotic Codex pets",
+        "intro": "Maximum energy, minimum predictability. Their states cycle a little strangely, in a good way.",
+        "metaDescription": "Chaotic Codex pets. High-energy animated pixel companions for Codex."
+      },
+      "melancholic": {
+        "label": "melancholic",
+        "title": "Melancholic Codex pets",
+        "intro": "Pensive, soft, and a little wistful. Companions for the part of the night when the build keeps failing.",
+        "metaDescription": "Melancholic Codex pets. Pensive animated pixel companions for Codex."
+      }
+    }
+  },
+  "docsPage": {
+    "metadata": {
+      "title": "Docs · Petdex",
+      "description": "How to install, distribute, and automate Codex pets with the Petdex CLI.",
+      "ogTitle": "Petdex CLI · Docs"
+    },
+    "nav": {
+      "getStarted": "Get started",
+      "quickStart": "Quick start",
+      "install": "Install",
+      "authenticate": "Authenticate",
+      "cli": "CLI",
+      "commands": "Commands",
+      "desktop": "Desktop app",
+      "distribute": "Distribute pets",
+      "validation": "Validation",
+      "failure": "Failure modes",
+      "agents": "Agents",
+      "agentUsage": "Agent-first usage",
+      "reference": "Reference",
+      "config": "Configuration",
+      "contribute": "Contribute"
+    },
+    "hero": {
+      "eyebrow": "Petdex CLI · v0.1",
+      "title": "Docs",
+      "description": "The Petdex CLI lets you install, browse, and submit Codex pets from your terminal. Authentication uses OAuth 2.0 + PKCE through Clerk, and tokens persist in your OS keychain.",
+      "npmCta": "npmjs.com/petdex",
+      "repoCta": "Repo"
+    },
+    "sections": {
+      "quickStart": {
+        "title": "Quick start",
+        "intro": "Install a curated pet into your Codex setup with one command. No account required to install. Sign in only when you submit.",
+        "afterCommand": "The CLI fetches the pet pack and drops it into <code>~/.codex/pets/boba/</code>. To activate it inside Codex go to <strong>Settings → Appearance → Pets</strong> and click <strong>Select</strong>. Use <code>/pet</code> inside Codex to wake or tuck it away.",
+        "callout": "Don't have a pet idea yet? <link>Hatch your own</link> with the Codex Hatch Pet skill, then come back to <code>petdex submit</code>."
+      },
+      "install": {
+        "title": "Install",
+        "intro": "The CLI runs on Node 20+ (or Bun). Pick the workflow that fits you. Both are equivalent in capability and persistence.",
+        "casualTitle": "Casual / one-off",
+        "casualBody": "Use <code>npx</code>. No setup, package is cached after first run.",
+        "powerTitle": "Power user",
+        "powerBody": "Install globally for instant invocation and easier muscle memory.",
+        "persistence": "<strong>Auth persistence is identical in both.</strong> Tokens live in your OS keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service) under the service name <code>petdex-cli</code>. Even if npx clears its package cache, your session survives."
+      },
+      "authenticate": {
+        "title": "Authenticate",
+        "intro": "Sign in once, then any command that needs auth, such as submit, works seamlessly.",
+        "flow": "The flow is OAuth 2.0 + PKCE: the CLI opens your browser, you sign in with Clerk on <code>accounts.petdex.crafter.run</code>, and the browser redirects to a one-shot localhost listener with the authorization code. The CLI exchanges it for a token set and stores it in the keychain. No secrets touch disk.",
+        "otherCommands": "Other auth commands:"
+      },
+      "commands": {
+        "title": "Commands",
+        "intro": "The CLI covers the full lifecycle: discover, install, hatch, publish, plus the desktop app and agent hooks. All commands accept <code>--help</code>.",
+        "listBody": "Print every approved pet with credit. Useful for discovery before installing.",
+        "installBody": "Drop a pet into <code>~/.codex/pets/{petName}/</code>. Equivalent to <code>curl -sSf https://petdex.crafter.run/install/{petName} | sh</code>.",
+        "submitIntro": "Publish your pet(s) to the gallery. The CLI accepts three shapes:",
+        "submitSingle": "<strong>Single folder</strong>: <code>petdex submit ~/.codex/pets/boba</code>",
+        "submitZip": "<strong>Single zip</strong>: <code>petdex submit ~/Downloads/boba.zip</code>",
+        "submitBulk": "<strong>Bulk</strong>: <code>petdex submit ~/.codex/pets</code>: every direct subfolder is treated as its own pet",
+        "bulkNote": "Bulk mode shows a progress spinner per pet and a final summary of failures. Slugs auto-deduplicate so you will not hit a slug-taken bounce.",
+        "authBody": "See the Authenticate section above.",
+        "installSyntax": "petdex install {petName}",
+        "submitSyntax": "petdex submit {path}"
+      },
+      "desktop": {
+        "title": "Desktop app",
+        "intro": "Petdex Desktop is a floating mascot that lives on top of your workspace and reacts to your coding agent tool calls. macOS today, Linux and Windows soon. See <download>/download</download> for the visual tour.",
+        "installDesktopBody": "Fetches the latest binary from GitHub Releases for your platform and drops it at <code>~/.petdex/bin/petdex-desktop</code>. The CLI strips the macOS quarantine attribute so the app opens without a Gatekeeper prompt.",
+        "hooksInstallBody": "Wires the desktop app into your coding agents so the pet animates as you work. Picks the agents present on your machine and writes hooks for each:",
+        "hookEvents": "Tool events map to pet states: <code>tool.before</code> → <code>running</code>, <code>tool.after</code> → <code>idle</code>, <code>session.end</code> → <code>waving</code>, <code>session.error</code> → <code>failed</code>. Each hook POSTs to the local sidecar at <code>http://127.0.0.1:7777/state</code>.",
+        "desktopManageBody": "Manage the running pet. <code>start</code> spawns it detached (PID at <code>~/.petdex/desktop.pid</code>, log at <code>~/.petdex/desktop.log</code>). <code>stop</code> sends SIGTERM. <code>status</code> reports running, stopped, or stale.",
+        "toggleBody": "One-shot wake/sleep for the mascot. <code>up</code> enables hooks AND launches the desktop. <code>down</code> disables hooks AND stops the desktop. <code>toggle</code> flips between them based on current state. That is what the <code>/petdex</code> slash command runs from inside your agent.",
+        "slashTitleSuffix": "(slash command)",
+        "slashBody": "Once <code>petdex hooks install</code> has run, every supported agent (Claude Code, Codex, Gemini, OpenCode) gets a <code>/petdex</code> command in its picker. Type it inside the agent and the mascot wakes or sleeps without leaving the chat:",
+        "slashToggle": "<code>/petdex</code>: toggle (wake if asleep, sleep if awake)",
+        "slashUp": "<code>/petdex up</code>: force-wake",
+        "slashDown": "<code>/petdex down</code>: force-sleep",
+        "slashStatus": "<code>/petdex status</code>: show whether hooks are enabled",
+        "slashDoctor": "<code>/petdex doctor</code>: diagnose install + agent wiring",
+        "killSwitchSuffix": "(kill-switch)",
+        "hooksKillBody": "Even with hooks installed, you can pause them without touching your agent settings. <code>petdex hooks off</code> drops a flag file at <code>~/.petdex/runtime/hooks-disabled</code>; every installed hook checks for it first and exits 0 immediately. <code>petdex hooks on</code> removes the file. Useful when a sidecar has gone weird and you do not want stray curls in your agent log.",
+        "uninstallBody": "Reverses <code>hooks install</code>: removes the petdex entries from each agent config (preserving your own hooks), deletes the <code>/petdex</code> slash command files, and removes the OpenCode plugin. Pass <code>--remove-token</code> to also drop the auth token at <code>~/.petdex/runtime/update-token</code>.",
+        "doctorBody": "Diagnostic. Verifies binary, sidecar bundle, sidecar reachability, pid file format, token mode, kill-switch state, hooks installed in each agent, Codex <code>codex_hooks</code> feature flag, and usable pet count. Each failed check ships an actionable hint.",
+        "updateBody": "Compares your installed version against the latest GitHub Release tag and downloads it if newer. If the desktop app was running, it stops it, swaps the binary, and restarts. Pass <code>--force</code> to re-download the same version.",
+        "sidecarCallout": "The sidecar is a local HTTP server on port <code>7777</code>. Anything that can <code>curl</code> + read the per-session token at <code>~/.petdex/runtime/update-token</code> can drive the pet. The token rotates every sidecar boot and lives at mode <code>0600</code>, so only your user can read it. Browsers and remote sites cannot:",
+        "manageSyntax": "petdex desktop {desktopAction}"
+      },
+      "distribute": {
+        "title": "Distribute your pets",
+        "intro": "Once you have hatched a pet inside Codex, sharing it takes one command. Here's the full lifecycle:",
+        "create": "<strong>Create.</strong> In Codex Desktop, install the <strong>Hatch Pet</strong> skill and run <code>/pet</code>. Codex generates the spritesheet and pet.json into <code>~/.codex/pets/{petName}/</code>. Full tutorial at <create>/create</create>.",
+        "signIn": "<strong>Sign in.</strong> <code>npx petdex login</code> if you have not.",
+        "submit": "<strong>Submit.</strong> <code>npx petdex submit ~/.codex/pets/{petName}</code>. Or bulk all at once with the parent dir.",
+        "review": "<strong>Wait for review.</strong> Submissions land as “pending” in the admin queue. You will receive a Resend email when approved or rejected (if rejected, the reason is included).",
+        "install": "<strong>Anyone can install your pet.</strong> Once approved, share <code>npx petdex install {yourPetName}</code> with anyone. They get your pet in their <code>~/.codex/pets/</code> instantly.",
+        "callout": "Pets are user-submitted fan art. Petdex does not claim rights to underlying IP. If you are a rights holder requesting a takedown, see <takedown>/legal/takedown</takedown>."
+      },
+      "validation": {
+        "title": "Validation rules",
+        "intro": "The server enforces these rules; the CLI checks locally too.",
+        "files": "<code>pet.json</code> and <code>spritesheet.webp</code> (or <code>.png</code>) must be at the root of the folder/zip.",
+        "spritesheet": "Spritesheet ≥ 256×256. Recommended <strong>1536×1872</strong> (8×9 frame grid).",
+        "rateLimit": "Rate limit: <strong>10 submissions / 24h per user</strong>. Admins bypass.",
+        "slugs": "Slugs auto-deduplicate (<code>boba</code> → <code>boba-2</code> → <code>boba-3</code> → …). You always get a successful submission.",
+        "identity": "Identity (userId, email, credit) comes from the verified OAuth token. Never trusted from request body."
+      },
+      "failure": {
+        "title": "Failure modes",
+        "headers": {
+          "symptom": "Symptom",
+          "cause": "Cause",
+          "fix": "Fix"
+        },
+        "then": "then",
+        "rows": {
+          "notSignedIn": {
+            "symptom": "Not signed in",
+            "cause": "No tokens or session expired"
+          },
+          "presign401": {
+            "cause": "Bearer rejected by Clerk userinfo"
+          },
+          "presign429": {
+            "cause": "10/24h rate limit hit",
+            "fixBefore": "Wait 24h or open a",
+            "fixLink": "submit-fallback issue"
+          },
+          "invalidSpritesheet": {
+            "cause": "Sprite < 256×256",
+            "fix": "Regenerate at 1536×1872"
+          },
+          "missingField": {
+            "cause": "Folder missing pet.json or spritesheet",
+            "fix": "Inspect folder contents"
+          },
+          "r2Put403": {
+            "cause": "Presigned URL expired (60s TTL)",
+            "fix": "Retry: CLI auto-presigns fresh URLs"
+          }
+        }
+      },
+      "agents": {
+        "title": "Agent-first usage (Skill)",
+        "intro": "Petdex ships a Claude Code / Codex / Cursor compatible <strong>skill</strong> at <code>.claude/skills/petdex/SKILL.md</code>. Compatible agents load it automatically and learn <em>when</em> and <em>how</em> to call the CLI on your behalf.",
+        "enablesTitle": "What this enables",
+        "enableCozy": "Say <em>“install something cozy for my Codex”</em> in any agent tool. It runs <code>petdex list</code>, suggests Boba/Boxcat, installs your pick, and reminds you to activate via <strong>Settings → Appearance → Pets</strong>.",
+        "enableShare": "Say <em>“share all my pets”</em>. Agent runs <code>petdex login</code> if needed, then <code>petdex submit ~/.codex/pets</code>, surfaces the bulk summary.",
+        "enableMake": "Say <em>“how do I make my own?”</em>. Agent walks you through Codex Desktop → Hatch Pet skill → <code>/pet</code> → <code>petdex submit</code>.",
+        "enableTitle": "How to enable it",
+        "enableIntro": "If you use Claude Code, save the skill globally so every project has it:",
+        "enableOther": "Other agent tools can load the same SKILL.md from the repo. The file is plain markdown. No agent-specific syntax beyond <code>allowed-tools</code>.",
+        "buildTitle": "Build your own skill on top",
+        "buildBody": "The CLI is the executable surface; the skill is the cognitive one. If you build a derivative skill (for example, one that auto-tags new pets or curates a daily digest), you can use the Petdex skill as a reference. Read it directly:"
+      },
+      "config": {
+        "title": "Configuration",
+        "intro": "The CLI ships with sensible defaults pointing at production. You only need to override env vars if you are testing against a non-production deployment.",
+        "petdexUrl": "<code>PETDEX_URL</code>: base URL, default <code>https://petdex.crafter.run</code>",
+        "clerkIssuer": "<code>CLERK_ISSUER</code>: OAuth issuer, default <code>https://clerk.petdex.crafter.run</code>",
+        "clerkClientId": "<code>CLERK_OAUTH_CLIENT_ID</code>: public client id (baked into the CLI binary)"
+      },
+      "contribute": {
+        "title": "Contribute",
+        "prBefore": "PRs welcome at",
+        "issuesBefore": "Bug reports and feature requests:",
+        "issueLink": "open an issue",
+        "sponsorBefore": "Sponsor on",
+        "sponsorAfter": "if Petdex saves you time."
+      }
+    },
+    "placeholders": {
+      "petName": "<slug>",
+      "yourPetName": "<your-slug>",
+      "path": "<path>",
+      "desktopAction": "start | stop | status"
+    }
   }
 }

@@ -114,7 +114,7 @@ function contrastRatio(bg: string, fg: string): number {
   return Math.round(Math.min(ratio / 0.21, 1) * 100);
 }
 
-const WHITE = "#ffffff";
+const _WHITE = "#ffffff";
 const BLACK = "#0b0b0d";
 const NEAR_WHITE = "#f7f7f8";
 const NEAR_BLACK = "#1a1a1e";

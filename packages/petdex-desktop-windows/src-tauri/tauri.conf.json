@@ -1,60 +1,38 @@
 {
-  "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Petdex Desktop",
+  "productName": "petdex-desktop-windows",
   "version": "0.1.0",
-  "identifier": "run.crafter.petdex-desktop",
+  "identifier": "run.crafter.petdex",
   "build": {
-    "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build",
-    "devUrl": "http://localhost:1420",
-    "frontendDist": "../dist"
+    "frontendDist": "../ui"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "label": "pet",
         "title": "Petdex",
-        "width": 140,
-        "height": 180,
+        "width": 192,
+        "height": 288,
+        "minWidth": 192,
+        "minHeight": 288,
         "resizable": false,
-        "maximizable": false,
-        "minimizable": false,
-        "closable": true,
         "decorations": false,
         "transparent": true,
         "alwaysOnTop": true,
-        "focus": false,
         "skipTaskbar": true,
+        "shadow": false,
         "visible": true,
         "center": false,
         "x": 100,
-        "y": 100
+        "y": 100,
+        "focus": false
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:7777; img-src 'self' data: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'; script-src 'self'",
-      "assetProtocol": {
-        "enable": true,
-        "scope": [
-          "$HOME/.petdex/runtime/webview/**",
-          "$HOME/.codex/pets/**"
-        ]
-      }
+      "csp": null
     }
   },
   "bundle": {
-    "active": true,
-    "targets": ["msi", "nsis"],
-    "icon": [
-      "icons/32x32.png",
-      "icons/128x128.png",
-      "icons/128x128@2x.png",
-      "icons/icon.ico"
-    ],
-    "windows": {
-      "webviewInstallMode": {
-        "type": "downloadBootstrapper"
-      }
-    }
+    "active": false
   }
 }

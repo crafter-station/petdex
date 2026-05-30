@@ -3,8 +3,9 @@
 // to update (sprite, petJson, zip). Mirrors /api/cli/submit but scoped
 // to an existing pet the caller already owns.
 
-import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
+
+import { and, eq } from "drizzle-orm";
 
 import { verifyCliBearer } from "@/lib/cli-auth";
 import { db, schema } from "@/lib/db/client";
@@ -85,10 +86,16 @@ export async function POST(req: Request): Promise<Response> {
 
   const uploadId = crypto.randomUUID().replace(/-/g, "").slice(0, 12);
 
-  const slots: Array<{ role: "sprite" | "petjson" | "zip"; ext: string; ct: string }> = [];
+  const slots: Array<{
+    role: "sprite" | "petjson" | "zip";
+    ext: string;
+    ct: string;
+  }> = [];
   if (body.hasSprite) slots.push({ role: "sprite", ext, ct: spriteCT });
-  if (body.hasMeta) slots.push({ role: "petjson", ext: "json", ct: "application/json" });
-  if (body.hasZip) slots.push({ role: "zip", ext: "zip", ct: "application/zip" });
+  if (body.hasMeta)
+    slots.push({ role: "petjson", ext: "json", ct: "application/json" });
+  if (body.hasZip)
+    slots.push({ role: "zip", ext: "zip", ct: "application/zip" });
 
   if (slots.length === 0) {
     return NextResponse.json({ error: "no_assets_requested" }, { status: 400 });
@@ -96,10 +103,11 @@ export async function POST(req: Request): Promise<Response> {
 
   const presigned = await Promise.all(
     slots.map(async (s) => {
-      const key = `pets/${row.slug}-pending-${uploadId}/${s.role}.${s.ext}`.slice(
-        0,
-        MAX_KEY_LEN + 32,
-      );
+      const key =
+        `pets/${row.slug}-pending-${uploadId}/${s.role}.${s.ext}`.slice(
+          0,
+          MAX_KEY_LEN + 32,
+        );
       const result = await presignPut(key, s.ct);
       return { role: s.role, ...result };
     }),

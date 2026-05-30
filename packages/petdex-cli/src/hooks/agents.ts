@@ -62,7 +62,7 @@ export type PostInstallNote = {
 };
 
 export type Agent = {
-  id: "claude-code" | "codex" | "gemini" | "opencode";
+  id: "claude-code" | "codex" | "gemini" | "opencode" | "antigravity";
   displayName: string;
   configDir: string;
   configFile: string;
@@ -77,7 +77,7 @@ export type Agent = {
    *   - Claude Code:  ~/.claude/commands/petdex.md
    *   - Codex:        ~/.codex/prompts/petdex.md
    *   - OpenCode:     ~/.config/opencode/command/petdex.md
-   *   - Gemini:       ~/.gemini/antigravity/global_workflows/petdex.md
+   *   - Gemini:       ~/.gemini/commands/petdex.toml
    */
   slashCommandPath: string;
   /**
@@ -104,6 +104,76 @@ export function resolveOpenCodeConfigDir(
   if (env.OPENCODE_CONFIG_DIR) return env.OPENCODE_CONFIG_DIR;
   if (env.XDG_CONFIG_HOME) return path.join(env.XDG_CONFIG_HOME, "opencode");
   return path.join(home, ".config", "opencode");
+}
+
+/**
+ * Antigravity MCP config paths.
+ *
+ * Antigravity stores its global MCP config in different places depending
+ * on the platform:
+ *
+ *   Windows: %LOCALAPPDATA%\Programs\antigravity\User\mcp_config.json
+ *   macOS/Linux: ~/.gemini/antigravity/mcp_config.json
+ */
+export function antigravityMcpConfigPaths(): string[] {
+  const localAppData =
+    process.env.LOCALAPPDATA ?? path.join(HOME, "AppData", "Local");
+  const winPath = path.join(
+    localAppData,
+    "Programs",
+    "antigravity",
+    "User",
+    "mcp_config.json",
+  );
+  const geminiPath = path.join(
+    HOME,
+    ".gemini",
+    "antigravity",
+    "mcp_config.json",
+  );
+  const legacyUnixPath = path.join(HOME, ".antigravity", "mcp_config.json");
+  if (process.platform === "win32") {
+    return [winPath, geminiPath, legacyUnixPath];
+  }
+  return [geminiPath, legacyUnixPath, winPath];
+}
+
+/**
+ * Resolve the Antigravity MCP config path that actually exists, or
+ * return the platform-default if neither exists.
+ */
+export async function resolveAntigravityMcpConfigPath(): Promise<string> {
+  const { stat } = await import("node:fs/promises");
+  const [primary, ...fallbacks] = antigravityMcpConfigPaths();
+  for (const candidate of [primary, ...fallbacks]) {
+    try {
+      await stat(candidate);
+      return candidate;
+    } catch {}
+  }
+  return primary;
+}
+
+/**
+ * Synchronous version — returns the platform-default primary path.
+ * The async `resolveAntigravityMcpConfigPath()` should be used at
+ * install time; this is only for the static Agent configFile field.
+ */
+export function antigravityMcpConfigPath(): string {
+  const [primary] = antigravityMcpConfigPaths();
+  return primary;
+}
+
+export function antigravityConfigDir(): string {
+  return path.dirname(antigravityMcpConfigPath());
+}
+
+export function antigravityGlobalMcpConfigPath(): string {
+  return antigravityMcpConfigPath();
+}
+
+export function antigravitySkillDir(): string {
+  return path.join(HOME, ".gemini", "antigravity", "skills", "petdex");
 }
 
 export const AGENTS: Agent[] = [
@@ -384,13 +454,7 @@ export const AGENTS: Agent[] = [
     displayName: "Gemini CLI",
     configDir: path.join(HOME, ".gemini"),
     configFile: path.join(HOME, ".gemini", "settings.json"),
-    slashCommandPath: path.join(
-      HOME,
-      ".gemini",
-      "antigravity",
-      "global_workflows",
-      "petdex.md",
-    ),
+    slashCommandPath: path.join(HOME, ".gemini", "commands", "petdex.toml"),
     docsUrl: "https://google-gemini.github.io/gemini-cli/docs/hooks",
     hookEntries: [
       { event: "BeforeTool", kind: "tool.before" },
@@ -461,6 +525,39 @@ export const AGENTS: Agent[] = [
       ];
     },
   },
+  {
+    id: "antigravity",
+    displayName: "Antigravity",
+    configDir: antigravityConfigDir(),
+    // Antigravity doesn't use a hooks JSON file. Instead we inject an
+    // MCP server config and an Agent Skill. We point configFile to the
+    // MCP config so the install/uninstall system knows what to write.
+    configFile: antigravityMcpConfigPath(),
+    slashCommandPath: path.join(
+      HOME,
+      ".gemini",
+      "antigravity",
+      "skills",
+      "petdex",
+      "SKILL.md",
+    ),
+    docsUrl: "https://antigravity.google/docs/skills",
+    // Antigravity doesn't support lifecycle hooks (BeforeTool/AfterTool).
+    // Instead we provide an MCP server + Agent Skill that tells the agent
+    // to call MCP tools before/after each action.
+    hookEntries: [],
+    build() {
+      return {};
+    },
+    async postInstallChecks() {
+      return [
+        {
+          level: "action",
+          message: `Antigravity uses MCP instead of hooks. The petdex MCP server was injected into your Antigravity MCP config.\n\nTo activate:\n  1. Open Antigravity → Agent Panel → ... → MCP Servers\n  2. Verify "petdex" MCP server is listed and running\n  3. The Petdex Agent Skill is installed at ~/.gemini/antigravity/skills/petdex/\n\nThe agent should start updating the mascot automatically when working in this project.`,
+        },
+      ];
+    },
+  },
 ];
 
 /**
@@ -526,7 +623,7 @@ function curlOnlyState(
   ].join(" ");
 }
 
-function curlCommand(
+function _curlCommand(
   agentId: Agent["id"],
   state: PetState,
   duration?: number,

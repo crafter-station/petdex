@@ -6,7 +6,9 @@
  *
  * Detects 4 agents today; adding a 5th is a single AGENTS entry away.
  */
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import path from "node:path";
 
 import * as p from "@clack/prompts";
@@ -15,13 +17,24 @@ import pc from "picocolors";
 import {
   AGENTS,
   type Agent,
+  antigravitySkillDir,
   PETDEX_PORT,
   type PostInstallNote,
+  resolveAntigravityMcpConfigPath,
   SIDECAR_URL,
 } from "./agents.js";
-import { installSlashCommand } from "./slash-command.js";
+import { generateMcpConfig, generateSkillMd } from "./antigravity-skill.js";
+import { PERSIST_PATH, persistRunningBinary } from "./persist-binary.js";
+import { installSlashCommand, uninstallSlashCommand } from "./slash-command.js";
 
 type Detection = { agent: Agent; installed: boolean };
+
+const LEGACY_ANTIGRAVITY_SKILL_DIR = path.join(
+  homedir(),
+  ".antigravity",
+  "skills",
+  "petdex",
+);
 
 export async function detectAgents(): Promise<Detection[]> {
   return Promise.all(
@@ -61,10 +74,14 @@ export async function runInstall(): Promise<HooksInstallResult> {
     const { persistRunningBinary } = await import("./persist-binary");
     const result = await persistRunningBinary();
     if (!result.ok && result.reason) {
-      p.log.warn(`Could not persist petdex binary (${result.reason}). Bubbles will be disabled.`);
+      p.log.warn(
+        `Could not persist petdex binary (${result.reason}). Bubbles will be disabled.`,
+      );
     }
   } catch (err) {
-    p.log.warn(`Could not persist petdex binary (${(err as Error).message}). Bubbles will be disabled.`);
+    p.log.warn(
+      `Could not persist petdex binary (${(err as Error).message}). Bubbles will be disabled.`,
+    );
   }
 
   const detections = await detectAgents();
@@ -101,11 +118,15 @@ export async function runInstall(): Promise<HooksInstallResult> {
   const summary: string[] = [];
   const followUps: { agent: string; notes: PostInstallNote[] }[] = [];
   const installedAgents: string[] = [];
-  for (const id of selected) {
+  const selectedAgentIds = selected as string[];
+  const selectedIds = new Set<string>(selectedAgentIds);
+  for (const id of selectedAgentIds) {
     const agent = AGENTS.find((a) => a.id === id);
     if (!agent) continue;
     try {
-      const result = await installForAgent(agent);
+      await installForAgent(agent, {
+        installSlashCommand: shouldInstallSlashCommand(agent, selectedIds),
+      });
       installedAgents.push(agent.id);
       // Keep summary lines short and uniform — earlier the long
       // backup filename + full config path made @clack/prompts'
@@ -174,22 +195,55 @@ export async function runInstall(): Promise<HooksInstallResult> {
 
 export type InstallResult = { backupPath: string | null };
 
-export async function installForAgent(agent: Agent): Promise<InstallResult> {
+export type InstallForAgentOptions = {
+  installSlashCommand?: boolean;
+};
+
+export function shouldInstallSlashCommand(
+  agent: Agent,
+  selectedIds: Set<string>,
+): boolean {
+  return (
+    agent.id !== "antigravity" &&
+    !(agent.id === "gemini" && selectedIds.has("antigravity"))
+  );
+}
+
+export async function installForAgent(
+  agent: Agent,
+  options: InstallForAgentOptions = {},
+): Promise<InstallResult> {
   await mkdir(path.dirname(agent.configFile), { recursive: true });
 
   const config = agent.build();
 
-  // /petdex slash command — installed alongside the hook config so
-  // users can toggle the killswitch from inside their agent without
-  // dropping to a shell. Idempotent: overwrites our own file, never
-  // user-authored content (we own the path under <agent>/commands/).
-  await installSlashCommand(agent);
+  // Antigravity doesn't use slash commands — its Agent Skill (SKILL.md)
+  // lives at the same path that slashCommandPath points to, so calling
+  // installSlashCommand would overwrite the skill with a slash-command
+  // body. Skip it entirely; the Antigravity installer handles the path.
+  if (agent.id !== "antigravity") {
+    if (options.installSlashCommand === false) {
+      await uninstallSlashCommand(agent);
+    } else {
+      // /petdex slash command — installed alongside the hook config so
+      // users can toggle the killswitch from inside their agent without
+      // dropping to a shell. Idempotent: overwrites our own file, never
+      // user-authored content (we own the path under <agent>/commands/).
+      await installSlashCommand(agent);
+    }
+  }
 
   // OpenCode plugin is a JS source file — write it whole, no merge.
   if (agent.id === "opencode") {
     const backupPath = await maybeBackup(agent.configFile);
     await writeFile(agent.configFile, config as string, "utf8");
     return { backupPath };
+  }
+
+  // Antigravity uses MCP config + Agent Skill instead of hooks.
+  if (agent.id === "antigravity") {
+    await installForAntigravity();
+    return { backupPath: null };
   }
 
   // JSON-based agents: merge our hooks into existing settings.
@@ -267,7 +321,9 @@ function mergeHooks(
   const mergedHooks: Record<string, unknown[]> = { ...existingHooks };
 
   for (const [event, entries] of Object.entries(patchHooks)) {
-    const prior = Array.isArray(mergedHooks[event]) ? mergedHooks[event]! : [];
+    const prior = Array.isArray(mergedHooks[event])
+      ? (mergedHooks[event] as unknown[])
+      : [];
     const filteredPrior = prior.filter((entry) => !isPetdexEntry(entry));
     mergedHooks[event] = [...filteredPrior, ...entries];
   }
@@ -305,3 +361,100 @@ function collectCommands(entry: unknown): string[] {
   return acc;
 }
 
+/**
+ * Install petdex hooks for Antigravity.
+ *
+ * Unlike hook-based agents (Claude Code, Codex, Gemini CLI), Antigravity
+ * integrates via two mechanisms:
+ *
+ * 1. MCP Server injection: We add a "petdex" entry to Antigravity's
+ *    mcp_config.json so the agent can call petdex_set_state etc.
+ * 2. Agent Skill: We install a SKILL.md to ~/.antigravity/skills/petdex/
+ *    that tells the agent WHEN to call the MCP tools.
+ *
+ * This function is called from installForAgent when agent.id === "antigravity".
+ */
+/**
+ * Verify the persisted binary exists AND can start the Antigravity MCP server.
+ * A stale ~/.petdex/bin/petdex.js from an older install might exist but lack
+ * the mcp-server subcommand, which would make Antigravity silently fail.
+ */
+async function validatePersistedBinary(): Promise<boolean> {
+  try {
+    await stat(PERSIST_PATH);
+    const result = spawnSync(process.execPath, [PERSIST_PATH, "mcp-server"], {
+      encoding: "utf8",
+      input: "",
+      timeout: 5000,
+    });
+    return result.status === 0 && result.stdout === "";
+  } catch {
+    return false;
+  }
+}
+
+async function installForAntigravity(): Promise<void> {
+  // 0. Always persist a fresh snapshot of the running CLI binary, then
+  // validate it supports the mcp-server subcommand. Antigravity's MCP server
+  // runs via node ~/.petdex/bin/petdex.js mcp-server. Unlike hook agents
+  // (which fall back to curl-only state hooks on failure), Antigravity has
+  // no fallback — a missing or stale binary silently fails to start, making
+  // the install appear successful.
+  //
+  // We always persist here (not just when the file is missing) because:
+  //   (a) persistRunningBinary() in runInstall() is best-effort and may skip
+  //   (b) a stale binary from an older version might exist but lack mcp-server
+  await persistRunningBinary().catch(() => {});
+  const binaryOk = await validatePersistedBinary();
+  if (!binaryOk) {
+    throw new Error(
+      `Petdex persisted binary missing or not functional: ${PERSIST_PATH}.\n` +
+        `  The mcp-server subcommand is required for Antigravity integration.\n` +
+        `  Run \`npx petdex@latest hooks install\` to persist a fresh binary, then re-run.`,
+    );
+  }
+
+  // 1. Install/update the MCP config
+  const mcpConfigPath = await resolveAntigravityMcpConfigPath();
+  await mkdir(path.dirname(mcpConfigPath), { recursive: true });
+  const mcpConfig = generateMcpConfig();
+
+  const existing = await readAntigravityMcpJson(mcpConfigPath);
+  if (existing.kind === "error") {
+    throw new Error(
+      `Refusing to overwrite ${mcpConfigPath}: ${existing.message}.\n   Fix the file (or rename it) and run \`petdex hooks install\` again.`,
+    );
+  }
+  if (existing.kind === "ok") await maybeBackup(mcpConfigPath);
+  const base =
+    existing.kind === "ok" ? (existing.value as Record<string, unknown>) : {};
+  const existingServers = (base.mcpServers ?? {}) as Record<string, unknown>;
+  const merged = {
+    ...base,
+    mcpServers: {
+      ...existingServers,
+      ...(mcpConfig.mcpServers as Record<string, unknown>),
+    },
+  };
+  await writeFile(
+    mcpConfigPath,
+    `${JSON.stringify(merged, null, 2)}\n`,
+    "utf8",
+  );
+
+  // 2. Install the Agent Skill (global scope only)
+  const skillDir = antigravitySkillDir();
+  await mkdir(skillDir, { recursive: true });
+  await writeFile(path.join(skillDir, "SKILL.md"), generateSkillMd(), "utf8");
+  await rm(LEGACY_ANTIGRAVITY_SKILL_DIR, { recursive: true, force: true });
+}
+
+async function readAntigravityMcpJson(file: string): Promise<ReadJsonResult> {
+  try {
+    const text = await readFile(file, "utf8");
+    if (text.trim() === "") return { kind: "missing" };
+  } catch {
+    return readJson(file);
+  }
+  return readJson(file);
+}

@@ -47,7 +47,7 @@ let failed = 0;
 const cc = await clerkClient();
 
 for (const row of todo) {
-  let user;
+  let user: Awaited<ReturnType<typeof cc.users.getUser>> | undefined;
   try {
     user = await cc.users.getUser(row.user_id);
   } catch (err) {

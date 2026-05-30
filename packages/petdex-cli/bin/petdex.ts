@@ -11,6 +11,7 @@ import { ClerkCliAuth } from "../src/cli-auth/index.js";
 import { runDoctor } from "../src/desktop/doctor.js";
 import {
   desktopBinPath,
+  ensureStarterPet,
   isTrustedAssetUrl,
   runInstallDesktop,
 } from "../src/desktop/install.js";
@@ -107,7 +108,7 @@ async function getAuth(): Promise<ClerkCliAuth> {
   return _auth;
 }
 
-const VERSION = "0.4.0";
+const VERSION = "0.4.1";
 
 // ─── entrypoint ────────────────────────────────────────────────────────────
 main().catch((err) => {
@@ -127,6 +128,15 @@ async function main() {
   if (cmd === "bubble") {
     const { runBubble } = await import("../src/hooks/bubble-runner");
     await runBubble(args.slice(1));
+    return;
+  }
+
+  // `petdex mcp-server` is also a hot path run as a subprocess by
+  // Antigravity. Any stdout output (telemetry notice, help text)
+  // before the client sends `initialize` breaks the MCP handshake.
+  if (cmd === "mcp-server") {
+    const { runMcpServer } = await import("../src/hooks/mcp-server.js");
+    await runMcpServer();
     return;
   }
 
@@ -228,6 +238,7 @@ function printHelp() {
       `    ${pc.bold("install")} <slug...>  Install one or more pets into ~/.petdex/pets and ~/.codex/pets`,
       `    ${pc.bold("install desktop")}    Install the petdex-desktop binary (alternative to the .dmg)`,
       `    ${pc.bold("list")}               List approved pets`,
+      `    ${pc.bold("mcp-server")}          Start the MCP protocol server for Antigravity integration`,
       `    ${pc.bold("hooks install")}      Wire petdex-desktop into your coding agents`,
       `    ${pc.bold("toggle")}             One-shot wake/sleep. Flips the mascot on or off depending on current state`,
       `    ${pc.bold("up")}                 Force-wake the mascot. Enables hooks AND launches petdex-desktop`,
@@ -496,7 +507,7 @@ async function cmdInstall(args: string[]) {
   }
 }
 
-async function download(url: string, dest: string): Promise<void> {
+async function _download(url: string, dest: string): Promise<void> {
   const res = await fetch(url);
   if (!res.ok) {
     throw new Error(`download ${url} → ${res.status}`);
@@ -725,7 +736,7 @@ async function cmdEdit(args: string[]): Promise<void> {
   }
 
   function flagValue(flag: string): string | null {
-    const idx = args.findIndex((a) => a === flag);
+    const idx = args.indexOf(flag);
     if (idx === -1) return null;
     const val = args[idx + 1];
     return typeof val === "string" && !val.startsWith("--") ? val : null;
@@ -1435,8 +1446,8 @@ function cmdHooksKillswitch(sub: "toggle" | "on" | "off" | "status"): void {
 //      hooks + persist the CLI snapshot + auto-start the mascot.
 //   2. Bare binary already installed      → same as above, no install.
 //   3. Nothing installed                  → run runInstallDesktop
-//      (downloads bare binary + sidecar to ~/.petdex/) so init still
-//      works for users who skipped the DMG.
+//      (uses the best release asset for the current platform) so init
+//      still works for users who skipped the DMG.
 //
 // Then in all paths: install hooks across detected agents, persist
 // petdex.js snapshot to ~/.petdex/bin/, and start the desktop. Hunter
@@ -1457,32 +1468,25 @@ async function cmdInit(): Promise<void> {
   // installed at all.
   const binPath = desktopBinPath();
   const desktopInstalled = existsSync(binPath);
+  let desktopReady = desktopInstalled;
+  let desktopInstallError: string | null = null;
 
   if (!desktopInstalled) {
     console.log(
       pc.dim(
-        `${pc.yellow("!")} No desktop binary found. Installing the bare binary at ${pc.cyan("~/.petdex/bin/")}...`,
-      ),
-    );
-    console.log(
-      pc.dim(
-        `  (For the proper macOS app icon, download the DMG from ${pc.cyan("https://petdex.crafter.run/download")} instead.)`,
+        `${pc.yellow("!")} No desktop app found. Installing Petdex Desktop...`,
       ),
     );
     console.log("");
     try {
       await runInstallDesktop();
+      desktopReady = existsSync(desktopBinPath());
     } catch (err) {
+      desktopInstallError = (err as Error).message;
       console.error(
-        `${pc.red("✗")} Could not install desktop: ${(err as Error).message}`,
+        `${pc.red("✗")} Could not install desktop: ${desktopInstallError}`,
       );
-      console.error(
-        pc.dim(
-          `  You can still proceed by downloading the DMG: ${pc.cyan("https://petdex.crafter.run/download")}`,
-        ),
-      );
-      // Hooks install is still useful even if desktop didn't land,
-      // so we don't bail. The user can drop the .app in later.
+      console.error(pc.dim(`  Continuing with hooks-only setup.`));
     }
   } else {
     const isAppBundle = binPath.includes("/Petdex.app/Contents/MacOS/");
@@ -1491,50 +1495,82 @@ async function cmdInit(): Promise<void> {
     );
   }
 
+  const starter = await ensureStarterPet();
   const { installedAgents } = await runHooksInstall();
 
-  // Auto-start the mascot. Skipping this used to leave the user with
-  // a working hook chain but no visible mascot — they'd run /petdex
-  // inside their agent expecting motion, see nothing, and assume
-  // setup failed. Idempotent via desktopStatus check.
-  const status = desktopStatus();
-  if (status.state === "running") {
-    console.log(`${pc.green("●")} Desktop already running (pid ${status.pid})`);
-  } else {
-    const result = await startDesktop();
-    if (result.ok) {
-      if (!result.alreadyRunning) {
-        emit("cli_desktop_start_success", { cli_version: VERSION });
-      }
+  let desktopStarted = false;
+  if (desktopReady) {
+    const status = desktopStatus();
+    if (status.state === "running") {
+      desktopStarted = true;
       console.log(
-        result.alreadyRunning
-          ? `${pc.dim("•")} Desktop already running (pid ${result.pid})`
-          : `${pc.green("✓")} Desktop started (pid ${result.pid})`,
+        `${pc.green("●")} Desktop already running (pid ${status.pid})`,
       );
     } else {
-      // Don't fail init — startup failure usually means the user
-      // hasn't opened the .app for the first time yet (macOS Gatekeeper
-      // wants the manual "Open" before subsequent launches go through).
-      console.log(
-        `${pc.yellow("!")} Could not start desktop: ${result.reason}`,
-      );
-      console.log(
-        pc.dim(
-          `  Open ${pc.cyan("/Applications/Petdex.app")} once manually, then re-run ${pc.cyan("petdex up")}.`,
-        ),
-      );
+      const result = await startDesktop();
+      if (result.ok) {
+        desktopStarted = true;
+        if (!result.alreadyRunning) {
+          emit("cli_desktop_start_success", { cli_version: VERSION });
+        }
+        console.log(
+          result.alreadyRunning
+            ? `${pc.dim("•")} Desktop already running (pid ${result.pid})`
+            : `${pc.green("✓")} Desktop started (pid ${result.pid})`,
+        );
+      } else {
+        console.log(
+          `${pc.yellow("!")} Could not start desktop: ${result.reason}`,
+        );
+        console.log(
+          pc.dim(
+            `  Open ${pc.cyan("/Applications/Petdex.app")} once manually, then re-run ${pc.cyan("petdex up")}.`,
+          ),
+        );
+      }
     }
   }
 
   console.log("");
+  console.log(pc.bold("Setup summary"));
   console.log(
-    `${pc.green("✓")} ${pc.bold("All set.")} Open your agent and run ${pc.cyan("/petdex")} to wake the mascot.`,
+    desktopReady
+      ? `${pc.green("✓")} Desktop installed${desktopStarted ? " and running" : ""}`
+      : `${pc.yellow("!")} Desktop not installed`,
   );
   console.log(
-    pc.dim(
-      `  Or from a shell: ${pc.cyan("petdex up")} (force-wake) · ${pc.cyan("petdex toggle")} (smart wake/sleep)`,
-    ),
+    starter.status === "installed"
+      ? `${pc.green("✓")} Starter pet installed: ${starter.slug}`
+      : starter.status === "present"
+        ? `${pc.green("✓")} Pet library ready`
+        : `${pc.yellow("!")} No starter pet installed`,
   );
+  console.log(
+    installedAgents.length > 0
+      ? `${pc.green("✓")} Hooks installed for ${installedAgents.join(", ")}`
+      : `${pc.yellow("!")} No agent hooks installed`,
+  );
+  if (desktopInstallError) {
+    console.log(pc.dim(`  Desktop install issue: ${desktopInstallError}`));
+  }
+
+  if (desktopReady) {
+    console.log("");
+    console.log(
+      `${pc.green("✓")} ${pc.bold("All set.")} Open your agent and run ${pc.cyan("/petdex")} to wake the mascot.`,
+    );
+    console.log(
+      pc.dim(
+        `  Or from a shell: ${pc.cyan("petdex up")} (force-wake) · ${pc.cyan("petdex toggle")} (smart wake/sleep)`,
+      ),
+    );
+  } else {
+    console.log("");
+    console.log(
+      `${pc.yellow("!")} Hooks-only setup finished. Desktop still needs a supported build for this platform.`,
+    );
+    console.log(pc.dim(`  Try again later with ${pc.cyan("petdex update")}.`));
+  }
 }
 
 function tildeify(p: string): string {

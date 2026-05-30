@@ -1,7 +1,8 @@
 import { notFound } from "next/navigation";
 
-import { KIND_COPY } from "@/lib/facet-copy";
-import { buildLocaleAlternates } from "@/lib/locale-routing";
+import { getTranslations } from "next-intl/server";
+
+import { buildLocaleAlternates, withLocale } from "@/lib/locale-routing";
 import { getApprovedPetsWithMetrics, type PetWithMetrics } from "@/lib/pets";
 import { PET_KINDS, type PetKind } from "@/lib/types";
 
@@ -36,32 +37,40 @@ function curatedSort(pets: PetWithMetrics[]): PetWithMetrics[] {
 
 export async function generateMetadata({ params }: Props) {
   const { kind: raw, locale } = await params;
+  const t = await getTranslations({
+    locale: hasLocale(locale) ? locale : "en",
+    namespace: "facetPages",
+  });
   const kind = resolveKind(raw);
-  if (!kind) return { title: "Kind not found", robots: { index: false } };
-  const copy = KIND_COPY[kind];
+  if (!kind) return { title: t("notFound.kind"), robots: { index: false } };
   return {
-    title: copy.title,
-    description: copy.metaDescription,
+    title: t(`kinds.${kind}.title`),
+    description: t(`kinds.${kind}.metaDescription`),
     alternates: buildLocaleAlternates(
       `/kind/${kind}`,
       hasLocale(locale) ? locale : undefined,
     ),
     openGraph: {
-      title: copy.title,
-      description: copy.metaDescription,
+      title: t(`kinds.${kind}.title`),
+      description: t(`kinds.${kind}.metaDescription`),
       url: `${SITE_URL}/kind/${kind}`,
       type: "website",
     },
     twitter: {
       card: "summary_large_image",
-      title: copy.title,
-      description: copy.metaDescription,
+      title: t(`kinds.${kind}.title`),
+      description: t(`kinds.${kind}.metaDescription`),
     },
   };
 }
 
 export default async function KindPage({ params }: Props) {
-  const { kind: raw } = await params;
+  const { kind: raw, locale } = await params;
+  const localeValue = hasLocale(locale) ? locale : "en";
+  const t = await getTranslations({
+    locale: hasLocale(locale) ? locale : "en",
+    namespace: "facetPages",
+  });
   const kind = resolveKind(raw);
   if (!kind) notFound();
 
@@ -70,20 +79,18 @@ export default async function KindPage({ params }: Props) {
 
   if (filtered.length === 0) notFound();
 
-  const copy = KIND_COPY[kind];
-
   const otherKinds = PET_KINDS.filter((k) => k !== kind);
   const related = otherKinds.map((k) => ({
-    href: `/kind/${k}`,
-    label: k,
+    href: withLocale(`/kind/${k}`, localeValue),
+    label: t(`kinds.${k}.label`),
     count: all.filter((p) => p.kind === k).length,
   }));
 
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "CollectionPage",
-    name: copy.title,
-    description: copy.metaDescription,
+    name: t(`kinds.${kind}.title`),
+    description: t(`kinds.${kind}.metaDescription`),
     url: `${SITE_URL}/kind/${kind}`,
     isPartOf: { "@type": "WebSite", "@id": `${SITE_URL}/#website` },
     mainEntity: {
@@ -102,13 +109,13 @@ export default async function KindPage({ params }: Props) {
     <>
       <JsonLd data={jsonLd} />
       <FacetPage
-        eyebrow={`Kind: ${kind}`}
-        title={copy.title}
-        intro={copy.intro}
-        count={filtered.length}
+        eyebrow={t("kindEyebrow", { kind: t(`kinds.${kind}.label`) })}
+        title={t(`kinds.${kind}.title`)}
+        intro={t(`kinds.${kind}.intro`)}
+        countLabel={t("count", { count: filtered.length })}
         pets={filtered}
         exampleSlug={filtered[0]?.slug}
-        relatedLabel="Other kinds"
+        relatedLabel={t("relatedKinds")}
         related={related}
       />
     </>

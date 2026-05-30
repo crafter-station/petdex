@@ -18,7 +18,7 @@
  * working. If step 4 fails after stop: the user can restart manually.
  */
 import { existsSync, readFileSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 
@@ -29,13 +29,18 @@ import { emit } from "../telemetry.js";
 import {
   appBundleRootFor,
   commitDesktopAssets,
+  defaultUserAppBundleRoot,
   desktopBinPath,
+  desktopInstallPlanError,
   fetchLatestRelease,
+  installAppBundleFromDmg,
+  resolveDesktopInstallPlan,
   stageDesktopAssets,
   updateAppBundleFromDmg,
 } from "./install.js";
 import {
   desktopStatus,
+  isPetdexPidAlive,
   startDesktop,
   stopDesktop,
   waitForPortRelease,
@@ -94,19 +99,64 @@ export async function requestSidecarHandoff(
   }
 }
 
-function readInstalledVersion(): string | null {
-  if (!existsSync(VERSION_FILE)) return null;
+function readInstalledVersion(versionFile = VERSION_FILE): string | null {
+  if (!existsSync(versionFile)) return null;
   try {
-    return readFileSync(VERSION_FILE, "utf8").trim() || null;
+    return readFileSync(versionFile, "utf8").trim() || null;
   } catch {
     return null;
   }
 }
 
+async function writeInstalledVersion(
+  versionFile: string,
+  tagName: string,
+): Promise<void> {
+  await mkdir(path.dirname(versionFile), { recursive: true });
+  await writeFile(versionFile, `${tagName}\n`);
+}
+
+type RunUpdateDeps = {
+  fetchLatestRelease: typeof fetchLatestRelease;
+  desktopBinPath: typeof desktopBinPath;
+  appBundleRootFor: typeof appBundleRootFor;
+  desktopStatus: typeof desktopStatus;
+  stopDesktop: typeof stopDesktop;
+  updateAppBundleFromDmg: typeof updateAppBundleFromDmg;
+  resolveDesktopInstallPlan: typeof resolveDesktopInstallPlan;
+  installAppBundleFromDmg: typeof installAppBundleFromDmg;
+  stageDesktopAssets: typeof stageDesktopAssets;
+  commitDesktopAssets: typeof commitDesktopAssets;
+  requestSidecarHandoff: typeof requestSidecarHandoff;
+  waitForPortRelease: typeof waitForPortRelease;
+  startDesktop: typeof startDesktop;
+  hookRefresh: typeof runHookRefresh;
+  versionFile: string;
+};
+
 export async function runUpdate(
   args: string[] = [],
   cliVersion?: string,
+  overrides: Partial<RunUpdateDeps> = {},
 ): Promise<void> {
+  const deps: RunUpdateDeps = {
+    fetchLatestRelease,
+    desktopBinPath,
+    appBundleRootFor,
+    desktopStatus,
+    stopDesktop,
+    updateAppBundleFromDmg,
+    resolveDesktopInstallPlan,
+    installAppBundleFromDmg,
+    stageDesktopAssets,
+    commitDesktopAssets,
+    requestSidecarHandoff,
+    waitForPortRelease,
+    startDesktop,
+    hookRefresh: runHookRefresh,
+    versionFile: VERSION_FILE,
+    ...overrides,
+  };
   const updateStartedAt = Date.now();
   const force = args.includes("--force");
   // --silent skips the @clack/prompts UI (intro/spinner/outro) and uses
@@ -150,7 +200,7 @@ export async function runUpdate(
 
   intro("petdex update");
 
-  const installed = readInstalledVersion();
+  const installed = readInstalledVersion(deps.versionFile);
   info(
     installed
       ? `Installed: ${silent ? installed : pc.cyan(installed)}`
@@ -161,7 +211,7 @@ export async function runUpdate(
   s.start("Checking GitHub for the latest release");
   let release: Awaited<ReturnType<typeof fetchLatestRelease>>;
   try {
-    release = await fetchLatestRelease();
+    release = await deps.fetchLatestRelease();
   } catch (err) {
     s.stop(silent ? "failed" : pc.red("failed"));
     throw new Error(
@@ -190,10 +240,10 @@ export async function runUpdate(
   // preserving signature and stapler ticket. Bare-binary installs
   // (~/.petdex/bin/) keep using the rename flow because there's no
   // bundle to coordinate.
-  const binPath = desktopBinPath();
-  const appBundleRoot = appBundleRootFor(binPath);
+  const binPath = deps.desktopBinPath();
+  const appBundleRoot = deps.appBundleRootFor(binPath);
 
-  const wasRunning = desktopStatus().state === "running";
+  const wasRunning = deps.desktopStatus().state === "running";
 
   if (appBundleRoot) {
     // App-bundle path. Download + mount + ditto. We stop the desktop
@@ -206,13 +256,13 @@ export async function runUpdate(
           ? "Stopping running petdex-desktop"
           : `${pc.dim("•")} Stopping running petdex-desktop`,
       );
-      await stopDesktop();
+      await deps.stopDesktop();
     }
     const dl = makeSpinner();
     dl.start(`Downloading ${release.tag_name} DMG`);
     let result: Awaited<ReturnType<typeof updateAppBundleFromDmg>>;
     try {
-      result = await updateAppBundleFromDmg(release, appBundleRoot);
+      result = await deps.updateAppBundleFromDmg(release, appBundleRoot);
     } catch (err) {
       dl.stop(silent ? "failed" : pc.red("failed"));
       throw err;
@@ -224,14 +274,14 @@ export async function runUpdate(
     );
     // Skip the bare-binary phases below; jump straight to the version
     // file write + restart logic by setting a sentinel staged value.
-    await writeFile(VERSION_FILE, `${release.tag_name}\n`);
+    await writeInstalledVersion(deps.versionFile, release.tag_name);
     emit("cli_update_applied", {
       cli_version: cliVersion,
       from_version: installed ?? undefined,
       to_version: release.tag_name,
       duration_ms: Date.now() - updateStartedAt,
     });
-    await runHookRefresh(info, warn, silent);
+    await deps.hookRefresh(info, warn, silent);
     const note = installed
       ? `${installed}  ->  ${release.tag_name}`
       : release.tag_name;
@@ -239,6 +289,55 @@ export async function runUpdate(
       silent
         ? `${note} (relaunch Petdex from /Applications to use it)`
         : `${pc.green("✓")} ${note}\n${pc.dim("  Relaunch Petdex from /Applications to use it.")}`,
+    );
+    return;
+  }
+
+  const installPlan = deps.resolveDesktopInstallPlan(release);
+  if (installPlan.kind === "unsupported") {
+    throw desktopInstallPlanError(installPlan);
+  }
+  if (installPlan.kind === "macos-dmg") {
+    if (wasRunning) {
+      info(
+        silent
+          ? "Stopping running petdex-desktop"
+          : `${pc.dim("•")} Stopping running petdex-desktop`,
+      );
+      await deps.stopDesktop();
+    }
+    const dl = makeSpinner();
+    dl.start(`Installing ${release.tag_name} app`);
+    let result: Awaited<ReturnType<typeof installAppBundleFromDmg>>;
+    try {
+      result = await deps.installAppBundleFromDmg(
+        release,
+        defaultUserAppBundleRoot(),
+      );
+    } catch (err) {
+      dl.stop(silent ? "failed" : pc.red("failed"));
+      throw err;
+    }
+    dl.stop(
+      silent
+        ? `Installed ${result.appBundleRoot} (${formatBytes(result.dmgAsset.size)})`
+        : `${pc.green("✓")} Installed ${pc.bold(result.appBundleRoot)} (${formatBytes(result.dmgAsset.size)})`,
+    );
+    await writeInstalledVersion(deps.versionFile, release.tag_name);
+    emit("cli_update_applied", {
+      cli_version: cliVersion,
+      from_version: installed ?? undefined,
+      to_version: release.tag_name,
+      duration_ms: Date.now() - updateStartedAt,
+    });
+    await deps.hookRefresh(info, warn, silent);
+    const note = installed
+      ? `${installed}  ->  ${release.tag_name}`
+      : release.tag_name;
+    outro(
+      silent
+        ? `${note} (run petdex up to launch the app)`
+        : `${pc.green("✓")} ${note}\n${pc.dim("  Run petdex up to launch the app.")}`,
     );
     return;
   }
@@ -253,7 +352,7 @@ export async function runUpdate(
   dl.start(`Downloading ${release.tag_name}`);
   let staged: Awaited<ReturnType<typeof stageDesktopAssets>>;
   try {
-    staged = await stageDesktopAssets(release);
+    staged = await deps.stageDesktopAssets(release);
   } catch (err) {
     dl.stop(silent ? "failed" : pc.red("failed"));
     throw err;
@@ -276,16 +375,38 @@ export async function runUpdate(
         ? "Stopping running petdex-desktop"
         : `${pc.dim("•")} Stopping running petdex-desktop`,
     );
-    await stopDesktop();
+    const stopResult = await deps.stopDesktop();
+    // On Windows the running .exe is file-locked until the process
+    // fully exits. If stopDesktop() failed AND the process is still
+    // alive, the rename in commitDesktopAssets would throw EPERM.
+    // Surface this as a clear actionable error rather than a
+    // confusing filesystem failure.
+    if (process.platform === "win32" && !stopResult.ok) {
+      const recheck = deps.desktopStatus();
+      if (recheck.state === "running" && isPetdexPidAlive(recheck.pid)) {
+        throw new Error(
+          "Cannot replace petdex-desktop-win32-x64.exe: process is still running. " +
+            "Run `petdex desktop stop` first.",
+        );
+      }
+    }
+  }
+
+  // On Windows, give the OS a moment to release the file lock after
+  // the process exits. taskkill returns before the kernel fully
+  // closes all handles, so a rename immediately after can still get
+  // EPERM on a recently-exited process.
+  if (process.platform === "win32" && wasRunning) {
+    await new Promise((res) => setTimeout(res, 500));
   }
 
   // Phase 3: commit. commitDesktopAssets rolls back from .prev
   // snapshots if any rename fails; we still have the previous
   // coherent install on disk. We let the throw bubble up as-is so
   // the caller's outer error handler reports it.
-  await commitDesktopAssets(staged);
+  await deps.commitDesktopAssets(staged);
 
-  await writeFile(VERSION_FILE, `${release.tag_name}\n`);
+  await writeInstalledVersion(deps.versionFile, release.tag_name);
 
   // Phase 4: restart so the user picks up the new binary + sidecar.
   //
@@ -313,7 +434,7 @@ export async function runUpdate(
         ? "Asking sidecar to release port"
         : `${pc.dim("•")} Asking sidecar to release port`,
     );
-    const handedOff = await requestSidecarHandoff();
+    const handedOff = await deps.requestSidecarHandoff();
     info(
       silent
         ? handedOff
@@ -323,7 +444,7 @@ export async function runUpdate(
           ? `${pc.dim("•")} Sidecar acknowledged handoff`
           : `${pc.dim("•")} Sidecar handoff unavailable, falling back to port wait`,
     );
-    const portFree = await waitForPortRelease(SIDECAR_PORT, {
+    const portFree = await deps.waitForPortRelease(SIDECAR_PORT, {
       timeoutMs: 10_000,
     });
     if (!portFree) {
@@ -343,7 +464,7 @@ export async function runUpdate(
         ? "Restarting petdex-desktop"
         : `${pc.dim("•")} Restarting petdex-desktop`,
     );
-    const startResult = await startDesktop();
+    const startResult = await deps.startDesktop();
     if (startResult.ok) {
       info(
         silent
@@ -366,7 +487,7 @@ export async function runUpdate(
     duration_ms: Date.now() - updateStartedAt,
   });
 
-  await runHookRefresh(info, warn, silent);
+  await deps.hookRefresh(info, warn, silent);
 
   const note = installed
     ? `${installed}  ->  ${release.tag_name}`

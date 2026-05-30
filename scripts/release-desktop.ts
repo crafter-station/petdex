@@ -68,11 +68,14 @@ function parseArgs(argv: string[]): Args {
     else positional.push(a);
   }
   if (positional.length !== 1) {
-    die("usage: bun scripts/release-desktop.ts <version> --notes \"...\" [--skip-build] [--draft]");
+    die(
+      'usage: bun scripts/release-desktop.ts <version> --notes "..." [--skip-build] [--draft]',
+    );
   }
   let version = positional[0];
   if (version.startsWith("v")) version = version.slice(1);
-  if (version.startsWith("desktop-v")) version = version.slice("desktop-v".length);
+  if (version.startsWith("desktop-v"))
+    version = version.slice("desktop-v".length);
   if (!/^\d+\.\d+\.\d+$/.test(version)) {
     die(`invalid version: ${version} (expected semver like 0.1.7)`);
   }
@@ -93,7 +96,15 @@ function step(label: string) {
   console.log(`\n=== ${label} ===`);
 }
 
-function run(cmd: string, args: string[], opts: { cwd?: string; env?: Record<string, string>; allowFail?: boolean } = {}): { stdout: string; stderr: string; status: number } {
+function run(
+  cmd: string,
+  args: string[],
+  opts: {
+    cwd?: string;
+    env?: Record<string, string>;
+    allowFail?: boolean;
+  } = {},
+): { stdout: string; stderr: string; status: number } {
   const r = spawnSync(cmd, args, {
     cwd: opts.cwd ?? REPO_ROOT,
     env: { ...process.env, ...(opts.env ?? {}) },
@@ -105,7 +116,11 @@ function run(cmd: string, args: string[], opts: { cwd?: string; env?: Record<str
   if (r.status !== 0 && !opts.allowFail) {
     die(`command failed (exit ${r.status}): ${cmd} ${args.join(" ")}`);
   }
-  return { stdout: r.stdout || "", stderr: r.stderr || "", status: r.status ?? -1 };
+  return {
+    stdout: r.stdout || "",
+    stderr: r.stderr || "",
+    status: r.status ?? -1,
+  };
 }
 
 function resolveAppleEnv(): Record<string, string> {
@@ -123,7 +138,8 @@ function resolveAppleEnv(): Record<string, string> {
       path.join(homedir(), ".appleconnect", path.basename(key)),
     ].filter((p): p is string => !!p);
     const resolved = candidates.find((p) => existsSync(p));
-    if (!resolved) die(`APPLE_API_KEY=${key} not found in any of: ${candidates.join(", ")}`);
+    if (!resolved)
+      die(`APPLE_API_KEY=${key} not found in any of: ${candidates.join(", ")}`);
     env.APPLE_API_KEY = resolved;
   }
   if (!process.env.APPLE_API_KEY_ID) die("APPLE_API_KEY_ID is required");
@@ -131,9 +147,13 @@ function resolveAppleEnv(): Record<string, string> {
   // SIGN_IDENTITY: if not provided, try to find the only Developer ID
   // Application identity in the keychain.
   if (!process.env.SIGN_IDENTITY) {
-    const r = spawnSync("security", ["find-identity", "-v", "-p", "codesigning"], {
-      encoding: "utf8",
-    });
+    const r = spawnSync(
+      "security",
+      ["find-identity", "-v", "-p", "codesigning"],
+      {
+        encoding: "utf8",
+      },
+    );
     const matches = (r.stdout || "")
       .split("\n")
       .filter((l) => l.includes("Developer ID Application"))
@@ -143,9 +163,13 @@ function resolveAppleEnv(): Record<string, string> {
       env.SIGN_IDENTITY = matches[0];
       console.log(`auto-detected SIGN_IDENTITY: ${matches[0]}`);
     } else if (matches.length === 0) {
-      die("SIGN_IDENTITY not set and no 'Developer ID Application' identity in keychain");
+      die(
+        "SIGN_IDENTITY not set and no 'Developer ID Application' identity in keychain",
+      );
     } else {
-      die(`SIGN_IDENTITY not set and multiple Developer ID identities found: ${matches.join("; ")}. Set SIGN_IDENTITY explicitly.`);
+      die(
+        `SIGN_IDENTITY not set and multiple Developer ID identities found: ${matches.join("; ")}. Set SIGN_IDENTITY explicitly.`,
+      );
     }
   }
   // ZERO_NATIVE_PATH default — sibling layout is the dev convention.
@@ -159,7 +183,9 @@ function resolveAppleEnv(): Record<string, string> {
       env.ZERO_NATIVE_PATH = found;
       console.log(`auto-detected ZERO_NATIVE_PATH: ${found}`);
     } else {
-      die(`ZERO_NATIVE_PATH not set and no checkout found in ${guesses.join(", ")}`);
+      die(
+        `ZERO_NATIVE_PATH not set and no checkout found in ${guesses.join(", ")}`,
+      );
     }
   }
   return env;
@@ -169,12 +195,19 @@ function preflightTag(version: string): string {
   const tag = `desktop-v${version}`;
   // Local tag check
   const local = run("git", ["tag", "-l", tag], { allowFail: true });
-  if (local.stdout.trim() === tag) die(`local tag ${tag} already exists. Delete with: git tag -d ${tag}`);
+  if (local.stdout.trim() === tag)
+    die(`local tag ${tag} already exists. Delete with: git tag -d ${tag}`);
   // Remote tag check
-  const remote = run("git", ["ls-remote", "--tags", "origin", tag], { allowFail: true });
+  const remote = run("git", ["ls-remote", "--tags", "origin", tag], {
+    allowFail: true,
+  });
   if (remote.stdout.includes(tag)) die(`remote tag ${tag} already exists`);
   // Existing GH release check
-  const release = run("gh", ["release", "view", tag, "--repo", "crafter-station/petdex"], { allowFail: true });
+  const release = run(
+    "gh",
+    ["release", "view", tag, "--repo", "crafter-station/petdex"],
+    { allowFail: true },
+  );
   if (release.status === 0) die(`GH release ${tag} already exists`);
   return tag;
 }
@@ -184,12 +217,28 @@ function preflightTree(): void {
   // build artifacts (DMGs, bare binaries) and sidecar/server.js are
   // OK to be uncommitted — those are outputs, not inputs. We check
   // src/, sidecar/server.ts, build.zig, and assets/ specifically.
-  const r = run("git", ["status", "--porcelain", "--", "packages/petdex-desktop/src", "packages/petdex-desktop/sidecar/server.ts", "packages/petdex-desktop/sidecar/state-queue.ts", "packages/petdex-desktop/sidecar/running-variant.ts", "packages/petdex-desktop/build.zig", "packages/petdex-desktop/assets"], { allowFail: true });
+  const r = run(
+    "git",
+    [
+      "status",
+      "--porcelain",
+      "--",
+      "packages/petdex-desktop/src",
+      "packages/petdex-desktop/sidecar/server.ts",
+      "packages/petdex-desktop/sidecar/state-queue.ts",
+      "packages/petdex-desktop/sidecar/running-variant.ts",
+      "packages/petdex-desktop/build.zig",
+      "packages/petdex-desktop/assets",
+    ],
+    { allowFail: true },
+  );
   const dirty = r.stdout.trim();
   if (dirty) {
     console.warn("\n!!! Uncommitted changes in desktop sources:");
     console.warn(dirty);
-    console.warn("!!! Commit these before tagging or the release will ship from a state nobody can reproduce.\n");
+    console.warn(
+      "!!! Commit these before tagging or the release will ship from a state nobody can reproduce.\n",
+    );
     if (!process.env.RELEASE_DESKTOP_ALLOW_DIRTY) {
       die("re-run with RELEASE_DESKTOP_ALLOW_DIRTY=1 to override");
     }
@@ -215,7 +264,7 @@ function preflightDetachDmgVolumes(): void {
   step("Detach lingering Petdex DMG mounts");
   const r = spawnSync("mount", [], { encoding: "utf8" });
   if (r.status !== 0) {
-    console.log("  ! could not list mounts, skipping (mount exit " + r.status + ")");
+    console.log(`  ! could not list mounts, skipping (mount exit ${r.status})`);
     return;
   }
   const mountPoints = (r.stdout || "")
@@ -265,7 +314,9 @@ function verifyArtifacts(): string[] {
     }
   }
   if (missing.length > 0) {
-    die(`missing artifacts: ${missing.join(", ")}. Re-run without --skip-build.`);
+    die(
+      `missing artifacts: ${missing.join(", ")}. Re-run without --skip-build.`,
+    );
   }
   // Sidecar lives at sidecar/server.js but uploads as petdex-desktop-sidecar.js.
   const sidecarSrc = path.join(SIDECAR_DIR, "server.js");
@@ -285,7 +336,14 @@ function tagAndPush(version: string, tag: string): void {
   run("git", ["push", "origin", tag]);
 }
 
-function ghRelease(tag: string, version: string, notes: string, assets: string[], draft: boolean, prerelease: boolean): void {
+function ghRelease(
+  tag: string,
+  version: string,
+  notes: string,
+  assets: string[],
+  draft: boolean,
+  prerelease: boolean,
+): void {
   step(`Create GH release ${tag} with ${assets.length} assets`);
   const ghArgs = [
     "release",
@@ -312,26 +370,35 @@ async function probeProduction(tag: string): Promise<void> {
   const ghUrl = `https://api.github.com/repos/crafter-station/petdex/releases/tags/${tag}`;
   const ghRes = await fetch(ghUrl);
   if (!ghRes.ok) {
-    console.warn(`  ! GH API didn't have ${tag} yet (status ${ghRes.status}). Replication delay; check in a minute.`);
+    console.warn(
+      `  ! GH API didn't have ${tag} yet (status ${ghRes.status}). Replication delay; check in a minute.`,
+    );
     return;
   }
   console.log(`  ✓ GH API has ${tag}`);
   // Probe proxy — informational only, don't fail the run.
   for (let i = 0; i < 3; i++) {
-    const r = await fetch("https://petdex.crafter.run/api/desktop/latest-release", {
-      redirect: "manual",
-    });
+    const r = await fetch(
+      "https://petdex.crafter.run/api/desktop/latest-release",
+      {
+        redirect: "manual",
+      },
+    );
     const loc = r.headers.get("location") ?? "";
     if (loc.includes(tag)) {
       console.log(`  ✓ proxy resolved to ${loc}`);
       return;
     }
     if (i < 2) {
-      console.log(`  ... proxy still serving ${loc || "no redirect"}, retrying in 30s`);
+      console.log(
+        `  ... proxy still serving ${loc || "no redirect"}, retrying in 30s`,
+      );
       await new Promise((resolve) => setTimeout(resolve, 30000));
     }
   }
-  console.warn(`  ! proxy hasn't picked up ${tag} after 60s. SWR cache will refresh soon.`);
+  console.warn(
+    `  ! proxy hasn't picked up ${tag} after 60s. SWR cache will refresh soon.`,
+  );
 }
 
 async function main() {
@@ -360,7 +427,9 @@ async function main() {
   }
 
   console.log(`\n✓ Released ${tag}`);
-  console.log(`  https://github.com/crafter-station/petdex/releases/tag/${tag}`);
+  console.log(
+    `  https://github.com/crafter-station/petdex/releases/tag/${tag}`,
+  );
   console.log(`  https://petdex.crafter.run/download`);
 }
 

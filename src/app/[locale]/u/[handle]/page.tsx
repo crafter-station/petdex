@@ -443,6 +443,7 @@ export default async function UserProfilePage({ params }: PageProps) {
             <PinnedReorderGrid
               pets={featuredPets}
               petStateCount={petStates.length}
+              hideAuthor
             />
           ) : (
             <div className="space-y-4">
@@ -480,6 +481,7 @@ export default async function UserProfilePage({ params }: PageProps) {
                         pet={pet}
                         index={index}
                         stateCount={petStates.length}
+                        hideAuthor
                       />
                     </div>
                   ))}

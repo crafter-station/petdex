@@ -27,7 +27,16 @@ export type BubbleEvent =
  */
 function canonicalToolKind(
   toolName: string,
-): "read" | "edit" | "write" | "bash" | "grep" | "glob" | "webfetch" | "task" | "unknown" {
+):
+  | "read"
+  | "edit"
+  | "write"
+  | "bash"
+  | "grep"
+  | "glob"
+  | "webfetch"
+  | "task"
+  | "unknown" {
   const lower = toolName.toLowerCase();
   if (lower === "read") return "read";
   if (lower === "edit" || lower === "multiedit") return "edit";
@@ -70,7 +79,8 @@ export function formatBubble(event: BubbleEvent): string {
 
   switch (kind) {
     case "read": {
-      const path = fieldFrom(toolInput, "file_path") ?? fieldFrom(toolInput, "path");
+      const path =
+        fieldFrom(toolInput, "file_path") ?? fieldFrom(toolInput, "path");
       const name = path ? clip(basename(path)) : null;
       if (name) return past ? `Read ${name}` : `Reading ${name}`;
       return past ? "Read file" : "Reading file";
@@ -94,14 +104,18 @@ export function formatBubble(event: BubbleEvent): string {
     case "grep": {
       const pattern = fieldFrom(toolInput, "pattern");
       if (pattern) {
-        return past ? `Searched "${clip(pattern, 28)}"` : `Searching "${clip(pattern, 28)}"`;
+        return past
+          ? `Searched "${clip(pattern, 28)}"`
+          : `Searching "${clip(pattern, 28)}"`;
       }
       return past ? "Searched files" : "Searching files";
     }
     case "glob": {
       const pattern = fieldFrom(toolInput, "pattern");
       if (pattern) {
-        return past ? `Listed ${clip(pattern, 28)}` : `Listing ${clip(pattern, 28)}`;
+        return past
+          ? `Listed ${clip(pattern, 28)}`
+          : `Listing ${clip(pattern, 28)}`;
       }
       return past ? "Listed files" : "Listing files";
     }
@@ -110,7 +124,9 @@ export function formatBubble(event: BubbleEvent): string {
       if (url) {
         try {
           const host = new URL(url).hostname;
-          return past ? `Fetched ${clip(host, 28)}` : `Fetching ${clip(host, 28)}`;
+          return past
+            ? `Fetched ${clip(host, 28)}`
+            : `Fetching ${clip(host, 28)}`;
         } catch {}
       }
       return past ? "Fetched web" : "Searching web";
@@ -121,7 +137,6 @@ export function formatBubble(event: BubbleEvent): string {
       if (desc) return past ? `Subagent done` : `Spawning ${clip(desc, 28)}`;
       return past ? "Subagent done" : "Spawning subagent";
     }
-    case "unknown":
     default: {
       // Generic fallback for MCP tools, custom tools, etc. Use the raw
       // tool name so the user can still tell what's happening.

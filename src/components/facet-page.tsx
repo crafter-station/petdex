@@ -18,7 +18,7 @@ type FacetPageProps = {
   eyebrow: string;
   title: string;
   intro: string;
-  count: number;
+  countLabel: string;
   pets: PetWithMetrics[];
   exampleSlug?: string;
   relatedLabel: string;
@@ -29,7 +29,7 @@ export async function FacetPage({
   eyebrow,
   title,
   intro,
-  count,
+  countLabel,
   pets,
   exampleSlug,
   relatedLabel,
@@ -59,7 +59,7 @@ export async function FacetPage({
               className="mt-5 w-full max-w-sm"
             />
             <p className="mt-3 font-mono text-[11px] tracking-[0.18em] text-muted-3 uppercase">
-              {count} pets in this collection
+              {countLabel}
             </p>
           </div>
         </div>

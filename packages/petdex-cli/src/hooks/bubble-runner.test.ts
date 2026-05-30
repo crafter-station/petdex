@@ -12,7 +12,9 @@ describe("eventFromArgs - session-level", () => {
   });
 
   test("user-prompt returns session.start", () => {
-    expect(eventFromArgs(["user-prompt"], "")).toEqual({ kind: "session.start" });
+    expect(eventFromArgs(["user-prompt"], "")).toEqual({
+      kind: "session.start",
+    });
   });
 
   test("waiting / notification returns session.waiting", () => {

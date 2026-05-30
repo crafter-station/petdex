@@ -28,7 +28,7 @@ const AXES = [
     key: "popularity",
     pointDx: 88,
     pointDy: 0,
-    labelX: 160,
+    labelX: 174,
     labelY: CENTER,
   },
   {
@@ -42,7 +42,7 @@ const AXES = [
     key: "freshness",
     pointDx: -88,
     pointDy: 0,
-    labelX: 40,
+    labelX: 26,
     labelY: CENTER,
   },
 ] as const satisfies ReadonlyArray<{
@@ -69,7 +69,7 @@ export function PetRadar(props: PetRadarProps) {
   return (
     <svg
       viewBox={`0 0 ${SIZE} ${SIZE}`}
-      className="mx-auto block aspect-square h-auto w-full max-w-[200px]"
+      className="mx-auto block aspect-square h-auto w-full max-w-[200px] overflow-visible"
       role="img"
       aria-label={props.ariaLabel}
     >

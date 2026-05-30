@@ -8,6 +8,12 @@ import { track } from "@vercel/analytics";
 import { ArrowRight } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
+import {
+  buildPetdexActivateUrl,
+  isMacDesktop,
+  openPetdexDeepLink,
+} from "@/lib/petdex-desktop-link";
+
 type OpenInPetdexButtonProps = {
   slug: string;
 };
@@ -39,63 +45,19 @@ export function OpenInPetdexButton({ slug }: OpenInPetdexButtonProps) {
 
   useEffect(() => {
     setMounted(true);
-    if (typeof navigator === "undefined") return;
-    const ua = navigator.userAgent ?? "";
-    const platform =
-      (navigator as Navigator & { platform?: string }).platform ?? "";
-    // Desktop macOS only. The download flow only ships a macOS
-    // desktop binary (no iOS app exists), so showing this CTA on
-    // iPhone/iPad would dead-end at /download. iPadOS reports as
-    // "MacIntel" on Safari so we also need to rule out touch +
-    // small viewport heuristics used by iPadOS in desktop mode.
-    const isIos =
-      /iPhone|iPad|iPod/i.test(platform) || /iPhone|iPad|iPod/i.test(ua);
-    const looksLikeIpadDesktopMode =
-      platform === "MacIntel" &&
-      typeof navigator.maxTouchPoints === "number" &&
-      navigator.maxTouchPoints > 1;
-    if (isIos || looksLikeIpadDesktopMode) {
-      setIsMac(false);
-      return;
-    }
-    setIsMac(/^Mac/i.test(platform) || /Mac OS X/i.test(ua));
+    setIsMac(isMacDesktop());
   }, []);
 
   if (!mounted || !isMac) return null;
 
   const downloadHref = `/${locale}/download?next=${encodeURIComponent(`install/${slug}`)}`;
-  const deepLink = `petdex://${slug}`;
+  const deepLink = buildPetdexActivateUrl(slug);
 
   function handleClick(e: React.MouseEvent<HTMLAnchorElement>) {
-    // Only intercept if the user isn't doing meta/ctrl/middle-click.
     if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
-    // Track BEFORE preventDefault — the analytics call needs to fire
-    // before the URL scheme attempt blurs the page (page-blur cancels
-    // pending Vercel Analytics queue flushes on some browsers).
     track("open_in_petdex_click", { slug, source: "pet_page" });
     e.preventDefault();
-    // Schedule the fallback redirect first so that even if the deep
-    // link blocks the browser somehow, the user still ends up
-    // somewhere useful.
-    let cancelled = false;
-    const timeout = window.setTimeout(() => {
-      if (cancelled) return;
-      window.location.href = downloadHref;
-    }, 1200);
-    // If the OS hands the URL off to Petdex, the page loses focus
-    // briefly. We use that as a signal to cancel the fallback.
-    const onBlur = () => {
-      cancelled = true;
-      window.clearTimeout(timeout);
-      window.removeEventListener("blur", onBlur);
-      window.removeEventListener("pagehide", onBlur);
-    };
-    window.addEventListener("blur", onBlur);
-    window.addEventListener("pagehide", onBlur);
-    // Trigger the URL scheme. Setting location.href is the most
-    // reliable way — it won't open a new tab and it survives popup
-    // blockers because we're inside a synchronous click handler.
-    window.location.href = deepLink;
+    openPetdexDeepLink(deepLink, downloadHref);
   }
 
   return (

@@ -20,9 +20,8 @@
 // header. For our scale (low hundreds), the risk is acceptable. If
 // this list ever grows past ~1k, switch to explicit opt-in.
 
-import { neon } from "@neondatabase/serverless";
-
 import { createClerkClient } from "@clerk/backend";
+import { neon } from "@neondatabase/serverless";
 
 import { requiredEnv } from "./env";
 

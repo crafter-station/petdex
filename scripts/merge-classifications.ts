@@ -50,10 +50,12 @@ for (const [slug, row] of Object.entries(unflagged)) {
     row.franchise !== "ORIGINAL" &&
     row.franchise !== "NONE"
   ) {
+    // biome-ignore lint/suspicious/noAssignInExpressions: intentional accumulator pattern
     (franchises[row.franchise] ??= new Set()).add(slug);
   }
   for (const cat of row.categories ?? []) {
     if (!cat || typeof cat !== "string") continue;
+    // biome-ignore lint/suspicious/noAssignInExpressions: intentional accumulator pattern
     (categories[cat] ??= new Set()).add(slug);
   }
 }

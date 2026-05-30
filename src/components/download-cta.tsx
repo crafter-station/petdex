@@ -1,6 +1,8 @@
 "use client";
 
-import { ArrowRight, Clock } from "lucide-react";
+import Image from "next/image";
+
+import { Apple, ArrowDownToLine, Clock } from "lucide-react";
 
 import {
   type MacArch,
@@ -20,9 +22,9 @@ const MACOS_X64_URL = "/api/desktop/latest-release?asset=darwin-x64";
  * dead-ends in a binary the user can't run.
  *
  *   macOS         → primary download button (direct binary)
- *   linux/win     → disabled "Coming soon" pill + still-works CLI
- *                   note (CLI itself runs on those platforms too,
- *                   even if the GUI binary doesn't)
+ *   linux/win     → disabled "Coming soon" pill + still-works CLI note
+ *                   (CLI itself runs on those platforms too, even if the
+ *                   GUI binary isn't self-contained yet)
  *   ios/ipados    → "macOS-only desktop" coming-soon, no CTA at all
  *   android       → same as iOS
  *   unknown/other → neutral placeholder (SSR + first paint, or a
@@ -38,12 +40,16 @@ export function DownloadCTA({
   primaryLabel,
   cliCommand,
   cliSubtext,
+  manualLabel,
+  manualSubtext,
   comingSoonLabel,
   desktopOnlyLabel,
 }: {
   primaryLabel: string;
   cliCommand: string;
   cliSubtext: string;
+  manualLabel: string;
+  manualSubtext: string;
   comingSoonLabel: string;
   desktopOnlyLabel: string;
 }) {
@@ -51,36 +57,60 @@ export function DownloadCTA({
   const arch = useMacArch();
 
   return (
-    <div className="mt-10 flex w-full flex-col items-center gap-3">
-      <div className="flex w-full flex-col items-stretch justify-center gap-3 sm:flex-row sm:items-center">
-        <PrimaryButton
+    <div className="mt-8 grid w-full min-w-0 gap-3">
+      <div className="min-w-0 overflow-hidden rounded-lg border border-brand/20 bg-surface p-3 shadow-[0_18px_48px_-38px_rgba(15,23,42,0.55)]">
+        <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center">
+          <span className="relative grid size-11 shrink-0 place-items-center overflow-hidden rounded-lg border border-brand/20 bg-background shadow-sm">
+            <Image
+              src="/brand/petdex-desktop-icon.png"
+              alt=""
+              fill
+              className="object-contain p-1"
+              sizes="44px"
+            />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-base font-semibold text-foreground">
+              {primaryLabel}
+            </p>
+            <p className="mt-0.5 text-sm leading-5 text-muted-2">
+              {cliSubtext}
+            </p>
+          </div>
+          <CommandLine
+            command={cliCommand}
+            source="download-hero-primary"
+            className="!h-10 w-full min-w-0 max-w-full !rounded-lg !border-border-base !bg-background !px-3 !py-2 !text-[12px] sm:w-auto sm:min-w-[260px] sm:max-w-[340px]"
+          />
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <ManualDownloadButton
           platform={platform}
           arch={arch}
-          primaryLabel={primaryLabel}
+          manualLabel={manualLabel}
           comingSoonLabel={comingSoonLabel}
           desktopOnlyLabel={desktopOnlyLabel}
         />
-        <CommandLine
-          command={cliCommand}
-          source="download-hero"
-          className="!h-12 w-full !rounded-full !px-5 !text-[13px] sm:w-auto sm:min-w-[280px]"
-        />
+        <p className="text-xs leading-5 text-muted-3 sm:max-w-[260px]">
+          {manualSubtext}
+        </p>
       </div>
-      <p className="text-xs text-muted-3">{cliSubtext}</p>
     </div>
   );
 }
 
-function PrimaryButton({
+function ManualDownloadButton({
   platform,
   arch,
-  primaryLabel,
+  manualLabel,
   comingSoonLabel,
   desktopOnlyLabel,
 }: {
   platform: Platform;
   arch: MacArch;
-  primaryLabel: string;
+  manualLabel: string;
   comingSoonLabel: string;
   desktopOnlyLabel: string;
 }) {
@@ -91,7 +121,7 @@ function PrimaryButton({
     return (
       <span
         aria-hidden="true"
-        className="inline-flex h-12 w-[180px] animate-pulse items-center justify-center rounded-full bg-surface-muted text-sm text-muted-3"
+        className="inline-flex h-11 w-full animate-pulse items-center justify-center rounded-lg bg-surface-muted text-sm text-muted-3 sm:w-[220px]"
       />
     );
   }
@@ -113,29 +143,28 @@ function PrimaryButton({
       <a
         href={href}
         rel="noreferrer"
-        className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-inverse px-6 text-sm font-medium text-on-inverse transition hover:bg-inverse-hover"
+        className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-border-base bg-surface px-4 text-sm font-medium text-foreground transition hover:border-border-strong hover:bg-surface-muted sm:w-auto sm:min-w-[220px]"
       >
-        {primaryLabel}
+        <ArrowDownToLine className="size-4" />
+        {manualLabel}
         {labelSuffix ? (
           <span className="ml-1 text-xs opacity-75">{labelSuffix}</span>
         ) : null}
-        <ArrowRight className="size-4" />
       </a>
     );
   }
 
-  // Desktop platforms we don't have a binary for yet. The button
-  // is non-clickable but mirrors the layout so we don't reflow.
+  // Linux / Windows — binary not yet self-contained (sidecar bundling pending).
   if (platform === "linux" || platform === "windows") {
     return (
       <span
         aria-disabled="true"
-        className="inline-flex h-12 cursor-not-allowed items-center justify-center gap-2 rounded-full border border-border-base bg-surface-muted px-6 text-sm font-medium text-muted-2"
+        className="inline-flex h-11 w-full cursor-not-allowed items-center justify-center gap-2 rounded-lg border border-border-base bg-surface-muted px-4 text-sm font-medium text-muted-2 sm:w-auto sm:min-w-[220px]"
       >
         <Clock className="size-4" />
         {comingSoonLabel.replace(
           "{os}",
-          platform === "linux" ? "Linux" : "Windows",
+          platform === "windows" ? "Windows" : "Linux",
         )}
       </span>
     );
@@ -145,9 +174,9 @@ function PrimaryButton({
   return (
     <span
       aria-disabled="true"
-      className="inline-flex h-12 cursor-not-allowed items-center justify-center gap-2 rounded-full border border-border-base bg-surface-muted px-6 text-sm font-medium text-muted-2"
+      className="inline-flex h-11 w-full cursor-not-allowed items-center justify-center gap-2 rounded-lg border border-border-base bg-surface-muted px-4 text-sm font-medium text-muted-2 sm:w-auto sm:min-w-[220px]"
     >
-      <Clock className="size-4" />
+      <Apple className="size-4" />
       {desktopOnlyLabel}
     </span>
   );

@@ -95,7 +95,9 @@ function titleFor(big: string, secondary: string): string {
 // =============== PHASE 1 — WIPE sub-collections ==================
 
 async function phase1() {
-  console.log(`\n=== PHASE 1: Wipe sub-collections (mode=${dryRun ? "DRY" : "APPLY"}) ===\n`);
+  console.log(
+    `\n=== PHASE 1: Wipe sub-collections (mode=${dryRun ? "DRY" : "APPLY"}) ===\n`,
+  );
   // Sub-collection slugs are exactly category-<a>-<b> with one extra
   // dash beyond the prefix. Match via regex on the database side.
   const targets = await sql`
@@ -293,7 +295,9 @@ async function phase2() {
     }
   }
 
-  console.log(`\n${totalSubs} sub-collections ${dryRun ? "would be" : ""} seeded`);
+  console.log(
+    `\n${totalSubs} sub-collections ${dryRun ? "would be" : ""} seeded`,
+  );
 }
 
 // =============== PHASE 3 — HIERARCHY enforcement ==================
@@ -332,7 +336,10 @@ async function phase3() {
   >();
   for (const r of rows) {
     const arr = byPet.get(r.pet_slug) ?? [];
-    arr.push({ collection_id: r.collection_id, collection_slug: r.collection_slug });
+    arr.push({
+      collection_id: r.collection_id,
+      collection_slug: r.collection_slug,
+    });
     byPet.set(r.pet_slug, arr);
   }
 
@@ -374,7 +381,9 @@ async function phase3() {
   }
 
   console.log(`pets affected: ${petsAffected}`);
-  console.log(`pet_collection_items rows ${dryRun ? "would be" : ""} removed: ${toRemove}\n`);
+  console.log(
+    `pet_collection_items rows ${dryRun ? "would be" : ""} removed: ${toRemove}\n`,
+  );
   console.log("Sample (first 10):");
   for (const s of sampleRemovals) console.log(`  ${s}`);
 
@@ -448,7 +457,8 @@ async function phase4() {
     ORDER BY n DESC LIMIT 15
   `) as Array<{ slug: string; n: number }>;
   console.log("\nTop 15 by pet count:");
-  for (const r of sizes) console.log(`  ${r.n.toString().padStart(4)}  ${r.slug}`);
+  for (const r of sizes)
+    console.log(`  ${r.n.toString().padStart(4)}  ${r.slug}`);
 
   const dist = (await sql`
     SELECT n, count(*)::int AS pets

@@ -5,23 +5,34 @@ import {
   ArrowRight,
   CheckCircle,
   Clock,
+  Command,
   MonitorSmartphone,
   Pointer,
+  ShieldCheck,
+  Sparkles,
   Zap,
 } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { buildLocaleAlternates } from "@/lib/locale-routing";
+import { getPet } from "@/lib/pets";
 
 import { CommandLine } from "@/components/command-line";
 import { DownloadCTA } from "@/components/download-cta";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
+import { StaticPetSprite } from "@/components/static-pet-sprite";
 
 import { hasLocale } from "@/i18n/config";
-import { buildSetupSteps, parsePendingPet } from "./setup-steps";
+import { buildSetupSteps, parsePendingInstallSlugs } from "./setup-steps";
 
 const SITE_URL = "https://petdex.crafter.run";
+const DEFAULT_PREVIEW_PET_SLUG = "boba";
+const DEFAULT_PREVIEW_PET = {
+  displayName: "Boba",
+  spritesheetPath:
+    "https://pub-94495283df974cfea5e98d6a9e3fa462.r2.dev/curated/boba/spritesheet.webp",
+};
 
 // Auto-detected /download/opengraph-image is locale-prefixed
 // (/en/download/opengraph-image) and next-intl rewrites that with a
@@ -80,7 +91,29 @@ export default async function DownloadPage({
   const t = await getTranslations("download");
   const locale = await getLocale();
   const params = await searchParams;
-  const pendingPet = parsePendingPet(params.next);
+  const pendingInstallSlugs = parsePendingInstallSlugs(params.next);
+  const activationCommand =
+    pendingInstallSlugs && pendingInstallSlugs.length > 0
+      ? `npx petdex init && npx petdex install ${pendingInstallSlugs.join(" ")}`
+      : "npx petdex init";
+  const pendingLabel =
+    pendingInstallSlugs && pendingInstallSlugs.length > 0
+      ? pendingInstallSlugs.length === 1
+        ? pendingInstallSlugs[0]
+        : pendingInstallSlugs.join(", ")
+      : null;
+  const previewIsPending = (pendingInstallSlugs?.length ?? 0) > 0;
+  const previewSlug = pendingInstallSlugs?.[0] ?? DEFAULT_PREVIEW_PET_SLUG;
+  const resolvedPreviewPet = await getPet(previewSlug);
+  const previewPet = resolvedPreviewPet
+    ? {
+        displayName: resolvedPreviewPet.displayName,
+        spritesheetPath: resolvedPreviewPet.spritesheetPath,
+      }
+    : previewSlug === DEFAULT_PREVIEW_PET_SLUG
+      ? DEFAULT_PREVIEW_PET
+      : null;
+  const previewPetName = previewPet?.displayName ?? pendingLabel;
 
   const features = [
     {
@@ -118,67 +151,91 @@ export default async function DownloadPage({
     },
   ];
 
+  const activationItems = [
+    {
+      icon: Command,
+      label: t("activation.items.hooks"),
+    },
+    {
+      icon: ShieldCheck,
+      label: t("activation.items.desktop"),
+    },
+    {
+      icon: Sparkles,
+      label: t("activation.items.pet"),
+    },
+  ];
+
   return (
     <main className="relative min-h-dvh bg-background text-foreground">
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-x-0 top-0 h-[760px] overflow-clip"
-      >
-        <div className="absolute -top-40 left-1/2 size-[900px] -translate-x-1/2 rounded-full bg-[radial-gradient(closest-side,oklch(from_var(--brand)_l_c_h/0.18),transparent_70%)] blur-3xl dark:bg-[radial-gradient(closest-side,oklch(from_var(--brand)_l_c_h/0.16),transparent_70%)]" />
-        <div className="absolute top-32 left-[8%] size-[480px] rounded-full bg-[radial-gradient(closest-side,oklch(from_var(--brand-light)_l_c_h/0.22),transparent_75%)] blur-3xl dark:bg-[radial-gradient(closest-side,oklch(from_var(--gradient-a)_l_c_h/0.3),transparent_75%)] dark:opacity-50" />
-        <div className="absolute top-52 right-[6%] size-[420px] rounded-full bg-[radial-gradient(closest-side,oklch(from_var(--brand-deep)_l_c_h/0.18),transparent_75%)] blur-3xl dark:bg-[radial-gradient(closest-side,oklch(from_var(--gradient-b)_l_c_h/0.25),transparent_75%)] dark:opacity-50" />
-      </div>
-
       <SiteHeader />
 
-      {pendingPet ? (
-        <div className="relative z-10 border-border-base/60 border-b bg-brand/10 backdrop-blur-sm">
-          <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-1 px-5 py-3 md:flex-row md:items-center md:gap-3 md:px-8">
-            <p className="text-sm text-foreground">
-              <span className="font-semibold text-brand">
-                {t("pendingPet.eyebrow")}
-              </span>{" "}
-              {t("pendingPet.messageBefore")}{" "}
-              <code className="rounded bg-surface-muted px-1.5 py-0.5 font-mono text-xs">
-                {pendingPet}
-              </code>{" "}
-              {t("pendingPet.messageAfter")}
+      <section className="mx-auto w-full max-w-[1440px] px-5 pt-10 pb-12 md:px-8 md:pt-16">
+        <div className="grid min-w-0 items-center gap-10 lg:grid-cols-[minmax(0,0.95fr)_minmax(420px,1fr)]">
+          <div className="min-w-0 max-w-2xl">
+            <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
+              {t("eyebrow")}
             </p>
-            <p className="text-xs text-muted-2 md:ml-auto">
-              {t("pendingPet.hint")}
+            <h1 className="mt-3 text-pretty text-[40px] leading-[0.98] font-semibold tracking-tight sm:text-[52px] md:text-[72px]">
+              {t("title")}
+            </h1>
+            <p className="mt-5 max-w-xl text-pretty text-base leading-7 text-muted-1 md:text-lg">
+              {t("subtitle")}
             </p>
-          </div>
-        </div>
-      ) : null}
 
-      <section className="mx-auto w-full max-w-[1440px] px-5 pt-16 pb-12 md:px-8 md:pt-24">
-        <div className="flex flex-col items-center text-center">
-          <div className="relative size-40 drop-shadow-2xl md:size-64">
-            <Image
-              src="/brand/petdex-desktop-icon.png"
-              alt="Petdex Desktop"
-              fill
-              className="object-contain"
-              priority
+            {pendingLabel ? (
+              <div className="mt-6 inline-flex max-w-full items-center gap-2 rounded-lg border border-brand/20 bg-brand-tint px-3 py-2 text-sm text-brand-deep dark:bg-brand-tint-dark dark:text-brand-light">
+                <Sparkles className="size-4 shrink-0" />
+                <span className="min-w-0">
+                  {t("pendingPet.messageBefore")}{" "}
+                  <code className="rounded bg-surface/80 px-1.5 py-0.5 font-mono text-xs">
+                    {pendingLabel}
+                  </code>{" "}
+                  {t("pendingPet.messageAfter")}
+                </span>
+              </div>
+            ) : null}
+
+            <DownloadCTA
+              primaryLabel={t("hero.primaryTitle")}
+              cliCommand={activationCommand}
+              cliSubtext={t("hero.cliSubtext")}
+              manualLabel={t("hero.manualLabel")}
+              manualSubtext={t("hero.manualSubtext")}
+              comingSoonLabel={t("hero.comingSoon")}
+              desktopOnlyLabel={t("hero.desktopOnly")}
             />
+
+            <div className="mt-5 grid gap-2 sm:grid-cols-3">
+              {activationItems.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <div
+                    key={item.label}
+                    className="flex min-w-0 items-center gap-2 rounded-lg border border-border-base bg-surface px-3 py-2 text-sm text-muted-1"
+                  >
+                    <Icon className="size-4 shrink-0 text-brand" />
+                    <span className="truncate">{item.label}</span>
+                  </div>
+                );
+              })}
+            </div>
           </div>
 
-          <p className="mt-8 font-mono text-xs tracking-[0.22em] text-brand uppercase">
-            {t("eyebrow")}
-          </p>
-          <h1 className="mt-3 text-[48px] leading-[0.98] font-semibold tracking-tight md:text-[72px]">
-            {t("title")}
-          </h1>
-          <p className="mt-5 max-w-lg text-balance text-base leading-7 text-muted-1 md:text-lg">
-            {t("subtitle")}
-          </p>
-
-          <DownloadCTA
-            primaryLabel={t("hero.downloadCta")}
-            cliCommand="npx petdex init"
-            cliSubtext={t("hero.cliSubtext")}
-            comingSoonLabel={t("hero.comingSoon")}
-            desktopOnlyLabel={t("hero.desktopOnly")}
+          <DesktopActivationPreview
+            pendingLabel={previewPetName}
+            pendingPet={previewPet}
+            title={t("preview.title")}
+            status={t("preview.status")}
+            terminalLabel={t("preview.terminalLabel")}
+            agentLabel={t("preview.agentLabel")}
+            petLabel={
+              previewPetName
+                ? previewIsPending
+                  ? t("preview.pendingPet", { slug: previewPetName })
+                  : t("preview.demoPet", { slug: previewPetName })
+                : t("preview.defaultPet")
+            }
           />
         </div>
       </section>
@@ -234,7 +291,7 @@ export default async function DownloadPage({
           </h2>
 
           <ol className="mt-10 flex flex-col gap-8">
-            {buildSetupSteps(t, pendingPet).map((step, idx) => {
+            {buildSetupSteps(t, pendingInstallSlugs).map((step, idx) => {
               const number = idx + 1;
               const dotClass = step.dimmed
                 ? "mt-0.5 grid size-7 shrink-0 place-items-center rounded-full bg-surface font-mono text-xs font-semibold text-muted-2 ring-1 ring-border-base"
@@ -314,5 +371,103 @@ export default async function DownloadPage({
 
       <SiteFooter />
     </main>
+  );
+}
+
+function DesktopActivationPreview({
+  pendingLabel,
+  pendingPet,
+  title,
+  status,
+  terminalLabel,
+  agentLabel,
+  petLabel,
+}: {
+  pendingLabel: string | null;
+  pendingPet: { displayName: string; spritesheetPath: string } | null;
+  title: string;
+  status: string;
+  terminalLabel: string;
+  agentLabel: string;
+  petLabel: string;
+}) {
+  return (
+    <div className="relative min-w-0 overflow-hidden rounded-lg border border-border-base bg-surface p-4 shadow-[0_32px_90px_-60px_rgba(15,23,42,0.6)]">
+      <div className="absolute inset-x-0 top-0 h-1 bg-brand" />
+      <div className="flex items-center gap-2 border-border-base border-b pb-3">
+        <span className="size-3 rounded-full bg-rose-400" />
+        <span className="size-3 rounded-full bg-amber-400" />
+        <span className="size-3 rounded-full bg-emerald-400" />
+        <span className="ml-2 truncate text-xs font-medium text-muted-3">
+          Petdex Desktop
+        </span>
+      </div>
+
+      <div className="grid gap-4 pt-5 sm:grid-cols-[1fr_160px]">
+        <div className="space-y-3">
+          <div className="rounded-lg border border-border-base bg-background p-4">
+            <p className="text-xs font-medium text-muted-3">{terminalLabel}</p>
+            <div className="mt-3 space-y-2 font-mono text-xs">
+              <p>
+                <span className="text-brand">$</span>{" "}
+                <span className="text-foreground">npx petdex init</span>
+              </p>
+              <p className="text-muted-3">✓ {agentLabel}</p>
+              <p className="text-muted-3">✓ {petLabel}</p>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-border-base bg-background p-4">
+            <div className="flex items-start gap-3">
+              <div className="relative size-12 shrink-0">
+                <Image
+                  src="/brand/petdex-desktop-icon.png"
+                  alt=""
+                  fill
+                  className="object-contain"
+                  sizes="48px"
+                />
+              </div>
+              <div className="min-w-0">
+                <p className="font-semibold text-foreground">{title}</p>
+                <p className="mt-1 text-sm leading-5 text-muted-2">{status}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="relative min-h-[210px] overflow-hidden rounded-lg border border-border-base bg-[linear-gradient(135deg,var(--surface-muted),var(--surface))] p-3">
+          <div className="absolute inset-x-3 top-3 rounded-lg border border-border-base bg-surface/80 p-3">
+            <div className="h-2 w-24 rounded-full bg-border-base" />
+            <div className="mt-2 h-2 w-16 rounded-full bg-border-base/70" />
+          </div>
+          {pendingPet ? (
+            <div className="pet-sprite-stage absolute right-4 bottom-7 grid size-28 place-items-center rounded-lg border border-brand/20 bg-surface shadow-xl">
+              <StaticPetSprite
+                src={pendingPet.spritesheetPath}
+                state="idle"
+                scale={0.46}
+                label={pendingPet.displayName}
+              />
+            </div>
+          ) : (
+            <div className="absolute right-5 bottom-7 grid size-24 place-items-center rounded-lg border border-brand/20 bg-surface shadow-xl">
+              <Image
+                src="/brand/petdex-desktop-icon.png"
+                alt="Petdex Desktop"
+                width={80}
+                height={80}
+                className="object-contain"
+              />
+            </div>
+          )}
+          {pendingLabel ? (
+            <span className="absolute bottom-3 left-3 max-w-[120px] truncate rounded-lg bg-brand px-2 py-1 text-xs font-medium text-on-inverse">
+              {pendingLabel}
+            </span>
+          ) : null}
+        </div>
+      </div>
+    </div>
   );
 }

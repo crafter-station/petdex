@@ -12,6 +12,7 @@ import {
 } from "next-intl/server";
 
 import { AnnouncementQueue } from "@/components/announcement-queue";
+import { BuildVersionWatcher } from "@/components/build-version-watcher";
 import { FeedbackWidget } from "@/components/feedback-widget";
 import { HeaderStateProvider } from "@/components/header-state-provider";
 import { ProfileAnnouncementModal } from "@/components/profile-announcement-modal";
@@ -118,6 +119,7 @@ export default async function LocaleLayout({ children, params }: Props) {
               <FeedbackWidget />
               <AnnouncementQueue />
               <ProfileAnnouncementModal />
+              <BuildVersionWatcher />
               <Analytics />
               <SpeedInsights />
             </HeaderStateProvider>

@@ -54,9 +54,7 @@ export function LikeButton({ slug }: LikeButtonProps) {
       .then((res) => (res.ok ? res.json() : null))
       .then(
         (
-          data:
-            | { liked?: boolean; count?: number; likeCount?: number }
-            | null,
+          data: { liked?: boolean; count?: number; likeCount?: number } | null,
         ) => {
           if (!data) return;
           if (loadVersionRef.current !== loadVersion) return;

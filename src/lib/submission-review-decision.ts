@@ -1,3 +1,4 @@
+import { petSecurityReason } from "@/lib/pet-security";
 import type {
   ReviewChecks,
   ReviewEvidenceMatch,
@@ -25,6 +26,18 @@ const AUTO_APPROVE_CONFIDENCE = 0.9;
 export function decideAutomatedReview(
   checks: ReviewChecks,
 ): ReviewDecisionResult {
+  const security = checks.security;
+  if (security?.decision === "fail") {
+    return applyDecision({
+      decision: "auto_reject",
+      reasonCode: "security_malicious_pet_json",
+      summary:
+        petSecurityReason(security, "fail") ??
+        "Pet metadata contains a high-confidence executable payload.",
+      confidence: 1,
+    });
+  }
+
   const exactMatch = checks.duplicates.exactMatches[0];
   if (exactMatch) {
     return applyDecision({
@@ -117,6 +130,15 @@ function firstHoldReason(
       summary:
         checks.assets.reasons[0] ?? "Asset checks require manual review.",
       confidence: 0.8,
+    };
+  }
+
+  if (checks.security?.decision === "hold") {
+    return {
+      code: "security_review_hold",
+      summary:
+        checks.security.reasons[0] ?? "Security checks require manual review.",
+      confidence: 0.9,
     };
   }
 

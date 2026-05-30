@@ -22,7 +22,9 @@ export function PetCountersBar({ slug }: PetCountersBarProps) {
   useEffect(() => {
     const controller = new AbortController();
     void fetch(`/api/pets/${slug}/metrics`, { signal: controller.signal })
-      .then((res) => (res.ok ? (res.json() as Promise<CountersResponse>) : null))
+      .then((res) =>
+        res.ok ? (res.json() as Promise<CountersResponse>) : null,
+      )
       .then((data) => {
         if (!data) return;
         setCounts({

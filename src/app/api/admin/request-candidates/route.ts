@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { Resend } from "resend";
 
-import { isAdmin } from "@/lib/admin";
+import { canReviewPetRequests } from "@/lib/admin";
 import { renderRequestFulfilledCreatorEmail } from "@/lib/email-templates/request-fulfilled-creator";
 import { renderRequestFulfilledRequesterEmail } from "@/lib/email-templates/request-fulfilled-requester";
 import { createNotification } from "@/lib/notifications";
@@ -50,7 +50,7 @@ export async function POST(req: Request): Promise<Response> {
   if (csrf) return csrf;
 
   const { userId } = await auth();
-  if (!isAdmin(userId)) {
+  if (!userId || !canReviewPetRequests(userId)) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
@@ -73,8 +73,7 @@ export async function POST(req: Request): Promise<Response> {
     const result = await rejectCandidate({
       petId: body.petId,
       requestId: body.requestId,
-      // biome-ignore lint/style/noNonNullAssertion: isAdmin gate above
-      resolvedBy: userId!,
+      resolvedBy: userId,
       reason: body.reason,
     });
     if (!result.ok) {
@@ -89,8 +88,7 @@ export async function POST(req: Request): Promise<Response> {
   const result = await approveCandidate({
     petId: body.petId,
     requestId: body.requestId,
-    // biome-ignore lint/style/noNonNullAssertion: isAdmin gate above
-    resolvedBy: userId!,
+    resolvedBy: userId,
   });
   if (!result.ok) {
     return NextResponse.json(
@@ -104,8 +102,9 @@ export async function POST(req: Request): Promise<Response> {
   // existing request_fulfilled kind; payload distinguishes via `role`.
   // Best-effort — failures are logged and swallowed.
   if (result.requesterId) {
+    const requesterId = result.requesterId;
     void createNotification({
-      userId: result.requesterId,
+      userId: requesterId,
       kind: "request_fulfilled",
       payload: {
         role: "requester",
@@ -117,15 +116,13 @@ export async function POST(req: Request): Promise<Response> {
     }).catch(() => {});
 
     void (async () => {
-      // biome-ignore lint/style/noNonNullAssertion: requesterId checked above
-      const locale = await getPreferredLocaleForUser(result.requesterId!);
+      const locale = await getPreferredLocaleForUser(requesterId);
       const rendered = renderRequestFulfilledRequesterEmail(locale, {
         petName: result.petDisplayName,
         petSlug: result.petSlug,
         requestQuery: result.requestQuery,
       });
-      // biome-ignore lint/style/noNonNullAssertion: requesterId checked above
-      await emailUser(result.requesterId!, rendered);
+      await emailUser(requesterId, rendered);
     })();
   }
 

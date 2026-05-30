@@ -34,7 +34,20 @@ import {
   visualDistanceSimilarityScore,
 } from "@/lib/submission-similarity";
 
-type AdminReviewPet = SubmittedPet & {
+type AdminReviewPet = Pick<
+  SubmittedPet,
+  | "createdAt"
+  | "description"
+  | "displayName"
+  | "featured"
+  | "id"
+  | "petJsonUrl"
+  | "slug"
+  | "spritesheetUrl"
+  | "status"
+  | "zipUrl"
+> & {
+  ownerEmail?: SubmittedPet["ownerEmail"];
   latestReview?: SubmissionReview | null;
 };
 
@@ -45,6 +58,7 @@ type AdminReviewRowProps = {
   stateCount: number;
   /** Pre-resolved profile handle for the submitter (Clerk username, fallback to userId tail). */
   ownerHandle?: string;
+  actionScope?: "admin" | "collaborator" | "moderator";
 };
 
 // Lima time, en-US so the format stays predictable. The admin only
@@ -86,6 +100,7 @@ export function AdminReviewRow({
   pet,
   stateCount,
   ownerHandle,
+  actionScope = "admin",
 }: AdminReviewRowProps) {
   const t = useTranslations("adminReview");
   const [status, setStatus] = useState(pet.status);
@@ -105,6 +120,10 @@ export function AdminReviewRow({
   }, []);
 
   const isUntitled = pet.displayName === "Untitled pet";
+  const canUseAdminOnlyActions = actionScope === "admin";
+  const canUseTakedownActions =
+    canUseAdminOnlyActions || actionScope === "moderator";
+  const showReviewMetadata = actionScope !== "moderator";
   const createdAtDate = new Date(pet.createdAt);
   // stateCount is intentionally read here (linter would otherwise flag
   // the unused param) — the count never varies per row but the prop
@@ -130,13 +149,20 @@ export function AdminReviewRow({
     const res = await fetch(`/api/admin/${pet.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        action: apiAction,
-        reason,
-        displayName,
-        description,
-        slug,
-      }),
+      body: JSON.stringify(
+        canUseAdminOnlyActions
+          ? {
+              action: apiAction,
+              reason,
+              displayName,
+              description,
+              slug,
+            }
+          : {
+              action: apiAction,
+              reason,
+            },
+      ),
     });
 
     if (!res.ok) {
@@ -173,8 +199,17 @@ export function AdminReviewRow({
       }
       return;
     }
-    const reason =
-      window.prompt("Reason (sent to owner email, optional)") ?? "";
+    const reasonPrompt =
+      actionScope === "moderator"
+        ? "Reason (required; sent to owner email and audit log)"
+        : "Reason (sent to owner email, optional)";
+    const rawReason = window.prompt(reasonPrompt);
+    if (rawReason === null) return;
+    const reason = rawReason.trim();
+    if (actionScope === "moderator" && !reason) {
+      window.alert("A reason is required for moderator takedowns.");
+      return;
+    }
 
     setBusy(true);
     setError(null);
@@ -313,16 +348,20 @@ export function AdminReviewRow({
                 /{slug}
               </span>
               <StatusBadge status={status} />
-              <AutomationBadge review={pet.latestReview ?? null} />
-              <button
-                type="button"
-                onClick={() => setEditing(true)}
-                aria-label={t("editAria")}
-                className="inline-flex items-center gap-1 rounded-full border border-border-base bg-surface px-2 py-0.5 font-mono text-[10px] tracking-[0.12em] text-muted-2 uppercase transition hover:border-border-strong hover:text-foreground"
-              >
-                <Pencil className="size-3" />
-                Edit
-              </button>
+              {showReviewMetadata ? (
+                <AutomationBadge review={pet.latestReview ?? null} />
+              ) : null}
+              {canUseAdminOnlyActions ? (
+                <button
+                  type="button"
+                  onClick={() => setEditing(true)}
+                  aria-label={t("editAria")}
+                  className="inline-flex items-center gap-1 rounded-full border border-border-base bg-surface px-2 py-0.5 font-mono text-[10px] tracking-[0.12em] text-muted-2 uppercase transition hover:border-border-strong hover:text-foreground"
+                >
+                  <Pencil className="size-3" />
+                  Edit
+                </button>
+              ) : null}
             </div>
             <p className="line-clamp-2 text-sm text-muted-2">{description}</p>
           </>
@@ -385,7 +424,9 @@ export function AdminReviewRow({
             pet.json
           </a>
         </div>
-        <AutomationEvidence review={pet.latestReview ?? null} />
+        {showReviewMetadata ? (
+          <AutomationEvidence review={pet.latestReview ?? null} />
+        ) : null}
         {error ? (
           <p className="rounded-md bg-chip-danger-bg px-2 py-1 text-xs text-chip-danger-fg">
             {error}
@@ -394,7 +435,7 @@ export function AdminReviewRow({
       </div>
 
       <div className="flex shrink-0 items-center gap-2 md:flex-col md:items-stretch">
-        {editing ? (
+        {editing && canUseAdminOnlyActions ? (
           <>
             <button
               type="button"
@@ -419,7 +460,7 @@ export function AdminReviewRow({
               Cancel
             </button>
           </>
-        ) : status === "pending" ? (
+        ) : status === "pending" && actionScope !== "moderator" ? (
           <>
             <button
               type="button"
@@ -444,7 +485,7 @@ export function AdminReviewRow({
               Reject
             </button>
           </>
-        ) : status === "rejected" ? (
+        ) : status === "rejected" && canUseAdminOnlyActions ? (
           <>
             <button
               type="button"
@@ -469,14 +510,16 @@ export function AdminReviewRow({
               Take down
             </button>
           </>
-        ) : status === "approved" ? (
+        ) : status === "approved" && canUseTakedownActions ? (
           <>
-            <AdminFeatureToggle
-              petId={pet.id}
-              initialFeatured={pet.featured}
-              petName={pet.displayName}
-              variant="solid"
-            />
+            {canUseAdminOnlyActions ? (
+              <AdminFeatureToggle
+                petId={pet.id}
+                initialFeatured={pet.featured}
+                petName={pet.displayName}
+                variant="solid"
+              />
+            ) : null}
             <button
               type="button"
               onClick={() => void takedown()}
@@ -492,7 +535,7 @@ export function AdminReviewRow({
             </button>
           </>
         ) : null}
-        {!editing ? (
+        {!editing && canUseAdminOnlyActions ? (
           <button
             type="button"
             onClick={() => void rerunReview()}
@@ -577,12 +620,12 @@ function AutomationEvidence({ review }: { review: SubmissionReview | null }) {
   return (
     <details className="rounded-xl border border-border-base bg-surface-muted/50 px-3 py-2 text-xs text-muted-2">
       <summary className="cursor-pointer font-mono text-[10px] tracking-[0.16em] text-muted-3 uppercase">
-        Automation evidence
+        {t("automationEvidence")}
       </summary>
       <div className="mt-2 space-y-2">
         <p>
-          {review.summary ?? "No summary."} Confidence: {review.confidence ?? 0}
-          %.
+          {review.summary ?? t("noSummary")}{" "}
+          {t("confidence", { confidence: review.confidence ?? 0 })}
         </p>
         <p className="font-mono text-[10px] tracking-[0.12em] text-muted-3 uppercase">
           {review.reasonCode ?? "no_reason"} ·{" "}
@@ -599,6 +642,20 @@ function AutomationEvidence({ review }: { review: SubmissionReview | null }) {
             items={checks.assets.reasons}
           />
         ) : null}
+        {checks.security?.findings?.length ? (
+          <EvidenceGroup
+            title={t("evidenceSecurity")}
+            items={checks.security.findings.map(
+              (finding) =>
+                `${finding.code} (${finding.path}): ${finding.evidence}`,
+            )}
+          />
+        ) : checks.security?.reasons?.length ? (
+          <EvidenceGroup
+            title={t("evidenceSecurity")}
+            items={checks.security.reasons}
+          />
+        ) : null}
         {checks.policy?.flags?.length ? (
           <EvidenceGroup
             title={t("evidencePolicy")}
@@ -611,6 +668,18 @@ function AutomationEvidence({ review }: { review: SubmissionReview | null }) {
           <EvidenceGroup
             title={t("evidencePolicy")}
             items={checks.policy.reasons}
+          />
+        ) : null}
+        {checks.policy?.visualText?.length ? (
+          <EvidenceGroup
+            title={t("evidenceVisualText")}
+            items={checks.policy.visualText}
+          />
+        ) : null}
+        {checks.policy?.visualSignals?.length ? (
+          <EvidenceGroup
+            title={t("evidenceVisualSignals")}
+            items={checks.policy.visualSignals}
           />
         ) : null}
         {duplicateMatches.length > 0 ? (

@@ -9,7 +9,7 @@
     "docker:down": "docker compose -f docker-compose.dev.yml down || podman compose -f docker-compose.dev.yml down",
     "docker:nuke": "docker compose -f docker-compose.dev.yml down -v || podman compose -f docker-compose.dev.yml down -v",
     "seed:dev": "bun scripts/seed-dev.ts",
-    "build": "next build",
+    "build": "bun scripts/write-build-version.ts && next build",
     "start": "next start",
     "check": "biome check .",
     "format": "biome check --write .",

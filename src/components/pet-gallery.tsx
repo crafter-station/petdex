@@ -818,6 +818,16 @@ type PetCardProps = {
    * never see this prop populated.
    */
   pinState?: PetCardPinState;
+  /**
+   * Profile pages already establish the creator context, so repeating
+   * "by ..." on every pet card wastes vertical space.
+   */
+  hideAuthor?: boolean;
+  /**
+   * Owner profile pin surfaces use a cleaner preview state: actions reveal
+   * on hover/focus over a light scrim, leaving the card quiet by default.
+   */
+  actionMode?: "default" | "profilePinHover";
 };
 
 function PetCardImpl({
@@ -828,6 +838,8 @@ function PetCardImpl({
   ownerActions,
   statusOverlay,
   pinState,
+  hideAuthor,
+  actionMode = "default",
 }: PetCardProps) {
   const t = useTranslations("gallery");
   const locale = useLocale();
@@ -845,6 +857,7 @@ function PetCardImpl({
   const batchLabel = pet.approvedAt
     ? formatBatchLabel(getBatchKey(new Date(pet.approvedAt)))
     : null;
+  const usesProfilePinHover = actionMode === "profilePinHover";
   // Every card with a dominantColor gets the same accent treatment.
   // Featured cards keep the same look + add a brand badge in the corner
   // (similar to HOT/NEW). Drop the special-case styling — featured no
@@ -864,7 +877,7 @@ function PetCardImpl({
     <article
       data-slot="card"
       style={accentStyle}
-      className="group relative flex h-full flex-col overflow-hidden rounded-3xl border border-black/10 bg-surface/76 shadow-sm shadow-blue-950/5 backdrop-blur transition has-[[aria-expanded=true]]:z-30 hover:-translate-y-0.5 hover:bg-white hover:shadow-xl hover:shadow-blue-950/10 dark:border-white/10 dark:hover:bg-stone-800"
+      className="group relative flex h-full flex-col overflow-hidden rounded-3xl border border-black/10 bg-surface/76 shadow-sm shadow-blue-950/5 backdrop-blur transition has-[[aria-expanded=true]]:z-30 has-[[aria-expanded=true]]:-translate-y-0.5 has-[[aria-expanded=true]]:bg-white has-[[aria-expanded=true]]:shadow-xl has-[[aria-expanded=true]]:shadow-blue-950/10 hover:-translate-y-0.5 hover:bg-white hover:shadow-xl hover:shadow-blue-950/10 dark:border-white/10 dark:has-[[aria-expanded=true]]:bg-stone-800 dark:hover:bg-stone-800"
     >
       {/* Inset accent tab — short bar floating inside the card near the top,
           centered horizontally, like the colored tab on a tab folder or a
@@ -919,6 +932,12 @@ function PetCardImpl({
             scale={0.7}
             label={`${pet.displayName} animated`}
           />
+          {usesProfilePinHover ? (
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-0 bg-black/10 opacity-0 transition group-has-[[aria-expanded=true]]:opacity-100 group-has-[:focus-visible]:opacity-100 group-hover:opacity-100 dark:bg-black/25"
+            />
+          ) : null}
           {/* Featured badge — universal across locales since 'featured' is
               product status, not localization. Sits top-right. The zh-only
               HOT/NEW/etc badges below take top-left to avoid collision. */}
@@ -1002,7 +1021,7 @@ function PetCardImpl({
             </Badge>
           ) : null}
 
-          {pet.submittedBy ? (
+          {pet.submittedBy && !hideAuthor ? (
             <div className="mt-2 flex items-center gap-1.5 border-t border-black/[0.05] pt-2 font-mono text-[10px] tracking-[0.12em] text-muted-3 uppercase dark:border-white/[0.05]">
               {pet.submittedBy.imageUrl &&
               isAllowedAvatarUrl(pet.submittedBy.imageUrl) ? (
@@ -1047,34 +1066,59 @@ function PetCardImpl({
         </Badge>
       ) : null}
 
-      {/* Pin overlay — owner-only on their own /u/[handle]. Sits to the
+      {usesProfilePinHover ? (
+        <div className="pointer-events-none absolute top-16 right-4 z-20 flex flex-col items-center gap-2 opacity-0 transition [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100 group-has-[[aria-expanded=true]]:pointer-events-auto group-has-[[aria-expanded=true]]:opacity-100 group-has-[:focus-visible]:pointer-events-auto group-has-[:focus-visible]:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100">
+          {pinState ? (
+            <ProfilePinButton
+              slug={pet.slug}
+              isPinned={pinState.isPinned}
+              pinnedCount={pinState.pinnedCount}
+              maxPins={pinState.maxPins}
+              appearance="subtle"
+            />
+          ) : null}
+          <PetActionMenu
+            pet={{
+              slug: pet.slug,
+              displayName: pet.displayName,
+              zipUrl: pet.zipUrl,
+              description: pet.description,
+            }}
+            ownerActions={ownerActions}
+          />
+        </div>
+      ) : (
+        <>
+          {/* Pin overlay — owner-only on their own /u/[handle]. Sits to the
  left of the action menu so both stay clickable above the card-wide
  Link. The button itself toggles isPinned via /api/profile and
  router.refresh()es. */}
-      {pinState ? (
-        <div className="absolute top-3 right-14 z-20">
-          <ProfilePinButton
-            slug={pet.slug}
-            isPinned={pinState.isPinned}
-            pinnedCount={pinState.pinnedCount}
-            maxPins={pinState.maxPins}
-          />
-        </div>
-      ) : null}
+          {pinState ? (
+            <div className="absolute top-3 right-14 z-20">
+              <ProfilePinButton
+                slug={pet.slug}
+                isPinned={pinState.isPinned}
+                pinnedCount={pinState.pinnedCount}
+                maxPins={pinState.maxPins}
+              />
+            </div>
+          ) : null}
 
-      {/* Action menu lives outside the Link so its clicks don't navigate.
+          {/* Action menu lives outside the Link so its clicks don't navigate.
  Absolute-positioned to overlap the featured badge corner. */}
-      <div className="absolute top-3 right-4 z-20">
-        <PetActionMenu
-          pet={{
-            slug: pet.slug,
-            displayName: pet.displayName,
-            zipUrl: pet.zipUrl,
-            description: pet.description,
-          }}
-          ownerActions={ownerActions}
-        />
-      </div>
+          <div className="absolute top-3 right-4 z-20">
+            <PetActionMenu
+              pet={{
+                slug: pet.slug,
+                displayName: pet.displayName,
+                zipUrl: pet.zipUrl,
+                description: pet.description,
+              }}
+              ownerActions={ownerActions}
+            />
+          </div>
+        </>
+      )}
     </article>
   );
 }

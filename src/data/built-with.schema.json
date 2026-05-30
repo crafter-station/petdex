@@ -92,7 +92,7 @@
           },
           "screenshot": {
             "type": "string",
-            "pattern": "^/built-with/[a-z0-9-]+\\.png$",
+            "pattern": "^/built-with/[a-z0-9-]+\\.(png|webp)$",
             "description": "Path under /public to the project screenshot. Captured at 1280x720 viewport via agent-browser."
           }
         }

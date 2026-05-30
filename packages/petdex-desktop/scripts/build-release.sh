@@ -112,7 +112,8 @@ EOF
 
 build_arch "aarch64-macos" "arm64" "Petdex-arm64.dmg"
 build_arch "x86_64-macos" "x64" "Petdex-x64.dmg"
+cp sidecar/server.js petdex-desktop-sidecar.js
 
 echo ""
 echo "Done. Artifacts:"
-ls -la Petdex-arm64.dmg Petdex-x64.dmg petdex-desktop-darwin-arm64 petdex-desktop-darwin-x64 2>/dev/null
+ls -la Petdex-arm64.dmg Petdex-x64.dmg petdex-desktop-darwin-arm64 petdex-desktop-darwin-x64 petdex-desktop-sidecar.js 2>/dev/null

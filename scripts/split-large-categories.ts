@@ -103,7 +103,9 @@ for (const [bigCat, bigSlugs] of big) {
   }
   intersections.sort((a, b) => b.slugs.length - a.slugs.length);
 
-  console.log(`\n# ${bigCat} (${bigSlugs.length}) → ${intersections.length} sub-collections`);
+  console.log(
+    `\n# ${bigCat} (${bigSlugs.length}) → ${intersections.length} sub-collections`,
+  );
   for (const { secondary, slugs } of intersections) {
     const subSlug = `category-${slugify(bigCat)}-${slugify(secondary)}`;
     const title = titleFor(bigCat, secondary);
@@ -152,4 +154,6 @@ for (const [bigCat, bigSlugs] of big) {
   }
 }
 
-console.log(`\ndone${dryRun ? " (DRY)" : ""} — ${totalSubs} sub-collections ${dryRun ? "preview" : "created"}`);
+console.log(
+  `\ndone${dryRun ? " (DRY)" : ""} — ${totalSubs} sub-collections ${dryRun ? "preview" : "created"}`,
+);

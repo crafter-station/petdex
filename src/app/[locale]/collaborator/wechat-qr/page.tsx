@@ -6,8 +6,6 @@ import { desc, eq } from "drizzle-orm";
 import { canEditWeChatQr } from "@/lib/admin";
 import { db, schema } from "@/lib/db/client";
 
-import { SiteHeader } from "@/components/site-header";
-
 import { WechatQrPanel } from "./wechat-qr-panel";
 
 export const dynamic = "force-dynamic";
@@ -35,11 +33,8 @@ export default async function WechatQrPage() {
     .limit(10);
 
   return (
-    <main className="min-h-dvh bg-background text-foreground">
-      <section className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-5 py-5 md:px-8 md:py-6">
-        <SiteHeader />
-        <WechatQrPanel current={current ?? null} history={history} />
-      </section>
-    </main>
+    <section className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-5 pb-12 md:px-8 md:pb-16">
+      <WechatQrPanel current={current ?? null} history={history} />
+    </section>
   );
 }

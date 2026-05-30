@@ -79,7 +79,7 @@ async function runAiModeration(diffText: string): Promise<boolean> {
   const { buildPolicyPrompt } = await import("@/lib/submission-review-policy");
   const { generateText } = await import("ai");
 
-  const systemPrompt = buildPolicyPrompt();
+  const systemPrompt = buildPolicyPrompt({ imageReview: false });
   const userPrompt = [
     "Review the following pending text diff for a user-submitted pet entry.",
     "The diff shows what the owner wants to change.",
@@ -99,21 +99,35 @@ async function runAiModeration(diffText: string): Promise<boolean> {
       abortSignal: AbortSignal.timeout(5000),
     });
 
-    const raw = text.trim();
-    const start = raw.indexOf("{");
-    const end = raw.lastIndexOf("}");
-    if (start === -1 || end === -1) return false;
-    const parsed = JSON.parse(raw.slice(start, end + 1)) as {
-      decision?: string;
-      confidence?: number;
-    };
-    if (parsed.decision !== "pass") return false;
-    const confidence =
-      typeof parsed.confidence === "number" ? parsed.confidence : 0;
-    return confidence >= 0.7;
+    return textPolicyModerationPasses(text);
   } catch {
     return false;
   }
+}
+
+export function textPolicyModerationPasses(
+  rawText: string,
+  minConfidence = 0.7,
+): boolean {
+  const raw = rawText.trim();
+  const start = raw.indexOf("{");
+  const end = raw.lastIndexOf("}");
+  if (start === -1 || end === -1) return false;
+  const parsed = JSON.parse(raw.slice(start, end + 1)) as {
+    decision?: unknown;
+    confidence?: unknown;
+    flags?: unknown;
+  };
+  if (parsed.decision !== "pass") return false;
+  if (parsed.flags !== undefined) {
+    if (!Array.isArray(parsed.flags)) return false;
+    if (parsed.flags.length > 0) return false;
+  }
+  const confidence =
+    typeof parsed.confidence === "number" && Number.isFinite(parsed.confidence)
+      ? parsed.confidence
+      : 0;
+  return confidence >= minConfidence;
 }
 
 export async function decideAutoAccept(

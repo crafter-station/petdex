@@ -20,6 +20,7 @@ import { CollectionCover } from "@/components/collection-cover";
 import { CommandLine } from "@/components/command-line";
 import { DiscordLink } from "@/components/discord-link";
 import { DownloadDesktopCTA } from "@/components/download-desktop-cta";
+import { DiscordIcon } from "@/components/icons/wechat-icon";
 import { JsonLd } from "@/components/json-ld";
 import { PetGallery } from "@/components/pet-gallery";
 import { PetSprite } from "@/components/pet-sprite";
@@ -33,6 +34,7 @@ import {
   CardDescription,
   CardTitle,
 } from "@/components/ui/card";
+import { WechatCommunityDialog } from "@/components/wechat-community-dialog";
 
 import { hasLocale, locales } from "@/i18n/config";
 
@@ -59,7 +61,6 @@ export async function generateMetadata({
   };
 }
 const SITE_URL = "https://petdex.crafter.run";
-
 export function generateStaticParams() {
   return locales.map((locale) => ({ locale }));
 }
@@ -98,6 +99,7 @@ export default async function Home({
     ]);
   const totalPets = initialSearch.total;
   const formattedTotalPets = formatLocalizedNumber(totalPets, locale);
+  const showWechatCommunity = isZh;
 
   // Plain-object so the server -> client serializer doesn't choke on a
   // Map. Same source of truth either way.
@@ -161,7 +163,7 @@ export default async function Home({
             <p className="mt-5 max-w-xl text-balance text-base leading-7 text-muted-1 md:text-lg">
               {t.rich("tagline", {
                 totalPets,
-                brand: () => <strong>Codex</strong>,
+                brand: (chunks) => <strong>{chunks}</strong>,
               })}
             </p>
             <div className="mt-5 flex w-full flex-col items-stretch justify-center gap-2 sm:flex-row sm:items-center">
@@ -187,12 +189,20 @@ export default async function Home({
             <SubmitCTA className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-inverse px-6 text-sm font-medium text-on-inverse transition hover:bg-inverse-hover">
               {t("submitCta")}
             </SubmitCTA>
-            {process.env.NEXT_PUBLIC_DISCORD_INVITE_URL ? (
+            {showWechatCommunity ? (
+              <WechatCommunityDialog
+                source="hero_secondary"
+                className="h-12 bg-[#07C160]/10 px-6 text-[#07C160] hover:bg-[#07C160]/16"
+              >
+                {t("joinWeChat")}
+              </WechatCommunityDialog>
+            ) : process.env.NEXT_PUBLIC_DISCORD_INVITE_URL && !isZh ? (
               <DiscordLink
                 href={process.env.NEXT_PUBLIC_DISCORD_INVITE_URL}
                 source="hero_secondary"
-                className="inline-flex h-12 items-center justify-center gap-2 rounded-full border border-border-base bg-surface/70 px-6 text-sm font-medium text-foreground backdrop-blur transition hover:bg-surface"
+                className="inline-flex h-12 items-center justify-center gap-2 rounded-full border border-[#5865F2]/25 bg-[#5865F2]/10 px-6 text-sm font-medium text-[#5865F2] backdrop-blur transition hover:bg-[#5865F2]/16"
               >
+                <DiscordIcon className="size-4" />
                 {t("joinDiscord")}
               </DiscordLink>
             ) : (

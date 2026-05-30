@@ -8,12 +8,15 @@ import { describe, expect, test } from "bun:test";
 // preserve every case below.
 
 function pinToLatest(command: string): string {
-  if (command.includes("petdex@")) return command;
-  const npxMatch = command.match(/^(.*?\bnpx\s+)petdex(\b.*)$/);
-  if (npxMatch) return `${npxMatch[1]}petdex@latest${npxMatch[2]}`;
-  const bareMatch = command.match(/^petdex(\b.*)$/);
-  if (bareMatch) return `npx petdex@latest${bareMatch[1]}`;
-  return command;
+  return command
+    .split(/(\s*(?:&&|\|\||;|\|)\s*)/g)
+    .map((segment) => {
+      if (/^\s*(?:&&|\|\||;|\|)\s*$/.test(segment)) return segment;
+      return segment
+        .replace(/\bnpx\s+petdex(?!@)\b/g, "npx petdex@latest")
+        .replace(/^(\s*)petdex(?!@)\b/, "$1npx petdex@latest");
+    })
+    .join("");
 }
 
 describe("pinToLatest", () => {
@@ -55,6 +58,15 @@ describe("pinToLatest", () => {
     // `cd path && npx petdex install` — still pin the petdex.
     expect(pinToLatest("cd ~/work && npx petdex install desktop")).toBe(
       "cd ~/work && npx petdex@latest install desktop",
+    );
+  });
+
+  test("pins every petdex command in chained setup snippets", () => {
+    expect(pinToLatest("npx petdex init && npx petdex install boba")).toBe(
+      "npx petdex@latest init && npx petdex@latest install boba",
+    );
+    expect(pinToLatest("petdex init && petdex install boba")).toBe(
+      "npx petdex@latest init && npx petdex@latest install boba",
     );
   });
 

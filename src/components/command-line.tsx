@@ -3,7 +3,7 @@
 import { Fragment, useState } from "react";
 
 import { track } from "@vercel/analytics";
-import { Check, Copy } from "lucide-react";
+import { Check, CircleAlert, Copy } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { CodexLogo } from "@/components/codex-logo";
@@ -22,6 +22,7 @@ type CommandLineProps = {
    * runs the install without the user needing a terminal.
    */
   codexPrompt?: string;
+  wrap?: boolean;
 };
 
 /**
@@ -32,21 +33,45 @@ type CommandLineProps = {
  * (without npx) so a user copying from a globally-installed
  * snippet still gets the latest tag.
  *
- * Only rewrites the FIRST occurrence — no risk of accidentally
- * rewriting embedded references in flags or paths.
+ * Rewrites each shell command segment so chained setup snippets keep
+ * every Petdex invocation on the newest release.
  */
 function pinToLatest(command: string): string {
-  // Already pinned? Leave it alone.
-  if (command.includes("petdex@")) return command;
-  // npx petdex ... → npx petdex@latest ...
-  const npxMatch = command.match(/^(.*?\bnpx\s+)petdex(\b.*)$/);
-  if (npxMatch) return `${npxMatch[1]}petdex@latest${npxMatch[2]}`;
-  // bare leading `petdex ...` (e.g. when the user has it on PATH)
-  // → `npx petdex@latest ...`. We add npx so the pinned form
-  // works even without a global install.
-  const bareMatch = command.match(/^petdex(\b.*)$/);
-  if (bareMatch) return `npx petdex@latest${bareMatch[1]}`;
-  return command;
+  return command
+    .split(/(\s*(?:&&|\|\||;|\|)\s*)/g)
+    .map((segment) => {
+      if (/^\s*(?:&&|\|\||;|\|)\s*$/.test(segment)) return segment;
+      return segment
+        .replace(/\bnpx\s+petdex(?!@)\b/g, "npx petdex@latest")
+        .replace(/^(\s*)petdex(?!@)\b/, "$1npx petdex@latest");
+    })
+    .join("");
+}
+
+async function writeClipboard(text: string) {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+  } catch {
+    // Fall through to the textarea fallback for browsers that expose the API
+    // but block it in the current permission context.
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  textarea.style.top = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  textarea.remove();
+  if (!copied) {
+    throw new Error("Clipboard write failed");
+  }
 }
 
 // Soft, light-on-light syntax: command word in brand blue, subcommands darker,
@@ -108,9 +133,18 @@ export function CommandLine({
   source,
   className = "",
   codexPrompt,
+  wrap = false,
 }: CommandLineProps) {
   const t = useTranslations("commandLine");
-  const [copied, setCopied] = useState(false);
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">(
+    "idle",
+  );
+  const copied = copyState === "copied";
+  const failed = copyState === "failed";
+  const rootLayoutClass = wrap ? "items-start" : "items-center";
+  const commandClass = wrap
+    ? "flex-1 whitespace-normal break-words leading-5"
+    : "flex-1 truncate";
 
   async function handleCopy() {
     // Display the natural `npx petdex` form, but copy the
@@ -119,15 +153,16 @@ export function CommandLine({
     // form so dashboards stay readable.
     const toCopy = pinToLatest(command);
     try {
-      await navigator.clipboard.writeText(toCopy);
-      setCopied(true);
+      await writeClipboard(toCopy);
+      setCopyState("copied");
       track("command_line_copied", {
         command: command.slice(0, 80),
         source: source ?? "unknown",
       });
-      window.setTimeout(() => setCopied(false), 1500);
+      window.setTimeout(() => setCopyState("idle"), 1500);
     } catch {
-      /* ignore */
+      setCopyState("failed");
+      window.setTimeout(() => setCopyState("idle"), 1800);
     }
   }
 
@@ -140,19 +175,23 @@ export function CommandLine({
         style={{
           fontFamily: "var(--font-geist-mono), ui-monospace, monospace",
         }}
-        className={`group inline-flex items-center gap-2 rounded-xl border border-border-base bg-surface/80 px-3 py-2 text-left text-[12px] text-foreground backdrop-blur transition hover:border-brand-light/40 hover:bg-surface ${className}`}
+        className={`group inline-flex ${rootLayoutClass} gap-2 rounded-xl border border-border-base bg-surface/80 px-3 py-2 text-left text-[12px] text-foreground backdrop-blur transition hover:border-brand-light/40 hover:bg-surface ${className}`}
       >
         <button
           type="button"
           onClick={() => void handleCopy()}
-          aria-label={t("copyAria")}
-          className="flex flex-1 items-center gap-2 truncate text-left"
+          aria-label={
+            copied ? t("copiedAria") : failed ? t("failedAria") : t("copyAria")
+          }
+          className={`flex flex-1 ${rootLayoutClass} gap-2 text-left`}
         >
           <span className="select-none text-brand">{prefix}</span>
-          <span className="flex-1 truncate">{tokenize(command)}</span>
+          <span className={commandClass}>{tokenize(command)}</span>
           <span className="grid size-6 shrink-0 place-items-center rounded-md text-muted-3 transition group-hover:bg-brand-tint group-hover:text-brand-deep">
             {copied ? (
               <Check className="size-3.5 text-brand-deep" />
+            ) : failed ? (
+              <CircleAlert className="size-3.5 text-rose-600" />
             ) : (
               <Copy className="size-3.5" />
             )}
@@ -179,15 +218,19 @@ export function CommandLine({
     <button
       type="button"
       onClick={() => void handleCopy()}
-      aria-label={t("copyAria")}
+      aria-label={
+        copied ? t("copiedAria") : failed ? t("failedAria") : t("copyAria")
+      }
       style={{ fontFamily: "var(--font-geist-mono), ui-monospace, monospace" }}
-      className={`group inline-flex items-center gap-2 rounded-xl border border-border-base bg-surface/80 px-3 py-2 text-left text-[12px] text-foreground backdrop-blur transition hover:border-brand-light/40 hover:bg-surface ${className}`}
+      className={`group inline-flex ${rootLayoutClass} gap-2 rounded-xl border border-border-base bg-surface/80 px-3 py-2 text-left text-[12px] text-foreground backdrop-blur transition hover:border-brand-light/40 hover:bg-surface ${className}`}
     >
       <span className="select-none text-brand">{prefix}</span>
-      <span className="flex-1 truncate">{tokenize(command)}</span>
+      <span className={commandClass}>{tokenize(command)}</span>
       <span className="grid size-6 shrink-0 place-items-center rounded-md text-muted-3 transition group-hover:bg-brand-tint group-hover:text-brand-deep">
         {copied ? (
           <Check className="size-3.5 text-brand-deep" />
+        ) : failed ? (
+          <CircleAlert className="size-3.5 text-rose-600" />
         ) : (
           <Copy className="size-3.5" />
         )}
