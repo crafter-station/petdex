@@ -86,9 +86,13 @@
       top: 2px;
       left: 2px;
       font: 9px monospace;
-      color: rgba(255, 255, 255, 0.45);
+      color: #fff;
+      background: rgba(220, 38, 38, 0.82);
+      padding: 3px 5px;
+      border-radius: 4px;
       pointer-events: none;
     }
+    #debug.visible { display: block; }
 
     #init-banner, #update-card {
       position: fixed;
@@ -164,16 +168,14 @@ async function boot() {
     const b64 = await invoke("read_file_as_base64", { path: pet.sprite_path })
       .catch((err) => { throw new Error(`spritesheet load failed: ${err}`); });
     const ext = pet.sprite_path.endsWith(".png") ? "png" : "webp";
-    document.getElementById("sprite").style.setProperty(
-      "--sprite-url",
-      `url("data:image/${ext};base64,${b64}")`
-    );
+    const sprite = document.getElementById("sprite");
+    sprite.style.backgroundImage = `url("data:image/${ext};base64,${b64}")`;
     applyState(DEFAULT_STATE);
     dbg(pet.name);
 
     startPolling();
   } catch (e) {
-    dbg(`err: ${String(e).slice(0, 40)}`);
+    dbg(`err: ${String(e).slice(0, 80)}`, true);
     console.error(e);
   }
 }
@@ -386,9 +388,11 @@ window.addEventListener("contextmenu", async (e) => {
   await invoke("quit_app");
 });
 
-function dbg(msg) {
+function dbg(msg, visible = false) {
   console.debug("[petdex]", msg);
-  document.getElementById("debug").textContent = msg;
+  const el = document.getElementById("debug");
+  el.textContent = msg;
+  el.classList.toggle("visible", visible);
 }
 
 boot();
