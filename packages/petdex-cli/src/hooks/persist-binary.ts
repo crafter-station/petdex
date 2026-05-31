@@ -16,12 +16,13 @@
  * us when behavior diverges between the running CLI and the hooks.
  */
 
-import { copyFile, mkdir } from "node:fs/promises";
+import { copyFile, mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 export const PERSIST_DIR = join(homedir(), ".petdex", "bin");
 export const PERSIST_PATH = join(PERSIST_DIR, "petdex.js");
+export const PERSIST_HOOK_VBS_PATH = join(PERSIST_DIR, "petdex-hook.vbs");
 
 /**
  * Best-effort copy. Returns the persisted path on success, null if
@@ -43,6 +44,12 @@ export async function persistRunningBinary(): Promise<{
   try {
     await mkdir(PERSIST_DIR, { recursive: true });
     await copyFile(source, PERSIST_PATH);
+    if (process.platform === "win32") {
+      await writeFile(
+        PERSIST_HOOK_VBS_PATH,
+        windowsHookLauncher(process.execPath),
+      );
+    }
     // chmod is best-effort; copyFile preserves perms on most
     // platforms but we want exec bits unconditionally.
     const { chmod } = await import("node:fs/promises");
@@ -57,4 +64,32 @@ export async function persistRunningBinary(): Promise<{
       reason: (err as Error).message,
     };
   }
+}
+
+function windowsHookLauncher(nodePath: string): string {
+  const escapedNodePath = nodePath.replace(/"/g, '""');
+  return `Option Explicit
+
+Dim shell, fso, scriptDir, petdexPath, nodePath, cmd, i
+Set shell = CreateObject("WScript.Shell")
+Set fso = CreateObject("Scripting.FileSystemObject")
+
+scriptDir = fso.GetParentFolderName(WScript.ScriptFullName)
+petdexPath = fso.BuildPath(scriptDir, "petdex.js")
+nodePath = "${escapedNodePath}"
+If Not fso.FileExists(nodePath) Then
+  nodePath = "node.exe"
+End If
+
+cmd = Quote(nodePath) & " " & Quote(petdexPath)
+For i = 0 To WScript.Arguments.Count - 1
+  cmd = cmd & " " & Quote(WScript.Arguments(i))
+Next
+
+shell.Run cmd, 0, True
+
+Function Quote(value)
+  Quote = Chr(34) & Replace(CStr(value), Chr(34), Chr(34) & Chr(34)) & Chr(34)
+End Function
+`;
 }

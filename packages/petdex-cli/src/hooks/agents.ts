@@ -8,6 +8,8 @@
 import { homedir } from "node:os";
 import path from "node:path";
 
+import { PERSIST_HOOK_VBS_PATH } from "./persist-binary";
+
 export const PETDEX_PORT = 7777;
 export const SIDECAR_URL = `http://127.0.0.1:${PETDEX_PORT}/state`;
 
@@ -581,6 +583,18 @@ function bubbleHookCommand(
   fallbackState: PetState,
   fallbackDuration?: number,
 ): string {
+  if (process.platform === "win32") {
+    return [
+      `wscript.exe`,
+      `//B`,
+      `//Nologo`,
+      quoteWindowsArg(PERSIST_HOOK_VBS_PATH),
+      `bubble`,
+      phase,
+      agentId,
+    ].join(" ");
+  }
+
   const killswitch = `[ -f "$HOME/.petdex/runtime/hooks-disabled" ] && exit 0`;
   const persistPath = `$HOME/.petdex/bin/petdex.js`;
   // Persisted binary path: reads stdin via Node, posts both /state
@@ -601,6 +615,10 @@ function bubbleHookCommand(
     `fi`,
   ].join(" ");
   return `${killswitch}; ${persistedBranch}`;
+}
+
+function quoteWindowsArg(value: string): string {
+  return `"${value.replace(/"/g, '""')}"`;
 }
 
 /** Emit only the curl part — used by bubbleHookCommand's fallback branch. */

@@ -29,6 +29,7 @@ const SIDECAR_BASE = "http://127.0.0.1:7777";
 const SIDECAR_BUBBLE_URL = `${SIDECAR_BASE}/bubble`;
 const SIDECAR_STATE_URL = `${SIDECAR_BASE}/state`;
 const STDIN_CAP = 64 * 1024;
+const STDIN_IDLE_TIMEOUT_MS = 80;
 
 /**
  * Map a hook phase + tool to the sprite state we want.
@@ -65,8 +66,17 @@ async function readStdin(): Promise<string> {
   return await new Promise((resolve) => {
     let buf = "";
     let truncated = false;
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve(buf);
+    };
+    const timer = setTimeout(finish, STDIN_IDLE_TIMEOUT_MS);
     process.stdin.setEncoding("utf8");
     process.stdin.on("data", (chunk) => {
+      if (done) return;
       if (truncated) return;
       if (buf.length + chunk.length > STDIN_CAP) {
         buf += chunk.slice(0, STDIN_CAP - buf.length);
@@ -75,8 +85,8 @@ async function readStdin(): Promise<string> {
       }
       buf += chunk;
     });
-    process.stdin.on("end", () => resolve(buf));
-    process.stdin.on("error", () => resolve(buf));
+    process.stdin.on("end", finish);
+    process.stdin.on("error", finish);
   });
 }
 
