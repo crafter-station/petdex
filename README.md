@@ -43,15 +43,33 @@ Every pet is a folder. Every folder is a Pokédex entry. Every entry is one `npx
 
 ## Quick start
 
-```sh
-# Pick a pet. Install it. Your Codex desktop app picks it up automatically.
-npx petdex install boba
+Follow this checklist to get a pet installed, visible in Codex, and connected to the desktop app.
 
-# Or run the full Petdex desktop app with bubble UI and agent hooks.
+1. Install a known pet:
+
+```sh
+npx petdex install boba
+```
+
+You should see `~/.codex/pets/boba/` with `pet.json` and a spritesheet.
+
+2. Initialize Petdex Desktop and agent hooks:
+
+```sh
 npx petdex init
 ```
 
-Open Codex, go to **Settings → Appearance → Pets**, and pick the one you just installed.
+This downloads the desktop app, starts it, and wires supported agents for `/petdex`.
+
+3. Open Codex, go to **Settings → Appearance → Pets**, choose **Boba**, and click **Select**. Use `/pet` inside Codex to wake the pet or tuck it away.
+
+4. Verify the setup:
+
+```sh
+npx petdex doctor
+```
+
+If hooks are installed, you can also type `/petdex status` inside a supported agent.
 
 ## For users
 

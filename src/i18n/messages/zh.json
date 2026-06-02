@@ -2248,8 +2248,29 @@
     "sections": {
       "quickStart": {
         "title": "快速开始",
-        "intro": "一条命令就能把精选宠物装进 Codex。安装不需要账号，只有提交作品时才需要登录。",
-        "afterCommand": "CLI 会拉取宠物包，并放到 <code>~/.codex/pets/boba/</code>。要在 Codex 里启用它，打开 <strong>Settings → Appearance → Pets</strong>，然后点击 <strong>Select</strong>。在 Codex 里使用 <code>/pet</code> 可以让宠物 wake 或 sleep。",
+        "intro": "按这份清单走完，就能把宠物装好、在 Codex 里看到它，并接上桌面应用。安装不需要账号，只有提交作品时才需要登录。",
+        "steps": {
+          "install": {
+            "title": "先安装一只已知宠物",
+            "body": "建议先用 Boba，这样 Codex 里一定有一个可以选择的宠物目录。",
+            "result": "你应该能看到 <code>~/.codex/pets/boba/</code>，里面包含 <code>pet.json</code> 和 spritesheet。"
+          },
+          "desktop": {
+            "title": "初始化桌面应用和 hooks",
+            "body": "如果你想让宠物浮在桌面上，并响应 coding agent 的活动，就运行完整初始化。",
+            "result": "Petdex 会下载并启动桌面应用，同时给支持的 agent 接上 <code>/petdex</code>。"
+          },
+          "select": {
+            "title": "在 Codex 里选择宠物",
+            "body": "打开 Codex，进入 <strong>Settings → Appearance → Pets</strong>，选择 <strong>Boba</strong>，然后点击 <strong>Select</strong>。",
+            "result": "在 Codex 里使用 <code>/pet</code> 可以唤醒宠物，也可以把它收起来。"
+          },
+          "verify": {
+            "title": "验证配置是否正常",
+            "body": "如果宠物没有出现，运行诊断命令；安装 hooks 后，也可以在支持的 agent 里输入 <code>/petdex status</code>。",
+            "result": "doctor 会指出缺失的 binary、hook、token 或宠物目录，并给出具体修复提示。"
+          }
+        },
         "callout": "还没有宠物点子？先用 Codex Hatch Pet skill <link>孵化一只</link>，再回来运行 <code>petdex submit</code>。"
       },
       "install": {

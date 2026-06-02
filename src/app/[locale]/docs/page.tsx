@@ -143,17 +143,62 @@ export default async function DocsPage({
 
           <Section id="quick-start" title={t("sections.quickStart.title")}>
             <p>{t("sections.quickStart.intro")}</p>
-            <CommandLine
-              command="npx petdex install boba"
-              source="docs-quickstart"
-              className="w-full max-w-xl"
-            />
-            <p>
-              {t.rich("sections.quickStart.afterCommand", {
-                code: (chunks) => <code>{chunks}</code>,
-                strong: (chunks) => <strong>{chunks}</strong>,
-              })}
-            </p>
+            <ol className="grid gap-3">
+              <QuickStartStep
+                number="1"
+                title={t("sections.quickStart.steps.install.title")}
+                body={t.rich("sections.quickStart.steps.install.body", rich)}
+                result={t.rich(
+                  "sections.quickStart.steps.install.result",
+                  rich,
+                )}
+              >
+                <CommandLine
+                  command="npx petdex install boba"
+                  source="docs-quickstart-install"
+                  className="w-full max-w-xl"
+                />
+              </QuickStartStep>
+              <QuickStartStep
+                number="2"
+                title={t("sections.quickStart.steps.desktop.title")}
+                body={t.rich("sections.quickStart.steps.desktop.body", rich)}
+                result={t.rich(
+                  "sections.quickStart.steps.desktop.result",
+                  rich,
+                )}
+              >
+                <CommandLine
+                  command="npx petdex init"
+                  source="docs-quickstart-init"
+                  className="w-full max-w-xl"
+                />
+              </QuickStartStep>
+              <QuickStartStep
+                number="3"
+                title={t("sections.quickStart.steps.select.title")}
+                body={t.rich("sections.quickStart.steps.select.body", rich)}
+                result={t.rich(
+                  "sections.quickStart.steps.select.result",
+                  rich,
+                )}
+              />
+              <QuickStartStep
+                number="4"
+                title={t("sections.quickStart.steps.verify.title")}
+                body={t.rich("sections.quickStart.steps.verify.body", rich)}
+                result={t.rich(
+                  "sections.quickStart.steps.verify.result",
+                  rich,
+                )}
+              >
+                <CommandLine
+                  command="npx petdex doctor"
+                  source="docs-quickstart-doctor"
+                  className="w-full max-w-xl"
+                />
+              </QuickStartStep>
+            </ol>
             <Callout>
               {t.rich("sections.quickStart.callout", {
                 code: (chunks) => <code>{chunks}</code>,
@@ -619,6 +664,39 @@ export default async function DocsPage({
 
       <SiteFooter />
     </main>
+  );
+}
+
+function QuickStartStep({
+  number,
+  title,
+  body,
+  result,
+  children,
+}: {
+  number: string;
+  title: string;
+  body: React.ReactNode;
+  result: React.ReactNode;
+  children?: React.ReactNode;
+}) {
+  return (
+    <li className="grid gap-3 rounded-lg border border-border-base bg-surface p-4">
+      <div className="flex items-start gap-3">
+        <span className="grid size-7 shrink-0 place-items-center rounded-full bg-brand-tint font-mono text-xs font-semibold text-brand-deep dark:bg-brand-tint-dark dark:text-brand-light">
+          {number}
+        </span>
+        <div className="min-w-0 space-y-2">
+          <h3 className="text-base font-semibold text-foreground">{title}</h3>
+          <p>{body}</p>
+          <p className="flex items-start gap-2 text-sm text-muted-2">
+            <Check className="mt-1 size-4 shrink-0 text-brand" />
+            <span className="min-w-0">{result}</span>
+          </p>
+        </div>
+      </div>
+      {children ? <div className="min-w-0 sm:pl-10">{children}</div> : null}
+    </li>
   );
 }
 

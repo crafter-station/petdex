@@ -1996,8 +1996,29 @@
     "sections": {
       "quickStart": {
         "title": "Quick start",
-        "intro": "Install a curated pet into your Codex setup with one command. No account required to install. Sign in only when you submit.",
-        "afterCommand": "The CLI fetches the pet pack and drops it into <code>~/.codex/pets/boba/</code>. To activate it inside Codex go to <strong>Settings → Appearance → Pets</strong> and click <strong>Select</strong>. Use <code>/pet</code> inside Codex to wake or tuck it away.",
+        "intro": "Follow this checklist to get a pet installed, visible in Codex, and connected to the desktop app. No account required to install. Sign in only when you submit.",
+        "steps": {
+          "install": {
+            "title": "Install a known pet",
+            "body": "Start with Boba so you have a real pet folder to select in Codex.",
+            "result": "You should see <code>~/.codex/pets/boba/</code> with <code>pet.json</code> and a spritesheet."
+          },
+          "desktop": {
+            "title": "Initialize desktop and hooks",
+            "body": "Run the full setup when you want the floating desktop mascot and agent activity hooks.",
+            "result": "Petdex downloads the desktop app, starts it, and wires supported agents for <code>/petdex</code>."
+          },
+          "select": {
+            "title": "Select the pet in Codex",
+            "body": "Open Codex, go to <strong>Settings → Appearance → Pets</strong>, choose <strong>Boba</strong>, and click <strong>Select</strong>.",
+            "result": "Use <code>/pet</code> inside Codex to wake the pet or tuck it away."
+          },
+          "verify": {
+            "title": "Verify the setup",
+            "body": "Run diagnostics if the pet does not appear, or type <code>/petdex status</code> inside a supported agent after hooks are installed.",
+            "result": "The doctor reports any missing binary, hook, token, or pet folder with a concrete fix."
+          }
+        },
         "callout": "Don't have a pet idea yet? <link>Hatch your own</link> with the Codex Hatch Pet skill, then come back to <code>petdex submit</code>."
       },
       "install": {
