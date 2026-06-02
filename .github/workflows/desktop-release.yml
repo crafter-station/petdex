@@ -64,7 +64,7 @@ jobs:
           ls -lh "petdex-desktop-${{ matrix.target }}"
 
       - name: Upload binary artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: petdex-desktop-${{ matrix.target }}
           path: packages/petdex-desktop/petdex-desktop-${{ matrix.target }}
@@ -89,7 +89,7 @@ jobs:
           ls -lh server.js
 
       - name: Upload sidecar artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: petdex-desktop-sidecar
           path: packages/petdex-desktop/sidecar/server.js
@@ -135,7 +135,7 @@ jobs:
           Copy-Item $exe "petdex-desktop-win32-x64.exe"
 
       - name: Upload binary artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: petdex-desktop-win32-x64
           path: packages/petdex-desktop-windows/petdex-desktop-win32-x64.exe
