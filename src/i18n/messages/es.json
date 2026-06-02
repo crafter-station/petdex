@@ -1995,10 +1995,31 @@
     },
     "sections": {
       "quickStart": {
-        "title": "Quick start",
-        "intro": "Install a curated pet into your Codex setup with one command. No account required to install. Sign in only when you submit.",
-        "afterCommand": "The CLI fetches the pet pack and drops it into <code>~/.codex/pets/boba/</code>. To activate it inside Codex go to <strong>Settings → Appearance → Pets</strong> and click <strong>Select</strong>. Use <code>/pet</code> inside Codex to wake or tuck it away.",
-        "callout": "Don't have a pet idea yet? <link>Hatch your own</link> with the Codex Hatch Pet skill, then come back to <code>petdex submit</code>."
+        "title": "Inicio rápido",
+        "intro": "Sigue esta lista para instalar una mascota, verla en Codex y conectarla con la app de escritorio. No necesitas una cuenta para instalar. Inicia sesión solo cuando quieras enviar una mascota.",
+        "steps": {
+          "install": {
+            "title": "Instala una mascota conocida",
+            "body": "Empieza con Boba para tener una carpeta real que puedas seleccionar en Codex.",
+            "result": "Deberías ver <code>~/.codex/pets/boba/</code> con <code>pet.json</code> y un spritesheet."
+          },
+          "desktop": {
+            "title": "Inicializa escritorio y hooks",
+            "body": "Ejecuta la configuración completa si quieres la mascota flotante de escritorio y los hooks de actividad del agente.",
+            "result": "Petdex descarga la app de escritorio, la inicia y conecta los agentes compatibles con <code>/petdex</code>."
+          },
+          "select": {
+            "title": "Selecciona la mascota en Codex",
+            "body": "Abre Codex, ve a <strong>Settings → Appearance → Pets</strong>, elige <strong>Boba</strong> y haz clic en <strong>Select</strong>.",
+            "result": "Usa <code>/pet</code> dentro de Codex para despertar la mascota o guardarla."
+          },
+          "verify": {
+            "title": "Verifica la configuración",
+            "body": "Ejecuta el diagnóstico si la mascota no aparece, o escribe <code>/petdex status</code> dentro de un agente compatible después de instalar los hooks.",
+            "result": "Doctor informa cualquier binario, hook, token o carpeta de mascota faltante con una corrección concreta."
+          }
+        },
+        "callout": "¿Aún no tienes una idea de mascota? <link>Crea la tuya</link> con el skill Codex Hatch Pet y vuelve para ejecutar <code>petdex submit</code>."
       },
       "install": {
         "title": "Install",
