@@ -153,7 +153,7 @@ jobs:
           ref: ${{ inputs.tag || github.ref }}
 
       - name: Download all binaries
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
 
