@@ -39,16 +39,19 @@ jobs:
         #
         # Source defaults to Railly/zero-native:feature/window-resize because
         # the floating-window options + window.resize + focusable flag aren't
-        # in vercel-labs/main yet. The feature/window-resize branch builds on
-        # top of feature/floating-window (the PR currently in review). Update
-        # ZERO_NATIVE_REMOTE / ZERO_NATIVE_BRANCH once everything merges
-        # upstream so CI can switch to vercel-labs/main.
+        # in vercel-labs/main yet. Pin the commit so a mutable fork branch
+        # cannot silently produce a desktop release without window.resize.
+        # Update ZERO_NATIVE_REMOTE / ZERO_NATIVE_BRANCH / ZERO_NATIVE_REF once
+        # everything merges upstream so CI can switch to vercel-labs/main.
         env:
           ZERO_NATIVE_REMOTE: "https://github.com/Railly/zero-native.git"
           ZERO_NATIVE_BRANCH: "feature/window-resize"
+          ZERO_NATIVE_REF: "c85ec92a170c5b1304543ffcbf0c1d6d3e413498"
         run: |
           set -euo pipefail
           git clone --depth 1 --branch "$ZERO_NATIVE_BRANCH" "$ZERO_NATIVE_REMOTE" "$GITHUB_WORKSPACE/zero-native"
+          git -C "$GITHUB_WORKSPACE/zero-native" fetch --depth 1 origin "$ZERO_NATIVE_REF"
+          git -C "$GITHUB_WORKSPACE/zero-native" checkout --detach "$ZERO_NATIVE_REF"
           echo "ZERO_NATIVE_PATH=$GITHUB_WORKSPACE/zero-native/" >> "$GITHUB_ENV"
 
       - name: Install Zig 0.16.0

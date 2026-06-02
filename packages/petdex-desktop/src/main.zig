@@ -6,6 +6,14 @@ const zero_native = @import("zero-native");
 
 pub const panic = std.debug.FullPanic(zero_native.debug.capturePanic);
 
+comptime {
+    if (!@hasDecl(zero_native.platform, "ResizeAnchor") or
+        !@hasField(zero_native.platform.PlatformServices, "resize_window_fn"))
+    {
+        @compileError("petdex-desktop requires zero-native with zero-native.window.resize support; use Railly/zero-native feature/window-resize at c85ec92 or newer");
+    }
+}
+
 const WINDOW_W: f32 = 140;
 // 180px tall: pet at top:34 + 78px sprite = 112; +16 bottom margin
 // after gravity-throw recovery. The bubble sits in the 30px strip
