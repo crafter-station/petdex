@@ -2,8 +2,6 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { notFound } from "next/navigation";
 
-import { Analytics } from "@vercel/analytics/next";
-import { SpeedInsights } from "@vercel/speed-insights/next";
 import { NextIntlClientProvider } from "next-intl";
 import {
   getMessages,
@@ -17,6 +15,7 @@ import { FeedbackWidget } from "@/components/feedback-widget";
 import { HeaderStateProvider } from "@/components/header-state-provider";
 import { ProfileAnnouncementModal } from "@/components/profile-announcement-modal";
 import { AppProviders } from "@/components/theme-providers";
+import { VercelObservability } from "@/components/vercel-observability";
 import { TopPromoStrip } from "@/components/zh/top-promo-strip";
 import { ZhLayoutSpacer } from "@/components/zh/zh-layout-spacer";
 
@@ -120,8 +119,7 @@ export default async function LocaleLayout({ children, params }: Props) {
               <AnnouncementQueue />
               <ProfileAnnouncementModal />
               <BuildVersionWatcher />
-              <Analytics />
-              <SpeedInsights />
+              <VercelObservability />
             </HeaderStateProvider>
           </AppProviders>
         </NextIntlClientProvider>

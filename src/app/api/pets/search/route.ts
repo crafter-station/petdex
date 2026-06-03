@@ -33,7 +33,7 @@ export async function GET(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const params = url.searchParams;
 
-  const q = params.get("q") ?? undefined;
+  const q = params.get("q")?.trim() || undefined;
 
   const kinds = parseList(params.get("kinds")).filter((k) =>
     KIND_SET.has(k),
@@ -46,10 +46,11 @@ export async function GET(req: Request): Promise<Response> {
   ) as ColorFamily[];
   const batches = parseBatchList(params.get("batches"));
 
-  const sortRaw = (params.get("sort") ?? "curated").toLowerCase();
+  const defaultSort: SortKey = q ? "curated" : "alpha";
+  const sortRaw = (params.get("sort") ?? defaultSort).toLowerCase();
   const sort: SortKey = SORT_SET.has(sortRaw as SortKey)
     ? (sortRaw as SortKey)
-    : "curated";
+    : defaultSort;
 
   const cursor = parseIntSafe(params.get("cursor"), 0);
   const limit = parseIntSafe(params.get("limit"), SEARCH_LIMITS.DEFAULT_LIMIT);

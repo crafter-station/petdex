@@ -89,10 +89,7 @@ export default async function Home({
   const [heroPets, initialSearch, dexEntries, collections, feedAds] =
     await Promise.all([
       getFeaturedPetsWithMetrics(6),
-      // No shuffleSeed → searchPets falls back to alpha order, which is
-      // the same for every visitor and therefore safe to cache. The
-      // client re-fetches with the visitor's seed on hydration.
-      searchPets({ sort: "curated" }),
+      searchPets({ sort: "alpha" }),
       getDexNumberMap(),
       getCollectionsBySlugs(LANDING_COLLECTION_ORDER, 6),
       getActiveFeedAds(6),

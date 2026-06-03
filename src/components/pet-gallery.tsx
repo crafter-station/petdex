@@ -145,7 +145,8 @@ export function PetGallery({
   const [activeVibes, setActiveVibes] = useState<Set<PetVibe>>(new Set());
   const [activeColors, setActiveColors] = useState<Set<ColorFamily>>(new Set());
   const [activeBatches, setActiveBatches] = useState<Set<string>>(new Set());
-  const [sort, setSort] = useState<SortKey>("curated");
+  const [sort, setSort] = useState<SortKey>("alpha");
+  const [sortTouched, setSortTouched] = useState(false);
   // The home page no longer ships caughtSlugs server-side — that would
   // make every SSR render per-visitor and kill ISR. We pull the caught
   // slug set from the shared HeaderStateProvider (one polled aggregate
@@ -181,6 +182,7 @@ export function PetGallery({
         p.set("batches", [...activeBatches].join(","));
       }
       if (sort === "curated") {
+        p.set("sort", sort);
         if (shuffleSeedRef.current) {
           p.set("shuffleSeed", shuffleSeedRef.current);
         }
@@ -194,6 +196,11 @@ export function PetGallery({
     },
     [trimmedQuery, activeKinds, activeVibes, activeColors, activeBatches, sort],
   );
+
+  useEffect(() => {
+    if (sortTouched) return;
+    setSort(trimmedQuery ? "curated" : "alpha");
+  }, [sortTouched, trimmedQuery]);
 
   // Re-fetch on filter / sort / query changes (debounced for the query).
   useEffect(() => {
@@ -376,6 +383,7 @@ export function PetGallery({
             value={sort}
             onValueChange={(next) => {
               track("sort_changed", { sort: next });
+              setSortTouched(true);
               setSort(next as SortKey);
             }}
           >

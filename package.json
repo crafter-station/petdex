@@ -14,6 +14,7 @@
     "check": "biome check .",
     "format": "biome check --write .",
     "generate-assets": "bun scripts/generate-assets.ts",
+    "cost:report": "bun scripts/vercel-cost-report.ts --project petdex",
     "auto-tag": "bun scripts/auto-tag.ts",
     "release:desktop": "bun scripts/release-desktop.ts",
     "i18n:check": "bun scripts/i18n-check.ts",
