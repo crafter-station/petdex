@@ -1,41 +1,20 @@
 # Contributing to Petdex
 
-## Three paths for local dev
+## Supported local dev paths
 
 Pick the one that matches what you want to change.
 
 | Goal | Command | Setup |
 |---|---|---|
-| Tweak UI / copy / i18n / CSS | `bun run dev:mock` | 0 credentials |
-| Test DB queries / auth / submit / likes | `bun run dev:docker` | Docker Desktop or Podman, ~30s |
+| Local full stack | `bun run dev:docker` | Docker Desktop or Podman, ~30s |
 | Run against real petdex services | `bun run dev` | `.env.local` filled in (maintainers only) |
 
-`dev:docker` is the new recommended path for almost everyone. It boots
+`dev:docker` is the recommended path for almost everyone. It boots
 a real Postgres + Redis + Clerk dev instance so the app behaves the
-same way it does in production, without any of the in-process shims
-that `dev:mock` ships.
+same way it does in production.
 
-## bun run dev:mock
-
-Zero credentials, zero containers, in-process Postgres (PGlite) and a
-stubbed Clerk session. Slower HMR, no real auth, but boots in 5 seconds.
-
-```bash
-bun install
-bun run dev:mock
-```
-
-Open <http://localhost:3000>. You're auto-signed in as
-`contributor@petdex.local`.
-
-What works: gallery, pet detail pages, search, the `/u/<handle>`
-profile dashboard, status badges. Sign-in flows are bypassed and the
-DB is in-memory.
-
-What does NOT work: real OAuth, real R2 uploads, outbound emails, the
-auto-tag and pet-sound jobs (need API keys).
-
-If your change touches any of those, use `dev:docker` instead.
+`dev:mock` is deprecated and intentionally exits. Use `dev:docker`, or
+`bun dev` if you are a maintainer with complete env vars.
 
 ## bun run dev:docker
 

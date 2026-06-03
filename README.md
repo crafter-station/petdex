@@ -100,22 +100,21 @@ crafter-station/petdex
 
 ## Develop locally
 
-Three paths, pick the one that matches what you want to change.
+Two paths are supported.
 
 | Goal | Command | Setup |
 | --- | --- | --- |
-| UI, copy, i18n, CSS | `bun run dev:mock` | Zero credentials. In-process Postgres + stubbed Clerk. |
-| DB queries, auth, submit, likes | `bun run dev:docker` | Docker or Podman, ~30s warm-up. |
+| Local full stack | `bun run dev:docker` | Docker or Podman, ~30s warm-up. |
 | Run against real services | `bun run dev` | `.env.local` filled (maintainers only). |
 
 ```sh
 git clone https://github.com/crafter-station/petdex.git
 cd petdex
 bun install
-bun run dev:mock
+bun run dev:docker
 ```
 
-Open [localhost:3000](http://localhost:3000). You're auto-signed-in as `contributor@petdex.local`. Full guide in [`CONTRIBUTING.md`](./CONTRIBUTING.md).
+Open [localhost:3000](http://localhost:3000). Full guide in [`CONTRIBUTING.md`](./CONTRIBUTING.md).
 
 ## Pet package format
 

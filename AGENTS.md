@@ -2,8 +2,9 @@
 
 ## Commands
 - Use Bun for repo work: `bun install`, not `npm install`. Published CLI docs mention `npm`/`npx` for end users only.
-- Recommended local app dev is `bun run dev:mock`; it needs no `.env.local`, loads `.env.mock`, auto-signs in as `contributor@petdex.local`, seeds PGlite from `pets/ideas.json`, and runs `next dev --webpack` because PGlite wasm/workers break under Turbopack.
-- Real-service dev is `bun dev` with `.env.local` copied from `.env.example`; this path expects Clerk, Postgres/Neon, R2, Upstash, Resend, OpenAI, and ElevenLabs credentials.
+- Recommended local app dev is `bun run dev:docker`; it boots local Postgres and Redis with shared Clerk dev defaults from `.env.dev`.
+- Maintainer dev is `bun dev` with `.env.local` copied from `.env.example`; this path expects Clerk, Postgres/Neon, R2, Upstash, Resend, OpenAI, and ElevenLabs credentials.
+- `bun run dev:mock` is deprecated and intentionally exits. Keep `.env.mock` only for targeted mock-backed tests or build checks.
 - Root checks: `bun run check` for Biome, `bun run format` to write Biome fixes, `bun run build` for the Next app, `bun test` for Bun tests, and `bun run i18n:check` after editing translation messages. There is no root `typecheck` script.
 - Focused tests use `bun test path/to/file.test.ts`. Tests that import `src/lib/db/client.ts` directly or indirectly, including `src/lib/pet-search.test.ts` and `src/lib/security.test.ts`, need a usable `DATABASE_URL` or mock env: `bun test --env-file=.env.mock src/lib/security.test.ts`.
 - `packages/petdex-cli` and `packages/discord-bot` are independent packages, not root workspaces; run their own `bun install` and package scripts from inside each directory. Root `tsconfig.json` excludes `packages`.

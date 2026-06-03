@@ -8,9 +8,6 @@
 // real bucket (CORS open). The image element happily fetches them and
 // the gallery looks like the real thing without anyone copying assets.
 //
-// If you're offline or want zero external requests, run dev:mock
-// instead — it ships its own PGlite seed.
-
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
