@@ -1,7 +1,7 @@
 {
   "$schema": "./built-with.schema.json",
   "version": 1,
-  "lastUpdated": "2026-05-30",
+  "lastUpdated": "2026-06-03",
   "categories": {
     "desktop-companion": {
       "label": "Desktop companions",
@@ -334,6 +334,42 @@
         "url": "https://github.com/Swair/prosophor/blob/main/main_src/prosophor_core/managers/agent_role_loader.cc#L176-L178"
       },
       "screenshot": "/built-with/prosophor.png"
+    },
+    {
+      "slug": "agent-critter",
+      "name": "Agent Critter",
+      "tagline": "Rust Claude Code desktop pet plugin that reacts to agent events and installs sprites directly from the Petdex manifest.",
+      "category": "desktop-companion",
+      "repo": "Jedeiah/agent-critter",
+      "homepage": "https://github.com/Jedeiah/agent-critter/releases/latest",
+      "stars": 2,
+      "language": "Rust",
+      "platforms": ["macOS", "Windows"],
+      "addedAt": "2026-06-03",
+      "evidence": {
+        "type": "code",
+        "quote": "ureq::get(\"https://petdex.crafter.run/api/manifest\").call()",
+        "url": "https://github.com/Jedeiah/agent-critter/blob/main/src/daemon.rs#L280"
+      },
+      "screenshot": "/built-with/agent-critter.png"
+    },
+    {
+      "slug": "codexpet-nest",
+      "name": "CodexPet Nest",
+      "tagline": "macOS companion nest overlay with widgets and a Petdex marketplace for browsing and installing community pets.",
+      "category": "desktop-companion",
+      "repo": "RyanNiu/codexpet-nest",
+      "homepage": "https://codexpet.xyz/nest/",
+      "stars": 9,
+      "language": "Swift",
+      "platforms": ["macOS", "Web"],
+      "addedAt": "2026-06-03",
+      "evidence": {
+        "type": "code",
+        "quote": "private let manifestURL = URL(string: \"https://petdex.crafter.run/api/manifest\")!",
+        "url": "https://github.com/RyanNiu/codexpet-nest/blob/main/Sources/CodexPetNest/PetMarketplaceProvider.swift#L152"
+      },
+      "screenshot": "/built-with/codexpet-nest.png"
     }
   ]
 }

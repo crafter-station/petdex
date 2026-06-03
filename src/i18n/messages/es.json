@@ -969,11 +969,11 @@
   "builtWith": {
     "metadata": {
       "titleTemplate": "Hecho con Petdex: {total} proyectos de la comunidad",
-      "description": "{total} proyectos open source construidos sobre Petdex: companions de escritorio, apps de wellness, wearables, SDKs y creadores de pets."
+      "description": "{total} proyectos open source y source-available construidos sobre Petdex: companions de escritorio, apps de wellness, wearables, SDKs y creadores de pets."
     },
     "eyebrow": "Hecho con Petdex",
     "title": "Apps que la comunidad está shippeando sobre Petdex",
-    "subtitle": "{total} proyectos open source consumen la galería, la API o el formato de Petdex. Apps de wellness, wearables, SDKs y creadores. Curado, con evidencia, sin vibes.",
+    "subtitle": "{total} proyectos open source y source-available consumen la galería, la API o el formato de Petdex. Apps de wellness, wearables, SDKs y creadores. Curado, con evidencia, sin vibes.",
     "stats": {
       "stars": "{total} stars combinadas",
       "projects": "{total} proyectos",

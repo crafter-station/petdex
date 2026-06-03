@@ -1059,11 +1059,11 @@
   "builtWith": {
     "metadata": {
       "titleTemplate": "用 Petdex 构建：{total} 个社区项目",
-      "description": "{total} 个基于 Petdex 构建的开源项目：桌面伙伴、专注工具、可穿戴设备、SDK 和 pet 创作者。"
+      "description": "{total} 个基于 Petdex 构建的开源和源码可见项目：桌面伙伴、专注工具、可穿戴设备、SDK 和 pet 创作者。"
     },
     "eyebrow": "用 Petdex 构建",
     "title": "社区正在 Petdex 上发布的应用",
-    "subtitle": "{total} 个开源项目使用 Petdex 的图库、API 或 pet 格式。专注工具、可穿戴设备、SDK 和创作者。精选、有证据、不靠感觉。",
+    "subtitle": "{total} 个开源和源码可见项目使用 Petdex 的图库、API 或 pet 格式。专注工具、可穿戴设备、SDK 和创作者。精选、有证据、不靠感觉。",
     "stats": {
       "stars": "总计 {total} stars",
       "projects": "{total} 个项目",

@@ -1,12 +1,12 @@
 name: Add my project to /built-with
-description: Submit your open-source project that builds on top of Petdex
+description: Submit your open-source or source-available project that builds on top of Petdex
 title: "[Built with] <project-name>"
 labels: ["built-with-submission"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for shipping with Petdex. The /built-with page features projects that pull from the Petdex gallery, API, or pet format with explicit attribution.
+        Thanks for shipping with Petdex. The /built-with page features open-source and source-available projects that pull from the Petdex gallery, API, or pet format with explicit attribution.
 
         We review submissions manually. Once approved, we take a screenshot and merge the entry into `src/data/built-with.json`. Typical turnaround: 3-5 days.
 
