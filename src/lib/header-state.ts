@@ -16,10 +16,16 @@ export const HEADER_STATE_POLL_MS = 900_000;
 export const HEADER_STATE_MIN_REFRESH_MS = HEADER_STATE_POLL_MS;
 export const HEADER_STATE_CACHE_TTL_MS = HEADER_STATE_MIN_REFRESH_MS;
 export const HEADER_STATE_BROWSER_CACHE_SECONDS = 300;
+export const HEADER_STATE_REFRESH_LOCK_MS = 15_000;
 
-type CachedHeaderState = {
+export type CachedHeaderState = {
   savedAt: number;
   state: HeaderState;
+};
+
+export type HeaderStateRefreshClaim = {
+  shouldRefresh: boolean;
+  token: string | null;
 };
 
 export function headerStateCacheKey(userId: string | null | undefined) {
@@ -79,6 +85,81 @@ export function parseCachedHeaderState(
 
 export function serializeHeaderState(state: HeaderState, savedAt: number) {
   return JSON.stringify({ savedAt, state });
+}
+
+export function readCachedHeaderStateFromBrowser(
+  cacheKey: string,
+  now = Date.now(),
+): CachedHeaderState | null {
+  const local = parseCachedHeaderState(
+    readStorageValue(browserStorage("localStorage"), cacheKey),
+    now,
+  );
+  const session = parseCachedHeaderState(
+    readStorageValue(browserStorage("sessionStorage"), cacheKey),
+    now,
+  );
+  if (!local) return session;
+  if (!session) return local;
+  return local.savedAt >= session.savedAt ? local : session;
+}
+
+export function writeCachedHeaderStateToBrowser(
+  cacheKey: string,
+  state: HeaderState,
+  savedAt: number,
+) {
+  const raw = serializeHeaderState(state, savedAt);
+  if (writeStorageValue(browserStorage("localStorage"), cacheKey, raw)) return;
+  writeStorageValue(browserStorage("sessionStorage"), cacheKey, raw);
+}
+
+export function clearCachedHeaderStateFromBrowser(cacheKey: string) {
+  removeStorageValue(browserStorage("localStorage"), cacheKey);
+  removeStorageValue(browserStorage("sessionStorage"), cacheKey);
+  removeStorageValue(
+    browserStorage("localStorage"),
+    headerStateRefreshLockKey(cacheKey),
+  );
+}
+
+export function claimHeaderStateRefresh(
+  cacheKey: string,
+  now = Date.now(),
+  lockMs = HEADER_STATE_REFRESH_LOCK_MS,
+  token = `${now}:${Math.random()}`,
+): HeaderStateRefreshClaim {
+  const storage = browserStorage("localStorage");
+  if (!storage) return { shouldRefresh: true, token: null };
+  const lockKey = headerStateRefreshLockKey(cacheKey);
+  const current = parseRefreshLock(readStorageValue(storage, lockKey));
+  if (current && current.expiresAt > now) {
+    return { shouldRefresh: false, token: null };
+  }
+  const next = JSON.stringify({ expiresAt: now + lockMs, token });
+  if (!writeStorageValue(storage, lockKey, next)) {
+    return { shouldRefresh: true, token: null };
+  }
+  const saved = parseRefreshLock(readStorageValue(storage, lockKey));
+  return saved?.token === token
+    ? { shouldRefresh: true, token }
+    : { shouldRefresh: false, token: null };
+}
+
+export function releaseHeaderStateRefreshClaim(
+  cacheKey: string,
+  token: string,
+) {
+  const storage = browserStorage("localStorage");
+  if (!storage) return;
+  const lockKey = headerStateRefreshLockKey(cacheKey);
+  const current = parseRefreshLock(readStorageValue(storage, lockKey));
+  if (current?.token !== token) return;
+  try {
+    storage.removeItem(lockKey);
+  } catch {
+    return;
+  }
 }
 
 export function headerStateFetchCacheMode(force?: boolean): RequestCache {
@@ -142,4 +223,69 @@ function isString(value: unknown): value is string {
 
 function toNumber(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function headerStateRefreshLockKey(cacheKey: string) {
+  return `${cacheKey}:refresh-lock`;
+}
+
+function parseRefreshLock(raw: string | null): {
+  expiresAt: number;
+  token: string;
+} | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as { expiresAt?: unknown; token?: unknown };
+    if (
+      typeof parsed.expiresAt === "number" &&
+      Number.isFinite(parsed.expiresAt) &&
+      typeof parsed.token === "string"
+    ) {
+      return { expiresAt: parsed.expiresAt, token: parsed.token };
+    }
+  } catch {}
+  return null;
+}
+
+function browserStorage(
+  name: "localStorage" | "sessionStorage",
+): Storage | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window[name];
+  } catch {
+    return null;
+  }
+}
+
+function readStorageValue(storage: Storage | null, key: string): string | null {
+  if (!storage) return null;
+  try {
+    return storage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStorageValue(
+  storage: Storage | null,
+  key: string,
+  value: string,
+): boolean {
+  if (!storage) return false;
+  try {
+    storage.setItem(key, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function removeStorageValue(storage: Storage | null, key: string) {
+  if (!storage) return;
+  try {
+    storage.removeItem(key);
+  } catch {
+    return;
+  }
 }

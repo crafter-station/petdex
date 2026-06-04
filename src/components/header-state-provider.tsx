@@ -12,6 +12,8 @@ import {
 import { useAuth } from "@clerk/nextjs";
 
 import {
+  claimHeaderStateRefresh,
+  clearCachedHeaderStateFromBrowser,
   HEADER_STATE_POLL_MS,
   type HeaderState,
   headerStateCacheKey,
@@ -20,9 +22,11 @@ import {
   INITIAL_HEADER_STATE,
   nextHeaderStatePollDelay,
   parseCachedHeaderState,
-  serializeHeaderState,
+  readCachedHeaderStateFromBrowser,
+  releaseHeaderStateRefreshClaim,
   shouldRequestHeaderState,
   withHeaderUnreadCount,
+  writeCachedHeaderStateToBrowser,
 } from "@/lib/header-state";
 
 type Ctx = {
@@ -51,6 +55,19 @@ export function HeaderStateProvider({
   const requestGeneration = useRef(0);
   const userScope = useRef<string | null>(null);
   const inFlightUser = useRef<string | null>(null);
+  const previousCacheKey = useRef<string | null>(null);
+
+  const applyCachedState = useCallback(
+    (now = Date.now()) => {
+      if (!cacheKey) return false;
+      const cached = readCachedHeaderStateFromBrowser(cacheKey, now);
+      if (!cached) return false;
+      setState(cached.state);
+      lastRefreshAt.current = cached.savedAt;
+      return true;
+    },
+    [cacheKey],
+  );
 
   const setUnreadCount = useCallback(
     (next: number | ((current: number) => number)) => {
@@ -63,6 +80,9 @@ export function HeaderStateProvider({
     async (options?: { force?: boolean }) => {
       const now = Date.now();
       const requestUserId = userId ?? null;
+      if (!options?.force) {
+        applyCachedState(now);
+      }
       if (
         !shouldRequestHeaderState({
           force: options?.force,
@@ -94,7 +114,7 @@ export function HeaderStateProvider({
         setState(json);
         lastRefreshAt.current = savedAt;
         if (cacheKey) {
-          writeCachedHeaderState(cacheKey, json, savedAt);
+          writeCachedHeaderStateToBrowser(cacheKey, json, savedAt);
         }
       } catch {
         return;
@@ -104,7 +124,7 @@ export function HeaderStateProvider({
         }
       }
     },
-    [cacheKey, isLoaded, isSignedIn, userId],
+    [applyCachedState, cacheKey, isLoaded, isSignedIn, userId],
   );
 
   useEffect(() => {
@@ -118,6 +138,10 @@ export function HeaderStateProvider({
       };
     }
     if (!isSignedIn) {
+      if (previousCacheKey.current) {
+        clearCachedHeaderStateFromBrowser(previousCacheKey.current);
+        previousCacheKey.current = null;
+      }
       setState(INITIAL_HEADER_STATE);
       lastRefreshAt.current = 0;
       return () => {
@@ -125,18 +149,13 @@ export function HeaderStateProvider({
         requestGeneration.current += 1;
       };
     }
-    let hasCachedState = false;
-    if (cacheKey) {
-      const cached = parseCachedHeaderState(
-        readCachedHeaderState(cacheKey),
-        Date.now(),
-      );
-      if (cached) {
-        setState(cached.state);
-        lastRefreshAt.current = cached.savedAt;
-        hasCachedState = true;
+    if (cacheKey && previousCacheKey.current !== cacheKey) {
+      if (previousCacheKey.current) {
+        clearCachedHeaderStateFromBrowser(previousCacheKey.current);
       }
+      previousCacheKey.current = cacheKey;
     }
+    const hasCachedState = applyCachedState();
     if (!hasCachedState) {
       setState(INITIAL_HEADER_STATE);
       lastRefreshAt.current = 0;
@@ -148,7 +167,30 @@ export function HeaderStateProvider({
     let cancelled = false;
     let intervalId: number | null = null;
     let timeoutId: number | null = null;
-    const poll = () => refreshIfVisible({ force: true });
+    const poll = () => {
+      if (document.visibilityState !== "visible") return;
+      const now = Date.now();
+      applyCachedState(now);
+      if (
+        !shouldRequestHeaderState({
+          isLoaded,
+          isSignedIn,
+          lastRefreshAt: lastRefreshAt.current,
+          now,
+        })
+      ) {
+        return;
+      }
+      const claim = cacheKey
+        ? claimHeaderStateRefresh(cacheKey, now)
+        : { shouldRefresh: true, token: null };
+      if (!claim.shouldRefresh) return;
+      void refresh({ force: true }).finally(() => {
+        if (cacheKey && claim.token) {
+          releaseHeaderStateRefreshClaim(cacheKey, claim.token);
+        }
+      });
+    };
     const schedulePoll = () => {
       if (cancelled) return;
       timeoutId = window.setTimeout(
@@ -163,7 +205,15 @@ export function HeaderStateProvider({
     void refresh().finally(schedulePoll);
     const onFocus = () => refreshIfVisible();
     const onVisibilityChange = () => refreshIfVisible();
+    const onStorage = (ev: StorageEvent) => {
+      if (ev.key !== cacheKey || !ev.newValue) return;
+      const cached = parseCachedHeaderState(ev.newValue, Date.now());
+      if (!cached || userScope.current !== (userId ?? null)) return;
+      setState(cached.state);
+      lastRefreshAt.current = cached.savedAt;
+    };
     window.addEventListener("focus", onFocus);
+    window.addEventListener("storage", onStorage);
     document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       cancelled = true;
@@ -172,9 +222,10 @@ export function HeaderStateProvider({
       if (timeoutId !== null) window.clearTimeout(timeoutId);
       if (intervalId !== null) window.clearInterval(intervalId);
       window.removeEventListener("focus", onFocus);
+      window.removeEventListener("storage", onStorage);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [cacheKey, isLoaded, isSignedIn, refresh, userId]);
+  }, [applyCachedState, cacheKey, isLoaded, isSignedIn, refresh, userId]);
 
   return (
     <HeaderStateContext.Provider value={{ refresh, setUnreadCount, state }}>
@@ -191,27 +242,4 @@ export function useHeaderState(): Ctx {
     setUnreadCount: () => {},
     state: INITIAL_HEADER_STATE,
   };
-}
-
-function readCachedHeaderState(cacheKey: string) {
-  try {
-    return window.sessionStorage.getItem(cacheKey);
-  } catch {
-    return null;
-  }
-}
-
-function writeCachedHeaderState(
-  cacheKey: string,
-  state: HeaderState,
-  savedAt: number,
-) {
-  try {
-    window.sessionStorage.setItem(
-      cacheKey,
-      serializeHeaderState(state, savedAt),
-    );
-  } catch {
-    return;
-  }
 }
