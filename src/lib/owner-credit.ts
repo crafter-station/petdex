@@ -23,6 +23,7 @@ import {
   publicProfileCacheKey,
 } from "@/lib/db/cached-aggregates";
 import { db, schema } from "@/lib/db/client";
+import { withNextDataCache } from "@/lib/next-data-cache";
 
 export type OwnerExternal = {
   provider: "github" | "x";
@@ -324,35 +325,41 @@ export async function resolveStoredOwnerCreditFor(
 export async function resolveStoredOwnerCreditForSlug(
   slug: string,
 ): Promise<StoredOwnerCredit | null> {
-  const row = await cachedAggregate<RowCreditFallback | null>(
-    {
-      key: petOwnerCreditCacheKey(slug),
-      ttlSeconds: PET_OWNER_CREDIT_TTL_SECONDS,
-    },
-    async () => {
-      const stored = await db.query.submittedPets.findFirst({
-        columns: {
-          ownerId: true,
-          creditName: true,
-          creditUrl: true,
-          creditImage: true,
-          source: true,
+  const row = await withNextDataCache(
+    async () =>
+      cachedAggregate<RowCreditFallback | null>(
+        {
+          key: petOwnerCreditCacheKey(slug),
+          ttlSeconds: PET_OWNER_CREDIT_TTL_SECONDS,
         },
-        where: and(
-          eq(schema.submittedPets.slug, slug),
-          eq(schema.submittedPets.status, "approved"),
-        ),
-      });
-      if (!stored) return null;
-      return {
-        ownerId: stored.ownerId,
-        creditName: stored.creditName,
-        creditUrl: stored.creditUrl,
-        creditImage: stored.source === "discover" ? null : stored.creditImage,
-        ownerIsProxy: stored.source === "discover",
-      };
-    },
-  );
+        async () => {
+          const stored = await db.query.submittedPets.findFirst({
+            columns: {
+              ownerId: true,
+              creditName: true,
+              creditUrl: true,
+              creditImage: true,
+              source: true,
+            },
+            where: and(
+              eq(schema.submittedPets.slug, slug),
+              eq(schema.submittedPets.status, "approved"),
+            ),
+          });
+          if (!stored) return null;
+          return {
+            ownerId: stored.ownerId,
+            creditName: stored.creditName,
+            creditUrl: stored.creditUrl,
+            creditImage:
+              stored.source === "discover" ? null : stored.creditImage,
+            ownerIsProxy: stored.source === "discover",
+          };
+        },
+      ),
+    ["petdex-pet-owner-credit", slug],
+    { tags: [`pet:${slug}`], revalidate: PET_OWNER_CREDIT_TTL_SECONDS },
+  )();
 
   if (!row) return null;
   return {
@@ -364,24 +371,32 @@ export async function resolveStoredOwnerCreditForSlug(
 async function getStoredPublicProfile(
   userId: string,
 ): Promise<StoredPublicProfile | null> {
-  return cachedAggregate(
+  return withNextDataCache(
+    async () =>
+      cachedAggregate(
+        {
+          key: publicProfileCacheKey(userId),
+          ttlSeconds: PUBLIC_PROFILE_TTL_SECONDS,
+        },
+        async () => {
+          try {
+            const [storedProfile] = await db
+              .select({
+                displayName: schema.userProfiles.displayName,
+                handle: schema.userProfiles.handle,
+              })
+              .from(schema.userProfiles)
+              .where(inArray(schema.userProfiles.userId, [userId]));
+            return storedProfile ?? { displayName: null, handle: null };
+          } catch {
+            return null;
+          }
+        },
+      ),
+    ["petdex-public-profile", userId],
     {
-      key: publicProfileCacheKey(userId),
-      ttlSeconds: PUBLIC_PROFILE_TTL_SECONDS,
+      tags: [`petdex:profile:${userId}`],
+      revalidate: PUBLIC_PROFILE_TTL_SECONDS,
     },
-    async () => {
-      try {
-        const [storedProfile] = await db
-          .select({
-            displayName: schema.userProfiles.displayName,
-            handle: schema.userProfiles.handle,
-          })
-          .from(schema.userProfiles)
-          .where(inArray(schema.userProfiles.userId, [userId]));
-        return storedProfile ?? { displayName: null, handle: null };
-      } catch {
-        return null;
-      }
-    },
-  );
+  )();
 }

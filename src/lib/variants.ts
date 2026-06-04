@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { AGGREGATE_KEYS, cachedAggregate } from "@/lib/db/cached-aggregates";
 import { db, schema } from "@/lib/db/client";
 import { getDexNumberMap } from "@/lib/dex";
+import { withNextDataCache } from "@/lib/next-data-cache";
 
 export const VARIANT_DISTANCE_THRESHOLD = 14;
 export const VARIANT_MAX_RESULTS = 6;
@@ -28,29 +29,37 @@ type VariantIndexRow = {
 const VARIANT_INDEX_TTL_SECONDS = 600;
 
 const getVariantIndex = cache(async (): Promise<VariantIndexRow[]> => {
-  return cachedAggregate(
-    { key: AGGREGATE_KEYS.variantIndex, ttlSeconds: VARIANT_INDEX_TTL_SECONDS },
-    async () => {
-      const rows = await db.query.submittedPets.findMany({
-        columns: {
-          slug: true,
-          displayName: true,
-          spritesheetUrl: true,
-          dhash: true,
-          source: true,
+  return withNextDataCache(
+    async () =>
+      cachedAggregate(
+        {
+          key: AGGREGATE_KEYS.variantIndex,
+          ttlSeconds: VARIANT_INDEX_TTL_SECONDS,
         },
-        where: eq(schema.submittedPets.status, "approved"),
-      });
+        async () => {
+          const rows = await db.query.submittedPets.findMany({
+            columns: {
+              slug: true,
+              displayName: true,
+              spritesheetUrl: true,
+              dhash: true,
+              source: true,
+            },
+            where: eq(schema.submittedPets.status, "approved"),
+          });
 
-      return rows.map((row) => ({
-        slug: row.slug,
-        displayName: row.displayName,
-        spritesheetUrl: row.spritesheetUrl,
-        dhash: row.dhash,
-        source: row.source,
-      }));
-    },
-  );
+          return rows.map((row) => ({
+            slug: row.slug,
+            displayName: row.displayName,
+            spritesheetUrl: row.spritesheetUrl,
+            dhash: row.dhash,
+            source: row.source,
+          }));
+        },
+      ),
+    ["petdex-variant-index"],
+    { tags: ["petdex:variant-index"], revalidate: VARIANT_INDEX_TTL_SECONDS },
+  )();
 });
 
 export const getVariantsFor = cache(

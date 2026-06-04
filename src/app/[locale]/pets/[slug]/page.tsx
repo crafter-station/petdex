@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { Layers, Shuffle, Sparkles } from "lucide-react";
-import { getTranslations } from "next-intl/server";
+import { getTranslations, setRequestLocale } from "next-intl/server";
 
 import { getCollectionsContainingPet } from "@/lib/collections";
 import { formatDexNumber, getDexEntryMap } from "@/lib/dex";
@@ -36,7 +36,7 @@ import { SiteHeader } from "@/components/site-header";
 import { StaticPetSprite } from "@/components/static-pet-sprite";
 import { SubmittedBy } from "@/components/submitted-by";
 
-import { hasLocale } from "@/i18n/config";
+import { defaultLocale, hasLocale } from "@/i18n/config";
 
 const SITE_URL = "https://petdex.crafter.run";
 
@@ -48,6 +48,7 @@ type PageProps = {
 };
 
 export const dynamicParams = true;
+export const dynamic = "force-static";
 // Long ISR window — the shell is byte-stable (metrics fetched
 // client-side), so the page only needs to regenerate when its
 // editorial fields change. Write paths call revalidateTag('pet:${slug}')
@@ -123,9 +124,11 @@ export async function generateMetadata({ params }: PageProps) {
 }
 
 export default async function PetPage({ params }: PageProps) {
-  const { slug } = await params;
+  const { slug, locale } = await params;
+  const localeValue = hasLocale(locale) ? locale : defaultLocale;
+  setRequestLocale(localeValue);
   const pet = await getPet(slug);
-  const tPet = await getTranslations("pet");
+  const tPet = await getTranslations({ locale: localeValue, namespace: "pet" });
 
   if (!pet) {
     notFound();
