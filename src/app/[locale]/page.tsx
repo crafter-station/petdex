@@ -13,6 +13,8 @@ import { formatLocalizedNumber } from "@/lib/format-number";
 import { buildLocaleAlternates } from "@/lib/locale-routing";
 import { searchPets } from "@/lib/pet-search";
 import { getFeaturedPetsWithMetrics, type PetWithMetrics } from "@/lib/pets";
+import { getRandomPet } from "@/lib/random-pet-pool";
+import { toSurprisePet } from "@/lib/surprise-pets";
 import { cn } from "@/lib/utils";
 
 import { CollectionActionMenu } from "@/components/collection-action-menu";
@@ -38,10 +40,10 @@ import { WechatCommunityDialog } from "@/components/wechat-community-dialog";
 
 import { hasLocale, locales } from "@/i18n/config";
 
-// ISR. The home page renders an alpha-ordered, anon shell — the
+// ISR. The home page renders an alpha-ordered, anon shell.
 // visitor's shuffle seed and caught-slug set are pulled client-side
-// (PetGallery re-fetches /api/pets/search; /api/me/caught-slugs feeds
-// the "caught" highlight). With a 24h ceiling and tag-based
+// after interaction; /api/me/header-state feeds the "caught" highlight.
+// With a 24h ceiling and tag-based
 // invalidation on submit/feature/withdraw, the page stays fresh for
 // editorial changes without burning a function on every visit.
 export const dynamic = "force-static";
@@ -86,17 +88,19 @@ export default async function Home({
     "franchise-jojos-bizarre-adventure",
   ];
 
-  const [heroPets, initialSearch, dexEntries, collections, feedAds] =
+  const [heroPets, initialSearch, dexEntries, collections, feedAds, randomPet] =
     await Promise.all([
       getFeaturedPetsWithMetrics(6),
       searchPets({ sort: "alpha" }),
       getDexNumberMap(),
       getCollectionsBySlugs(LANDING_COLLECTION_ORDER, 6),
       getActiveFeedAds(6),
+      getRandomPet(),
     ]);
   const totalPets = initialSearch.total;
   const formattedTotalPets = formatLocalizedNumber(totalPets, locale);
   const showWechatCommunity = isZh;
+  const surprisePet = randomPet ? toSurprisePet(randomPet) : null;
 
   // Plain-object so the server -> client serializer doesn't choke on a
   // Map. Same source of truth either way.
@@ -141,7 +145,7 @@ export default async function Home({
   return (
     <main className="min-h-dvh bg-background text-foreground">
       <JsonLd data={jsonLd} />
-      <SurprisePetCard />
+      <SurprisePetCard initialPet={surprisePet} />
       <SiteHeader />
       <section className="petdex-cloud relative -mt-[84px] overflow-clip pt-[84px]">
         <div className="relative mx-auto flex w-full max-w-[1440px] flex-col px-5 pb-10 md:px-8">

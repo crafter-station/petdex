@@ -1,21 +1,9 @@
 import { NextResponse } from "next/server";
 
-import { and, eq, ne } from "drizzle-orm";
-
-import { AGGREGATE_KEYS, cachedAggregate } from "@/lib/db/cached-aggregates";
-import { db, schema } from "@/lib/db/client";
+import { getRandomPetPool } from "@/lib/random-pet-pool";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const RANDOM_POOL_TTL_SECONDS = 300;
-
-type RandomPet = {
-  slug: string;
-  displayName: string;
-  description: string;
-  spritesheetPath: string;
-};
 
 // GET /api/pets/random?exclude=current-slug
 //
@@ -60,28 +48,4 @@ export async function GET(req: Request): Promise<Response> {
     return NextResponse.redirect(new URL("/", req.url), 302);
   }
   return NextResponse.redirect(new URL(`/pets/${next.slug}`, req.url), 302);
-}
-
-async function getRandomPetPool(): Promise<RandomPet[]> {
-  return cachedAggregate(
-    {
-      key: AGGREGATE_KEYS.randomPetPool,
-      ttlSeconds: RANDOM_POOL_TTL_SECONDS,
-    },
-    async () =>
-      db
-        .select({
-          slug: schema.submittedPets.slug,
-          displayName: schema.submittedPets.displayName,
-          description: schema.submittedPets.description,
-          spritesheetPath: schema.submittedPets.spritesheetUrl,
-        })
-        .from(schema.submittedPets)
-        .where(
-          and(
-            eq(schema.submittedPets.status, "approved"),
-            ne(schema.submittedPets.source, "discover"),
-          ),
-        ),
-  );
 }
