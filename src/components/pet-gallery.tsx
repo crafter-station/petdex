@@ -168,6 +168,7 @@ export function PetGallery({
   const [loadingMore, setLoadingMore] = useState(false);
 
   const requestSeq = useRef(0);
+  const hasMountedSearchEffect = useRef(false);
   const shuffleSeedRef = useRef<string | null>(initial.shuffleSeed ?? null);
   const stateCount = petStates.length;
 
@@ -204,6 +205,10 @@ export function PetGallery({
 
   // Re-fetch on filter / sort / query changes (debounced for the query).
   useEffect(() => {
+    if (!hasMountedSearchEffect.current) {
+      hasMountedSearchEffect.current = true;
+      return;
+    }
     const seq = ++requestSeq.current;
     const controller = new AbortController();
     let cancelled = false;
