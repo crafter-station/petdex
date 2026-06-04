@@ -3,6 +3,7 @@ import { describe, expect, it } from "bun:test";
 import {
   headerStateCacheKey,
   INITIAL_HEADER_STATE,
+  nextHeaderStatePollDelay,
   parseCachedHeaderState,
   serializeHeaderState,
   shouldRequestHeaderState,
@@ -76,8 +77,15 @@ describe("header state helpers", () => {
     const raw = serializeHeaderState(state, 1_000);
 
     expect(parseCachedHeaderState(raw, 30_000)?.state).toEqual(state);
-    expect(parseCachedHeaderState(raw, 90_000)).toBeNull();
+    expect(parseCachedHeaderState(raw, 301_001)).toBeNull();
     expect(parseCachedHeaderState(raw, 500)).toBeNull();
+  });
+
+  it("schedules cached polls by remaining freshness window", () => {
+    expect(nextHeaderStatePollDelay(0, 1_000)).toBe(300_000);
+    expect(nextHeaderStatePollDelay(1_000, 61_000)).toBe(240_000);
+    expect(nextHeaderStatePollDelay(1_000, 301_000)).toBe(0);
+    expect(nextHeaderStatePollDelay(10_000, 1_000)).toBe(300_000);
   });
 
   it("scopes cache keys by signed-in user", () => {

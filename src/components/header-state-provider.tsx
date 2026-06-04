@@ -16,6 +16,7 @@ import {
   type HeaderState,
   headerStateCacheKey,
   INITIAL_HEADER_STATE,
+  nextHeaderStatePollDelay,
   parseCachedHeaderState,
   serializeHeaderState,
   shouldRequestHeaderState,
@@ -140,9 +141,14 @@ export function HeaderStateProvider({
       if (document.visibilityState !== "visible") return;
       void refresh(options);
     };
-    const id = window.setInterval(
-      () => refreshIfVisible({ force: true }),
-      HEADER_STATE_POLL_MS,
+    let intervalId: number | null = null;
+    const poll = () => refreshIfVisible({ force: true });
+    const timeoutId = window.setTimeout(
+      () => {
+        poll();
+        intervalId = window.setInterval(poll, HEADER_STATE_POLL_MS);
+      },
+      nextHeaderStatePollDelay(lastRefreshAt.current, Date.now()),
     );
     const onFocus = () => refreshIfVisible();
     const onVisibilityChange = () => refreshIfVisible();
@@ -151,7 +157,8 @@ export function HeaderStateProvider({
     return () => {
       mounted.current = false;
       requestGeneration.current += 1;
-      window.clearInterval(id);
+      window.clearTimeout(timeoutId);
+      if (intervalId !== null) window.clearInterval(intervalId);
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };

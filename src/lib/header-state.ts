@@ -14,7 +14,7 @@ export const INITIAL_HEADER_STATE: HeaderState = {
 
 export const HEADER_STATE_POLL_MS = 300_000;
 export const HEADER_STATE_MIN_REFRESH_MS = 300_000;
-export const HEADER_STATE_CACHE_TTL_MS = 60_000;
+export const HEADER_STATE_CACHE_TTL_MS = HEADER_STATE_MIN_REFRESH_MS;
 
 type CachedHeaderState = {
   savedAt: number;
@@ -40,6 +40,15 @@ export function shouldRequestHeaderState(input: {
     input.now - input.lastRefreshAt >=
       (input.minRefreshMs ?? HEADER_STATE_MIN_REFRESH_MS)
   );
+}
+
+export function nextHeaderStatePollDelay(
+  lastRefreshAt: number,
+  now: number,
+  pollMs = HEADER_STATE_POLL_MS,
+) {
+  if (lastRefreshAt <= 0 || lastRefreshAt > now) return pollMs;
+  return Math.max(0, pollMs - (now - lastRefreshAt));
 }
 
 export function parseCachedHeaderState(
