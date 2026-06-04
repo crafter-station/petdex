@@ -63,6 +63,8 @@ export async function generateMetadata({
   };
 }
 const SITE_URL = "https://petdex.crafter.run";
+const HOME_INITIAL_GALLERY_LIMIT = 10;
+
 export function generateStaticParams() {
   return locales.map((locale) => ({ locale }));
 }
@@ -91,7 +93,7 @@ export default async function Home({
   const [heroPets, initialSearch, dexEntries, collections, feedAds, randomPet] =
     await Promise.all([
       getFeaturedPetsWithMetrics(6),
-      searchPets({ sort: "alpha" }),
+      searchPets({ sort: "alpha", limit: HOME_INITIAL_GALLERY_LIMIT }),
       getDexNumberMap(),
       getCollectionsBySlugs(LANDING_COLLECTION_ORDER, 6),
       getActiveFeedAds(6),
