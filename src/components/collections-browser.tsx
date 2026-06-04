@@ -12,10 +12,12 @@ import {
   KIND_SLUG,
 } from "@/lib/collection-kind";
 import type { OwnerCredit } from "@/lib/owner-credit";
-import type { PetWithMetrics } from "@/lib/pets";
 
 import { CollectionActionMenu } from "@/components/collection-action-menu";
-import { CollectionCover } from "@/components/collection-cover";
+import {
+  CollectionCover,
+  type CollectionCoverPet,
+} from "@/components/collection-cover";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -39,7 +41,7 @@ type CollectionItem = {
   externalUrl: string | null;
   coverPetSlug: string | null;
   petCount: number;
-  pets: PetWithMetrics[];
+  pets: CollectionCoverPet[];
 };
 
 type SortKey = "size" | "title";

@@ -89,7 +89,11 @@ export default async function CollectionsPage({
     externalUrl: c.externalUrl,
     coverPetSlug: c.coverPetSlug,
     petCount: c.petCount,
-    pets: c.pets,
+    pets: c.pets.map((pet) => ({
+      slug: pet.slug,
+      displayName: pet.displayName,
+      spritesheetPath: pet.spritesheetPath,
+    })),
   }));
 
   return (

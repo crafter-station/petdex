@@ -9,12 +9,16 @@
 // server picks one offset and the client picks another; a slug-derived
 // pseudo-hash gives both sides the same answer without coordination.
 
-import type { PetWithMetrics } from "@/lib/pets";
-
 import { PetSprite } from "@/components/pet-sprite";
 
+export type CollectionCoverPet = {
+  slug: string;
+  displayName: string;
+  spritesheetPath: string;
+};
+
 type CollectionCoverProps = {
-  pets: PetWithMetrics[];
+  pets: CollectionCoverPet[];
   /** Slug to render largest and most prominent. Falls back to first pet. */
   coverSlug: string | null;
   /** Max sprites rendered. Defaults to 5 (works on mobile). */
