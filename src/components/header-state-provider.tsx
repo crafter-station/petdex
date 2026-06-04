@@ -47,6 +47,7 @@ export function HeaderStateProvider({
   const mounted = useRef(false);
   const requestGeneration = useRef(0);
   const userScope = useRef<string | null>(null);
+  const inFlightUser = useRef<string | null>(null);
 
   const setUnreadCount = useCallback(
     (next: number | ((current: number) => number)) => {
@@ -70,8 +71,9 @@ export function HeaderStateProvider({
       ) {
         return;
       }
+      if (!options?.force && inFlightUser.current === requestUserId) return;
       const generation = ++requestGeneration.current;
-      lastRefreshAt.current = now;
+      inFlightUser.current = requestUserId;
       try {
         const res = await fetch("/api/me/header-state", { cache: "no-store" });
         if (!res.ok) return;
@@ -84,11 +86,16 @@ export function HeaderStateProvider({
           return;
         }
         setState(json);
+        lastRefreshAt.current = now;
         if (cacheKey) {
           writeCachedHeaderState(cacheKey, json, now);
         }
       } catch {
         return;
+      } finally {
+        if (inFlightUser.current === requestUserId) {
+          inFlightUser.current = null;
+        }
       }
     },
     [cacheKey, isLoaded, isSignedIn, userId],
@@ -129,7 +136,10 @@ export function HeaderStateProvider({
       lastRefreshAt.current = 0;
     }
     void refresh({ force: !hasCachedState });
-    const id = window.setInterval(() => void refresh(), HEADER_STATE_POLL_MS);
+    const id = window.setInterval(
+      () => void refresh({ force: true }),
+      HEADER_STATE_POLL_MS,
+    );
     const onFocus = () => void refresh();
     window.addEventListener("focus", onFocus);
     return () => {

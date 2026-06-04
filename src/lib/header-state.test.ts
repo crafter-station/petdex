@@ -43,17 +43,23 @@ describe("header state helpers", () => {
         isLoaded: true,
         isSignedIn: true,
         lastRefreshAt: 1_000,
-        minRefreshMs: 60_000,
-        now: 30_000,
+        now: 120_000,
       }),
     ).toBe(false);
+    expect(
+      shouldRequestHeaderState({
+        isLoaded: true,
+        isSignedIn: true,
+        lastRefreshAt: 1_000,
+        now: 302_000,
+      }),
+    ).toBe(true);
     expect(
       shouldRequestHeaderState({
         force: true,
         isLoaded: true,
         isSignedIn: true,
         lastRefreshAt: 1_000,
-        minRefreshMs: 60_000,
         now: 30_000,
       }),
     ).toBe(true);

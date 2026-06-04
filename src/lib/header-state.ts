@@ -13,7 +13,7 @@ export const INITIAL_HEADER_STATE: HeaderState = {
 };
 
 export const HEADER_STATE_POLL_MS = 300_000;
-export const HEADER_STATE_MIN_REFRESH_MS = 60_000;
+export const HEADER_STATE_MIN_REFRESH_MS = 300_000;
 export const HEADER_STATE_CACHE_TTL_MS = 60_000;
 
 type CachedHeaderState = {
