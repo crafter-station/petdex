@@ -1,7 +1,7 @@
 {
   "$schema": "./built-with.schema.json",
   "version": 1,
-  "lastUpdated": "2026-06-03",
+  "lastUpdated": "2026-06-04",
   "categories": {
     "desktop-companion": {
       "label": "Desktop companions",
@@ -370,6 +370,24 @@
         "url": "https://github.com/RyanNiu/codexpet-nest/blob/main/Sources/CodexPetNest/PetMarketplaceProvider.swift#L152"
       },
       "screenshot": "/built-with/codexpet-nest.png"
+    },
+    {
+      "slug": "codex-pet-platformer",
+      "name": "Codex Pet Platformer",
+      "tagline": "Codex and Claude Code skill that turns any Petdex pet into a customizable side-scrolling platformer deployable to Netlify.",
+      "category": "bundled",
+      "repo": "shmulc8/codex-pet-platformer",
+      "homepage": "https://shmulik-ai-superhero.netlify.app",
+      "stars": 0,
+      "language": "JavaScript",
+      "platforms": ["Web"],
+      "addedAt": "2026-06-04",
+      "evidence": {
+        "type": "code",
+        "quote": "PETDEX_MANIFEST_URL = \"https://petdex.crafter.run/api/manifest\"",
+        "url": "https://github.com/shmulc8/codex-pet-platformer/blob/27037a5dc39aa9f139dcc7e019bf7c88af7e459d/skills/pet-platformer/scripts/build_game.py#L35"
+      },
+      "screenshot": "/built-with/codex-pet-platformer.png"
     }
   ]
 }
