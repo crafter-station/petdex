@@ -89,6 +89,8 @@ function scheduleRouteCostSample(req: NextRequest, event?: NextFetchEvent) {
   const sample = buildRouteCostSample({
     method: req.method,
     pathname: req.nextUrl.pathname,
+    headers: req.headers,
+    origin: req.nextUrl.origin,
     sampleRate,
   });
   if (!sample) return;

@@ -303,9 +303,11 @@ function RouteCostList({
   items: {
     estimatedRequests: number;
     method: string;
+    referrerSource: string;
     route: string;
     routeKind: string;
     samples: number;
+    trafficSource: string;
   }[];
   emptyLabel: string;
 }) {
@@ -323,7 +325,7 @@ function RouteCostList({
             : 0;
         return (
           <li
-            key={`${item.method}:${item.routeKind}:${item.route}`}
+            key={`${item.method}:${item.routeKind}:${item.route}:${item.trafficSource}:${item.referrerSource}`}
             className="grid gap-2 rounded-md border border-border-base px-3 py-2 text-sm md:grid-cols-[minmax(0,1fr)_160px]"
           >
             <div className="min-w-0">
@@ -334,7 +336,8 @@ function RouteCostList({
                 </span>
               </div>
               <p className="mt-1 font-mono text-[10px] tracking-[0.14em] text-muted-4 uppercase">
-                {item.routeKind} - {item.samples.toLocaleString()} samples
+                {item.routeKind} - {item.trafficSource} / {item.referrerSource}{" "}
+                - {item.samples.toLocaleString()} samples
               </p>
             </div>
             <div className="flex items-center gap-2">

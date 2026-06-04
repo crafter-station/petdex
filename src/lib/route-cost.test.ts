@@ -2,6 +2,8 @@ import { describe, expect, it } from "bun:test";
 
 import {
   buildRouteCostSample,
+  classifyRouteCostReferrerSource,
+  classifyRouteCostTrafficSource,
   normalizeRouteCostPath,
   routeCostKind,
   routeCostSampleRate,
@@ -85,10 +87,63 @@ describe("route cost helpers", () => {
       }),
     ).toMatchObject({
       method: "GET",
+      referrerSource: "direct",
       route: "/api/pets/[slug]/thumb",
       routeKind: "asset-api",
       sampleWeight: 1000,
+      trafficSource: "unknown",
     });
+  });
+
+  it("classifies sampled browser and prefetch requests without storing raw headers", () => {
+    expect(
+      classifyRouteCostTrafficSource({
+        "next-router-prefetch": "1",
+        "user-agent": "Mozilla/5.0",
+      }),
+    ).toBe("prefetch");
+    expect(
+      classifyRouteCostTrafficSource({
+        "sec-fetch-site": "same-origin",
+        "user-agent": "Mozilla/5.0",
+      }),
+    ).toBe("browser");
+    expect(
+      classifyRouteCostReferrerSource(
+        { referer: "https://petdex.crafter.run/pets/nukey" },
+        "https://petdex.crafter.run",
+      ),
+    ).toBe("internal");
+  });
+
+  it("classifies preview, bot, monitor, and external referrers coarsely", () => {
+    expect(
+      classifyRouteCostTrafficSource({
+        "user-agent": "Discordbot/2.0",
+      }),
+    ).toBe("preview");
+    expect(
+      classifyRouteCostTrafficSource({
+        "user-agent": "Googlebot/2.1",
+      }),
+    ).toBe("bot");
+    expect(
+      classifyRouteCostTrafficSource({
+        "user-agent": "curl/8.7.1",
+      }),
+    ).toBe("monitor");
+    expect(
+      classifyRouteCostReferrerSource(
+        { referer: "https://www.google.com/search?q=petdex" },
+        "https://petdex.crafter.run",
+      ),
+    ).toBe("search");
+    expect(
+      classifyRouteCostReferrerSource(
+        { referer: "https://github.com/crafter-station/petdex" },
+        "https://petdex.crafter.run",
+      ),
+    ).toBe("external");
   });
 
   it("requires explicit route cost env values", () => {

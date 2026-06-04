@@ -3,6 +3,12 @@ import "server-only";
 import { sql } from "drizzle-orm";
 
 import { db } from "@/lib/db/client";
+import {
+  combineRouteCostAttributionRows,
+  type RouteCostAttributionRow,
+  type RouteCostBucketInput,
+  type RouteCostSourceBucketInput,
+} from "@/lib/telemetry/route-cost-attribution";
 
 export type InstallsByDayRow = { date: string; count: number };
 export type OsRow = { os: string; count: number };
@@ -10,13 +16,7 @@ export type ArchRow = { arch: string; count: number };
 export type VersionRow = { binary_version: string; count: number };
 export type AgentRow = { agent: string; count: number };
 export type CountryRow = { country: string; count: number };
-export type RouteCostRow = {
-  estimatedRequests: number;
-  method: string;
-  route: string;
-  routeKind: string;
-  samples: number;
-};
+export type RouteCostRow = RouteCostAttributionRow;
 export type VersionAdoptionRow = {
   day: string;
   version: string;
@@ -201,25 +201,7 @@ export async function getTelemetrySummary(): Promise<TelemetrySummary> {
     ).rows ?? []
   ).map((r) => ({ country: r.country, count: toNum(r.count) }));
 
-  const routeCostTop = (
-    (
-      routeCostResult as unknown as {
-        rows: Array<{
-          estimated_requests: unknown;
-          method: string;
-          route: string;
-          route_kind: string;
-          samples: unknown;
-        }>;
-      }
-    ).rows ?? []
-  ).map((r) => ({
-    estimatedRequests: toNum(r.estimated_requests),
-    method: r.method,
-    route: r.route,
-    routeKind: r.route_kind,
-    samples: toNum(r.samples),
-  }));
+  const routeCostTop = routeCostResult;
 
   const funnelRow = (
     funnelResult as unknown as {
@@ -263,10 +245,12 @@ export async function getTelemetrySummary(): Promise<TelemetrySummary> {
   };
 }
 
-async function getRouteCostTop() {
+async function getRouteCostTop(): Promise<RouteCostRow[]> {
+  let legacyRows: RouteCostBucketInput[];
   try {
-    return await db.execute(sql`
+    const legacyResult = await db.execute(sql`
       SELECT
+        bucket_start,
         method,
         route,
         route_kind,
@@ -274,13 +258,91 @@ async function getRouteCostTop() {
         SUM(estimated_requests) AS estimated_requests
       FROM route_cost_buckets
       WHERE bucket_start >= now() - interval '24 hours'
-      GROUP BY method, route, route_kind
-      ORDER BY estimated_requests DESC
-      LIMIT 20
+      GROUP BY bucket_start, method, route, route_kind
     `);
+    legacyRows = mapLegacyRows(legacyResult);
   } catch {
-    return { rows: [] };
+    return [];
   }
+
+  let sourceRows: RouteCostSourceBucketInput[] = [];
+  try {
+    const sourceResult = await db.execute(sql`
+      SELECT
+        bucket_start,
+        method,
+        referrer_source,
+        route,
+        route_kind,
+        traffic_source,
+        SUM(sample_count) AS samples,
+        SUM(estimated_requests) AS estimated_requests
+      FROM route_cost_source_buckets
+      WHERE bucket_start >= now() - interval '24 hours'
+      GROUP BY
+        bucket_start,
+        method,
+        route,
+        route_kind,
+        traffic_source,
+        referrer_source
+    `);
+    sourceRows = mapSourceRows(sourceResult);
+  } catch {}
+
+  return combineRouteCostAttributionRows(legacyRows, sourceRows, 20);
+}
+
+function mapLegacyRows(result: unknown): RouteCostBucketInput[] {
+  return (
+    (
+      result as {
+        rows?: Array<{
+          bucket_start: unknown;
+          estimated_requests: unknown;
+          method: string;
+          route: string;
+          route_kind: string;
+          samples: unknown;
+        }>;
+      }
+    ).rows ?? []
+  ).map((r) => ({
+    bucketStart: String(r.bucket_start),
+    estimatedRequests: toNum(r.estimated_requests),
+    method: r.method,
+    route: r.route,
+    routeKind: r.route_kind,
+    samples: toNum(r.samples),
+  }));
+}
+
+function mapSourceRows(result: unknown): RouteCostSourceBucketInput[] {
+  return (
+    (
+      result as {
+        rows?: Array<{
+          bucket_start: unknown;
+          estimated_requests: unknown;
+          method: string;
+          referrer_source: string;
+          route: string;
+          route_kind: string;
+          samples: unknown;
+          traffic_source: string;
+        }>;
+      }
+    ).rows ?? []
+  ).map((r) => ({
+    bucketStart: String(r.bucket_start),
+    estimatedRequests: toNum(r.estimated_requests),
+    method: r.method,
+    referrerSource: r.referrer_source,
+    route: r.route,
+    routeKind: r.route_kind,
+    samples: toNum(r.samples),
+    trafficSource: r.traffic_source,
+  }));
 }
 
 export async function versionAdoptionOverTime(): Promise<VersionAdoptionRow[]> {

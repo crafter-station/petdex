@@ -862,6 +862,54 @@ export const routeCostBuckets = pgTable(
 export type RouteCostBucket = typeof routeCostBuckets.$inferSelect;
 export type NewRouteCostBucket = typeof routeCostBuckets.$inferInsert;
 
+export const routeCostSourceBuckets = pgTable(
+  "route_cost_source_buckets",
+  {
+    id: serial("id").primaryKey(),
+    bucketStart: timestamp("bucket_start", { withTimezone: true }).notNull(),
+    route: text("route").notNull(),
+    routeKind: text("route_kind").notNull(),
+    method: text("method").notNull(),
+    trafficSource: text("traffic_source").notNull().default("unknown"),
+    referrerSource: text("referrer_source").notNull().default("unknown"),
+    sampleCount: integer("sample_count").notNull().default(0),
+    estimatedRequests: integer("estimated_requests").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    bucketIdx: index("route_cost_source_buckets_bucket_idx").on(
+      table.bucketStart,
+    ),
+    routeIdx: index("route_cost_source_buckets_route_idx").on(
+      table.route,
+      table.bucketStart,
+    ),
+    sourceIdx: index("route_cost_source_buckets_source_idx").on(
+      table.route,
+      table.trafficSource,
+      table.referrerSource,
+      table.bucketStart,
+    ),
+    uniqueBucket: uniqueIndex("route_cost_source_buckets_unique").on(
+      table.bucketStart,
+      table.method,
+      table.routeKind,
+      table.route,
+      table.trafficSource,
+      table.referrerSource,
+    ),
+  }),
+);
+
+export type RouteCostSourceBucket = typeof routeCostSourceBuckets.$inferSelect;
+export type NewRouteCostSourceBucket =
+  typeof routeCostSourceBuckets.$inferInsert;
+
 export const wechatQrUploads = pgTable(
   "wechat_qr_uploads",
   {

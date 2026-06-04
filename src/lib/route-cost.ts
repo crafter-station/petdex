@@ -1,12 +1,32 @@
 export type RouteCostKind = "api" | "asset-api" | "metadata" | "page";
+export type RouteCostReferrerSource =
+  | "direct"
+  | "external"
+  | "internal"
+  | "search"
+  | "social"
+  | "unknown";
+export type RouteCostTrafficSource =
+  | "bot"
+  | "browser"
+  | "monitor"
+  | "prefetch"
+  | "preview"
+  | "unknown";
 
 export type RouteCostSample = {
   method: string;
   route: string;
   routeKind: RouteCostKind;
+  trafficSource: RouteCostTrafficSource;
+  referrerSource: RouteCostReferrerSource;
   sampleWeight: number;
   at: string;
 };
+
+type HeaderBag =
+  | Pick<Headers, "get">
+  | Record<string, string | null | undefined>;
 
 const LOCALE_SET = new Set(["en", "es", "zh"]);
 const DYNAMIC_ROUTE_PATTERNS = [
@@ -170,6 +190,8 @@ export function shouldSampleRouteCost(rate = routeCostSampleRate()): boolean {
 export function buildRouteCostSample(input: {
   method: string;
   pathname: string;
+  headers?: HeaderBag;
+  origin?: string;
   sampleRate?: number;
 }): RouteCostSample | null {
   if (input.pathname === "/api/internal/route-cost") return null;
@@ -180,9 +202,84 @@ export function buildRouteCostSample(input: {
     method: normalizeMethod(input.method),
     route,
     routeKind: routeCostKind(route),
+    trafficSource: classifyRouteCostTrafficSource(input.headers),
+    referrerSource: classifyRouteCostReferrerSource(
+      input.headers,
+      input.origin,
+    ),
     sampleWeight: Math.max(1, Math.round(1 / sampleRate)),
     at: new Date().toISOString(),
   };
+}
+
+export function classifyRouteCostTrafficSource(
+  headers?: HeaderBag,
+): RouteCostTrafficSource {
+  const purpose = [
+    readHeader(headers, "purpose"),
+    readHeader(headers, "sec-purpose"),
+    readHeader(headers, "x-purpose"),
+  ]
+    .join(" ")
+    .toLowerCase();
+  const nextPrefetch = readHeader(headers, "next-router-prefetch");
+  const middlewarePrefetch = readHeader(headers, "x-middleware-prefetch");
+  if (
+    purpose.includes("prefetch") ||
+    purpose.includes("prerender") ||
+    isTruthyHeader(nextPrefetch) ||
+    isTruthyHeader(middlewarePrefetch)
+  ) {
+    return "prefetch";
+  }
+
+  const userAgent = readHeader(headers, "user-agent").toLowerCase();
+  if (!userAgent) return "unknown";
+
+  if (PREVIEW_USER_AGENT_RE.test(userAgent)) return "preview";
+  if (MONITOR_USER_AGENT_RE.test(userAgent)) return "monitor";
+  if (BOT_USER_AGENT_RE.test(userAgent)) return "bot";
+
+  if (
+    readHeader(headers, "sec-fetch-site") ||
+    readHeader(headers, "sec-ch-ua") ||
+    (userAgent.includes("mozilla") &&
+      readHeader(headers, "accept").toLowerCase().includes("text/html"))
+  ) {
+    return "browser";
+  }
+
+  return "unknown";
+}
+
+export function classifyRouteCostReferrerSource(
+  headers?: HeaderBag,
+  origin?: string,
+): RouteCostReferrerSource {
+  const referrer =
+    readHeader(headers, "referer") || readHeader(headers, "referrer");
+  if (!referrer) return "direct";
+
+  let url: URL;
+  try {
+    url = new URL(referrer, origin);
+  } catch {
+    return "unknown";
+  }
+
+  if (origin) {
+    try {
+      const current = new URL(origin);
+      if (url.origin === current.origin) return "internal";
+    } catch {
+      return "unknown";
+    }
+  }
+
+  const host = url.hostname.toLowerCase().replace(/^www\./, "");
+  if (SEARCH_REFERRER_RE.test(host)) return "search";
+  if (SOCIAL_REFERRER_RE.test(host)) return "social";
+  return "external";
 }
 
 export function normalizeRouteCostPath(pathname: string): string {
@@ -232,6 +329,20 @@ function normalizeMethod(method: string): string {
   return upper.length <= 12 ? upper : "OTHER";
 }
 
+function readHeader(headers: HeaderBag | undefined, name: string): string {
+  if (!headers) return "";
+  if (typeof (headers as Pick<Headers, "get">).get === "function") {
+    return (headers as Pick<Headers, "get">).get(name) ?? "";
+  }
+  const bag = headers as Record<string, string | null | undefined>;
+  return bag[name] ?? bag[name.toLowerCase()] ?? bag[name.toUpperCase()] ?? "";
+}
+
+function isTruthyHeader(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
+}
+
 function firstNonEmpty(...values: Array<string | undefined>): string | null {
   for (const value of values) {
     const trimmed = value?.trim();
@@ -254,3 +365,14 @@ function matchDynamicRoutePattern(parts: string[]): string[] | null {
 function isDynamicPart(part: string): boolean {
   return part.startsWith("[") && part.endsWith("]");
 }
+
+const PREVIEW_USER_AGENT_RE =
+  /\b(discordbot|slackbot|twitterbot|facebookexternalhit|linkedinbot|whatsapp|telegrambot|pinterest|skypeuripreview|embedly|quora link preview)\b/;
+const MONITOR_USER_AGENT_RE =
+  /\b(uptimerobot|pingdom|healthcheck|statuscake|checkly|datadog|newrelic|better uptime|vercel|curl|wget)\b/;
+const BOT_USER_AGENT_RE =
+  /\b(bot|crawler|spider|crawling|slurp|ahrefs|semrush|applebot|googlebot|bingbot|duckduckbot|baiduspider|yandexbot|petalbot)\b/;
+const SEARCH_REFERRER_RE =
+  /(^|\.)((google|bing|duckduckgo|baidu|yahoo|yandex|ecosia|brave|perplexity)\.)/;
+const SOCIAL_REFERRER_RE =
+  /(^|\.)((x|twitter|t|facebook|instagram|threads|linkedin|reddit|discord|slack|youtube|telegram|whatsapp|pinterest)\.)/;

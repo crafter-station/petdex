@@ -3,7 +3,12 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { sql } from "drizzle-orm";
 
 import { db, schema } from "@/lib/db/client";
-import { type RouteCostKind, routeCostSecret } from "@/lib/route-cost";
+import {
+  type RouteCostKind,
+  type RouteCostReferrerSource,
+  type RouteCostTrafficSource,
+  routeCostSecret,
+} from "@/lib/route-cost";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,13 +29,31 @@ const METHOD_SET = new Set([
   "DELETE",
   "OPTIONS",
 ]);
+const REFERRER_SOURCE_SET = new Set<RouteCostReferrerSource>([
+  "direct",
+  "external",
+  "internal",
+  "search",
+  "social",
+  "unknown",
+]);
+const TRAFFIC_SOURCE_SET = new Set<RouteCostTrafficSource>([
+  "bot",
+  "browser",
+  "monitor",
+  "prefetch",
+  "preview",
+  "unknown",
+]);
 
 type Body = {
   at?: unknown;
   method?: unknown;
+  referrerSource?: unknown;
   route?: unknown;
   routeKind?: unknown;
   sampleWeight?: unknown;
+  trafficSource?: unknown;
 };
 
 class PayloadTooLargeError extends Error {
@@ -105,6 +128,41 @@ export async function POST(req: Request): Promise<Response> {
     );
   }
 
+  try {
+    await db
+      .insert(schema.routeCostSourceBuckets)
+      .values({
+        bucketStart: parsed.data.bucketStart,
+        method: parsed.data.method,
+        referrerSource: parsed.data.referrerSource,
+        route: parsed.data.route,
+        routeKind: parsed.data.routeKind,
+        trafficSource: parsed.data.trafficSource,
+        sampleCount: 1,
+        estimatedRequests: parsed.data.sampleWeight,
+      })
+      .onConflictDoUpdate({
+        target: [
+          schema.routeCostSourceBuckets.bucketStart,
+          schema.routeCostSourceBuckets.method,
+          schema.routeCostSourceBuckets.routeKind,
+          schema.routeCostSourceBuckets.route,
+          schema.routeCostSourceBuckets.trafficSource,
+          schema.routeCostSourceBuckets.referrerSource,
+        ],
+        set: {
+          sampleCount: sql`${schema.routeCostSourceBuckets.sampleCount} + 1`,
+          estimatedRequests: sql`${schema.routeCostSourceBuckets.estimatedRequests} + ${parsed.data.sampleWeight}`,
+          updatedAt: new Date(),
+        },
+      });
+  } catch (err) {
+    console.error(
+      "[route-cost-source] upsert failed:",
+      err instanceof Error ? err.message : "unknown error",
+    );
+  }
+
   return new Response(null, { status: 204 });
 }
 
@@ -141,9 +199,11 @@ function parseBody(body: Body):
       data: {
         bucketStart: Date;
         method: string;
+        referrerSource: RouteCostReferrerSource;
         route: string;
         routeKind: RouteCostKind;
         sampleWeight: number;
+        trafficSource: RouteCostTrafficSource;
       };
     }
   | { ok: false; error: string } {
@@ -158,6 +218,16 @@ function parseBody(body: Body):
     KIND_SET.has(body.routeKind as RouteCostKind)
       ? (body.routeKind as RouteCostKind)
       : null;
+  const referrerSource =
+    typeof body.referrerSource === "string" &&
+    REFERRER_SOURCE_SET.has(body.referrerSource as RouteCostReferrerSource)
+      ? (body.referrerSource as RouteCostReferrerSource)
+      : "unknown";
+  const trafficSource =
+    typeof body.trafficSource === "string" &&
+    TRAFFIC_SOURCE_SET.has(body.trafficSource as RouteCostTrafficSource)
+      ? (body.trafficSource as RouteCostTrafficSource)
+      : "unknown";
   const at = typeof body.at === "string" ? new Date(body.at) : new Date();
   const sampleWeight =
     typeof body.sampleWeight === "number" &&
@@ -179,9 +249,11 @@ function parseBody(body: Body):
     data: {
       bucketStart: bucketStart(at),
       method,
+      referrerSource,
       route,
       routeKind,
       sampleWeight,
+      trafficSource,
     },
   };
 }
