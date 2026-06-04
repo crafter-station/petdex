@@ -136,17 +136,24 @@ export function HeaderStateProvider({
       lastRefreshAt.current = 0;
     }
     void refresh({ force: !hasCachedState });
+    const refreshIfVisible = (options?: { force?: boolean }) => {
+      if (document.visibilityState !== "visible") return;
+      void refresh(options);
+    };
     const id = window.setInterval(
-      () => void refresh({ force: true }),
+      () => refreshIfVisible({ force: true }),
       HEADER_STATE_POLL_MS,
     );
-    const onFocus = () => void refresh();
+    const onFocus = () => refreshIfVisible();
+    const onVisibilityChange = () => refreshIfVisible();
     window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       mounted.current = false;
       requestGeneration.current += 1;
       window.clearInterval(id);
       window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [cacheKey, isLoaded, isSignedIn, refresh, userId]);
 
