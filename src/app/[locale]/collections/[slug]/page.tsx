@@ -1,26 +1,26 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { auth } from "@clerk/nextjs/server";
 import { ExternalLink, Heart, TerminalSquare } from "lucide-react";
-import { getTranslations } from "next-intl/server";
+import { getTranslations, setRequestLocale } from "next-intl/server";
 
-import { getCaughtSlugSet } from "@/lib/catch-status";
 import { getCollection } from "@/lib/collections";
 import { getDexNumberMap } from "@/lib/dex";
 import { formatLocalizedNumber } from "@/lib/format-number";
 import { buildLocaleAlternates } from "@/lib/locale-routing";
-import { resolveOwnerCredits } from "@/lib/owner-credit";
+import { getStoredPublicProfileForUser } from "@/lib/owner-credit";
 
+import { CollectionCaughtProgress } from "@/components/collection-caught-progress";
 import { CollectionPetGrid } from "@/components/collection-pet-grid";
 import { JsonLd } from "@/components/json-ld";
 import { PetSprite } from "@/components/pet-sprite";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 
-import { hasLocale } from "@/i18n/config";
+import { defaultLocale, hasLocale } from "@/i18n/config";
 
-export const dynamic = "force-dynamic";
+export const dynamic = "force-static";
+export const revalidate = 86400;
 
 const SITE_URL = "https://petdex.crafter.run";
 
@@ -65,33 +65,27 @@ export async function generateMetadata({ params }: PageProps) {
 
 export default async function CollectionPage({ params }: PageProps) {
   const { slug, locale } = await params;
+  const localeValue = hasLocale(locale) ? locale : defaultLocale;
+  setRequestLocale(localeValue);
   const collection = await getCollection(slug);
   if (!collection) notFound();
-  const t = await getTranslations("collectionDetail");
+  const t = await getTranslations({
+    locale: localeValue,
+    namespace: "collectionDetail",
+  });
 
-  const { userId } = await auth();
-  const [caughtSlugs, dexEntries, credits] = await Promise.all([
-    getCaughtSlugSet(userId),
+  const [dexEntries, ownerProfile] = await Promise.all([
     getDexNumberMap(),
     collection.ownerId
-      ? resolveOwnerCredits([
-          {
-            ownerId: collection.ownerId,
-            creditName: null,
-            creditUrl: null,
-            creditImage: null,
-          },
-        ])
-      : Promise.resolve(new Map()),
+      ? getStoredPublicProfileForUser(collection.ownerId)
+      : Promise.resolve(null),
   ]);
-  const owner = collection.ownerId ? credits.get(collection.ownerId) : null;
+  const ownerHref = ownerProfile?.handle ? `/u/${ownerProfile.handle}` : null;
+  const petSlugs = collection.pets.map((pet) => pet.slug);
   const leadPet =
     collection.pets.find((pet) => pet.slug === collection.coverPetSlug) ??
     collection.pets[0] ??
     null;
-  const caughtCount = collection.pets.filter((pet) =>
-    caughtSlugs.has(pet.slug),
-  ).length;
   const totalLikes = collection.pets.reduce(
     (acc, pet) => acc + pet.metrics.likeCount,
     0,
@@ -101,7 +95,6 @@ export default async function CollectionPage({ params }: PageProps) {
     0,
   );
   const dexMap = Object.fromEntries(dexEntries.entries());
-
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "CollectionPage",
@@ -146,9 +139,9 @@ export default async function CollectionPage({ params }: PageProps) {
               </p>
 
               <div className="mt-6 flex flex-wrap items-center gap-3">
-                {owner ? (
+                {ownerHref ? (
                   <Link
-                    href={`/u/${owner.handle}`}
+                    href={ownerHref}
                     prefetch={false}
                     className="inline-flex h-10 items-center rounded-full bg-inverse px-4 text-sm font-medium text-on-inverse transition hover:bg-inverse-hover"
                   >
@@ -170,11 +163,7 @@ export default async function CollectionPage({ params }: PageProps) {
 
               <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 font-mono text-[11px] tracking-[0.18em] text-muted-3 uppercase">
                 <span>{collection.pets.length} pets</span>
-                {userId ? (
-                  <span>
-                    caught {caughtCount}/{collection.pets.length}
-                  </span>
-                ) : null}
+                <CollectionCaughtProgress petSlugs={petSlugs} />
                 {totalLikes > 0 ? (
                   <span className="inline-flex items-center gap-1.5">
                     <Heart className="size-3" />
@@ -222,11 +211,7 @@ export default async function CollectionPage({ params }: PageProps) {
           </Link>
         </div>
 
-        <CollectionPetGrid
-          pets={collection.pets}
-          dexMap={dexMap}
-          caughtSlugs={[...caughtSlugs]}
-        />
+        <CollectionPetGrid pets={collection.pets} dexMap={dexMap} />
       </section>
 
       <SiteFooter />

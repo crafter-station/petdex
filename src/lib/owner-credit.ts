@@ -400,3 +400,9 @@ async function getStoredPublicProfile(
     },
   )();
 }
+
+export async function getStoredPublicProfileForUser(
+  userId: string,
+): Promise<StoredPublicProfile | null> {
+  return getStoredPublicProfile(userId);
+}
