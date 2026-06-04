@@ -201,11 +201,15 @@ function UserDropdown({ compact = false }: { compact?: boolean }) {
         <DropdownMenuSeparator />
 
         <DropdownMenuGroup>
-          <DropdownMenuItem render={<Link href={`/u/${handle}`} />}>
+          <DropdownMenuItem
+            render={<Link href={`/u/${handle}`} prefetch={false} />}
+          >
             <IdentificationCardIcon weight="duotone" className="size-4" />
             {t("myProfile")}
           </DropdownMenuItem>
-          <DropdownMenuItem render={<Link href="/my-feedback" />}>
+          <DropdownMenuItem
+            render={<Link href="/my-feedback" prefetch={false} />}
+          >
             <ChatCircleDotsIcon weight="duotone" className="size-4" />
             {t("myFeedback")}
             {unread > 0 ? (
@@ -215,13 +219,15 @@ function UserDropdown({ compact = false }: { compact?: boolean }) {
             ) : null}
           </DropdownMenuItem>
           {showAdmin ? (
-            <DropdownMenuItem render={<Link href="/admin" />}>
+            <DropdownMenuItem render={<Link href="/admin" prefetch={false} />}>
               <ShieldCheckIcon weight="duotone" className="size-4" />
               {t("admin")}
             </DropdownMenuItem>
           ) : null}
           {showCollaborator ? (
-            <DropdownMenuItem render={<Link href={href(collaboratorHref)} />}>
+            <DropdownMenuItem
+              render={<Link href={href(collaboratorHref)} prefetch={false} />}
+            >
               <QrCodeIcon weight="duotone" className="size-4" />
               {t("collaborator")}
             </DropdownMenuItem>
@@ -231,11 +237,15 @@ function UserDropdown({ compact = false }: { compact?: boolean }) {
         <DropdownMenuSeparator />
 
         <DropdownMenuGroup>
-          <DropdownMenuItem render={<Link href={href("/about")} />}>
+          <DropdownMenuItem
+            render={<Link href={href("/about")} prefetch={false} />}
+          >
             <InfoIcon weight="duotone" className="size-4" />
             {t("about")}
           </DropdownMenuItem>
-          <DropdownMenuItem render={<Link href={href("/legal/takedown")} />}>
+          <DropdownMenuItem
+            render={<Link href={href("/legal/takedown")} prefetch={false} />}
+          >
             <ShieldWarningIcon weight="duotone" className="size-4" />
             {t("takedown")}
           </DropdownMenuItem>

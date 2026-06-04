@@ -551,7 +551,7 @@ export function PetActionMenu({ pet, variant = "card", ownerActions }: Props) {
               <>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
-                  render={<Link href="/submit" />}
+                  render={<Link href="/submit" prefetch={false} />}
                   className="flex items-center gap-2.5 px-3 py-2.5 text-sm text-foreground"
                 >
                   <Plus className="size-4" />
@@ -564,7 +564,9 @@ export function PetActionMenu({ pet, variant = "card", ownerActions }: Props) {
               <>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
-                  render={<Link href={`/pets/${pet.slug}#edit`} />}
+                  render={
+                    <Link href={`/pets/${pet.slug}#edit`} prefetch={false} />
+                  }
                   className="flex items-center gap-2.5 px-3 py-2.5 text-sm text-foreground"
                 >
                   <Pencil className="size-4" />

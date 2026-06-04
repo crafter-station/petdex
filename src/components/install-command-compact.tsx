@@ -63,6 +63,7 @@ export function InstallCommandCompact({
       </div>
       <Link
         href={`/${locale}/docs#install`}
+        prefetch={false}
         className="group inline-flex items-center gap-1 self-start text-muted-3 text-xs transition hover:text-foreground"
       >
         {t("seeGuide")}
