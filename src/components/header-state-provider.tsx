@@ -9,28 +9,26 @@ import {
   useState,
 } from "react";
 
-type HeaderState = {
-  signedIn: boolean;
-  notifications: { unreadCount: number };
-  feedback: { count: number; adminCount: number };
-  caught: string[];
-};
+import { useAuth } from "@clerk/nextjs";
 
-const INITIAL: HeaderState = {
-  signedIn: false,
-  notifications: { unreadCount: 0 },
-  feedback: { count: 0, adminCount: 0 },
-  caught: [],
-};
+import {
+  HEADER_STATE_POLL_MS,
+  type HeaderState,
+  headerStateCacheKey,
+  INITIAL_HEADER_STATE,
+  parseCachedHeaderState,
+  serializeHeaderState,
+  shouldRequestHeaderState,
+  withHeaderUnreadCount,
+} from "@/lib/header-state";
 
 type Ctx = {
   state: HeaderState;
-  refresh: () => Promise<void>;
+  refresh: (options?: { force?: boolean }) => Promise<void>;
+  setUnreadCount: (next: number | ((current: number) => number)) => void;
 };
 
 const HeaderStateContext = createContext<Ctx | null>(null);
-
-const POLL_MS = 90_000;
 
 // Single source of truth for SiteHeader badges + caught-slug set.
 // Replaces 3 separate fetches per page-view (auth-badge feedback unread,
@@ -42,35 +40,108 @@ export function HeaderStateProvider({
 }: {
   children: React.ReactNode;
 }) {
-  const [state, setState] = useState<HeaderState>(INITIAL);
-  const stopped = useRef(false);
+  const { isLoaded, isSignedIn, userId } = useAuth();
+  const [state, setState] = useState<HeaderState>(INITIAL_HEADER_STATE);
+  const cacheKey = headerStateCacheKey(userId);
+  const lastRefreshAt = useRef(0);
+  const mounted = useRef(false);
+  const requestGeneration = useRef(0);
+  const userScope = useRef<string | null>(null);
 
-  const refresh = useCallback(async () => {
-    try {
-      const res = await fetch("/api/me/header-state", { cache: "no-store" });
-      if (!res.ok) return;
-      const json = (await res.json()) as HeaderState;
-      if (!stopped.current) setState(json);
-    } catch {
-      /* offline / network blip — keep last known state */
-    }
-  }, []);
+  const setUnreadCount = useCallback(
+    (next: number | ((current: number) => number)) => {
+      setState((current) => withHeaderUnreadCount(current, next));
+    },
+    [],
+  );
+
+  const refresh = useCallback(
+    async (options?: { force?: boolean }) => {
+      const now = Date.now();
+      const requestUserId = userId ?? null;
+      if (
+        !shouldRequestHeaderState({
+          force: options?.force,
+          isLoaded,
+          isSignedIn,
+          lastRefreshAt: lastRefreshAt.current,
+          now,
+        })
+      ) {
+        return;
+      }
+      const generation = ++requestGeneration.current;
+      lastRefreshAt.current = now;
+      try {
+        const res = await fetch("/api/me/header-state", { cache: "no-store" });
+        if (!res.ok) return;
+        const json = (await res.json()) as HeaderState;
+        if (
+          !mounted.current ||
+          generation !== requestGeneration.current ||
+          userScope.current !== requestUserId
+        ) {
+          return;
+        }
+        setState(json);
+        if (cacheKey) {
+          writeCachedHeaderState(cacheKey, json, now);
+        }
+      } catch {
+        return;
+      }
+    },
+    [cacheKey, isLoaded, isSignedIn, userId],
+  );
 
   useEffect(() => {
-    stopped.current = false;
-    void refresh();
-    const id = window.setInterval(() => void refresh(), POLL_MS);
+    mounted.current = true;
+    userScope.current = userId ?? null;
+    requestGeneration.current += 1;
+    if (!isLoaded) {
+      return () => {
+        mounted.current = false;
+        requestGeneration.current += 1;
+      };
+    }
+    if (!isSignedIn) {
+      setState(INITIAL_HEADER_STATE);
+      lastRefreshAt.current = 0;
+      return () => {
+        mounted.current = false;
+        requestGeneration.current += 1;
+      };
+    }
+    let hasCachedState = false;
+    if (cacheKey) {
+      const cached = parseCachedHeaderState(
+        readCachedHeaderState(cacheKey),
+        Date.now(),
+      );
+      if (cached) {
+        setState(cached.state);
+        lastRefreshAt.current = cached.savedAt;
+        hasCachedState = true;
+      }
+    }
+    if (!hasCachedState) {
+      setState(INITIAL_HEADER_STATE);
+      lastRefreshAt.current = 0;
+    }
+    void refresh({ force: !hasCachedState });
+    const id = window.setInterval(() => void refresh(), HEADER_STATE_POLL_MS);
     const onFocus = () => void refresh();
     window.addEventListener("focus", onFocus);
     return () => {
-      stopped.current = true;
+      mounted.current = false;
+      requestGeneration.current += 1;
       window.clearInterval(id);
       window.removeEventListener("focus", onFocus);
     };
-  }, [refresh]);
+  }, [cacheKey, isLoaded, isSignedIn, refresh, userId]);
 
   return (
-    <HeaderStateContext.Provider value={{ state, refresh }}>
+    <HeaderStateContext.Provider value={{ refresh, setUnreadCount, state }}>
       {children}
     </HeaderStateContext.Provider>
   );
@@ -79,5 +150,32 @@ export function HeaderStateProvider({
 export function useHeaderState(): Ctx {
   const ctx = useContext(HeaderStateContext);
   if (ctx) return ctx;
-  return { state: INITIAL, refresh: async () => {} };
+  return {
+    refresh: async () => {},
+    setUnreadCount: () => {},
+    state: INITIAL_HEADER_STATE,
+  };
+}
+
+function readCachedHeaderState(cacheKey: string) {
+  try {
+    return window.sessionStorage.getItem(cacheKey);
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedHeaderState(
+  cacheKey: string,
+  state: HeaderState,
+  savedAt: number,
+) {
+  try {
+    window.sessionStorage.setItem(
+      cacheKey,
+      serializeHeaderState(state, savedAt),
+    );
+  } catch {
+    return;
+  }
 }

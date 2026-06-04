@@ -130,17 +130,17 @@ function relativeTime(iso: string): string {
 }
 
 export function NotificationsBell({ compact = false }: { compact?: boolean }) {
-  const { state, refresh } = useHeaderState();
+  const { state, refresh, setUnreadCount } = useHeaderState();
   const unread = state.notifications.unreadCount;
   const [items, setItems] = useState<Notif[]>([]);
   const [itemsLoaded, setItemsLoaded] = useState(false);
   const [open, setOpen] = useState(false);
 
   const setUnread = useCallback(
-    (_next: number | ((n: number) => number)) => {
-      void refresh();
+    (next: number | ((n: number) => number)) => {
+      setUnreadCount(next);
     },
-    [refresh],
+    [setUnreadCount],
   );
 
   const loadItems = useCallback(async () => {
@@ -174,6 +174,8 @@ export function NotificationsBell({ compact = false }: { compact?: boolean }) {
       });
     } catch {
       /* silent — next poll will reconcile */
+    } finally {
+      void refresh({ force: true });
     }
   }
 
@@ -194,6 +196,8 @@ export function NotificationsBell({ compact = false }: { compact?: boolean }) {
       });
     } catch {
       /* silent */
+    } finally {
+      void refresh({ force: true });
     }
   }
 
