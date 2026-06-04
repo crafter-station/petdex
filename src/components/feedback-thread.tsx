@@ -4,6 +4,8 @@ import { useEffect, useRef, useState, useTransition } from "react";
 
 import { Bell, BellOff, Loader2, Send } from "lucide-react";
 
+import { useHeaderState } from "@/components/header-state-provider";
+
 type Reply = {
   id: string;
   authorKind: "admin" | "user";
@@ -49,18 +51,25 @@ export function FeedbackThread({
   const [notify, setNotify] = useState(feedback.notifyEmail);
   const [, startTransition] = useTransition();
   const endRef = useRef<HTMLDivElement | null>(null);
+  const { refresh } = useHeaderState();
+  const feedbackId = feedback.id;
 
   useEffect(() => {
     if (replies.length === 0) return;
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [replies.length]);
 
+  useEffect(() => {
+    if (!feedbackId) return;
+    void refresh({ force: true });
+  }, [feedbackId, refresh]);
+
   async function send() {
     const body = draft.trim();
     if (!body || busy) return;
     setBusy(true);
     try {
-      const res = await fetch(`/api/feedback/${feedback.id}/replies`, {
+      const res = await fetch(`/api/feedback/${feedbackId}/replies`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ body }),
@@ -75,6 +84,7 @@ export function FeedbackThread({
       const data = (await res.json()) as { reply: Reply };
       setReplies((prev) => [...prev, data.reply]);
       setDraft("");
+      void refresh({ force: true });
     } finally {
       setBusy(false);
     }
@@ -85,7 +95,7 @@ export function FeedbackThread({
     const next = !notify;
     setNotify(next);
     try {
-      const res = await fetch(`/api/feedback/${feedback.id}`, {
+      const res = await fetch(`/api/feedback/${feedbackId}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ notifyEmail: next }),
