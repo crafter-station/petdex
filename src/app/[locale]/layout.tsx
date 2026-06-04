@@ -19,6 +19,7 @@ import { VercelObservability } from "@/components/vercel-observability";
 import { TopPromoStrip } from "@/components/zh/top-promo-strip";
 import { ZhLayoutSpacer } from "@/components/zh/zh-layout-spacer";
 
+import { pickClientMessages } from "@/i18n/client-messages";
 import { hasLocale, locales } from "@/i18n/config";
 
 const geistSans = Geist({
@@ -100,6 +101,7 @@ export default async function LocaleLayout({ children, params }: Props) {
 
   setRequestLocale(locale);
   const messages = await getMessages();
+  const clientMessages = pickClientMessages(messages);
 
   const isZh = locale === "zh";
 
@@ -110,7 +112,7 @@ export default async function LocaleLayout({ children, params }: Props) {
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-background text-foreground">
-        <NextIntlClientProvider messages={messages}>
+        <NextIntlClientProvider messages={clientMessages}>
           <AppProviders>
             {isZh && <TopPromoStrip />}
             <HeaderStateProvider>
