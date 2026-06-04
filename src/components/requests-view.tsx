@@ -30,14 +30,12 @@ import { ClaimRequestButton } from "@/components/claim-request-button";
 type ClerkInfo = {
   handle: string;
   displayName: string | null;
-  username: string | null;
   imageUrl: string | null;
 };
 
 type FulfilledPet = {
   slug: string;
   displayName: string;
-  spritesheetUrl: string;
 };
 
 export type RequestRow = {
@@ -63,7 +61,13 @@ const COLLECTION_PREFIX = "Collection:";
 type Sort = "top" | "new" | "fulfilled";
 type RequestKind = "pet" | "collection";
 
-export function RequestsView({ initial }: { initial: RequestRow[] }) {
+export function RequestsView({
+  initial,
+  refreshOnMount,
+}: {
+  initial: RequestRow[];
+  refreshOnMount: boolean;
+}) {
   const t = useTranslations("requests.view");
   const [requests, setRequests] = useState<RequestRow[]>(initial);
   const [pending, setPending] = useState<Set<string>>(new Set());
@@ -90,6 +94,7 @@ export function RequestsView({ initial }: { initial: RequestRow[] }) {
   // We always pull status=all so all three sort tabs work without
   // another roundtrip when the user toggles them.
   useEffect(() => {
+    if (!refreshOnMount) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -105,7 +110,7 @@ export function RequestsView({ initial }: { initial: RequestRow[] }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [refreshOnMount]);
 
   const counts = useMemo(() => {
     return {

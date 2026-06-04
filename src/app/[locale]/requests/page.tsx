@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-import { clerkClient } from "@clerk/nextjs/server";
+import { auth, clerkClient } from "@clerk/nextjs/server";
 import { desc, inArray, sql } from "drizzle-orm";
 import { getTranslations } from "next-intl/server";
 
@@ -14,6 +14,8 @@ import { SiteHeader } from "@/components/site-header";
 import { hasLocale } from "@/i18n/config";
 
 export const dynamic = "force-dynamic";
+
+const VISIBLE_VOTER_LIMIT = 3;
 
 export async function generateMetadata({
   params,
@@ -35,12 +37,23 @@ export async function generateMetadata({
 
 export default async function RequestsPage() {
   const t = await getTranslations("requests");
+  const { userId } = await auth();
 
   // Pull everything (open + fulfilled + dismissed) so the sort tabs in
   // RequestsView can switch instantly without a refetch. The list is
   // small enough that 80 rows is fine.
   const rows = await db
-    .select()
+    .select({
+      id: schema.petRequests.id,
+      query: schema.petRequests.query,
+      requestedBy: schema.petRequests.requestedBy,
+      upvoteCount: schema.petRequests.upvoteCount,
+      status: schema.petRequests.status,
+      fulfilledPetSlug: schema.petRequests.fulfilledPetSlug,
+      imageUrl: schema.petRequests.imageUrl,
+      imageReviewStatus: schema.petRequests.imageReviewStatus,
+      createdAt: schema.petRequests.createdAt,
+    })
     .from(schema.petRequests)
     .orderBy(
       sql`${schema.petRequests.upvoteCount} DESC, ${schema.petRequests.createdAt} DESC`,
@@ -63,15 +76,23 @@ export default async function RequestsPage() {
 
   const userIdSet = new Set<string>();
   for (const r of rows) if (r.requestedBy) userIdSet.add(r.requestedBy);
-  for (const v of votes) userIdSet.add(v.userId);
 
   type ClerkInfo = {
     handle: string;
     displayName: string | null;
-    username: string | null;
     imageUrl: string | null;
   };
   const clerkInfo = new Map<string, ClerkInfo>();
+  const votersByRequestId = new Map<string, string[]>();
+  const requesterByRequestId = new Map(rows.map((r) => [r.id, r.requestedBy]));
+  for (const v of votes) {
+    if (v.userId === requesterByRequestId.get(v.requestId)) continue;
+    const current = votersByRequestId.get(v.requestId) ?? [];
+    if (current.length >= VISIBLE_VOTER_LIMIT) continue;
+    current.push(v.userId);
+    votersByRequestId.set(v.requestId, current);
+    userIdSet.add(v.userId);
+  }
   if (userIdSet.size > 0) {
     try {
       const client = await clerkClient();
@@ -91,7 +112,6 @@ export default async function RequestsPage() {
               ? u.username.toLowerCase()
               : u.id.slice(-8).toLowerCase(),
             displayName: displayName || null,
-            username: u.username ?? null,
             imageUrl: u.imageUrl ?? null,
           });
         }
@@ -116,7 +136,6 @@ export default async function RequestsPage() {
         .select({
           slug: schema.submittedPets.slug,
           displayName: schema.submittedPets.displayName,
-          spritesheetUrl: schema.submittedPets.spritesheetUrl,
         })
         .from(schema.submittedPets)
         .where(inArray(schema.submittedPets.slug, fulfilledSlugs))
@@ -127,11 +146,10 @@ export default async function RequestsPage() {
     const requester = r.requestedBy
       ? (clerkInfo.get(r.requestedBy) ?? null)
       : null;
-    const voters = votes
-      .filter((v) => v.requestId === r.id && v.userId !== r.requestedBy)
-      .map((v) => clerkInfo.get(v.userId))
+    const voters = (votersByRequestId.get(r.id) ?? [])
+      .map((id) => clerkInfo.get(id))
       .filter((v): v is ClerkInfo => Boolean(v))
-      .slice(0, 6);
+      .slice(0, VISIBLE_VOTER_LIMIT);
     const fulfilledPet = r.fulfilledPetSlug
       ? (petBySlug.get(r.fulfilledPetSlug) ?? null)
       : null;
@@ -174,7 +192,7 @@ export default async function RequestsPage() {
           </Link>
         </header>
 
-        <RequestsView initial={initial} />
+        <RequestsView initial={initial} refreshOnMount={Boolean(userId)} />
       </section>
       <SiteFooter />
     </main>
