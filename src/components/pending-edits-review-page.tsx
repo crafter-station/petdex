@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 
 import { desc, isNotNull } from "drizzle-orm";
@@ -155,18 +156,22 @@ export async function PendingEditsReviewPage({
                       <div className="mt-2 grid gap-2 md:grid-cols-2">
                         <div className="space-y-1">
                           <p className="text-[10px] text-muted-4">Before</p>
-                          <img
+                          <Image
                             src={r.spritesheetUrl}
                             alt="current spritesheet"
-                            className="max-h-40 rounded-lg border border-chip-danger-fg/20 object-contain"
+                            width={r.pendingSpritesheetWidth ?? 768}
+                            height={r.pendingSpritesheetHeight ?? 768}
+                            className="h-auto max-h-40 w-full rounded-lg border border-chip-danger-fg/20 object-contain"
                           />
                         </div>
                         <div className="space-y-1">
                           <p className="text-[10px] text-muted-4">After</p>
-                          <img
+                          <Image
                             src={r.pendingSpritesheetUrl}
                             alt="pending spritesheet"
-                            className="max-h-40 rounded-lg border border-chip-success-fg/20 object-contain"
+                            width={r.pendingSpritesheetWidth ?? 768}
+                            height={r.pendingSpritesheetHeight ?? 768}
+                            className="h-auto max-h-40 w-full rounded-lg border border-chip-success-fg/20 object-contain"
                           />
                         </div>
                       </div>

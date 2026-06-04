@@ -43,7 +43,11 @@ export function ComposeForm({ optedIn, byLocale, collectionsReady }: Props) {
         setError(res.error ?? "unknown");
         return;
       }
-      const r = res.result!;
+      if (!res.result) {
+        setError("unknown");
+        return;
+      }
+      const r = res.result;
       setMessage(
         `Test sent. attempted=${r.attempted} sent=${r.sent} failed=${r.failed}`,
       );
@@ -59,7 +63,11 @@ export function ComposeForm({ optedIn, byLocale, collectionsReady }: Props) {
         setError(res.error ?? "unknown");
         return;
       }
-      const r = res.result!;
+      if (!res.result) {
+        setError("unknown");
+        return;
+      }
+      const r = res.result;
       setMessage(
         `Broadcast complete. attempted=${r.attempted} sent=${r.sent} failed=${r.failed} skipped=${r.skipped}`,
       );

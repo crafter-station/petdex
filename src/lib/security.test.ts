@@ -193,7 +193,7 @@ describe("posixInstallScript shell-injection", () => {
           "  shift",
           "done",
           'mkdir -p "$(dirname "$out")"',
-          'printf \'{}\\n\' > "$out"',
+          "printf '{}\\n' > \"$out\"",
           "",
         ].join("\n"),
       );

@@ -18,8 +18,6 @@ export type UrlHit = {
   field: string;
 };
 
-type UrlCheckResult = UrlHit | null;
-
 // Common TLDs likely to appear in promotional spam. Kept intentionally
 // broad so that new TLDs are caught automatically. False-positive risk:
 // `.dev` may appear in legitimate context (e.g., "v0.dev" as a tool

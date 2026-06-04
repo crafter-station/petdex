@@ -61,7 +61,7 @@ export async function sendTestAction(form: FormData): Promise<{
   error?: string;
 }> {
   const { userId } = await auth();
-  if (!isAdmin(userId)) return { ok: false, error: "unauthorized" };
+  if (!userId || !isAdmin(userId)) return { ok: false, error: "unauthorized" };
 
   const localeRaw = String(form.get("locale") ?? "en");
   const locale = (
@@ -80,7 +80,7 @@ export async function sendTestAction(form: FormData): Promise<{
   const result = await sendBroadcast({
     campaign,
     batchKey: `${campaign.replace(/_/g, "-")}-test-${Date.now()}`,
-    toUserIds: [userId!],
+    toUserIds: [userId],
     localeFilter: locale,
     collections,
   });
@@ -95,7 +95,7 @@ export async function sendBroadcastAction(form: FormData): Promise<{
   error?: string;
 }> {
   const { userId } = await auth();
-  if (!isAdmin(userId)) return { ok: false, error: "unauthorized" };
+  if (!userId || !isAdmin(userId)) return { ok: false, error: "unauthorized" };
 
   const confirm = String(form.get("confirm") ?? "");
   if (confirm !== "SEND") {

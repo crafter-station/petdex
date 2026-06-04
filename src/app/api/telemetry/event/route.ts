@@ -34,8 +34,6 @@ const MAX_STATE_LEN = 64;
 const MAX_AGENT_SOURCE_LEN = 64;
 const MAX_BODY_BYTES = 4096;
 
-type RawBody = Record<string, unknown>;
-
 class PayloadTooLargeError extends Error {
   constructor() {
     super("payload_too_large");

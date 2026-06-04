@@ -382,12 +382,8 @@
           "name": "ad_events_campaign_id_ad_campaigns_id_fk",
           "tableFrom": "ad_events",
           "tableTo": "ad_campaigns",
-          "columnsFrom": [
-            "campaign_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["campaign_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -531,12 +527,8 @@
           "name": "ad_impressions_campaign_id_ad_campaigns_id_fk",
           "tableFrom": "ad_impressions",
           "tableTo": "ad_campaigns",
-          "columnsFrom": [
-            "campaign_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["campaign_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1097,12 +1089,8 @@
           "name": "feedback_replies_feedback_id_feedback_id_fk",
           "tableFrom": "feedback_replies",
           "tableTo": "feedback",
-          "columnsFrom": [
-            "feedback_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["feedback_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1381,12 +1369,8 @@
           "name": "pet_collection_items_collection_id_pet_collections_id_fk",
           "tableFrom": "pet_collection_items",
           "tableTo": "pet_collections",
-          "columnsFrom": [
-            "collection_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["collection_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1394,10 +1378,7 @@
       "compositePrimaryKeys": {
         "pet_collection_items_collection_id_pet_slug_pk": {
           "name": "pet_collection_items_collection_id_pet_slug_pk",
-          "columns": [
-            "collection_id",
-            "pet_slug"
-          ]
+          "columns": ["collection_id", "pet_slug"]
         }
       },
       "uniqueConstraints": {},
@@ -1537,12 +1518,8 @@
           "name": "pet_collection_requests_collection_id_pet_collections_id_fk",
           "tableFrom": "pet_collection_requests",
           "tableTo": "pet_collections",
-          "columnsFrom": [
-            "collection_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["collection_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1720,10 +1697,7 @@
       "compositePrimaryKeys": {
         "pet_likes_user_id_pet_slug_pk": {
           "name": "pet_likes_user_id_pet_slug_pk",
-          "columns": [
-            "user_id",
-            "pet_slug"
-          ]
+          "columns": ["user_id", "pet_slug"]
         }
       },
       "uniqueConstraints": {},
@@ -1908,10 +1882,7 @@
       "compositePrimaryKeys": {
         "pet_request_candidates_pet_id_request_id_pk": {
           "name": "pet_request_candidates_pet_id_request_id_pk",
-          "columns": [
-            "pet_id",
-            "request_id"
-          ]
+          "columns": ["pet_id", "request_id"]
         }
       },
       "uniqueConstraints": {},
@@ -1948,10 +1919,7 @@
       "compositePrimaryKeys": {
         "pet_request_votes_request_id_user_id_pk": {
           "name": "pet_request_votes_request_id_user_id_pk",
-          "columns": [
-            "request_id",
-            "user_id"
-          ]
+          "columns": ["request_id", "user_id"]
         }
       },
       "uniqueConstraints": {},
@@ -2894,39 +2862,22 @@
     "public.ad_campaign_status": {
       "name": "ad_campaign_status",
       "schema": "public",
-      "values": [
-        "pending_payment",
-        "active",
-        "exhausted",
-        "paused",
-        "deleted"
-      ]
+      "values": ["pending_payment", "active", "exhausted", "paused", "deleted"]
     },
     "public.ad_event_kind": {
       "name": "ad_event_kind",
       "schema": "public",
-      "values": [
-        "hover",
-        "click",
-        "dismissed",
-        "time_in_view"
-      ]
+      "values": ["hover", "click", "dismissed", "time_in_view"]
     },
     "public.approval_status": {
       "name": "approval_status",
       "schema": "public",
-      "values": [
-        "pending",
-        "approved",
-        "rejected"
-      ]
+      "values": ["pending", "approved", "rejected"]
     },
     "public.email_campaign": {
       "name": "email_campaign",
       "schema": "public",
-      "values": [
-        "collections_drop"
-      ]
+      "values": ["collections_drop"]
     },
     "public.email_send_status": {
       "name": "email_send_status",
@@ -2944,29 +2895,17 @@
     "public.feedback_author_kind": {
       "name": "feedback_author_kind",
       "schema": "public",
-      "values": [
-        "admin",
-        "user"
-      ]
+      "values": ["admin", "user"]
     },
     "public.feedback_kind": {
       "name": "feedback_kind",
       "schema": "public",
-      "values": [
-        "suggestion",
-        "bug",
-        "praise",
-        "other"
-      ]
+      "values": ["suggestion", "bug", "praise", "other"]
     },
     "public.feedback_status": {
       "name": "feedback_status",
       "schema": "public",
-      "values": [
-        "pending",
-        "addressed",
-        "archived"
-      ]
+      "values": ["pending", "addressed", "archived"]
     },
     "public.notification_kind": {
       "name": "notification_kind",
@@ -2983,20 +2922,12 @@
     "public.pet_kind": {
       "name": "pet_kind",
       "schema": "public",
-      "values": [
-        "creature",
-        "object",
-        "character"
-      ]
+      "values": ["creature", "object", "character"]
     },
     "public.pet_source": {
       "name": "pet_source",
       "schema": "public",
-      "values": [
-        "submit",
-        "discover",
-        "claimed"
-      ]
+      "values": ["submit", "discover", "claimed"]
     }
   },
   "schemas": {},

@@ -23,12 +23,12 @@ import {
   startDesktop,
   stopDesktop,
 } from "../src/desktop/process.js";
-import { runUpdate } from "../src/desktop/update.js";
 import {
   collectSelectableSlugs,
   reloadDesktopAfterSelect,
   setActivePet,
 } from "../src/desktop/select.js";
+import { runUpdate } from "../src/desktop/update.js";
 import { runInstall as runHooksInstall } from "../src/hooks/install.js";
 import {
   getKillswitchState,

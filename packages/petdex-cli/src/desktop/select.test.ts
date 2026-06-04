@@ -1,9 +1,8 @@
+import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-
-import { afterEach, describe, expect, test } from "bun:test";
 
 import {
   collectSelectableSlugs,
@@ -25,7 +24,12 @@ async function tempRoot(): Promise<string> {
   return root;
 }
 
-function makePet(root: string, slug: string, spriteName: string, bytes: Buffer) {
+function makePet(
+  root: string,
+  slug: string,
+  spriteName: string,
+  bytes: Buffer,
+) {
   const dir = path.join(root, slug);
   mkdirSync(dir, { recursive: true });
   writeFileSync(path.join(dir, spriteName), bytes);
@@ -49,7 +53,12 @@ describe("collectSelectableSlugs", () => {
     const root = await tempRoot();
     mkdirSync(path.join(root, "missing-sprite"), { recursive: true });
     makePet(root, "empty", "spritesheet.webp", Buffer.alloc(0));
-    makePet(root, "huge", "spritesheet.webp", Buffer.alloc(16 * 1024 * 1024 + 1));
+    makePet(
+      root,
+      "huge",
+      "spritesheet.webp",
+      Buffer.alloc(16 * 1024 * 1024 + 1),
+    );
     makePet(root, "good", "spritesheet.webp", Buffer.from("ok"));
 
     expect(await collectSelectableSlugs([root])).toEqual(["good"]);
@@ -88,7 +97,10 @@ describe("reloadDesktopAfterSelect", () => {
   test("does not start after a real stop failure", async () => {
     let started = false;
     const result = await reloadDesktopAfterSelect({
-      stopDesktop: async () => ({ ok: false, reason: "failed to signal pid 7" }),
+      stopDesktop: async () => ({
+        ok: false,
+        reason: "failed to signal pid 7",
+      }),
       startDesktop: async () => {
         started = true;
         return { ok: true, pid: 123, alreadyRunning: false };

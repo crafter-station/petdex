@@ -3,10 +3,10 @@ import path from "node:path";
 
 import { homeDir, isPetUsable } from "./install.js";
 import {
-  startDesktop,
-  stopDesktop,
   type StartResult,
   type StopResult,
+  startDesktop,
+  stopDesktop,
 } from "./process.js";
 
 export type DesktopReloadDeps = {
@@ -19,7 +19,10 @@ export type DesktopReloadResult =
   | { status: "manual_restart_required"; reason: string };
 
 export function defaultPetRoots(home = homeDir()): string[] {
-  return [path.join(home, ".petdex", "pets"), path.join(home, ".codex", "pets")];
+  return [
+    path.join(home, ".petdex", "pets"),
+    path.join(home, ".codex", "pets"),
+  ];
 }
 
 export function defaultActiveJsonPath(home = homeDir()): string {
@@ -37,9 +40,7 @@ export async function collectSelectableSlugs(
         if (!entry.isDirectory()) continue;
         if (isPetUsable(path.join(root, entry.name))) slugSet.add(entry.name);
       }
-    } catch {
-      continue;
-    }
+    } catch {}
   }
   return [...slugSet].sort();
 }
@@ -49,7 +50,7 @@ export async function setActivePet(
   activeJsonPath = defaultActiveJsonPath(),
 ): Promise<void> {
   await mkdir(path.dirname(activeJsonPath), { recursive: true });
-  await writeFile(activeJsonPath, JSON.stringify({ slug }) + "\n", "utf8");
+  await writeFile(activeJsonPath, `${JSON.stringify({ slug })}\n`, "utf8");
 }
 
 export async function reloadDesktopAfterSelect(
