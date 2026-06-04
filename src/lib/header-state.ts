@@ -85,6 +85,19 @@ export function headerStateFetchCacheMode(force?: boolean): RequestCache {
   return force ? "no-store" : "default";
 }
 
+export function headerStateResponseSavedAt(
+  headers: Pick<Headers, "get">,
+  now: number,
+) {
+  const dateMs = Date.parse(headers.get("date") ?? "");
+  if (Number.isFinite(dateMs) && dateMs <= now) return dateMs;
+  const ageSeconds = Number(headers.get("age") ?? NaN);
+  if (Number.isFinite(ageSeconds) && ageSeconds >= 0) {
+    return Math.max(0, now - ageSeconds * 1000);
+  }
+  return now;
+}
+
 export function withHeaderUnreadCount(
   state: HeaderState,
   next: number | ((current: number) => number),

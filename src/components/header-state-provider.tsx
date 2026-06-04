@@ -16,6 +16,7 @@ import {
   type HeaderState,
   headerStateCacheKey,
   headerStateFetchCacheMode,
+  headerStateResponseSavedAt,
   INITIAL_HEADER_STATE,
   nextHeaderStatePollDelay,
   parseCachedHeaderState,
@@ -89,10 +90,11 @@ export function HeaderStateProvider({
         ) {
           return;
         }
+        const savedAt = headerStateResponseSavedAt(res.headers, now);
         setState(json);
-        lastRefreshAt.current = now;
+        lastRefreshAt.current = savedAt;
         if (cacheKey) {
-          writeCachedHeaderState(cacheKey, json, now);
+          writeCachedHeaderState(cacheKey, json, savedAt);
         }
       } catch {
         return;
