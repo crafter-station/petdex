@@ -441,7 +441,7 @@ function NavGrid({ items }: { items: NavItem[] }) {
         return (
           <li key={item.href}>
             <NavigationMenuLink
-              render={<Link href={item.href} />}
+              render={<Link href={item.href} prefetch={false} />}
               closeOnClick
               className="group/item flex items-center gap-3 rounded-2xl p-2 pr-4 transition hover:bg-surface-muted focus:bg-surface-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
             >
@@ -494,6 +494,7 @@ function MobileLink({
   return (
     <Link
       href={href}
+      prefetch={false}
       onClick={onClick}
       className="rounded-2xl px-4 py-3 text-foreground transition hover:bg-white dark:hover:bg-stone-800"
     >

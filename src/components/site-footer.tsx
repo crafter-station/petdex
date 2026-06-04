@@ -15,24 +15,28 @@ export function SiteFooter() {
         <div className="flex flex-wrap items-center gap-4">
           <Link
             href="/leaderboard"
+            prefetch={false}
             className="underline underline-offset-4 transition hover:text-foreground"
           >
             {t("topCreators")}
           </Link>
           <Link
             href="/legal/takedown"
+            prefetch={false}
             className="underline underline-offset-4 transition hover:text-foreground"
           >
             {t("takedown")}
           </Link>
           <Link
             href="/advertise"
+            prefetch={false}
             className="underline underline-offset-4 transition hover:text-foreground"
           >
             {t("advertise")}
           </Link>
           <Link
             href="/brand"
+            prefetch={false}
             className="underline underline-offset-4 transition hover:text-foreground"
           >
             {t("brand")}

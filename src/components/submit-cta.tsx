@@ -46,7 +46,7 @@ export function SubmitCTA({
       variant="petdex-cta"
       size="petdex-pill"
       className={className}
-      render={<Link href={href} />}
+      render={<Link href={href} prefetch={false} />}
     >
       {children}
     </Button>
