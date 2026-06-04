@@ -161,16 +161,8 @@ export async function getLeaderboardPetThumbs(
   ownerIds: string[],
   defaultLimit = 3,
   topLimit = 5,
-): Promise<
-  Record<
-    string,
-    Array<{ slug: string; displayName: string; spritesheetUrl: string }>
-  >
-> {
-  const out: Record<
-    string,
-    Array<{ slug: string; displayName: string; spritesheetUrl: string }>
-  > = {};
+): Promise<Record<string, Array<{ slug: string; displayName: string }>>> {
+  const out: Record<string, Array<{ slug: string; displayName: string }>> = {};
   if (ownerIds.length === 0) return out;
 
   // We need the full set of approved pets per owner *and* whatever is
@@ -187,7 +179,6 @@ export async function getLeaderboardPetThumbs(
         sp.owner_id,
         sp.slug,
         sp.display_name,
-        sp.spritesheet_url,
         sp.approved_at,
         ROW_NUMBER() OVER (
           PARTITION BY sp.owner_id
@@ -201,7 +192,6 @@ export async function getLeaderboardPetThumbs(
       a.owner_id,
       a.slug,
       a.display_name,
-      a.spritesheet_url,
       up.featured_pet_slugs
     FROM approved a
     LEFT JOIN user_profiles up ON up.user_id = a.owner_id
@@ -212,7 +202,6 @@ export async function getLeaderboardPetThumbs(
       owner_id: string;
       slug: string;
       display_name: string;
-      spritesheet_url: string;
       featured_pet_slugs: string[] | null;
     }>;
   };
@@ -223,34 +212,23 @@ export async function getLeaderboardPetThumbs(
     string,
     {
       pinnedOrder: string[];
-      pets: Map<
-        string,
-        { slug: string; displayName: string; spritesheetUrl: string }
-      >;
+      pets: Map<string, { slug: string; displayName: string }>;
     }
   >();
   for (const row of result.rows) {
     const existing = byOwner.get(row.owner_id) ?? {
       pinnedOrder: row.featured_pet_slugs ?? [],
-      pets: new Map<
-        string,
-        { slug: string; displayName: string; spritesheetUrl: string }
-      >(),
+      pets: new Map<string, { slug: string; displayName: string }>(),
     };
     existing.pets.set(row.slug, {
       slug: row.slug,
       displayName: row.display_name,
-      spritesheetUrl: row.spritesheet_url,
     });
     byOwner.set(row.owner_id, existing);
   }
 
   for (const [ownerId, { pinnedOrder, pets }] of byOwner.entries()) {
-    const ranked: Array<{
-      slug: string;
-      displayName: string;
-      spritesheetUrl: string;
-    }> = [];
+    const ranked: Array<{ slug: string; displayName: string }> = [];
     const seen = new Set<string>();
     for (const slug of pinnedOrder) {
       const pet = pets.get(slug);

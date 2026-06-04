@@ -75,7 +75,6 @@ const TABS: Tab[] = [
 export type LeaderboardPetThumb = {
   slug: string;
   displayName: string;
-  spritesheetUrl: string;
 };
 
 type LeaderboardViewProps = {
