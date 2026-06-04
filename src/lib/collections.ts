@@ -31,6 +31,12 @@ export type PetCollectionWithPets = PetCollection & {
   pets: PetWithMetrics[];
 };
 
+export type CollectionSitemapEntry = {
+  slug: string;
+  updatedAt: Date;
+  featured: boolean;
+};
+
 export async function getFeaturedCollections(
   limit = 3,
 ): Promise<PetCollectionWithPets[]> {
@@ -99,6 +105,30 @@ export async function getAllCollections(): Promise<PetCollectionWithPets[]> {
       return hydrateCollections(rows);
     },
     ["petdex-all-collections"],
+    { tags: ["collection:list"], revalidate: 86400 },
+  )();
+}
+
+export async function getCollectionSitemapEntries(): Promise<
+  CollectionSitemapEntry[]
+> {
+  return withNextDataCache(
+    async () => {
+      try {
+        return await db
+          .select({
+            slug: schema.petCollections.slug,
+            updatedAt: schema.petCollections.updatedAt,
+            featured: schema.petCollections.featured,
+          })
+          .from(schema.petCollections)
+          .orderBy(asc(schema.petCollections.slug));
+      } catch (error) {
+        if (isMissingCollectionTableError(error)) return [];
+        throw error;
+      }
+    },
+    ["petdex-collection-sitemap-entries"],
     { tags: ["collection:list"], revalidate: 86400 },
   )();
 }

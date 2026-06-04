@@ -23,6 +23,12 @@ import type { PetdexPet, PetKind, PetVibe } from "@/lib/types";
 
 export type PetWithMetrics = PetdexPet & { metrics: Metrics };
 
+export type PetSitemapEntry = {
+  slug: string;
+  importedAt: string;
+  featured: boolean;
+};
+
 const EMPTY_METRICS: Metrics = {
   installCount: 0,
   zipDownloadCount: 0,
@@ -191,6 +197,32 @@ export async function getAllApprovedPets(): Promise<PetdexPet[]> {
         },
       ),
     ["petdex-all-approved-pets"],
+    { tags: ["pet:list"], revalidate: 86400 },
+  )();
+}
+
+export async function getPetSitemapEntries(): Promise<PetSitemapEntry[]> {
+  return withNextDataCache(
+    async () => {
+      const rows = await db
+        .select({
+          slug: schema.submittedPets.slug,
+          featured: schema.submittedPets.featured,
+          approvedAt: schema.submittedPets.approvedAt,
+          createdAt: schema.submittedPets.createdAt,
+        })
+        .from(schema.submittedPets)
+        .where(eq(schema.submittedPets.status, "approved"))
+        .orderBy(schema.submittedPets.slug);
+
+      return rows.map((row) => ({
+        slug: row.slug,
+        featured: row.featured,
+        importedAt:
+          row.approvedAt?.toISOString() ?? row.createdAt.toISOString(),
+      }));
+    },
+    ["petdex-pet-sitemap-entries"],
     { tags: ["pet:list"], revalidate: 86400 },
   )();
 }
