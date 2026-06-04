@@ -82,10 +82,10 @@ describe("header state helpers", () => {
   });
 
   it("schedules cached polls by remaining freshness window", () => {
-    expect(nextHeaderStatePollDelay(0, 1_000)).toBe(300_000);
-    expect(nextHeaderStatePollDelay(1_000, 61_000)).toBe(240_000);
-    expect(nextHeaderStatePollDelay(1_000, 301_000)).toBe(0);
-    expect(nextHeaderStatePollDelay(10_000, 1_000)).toBe(300_000);
+    expect(nextHeaderStatePollDelay(0, 1_000)).toBe(900_000);
+    expect(nextHeaderStatePollDelay(1_000, 61_000)).toBe(840_000);
+    expect(nextHeaderStatePollDelay(1_000, 901_000)).toBe(0);
+    expect(nextHeaderStatePollDelay(10_000, 1_000)).toBe(900_000);
   });
 
   it("scopes cache keys by signed-in user", () => {

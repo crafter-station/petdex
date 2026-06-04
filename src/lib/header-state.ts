@@ -12,7 +12,7 @@ export const INITIAL_HEADER_STATE: HeaderState = {
   caught: [],
 };
 
-export const HEADER_STATE_POLL_MS = 300_000;
+export const HEADER_STATE_POLL_MS = 900_000;
 export const HEADER_STATE_MIN_REFRESH_MS = 300_000;
 export const HEADER_STATE_CACHE_TTL_MS = HEADER_STATE_MIN_REFRESH_MS;
 
