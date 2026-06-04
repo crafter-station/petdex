@@ -2,6 +2,8 @@ import { createBuildVersionToken } from "@/lib/build-version-token";
 
 export const BUILD_VERSION_PATH = "/version.json";
 export const BUILD_VERSION_FETCH_TIMEOUT_MS = 5_000;
+export const BUILD_VERSION_BROWSER_CACHE_TTL_MS = 10 * 60_000;
+export const BUILD_VERSION_BROWSER_CACHE_KEY = "petdex:build-version";
 
 const CHUNK_LOAD_FAILURE_PATTERNS = [
   "chunkloaderror",
@@ -42,10 +44,10 @@ export async function fetchBuildVersion(
   );
 
   try {
-    const response = await fetcher(
-      `${BUILD_VERSION_PATH}?t=${Date.now().toString()}`,
-      { cache: "no-store", signal: controller.signal },
-    );
+    const response = await fetcher(BUILD_VERSION_PATH, {
+      cache: "no-store",
+      signal: controller.signal,
+    });
 
     if (!response.ok) {
       return null;
@@ -57,6 +59,83 @@ export async function fetchBuildVersion(
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+export async function fetchBuildVersionWithBrowserCache(
+  fetcher: typeof fetch = fetch,
+  options: {
+    maxAgeMs?: number;
+    nowMs?: number;
+    storage?: Storage | null;
+    timeoutMs?: number;
+    cacheKey?: string;
+  } = {},
+): Promise<string | null> {
+  const nowMs = options.nowMs ?? Date.now();
+  const maxAgeMs = options.maxAgeMs ?? BUILD_VERSION_BROWSER_CACHE_TTL_MS;
+  const storage = options.storage ?? browserStorage();
+  const cacheKey = options.cacheKey ?? BUILD_VERSION_BROWSER_CACHE_KEY;
+  const cached = readCachedBuildVersion(storage, nowMs, maxAgeMs, cacheKey);
+
+  if (cached) {
+    return cached;
+  }
+
+  const version = await fetchBuildVersion(fetcher, {
+    timeoutMs: options.timeoutMs,
+  });
+
+  if (version) {
+    writeCachedBuildVersion(storage, version, nowMs, cacheKey);
+  }
+
+  return version;
+}
+
+export function readCachedBuildVersion(
+  storage: Storage | null,
+  nowMs: number,
+  maxAgeMs = BUILD_VERSION_BROWSER_CACHE_TTL_MS,
+  cacheKey = BUILD_VERSION_BROWSER_CACHE_KEY,
+): string | null {
+  if (!storage) return null;
+
+  try {
+    const raw = storage.getItem(cacheKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { savedAt?: unknown; version?: unknown };
+
+    if (typeof parsed.version !== "string") return null;
+    if (typeof parsed.savedAt !== "number") return null;
+    if (!Number.isFinite(parsed.savedAt)) return null;
+    if (nowMs - parsed.savedAt < 0) return null;
+    if (nowMs - parsed.savedAt > maxAgeMs) return null;
+
+    return parsed.version;
+  } catch {
+    return null;
+  }
+}
+
+export function writeCachedBuildVersion(
+  storage: Storage | null,
+  version: string,
+  savedAt: number,
+  cacheKey = BUILD_VERSION_BROWSER_CACHE_KEY,
+): void {
+  if (!storage) return;
+
+  try {
+    storage.setItem(cacheKey, JSON.stringify({ savedAt, version }));
+  } catch {
+    return;
+  }
+}
+
+export function buildVersionBrowserCacheKey(currentVersion: string | null) {
+  return currentVersion
+    ? `${BUILD_VERSION_BROWSER_CACHE_KEY}:${currentVersion}`
+    : BUILD_VERSION_BROWSER_CACHE_KEY;
 }
 
 export function isChunkLoadFailure(errorLike: unknown): boolean {
@@ -96,4 +175,13 @@ function getErrorLikeMessage(errorLike: unknown): string {
   }
 
   return "";
+}
+
+function browserStorage(): Storage | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
 }

@@ -6,7 +6,8 @@ import { RefreshCw, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import {
-  fetchBuildVersion,
+  buildVersionBrowserCacheKey,
+  fetchBuildVersionWithBrowserCache,
   isChunkLoadFailure,
 } from "@/lib/build-version-check";
 import { createBuildVersionMonitor } from "@/lib/build-version-monitor";
@@ -14,7 +15,7 @@ import { CURRENT_BUILD_KEY } from "@/lib/current-build";
 
 import { Button } from "@/components/ui/button";
 
-const CHECK_INTERVAL_MS = 60_000;
+const CHECK_INTERVAL_MS = 10 * 60_000;
 
 type UpdateReason = "version" | "asset-load";
 
@@ -35,7 +36,10 @@ export function BuildVersionWatcher() {
         window.addEventListener(type, listener),
       clearInterval: (id) => window.clearInterval(id),
       currentVersion: CURRENT_BUILD_KEY,
-      fetchVersion: fetchBuildVersion,
+      fetchVersion: () =>
+        fetchBuildVersionWithBrowserCache(fetch, {
+          cacheKey: buildVersionBrowserCacheKey(CURRENT_BUILD_KEY),
+        }),
       intervalMs: CHECK_INTERVAL_MS,
       isChunkLoadFailure,
       isVisible: () => document.visibilityState === "visible",
