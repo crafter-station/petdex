@@ -1,11 +1,13 @@
+import { PET_METRICS_CACHE_TTL_MS } from "@/lib/pet-metrics-cache";
+
+export { PET_METRICS_CACHE_TTL_MS } from "@/lib/pet-metrics-cache";
+
 export type PetMetricsResponse = {
   installCount: number;
   zipDownloadCount: number;
   likeCount: number;
   summary: { maxInstallCount: number; maxLikeCount: number };
 };
-
-export const PET_METRICS_CACHE_TTL_MS = 300_000;
 
 export type CachedPetMetrics = {
   savedAt: number;
