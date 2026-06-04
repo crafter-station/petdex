@@ -28,7 +28,7 @@ import { PetKeyboardNav } from "@/components/pet-keyboard-nav";
 import { PetRadarClient } from "@/components/pet-radar-client";
 import { PetSoundButton } from "@/components/pet-sound-button";
 import { PetSprite } from "@/components/pet-sprite";
-import { PetStateViewer } from "@/components/pet-state-viewer";
+import { PetStateViewerLazy } from "@/components/pet-state-viewer-lazy";
 import { ReducedMotionHint } from "@/components/reduced-motion-hint";
 import { SaveAsSticker } from "@/components/save-as-sticker";
 import { SiteFooter } from "@/components/site-footer";
@@ -449,7 +449,10 @@ export default async function PetPage({ params }: PageProps) {
             the hero so its internal 2-column layout has the full content
             width to breathe. The hero idle preview keeps users grounded
             while they scroll into the state grid. */}
-        <PetStateViewer src={pet.spritesheetPath} petName={pet.displayName} />
+        <PetStateViewerLazy
+          src={pet.spritesheetPath}
+          petName={pet.displayName}
+        />
 
         {/* Full install guide. CLI + Curl tabs, platform-specific
             terminal instructions, "Activate in Codex" steps. Lives
