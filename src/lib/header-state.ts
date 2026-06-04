@@ -15,6 +15,7 @@ export const INITIAL_HEADER_STATE: HeaderState = {
 export const HEADER_STATE_POLL_MS = 900_000;
 export const HEADER_STATE_MIN_REFRESH_MS = HEADER_STATE_POLL_MS;
 export const HEADER_STATE_CACHE_TTL_MS = HEADER_STATE_MIN_REFRESH_MS;
+export const HEADER_STATE_BROWSER_CACHE_SECONDS = 300;
 
 type CachedHeaderState = {
   savedAt: number;
@@ -78,6 +79,10 @@ export function parseCachedHeaderState(
 
 export function serializeHeaderState(state: HeaderState, savedAt: number) {
   return JSON.stringify({ savedAt, state });
+}
+
+export function headerStateFetchCacheMode(force?: boolean): RequestCache {
+  return force ? "no-store" : "default";
 }
 
 export function withHeaderUnreadCount(

@@ -15,6 +15,7 @@ import {
   HEADER_STATE_POLL_MS,
   type HeaderState,
   headerStateCacheKey,
+  headerStateFetchCacheMode,
   INITIAL_HEADER_STATE,
   nextHeaderStatePollDelay,
   parseCachedHeaderState,
@@ -76,7 +77,9 @@ export function HeaderStateProvider({
       const generation = ++requestGeneration.current;
       inFlightUser.current = requestUserId;
       try {
-        const res = await fetch("/api/me/header-state", { cache: "no-store" });
+        const res = await fetch("/api/me/header-state", {
+          cache: headerStateFetchCacheMode(options?.force),
+        });
         if (!res.ok) return;
         const json = (await res.json()) as HeaderState;
         if (
@@ -136,7 +139,7 @@ export function HeaderStateProvider({
       setState(INITIAL_HEADER_STATE);
       lastRefreshAt.current = 0;
     }
-    void refresh({ force: !hasCachedState });
+    void refresh();
     const refreshIfVisible = (options?: { force?: boolean }) => {
       if (document.visibilityState !== "visible") return;
       void refresh(options);

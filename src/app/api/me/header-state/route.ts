@@ -5,6 +5,7 @@ import { sql as dsql } from "drizzle-orm";
 
 import { isAdmin } from "@/lib/admin";
 import { db } from "@/lib/db/client";
+import { HEADER_STATE_BROWSER_CACHE_SECONDS } from "@/lib/header-state";
 
 export const runtime = "nodejs";
 
@@ -45,7 +46,10 @@ export async function GET(): Promise<Response> {
     );
   }
 
-  const headers = { "Cache-Control": "private, no-store" };
+  const headers = {
+    "Cache-Control": `private, max-age=${HEADER_STATE_BROWSER_CACHE_SECONDS}, must-revalidate`,
+    Vary: "Cookie",
+  };
   const admin = isAdmin(userId);
   const result = (await db.execute(dsql`
     WITH notification_state AS (

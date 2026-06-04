@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 
 import {
   headerStateCacheKey,
+  headerStateFetchCacheMode,
   INITIAL_HEADER_STATE,
   nextHeaderStatePollDelay,
   parseCachedHeaderState,
@@ -93,6 +94,12 @@ describe("header state helpers", () => {
     expect(headerStateCacheKey("user_123")).toBe(
       "petdex:header-state:user_123",
     );
+  });
+
+  it("uses browser cache only for non-forced header refreshes", () => {
+    expect(headerStateFetchCacheMode()).toBe("default");
+    expect(headerStateFetchCacheMode(false)).toBe("default");
+    expect(headerStateFetchCacheMode(true)).toBe("no-store");
   });
 
   it("updates unread count without mutating the current header state", () => {
