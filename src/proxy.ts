@@ -1,7 +1,19 @@
-import { NextResponse } from "next/server";
+import {
+  type NextFetchEvent,
+  type NextRequest,
+  NextResponse,
+} from "next/server";
 
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import createMiddleware from "next-intl/middleware";
+
+import {
+  buildRouteCostSample,
+  routeCostSampleRate,
+  routeCostSecret,
+  shouldSampleRouteCost,
+  signRouteCostPayload,
+} from "@/lib/route-cost";
 
 import { defaultLocale, locales } from "@/i18n/config";
 
@@ -37,7 +49,8 @@ const handleI18nRouting = createMiddleware({
 // clerkMiddleware entirely (it would otherwise try to validate a real
 // backend secret before our shims have a chance to short-circuit).
 // Everything else — next-intl routing, the shuffle cookie — keeps working.
-const baseMiddleware = (req: Request) => {
+const baseMiddleware = (req: NextRequest, event?: NextFetchEvent) => {
+  scheduleRouteCostSample(req, event);
   if (new URL(req.url).pathname.startsWith("/api")) {
     return NextResponse.next();
   }
@@ -46,7 +59,9 @@ const baseMiddleware = (req: Request) => {
 
 export default IS_MOCK_AUTH
   ? baseMiddleware
-  : clerkMiddleware(async (auth, req) => {
+  : clerkMiddleware(async (auth, req, event) => {
+      scheduleRouteCostSample(req, event);
+
       if (isProtected(req)) {
         await auth.protect();
       }
@@ -65,3 +80,34 @@ export const config = {
     "/(api|trpc)(.*)",
   ],
 };
+
+function scheduleRouteCostSample(req: NextRequest, event?: NextFetchEvent) {
+  if (!event) return;
+  const secret = routeCostSecret();
+  const sampleRate = routeCostSampleRate();
+  if (!secret || !shouldSampleRouteCost(sampleRate)) return;
+  const sample = buildRouteCostSample({
+    method: req.method,
+    pathname: req.nextUrl.pathname,
+    sampleRate,
+  });
+  if (!sample) return;
+
+  const body = JSON.stringify(sample);
+  event.waitUntil(
+    signRouteCostPayload(body, secret)
+      .then((signature) =>
+        fetch(new URL("/api/internal/route-cost", req.url), {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-petdex-signature": signature,
+          },
+          body,
+          cache: "no-store",
+        }),
+      )
+      .then(() => undefined)
+      .catch(() => undefined),
+  );
+}

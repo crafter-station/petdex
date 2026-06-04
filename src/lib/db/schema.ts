@@ -827,6 +827,41 @@ export const telemetryEvents = pgTable(
 export type TelemetryEvent = typeof telemetryEvents.$inferSelect;
 export type NewTelemetryEvent = typeof telemetryEvents.$inferInsert;
 
+export const routeCostBuckets = pgTable(
+  "route_cost_buckets",
+  {
+    id: serial("id").primaryKey(),
+    bucketStart: timestamp("bucket_start", { withTimezone: true }).notNull(),
+    route: text("route").notNull(),
+    routeKind: text("route_kind").notNull(),
+    method: text("method").notNull(),
+    sampleCount: integer("sample_count").notNull().default(0),
+    estimatedRequests: integer("estimated_requests").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    bucketIdx: index("route_cost_buckets_bucket_idx").on(table.bucketStart),
+    routeIdx: index("route_cost_buckets_route_idx").on(
+      table.route,
+      table.bucketStart,
+    ),
+    uniqueBucket: uniqueIndex("route_cost_buckets_unique").on(
+      table.bucketStart,
+      table.method,
+      table.routeKind,
+      table.route,
+    ),
+  }),
+);
+
+export type RouteCostBucket = typeof routeCostBuckets.$inferSelect;
+export type NewRouteCostBucket = typeof routeCostBuckets.$inferInsert;
+
 export const wechatQrUploads = pgTable(
   "wechat_qr_uploads",
   {

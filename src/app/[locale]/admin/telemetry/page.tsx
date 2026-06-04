@@ -79,6 +79,27 @@ export default async function AdminTelemetryPage({
         />
       </div>
 
+      <Card>
+        <CardHeader>
+          <p className="inline-flex items-center gap-1.5 font-mono text-[10px] tracking-[0.22em] text-brand uppercase">
+            <BarChart2 className="size-3" />
+            Cost attribution
+          </p>
+          <CardTitle className="text-base md:text-lg">
+            Estimated route requests, last 24 hours
+          </CardTitle>
+          <CardDescription>
+            Top contributors by estimated request volume.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <RouteCostList
+            items={summary.routeCostTop}
+            emptyLabel={t("noData")}
+          />
+        </CardContent>
+      </Card>
+
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader>
@@ -272,6 +293,65 @@ function StatCard({
         </CardTitle>
       </CardHeader>
     </Card>
+  );
+}
+
+function RouteCostList({
+  items,
+  emptyLabel,
+}: {
+  items: {
+    estimatedRequests: number;
+    method: string;
+    route: string;
+    routeKind: string;
+    samples: number;
+  }[];
+  emptyLabel: string;
+}) {
+  const max = Math.max(...items.map((item) => item.estimatedRequests), 0);
+  if (items.length === 0 || max === 0) {
+    return <p className="text-sm text-muted-3">{emptyLabel}</p>;
+  }
+
+  return (
+    <ul className="space-y-2">
+      {items.map((item) => {
+        const pct =
+          max > 0
+            ? Math.max(4, Math.round((item.estimatedRequests / max) * 100))
+            : 0;
+        return (
+          <li
+            key={`${item.method}:${item.routeKind}:${item.route}`}
+            className="grid gap-2 rounded-md border border-border-base px-3 py-2 text-sm md:grid-cols-[minmax(0,1fr)_160px]"
+          >
+            <div className="min-w-0">
+              <div className="flex min-w-0 items-center gap-2">
+                <Badge variant="outline">{item.method}</Badge>
+                <span className="truncate font-mono text-xs text-foreground">
+                  {item.route}
+                </span>
+              </div>
+              <p className="mt-1 font-mono text-[10px] tracking-[0.14em] text-muted-4 uppercase">
+                {item.routeKind} - {item.samples.toLocaleString()} samples
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-border-base">
+                <div
+                  className="absolute inset-y-0 left-0 rounded-full bg-brand/60"
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+              <span className="w-16 text-right font-mono text-xs text-muted-2">
+                {item.estimatedRequests.toLocaleString()}
+              </span>
+            </div>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
