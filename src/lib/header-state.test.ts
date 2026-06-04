@@ -52,7 +52,7 @@ describe("header state helpers", () => {
         isLoaded: true,
         isSignedIn: true,
         lastRefreshAt: 1_000,
-        now: 302_000,
+        now: 902_000,
       }),
     ).toBe(true);
     expect(
@@ -77,7 +77,7 @@ describe("header state helpers", () => {
     const raw = serializeHeaderState(state, 1_000);
 
     expect(parseCachedHeaderState(raw, 30_000)?.state).toEqual(state);
-    expect(parseCachedHeaderState(raw, 301_001)).toBeNull();
+    expect(parseCachedHeaderState(raw, 901_001)).toBeNull();
     expect(parseCachedHeaderState(raw, 500)).toBeNull();
   });
 
