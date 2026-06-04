@@ -84,6 +84,7 @@ export function DesktopAnnouncementModal({
           <div className="flex items-center gap-2 pt-1">
             <Link
               href="/download"
+              prefetch={false}
               onClick={() => close("cta_download")}
               className="inline-flex h-10 flex-1 items-center justify-center gap-1.5 rounded-full bg-inverse px-5 text-sm font-medium text-on-inverse transition hover:bg-inverse-hover"
             >
@@ -92,6 +93,7 @@ export function DesktopAnnouncementModal({
             </Link>
             <Link
               href="/download#how-it-works"
+              prefetch={false}
               onClick={() => close("cta_docs")}
               className="inline-flex h-10 items-center justify-center rounded-full border border-border-base bg-surface px-4 text-sm font-medium text-muted-2 transition hover:border-border-strong"
             >

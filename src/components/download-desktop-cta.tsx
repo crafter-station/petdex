@@ -28,6 +28,7 @@ export function DownloadDesktopCTA({
   return (
     <Link
       href={href}
+      prefetch={false}
       aria-label={ariaLabel}
       className={className}
       onClick={() => {

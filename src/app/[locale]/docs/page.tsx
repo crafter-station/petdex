@@ -274,6 +274,7 @@ export default async function DocsPage({
                 download: (chunks) => (
                   <Link
                     href={withLocale("/download", localeValue)}
+                    prefetch={false}
                     className="font-medium underline underline-offset-4"
                   >
                     {chunks}
