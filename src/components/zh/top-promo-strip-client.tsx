@@ -114,6 +114,7 @@ export function TopPromoStripClient({ items, intervalMs = 4000 }: Props) {
     <div className={baseClasses}>
       <Link
         href={href}
+        prefetch={false}
         className="group flex min-h-[44px] items-center gap-1 px-3 text-xs font-medium text-white hover:text-amber-400 transition-colors sm:min-h-0 sm:px-0"
       >
         <span>{copy.emoji}</span>

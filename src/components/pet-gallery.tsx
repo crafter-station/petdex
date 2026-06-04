@@ -904,6 +904,7 @@ function PetCardImpl({
       />
       <Link
         href={href}
+        prefetch={false}
         aria-label={`Open ${pet.displayName}`}
         className="flex flex-1 flex-col rounded-3xl"
       >

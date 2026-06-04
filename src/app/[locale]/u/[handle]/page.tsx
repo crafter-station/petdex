@@ -542,6 +542,7 @@ function FeaturedPin({
   return (
     <Link
       href={`/pets/${pet.slug}`}
+      prefetch={false}
       aria-label={`Open ${pet.displayName}`}
       className="featured-pin-card group relative flex flex-col overflow-hidden rounded-3xl border border-brand-light/45 bg-surface/80 backdrop-blur transition hover:bg-white md:flex-row md:items-stretch dark:hover:bg-stone-800"
     >

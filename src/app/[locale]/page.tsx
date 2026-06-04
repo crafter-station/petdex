@@ -340,6 +340,7 @@ async function HeroPetParade({ pets, isZh }: HeroPetParadeProps) {
           <Link
             key={pet.slug}
             href={`/pets/${pet.slug}`}
+            prefetch={false}
             aria-label={t("openPet", { name: pet.displayName })}
             className={`group relative flex flex-col items-center rounded-2xl border border-border-base bg-surface/60 px-3 pt-3 pb-2 shadow-lg shadow-blue-900/10 backdrop-blur-md transition hover:-translate-y-1 hover:bg-surface ${tilt} ${lift}`}
           >
