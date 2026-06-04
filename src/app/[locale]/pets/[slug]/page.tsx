@@ -251,6 +251,7 @@ export default async function PetPage({ params }: PageProps) {
             <DexNavPill pet={prevPet} direction="prev" />
             <Link
               href={shuffleHref}
+              prefetch={false}
               className="inline-flex h-10 items-center gap-2 rounded-full border border-border-base bg-surface/80 px-4 text-sm font-medium text-foreground backdrop-blur transition hover:border-border-strong"
               title={tPet("navigation.shuffleTitle")}
             >
@@ -400,6 +401,7 @@ export default async function PetPage({ params }: PageProps) {
                     <Link
                       key={col.slug}
                       href={`/collections/${col.slug}`}
+                      prefetch={false}
                       className="rounded-full border border-border-base bg-surface px-2.5 py-1 text-xs font-medium text-muted-2 transition hover:border-border-strong hover:text-foreground"
                     >
                       {col.title}
@@ -514,6 +516,7 @@ export default async function PetPage({ params }: PageProps) {
                   <Link
                     key={variant.slug}
                     href={`/pets/${variant.slug}`}
+                    prefetch={false}
                     className="group flex items-center gap-3 rounded-2xl border border-border-base bg-background/70 p-3 transition hover:-translate-y-0.5 hover:border-brand/35 hover:bg-background"
                   >
                     <div className="shrink-0 rounded-2xl border border-border-base bg-surface p-2">
@@ -563,6 +566,7 @@ function DexNavPill({
   return (
     <Link
       href={`/pets/${pet.slug}`}
+      prefetch={false}
       className={`inline-flex min-h-10 items-center gap-2 rounded-full border border-border-base bg-surface px-4 py-2 text-sm text-foreground transition hover:border-border-strong ${direction === "next" ? "ml-auto" : ""}`}
     >
       {direction === "prev" ? <span aria-hidden="true">←</span> : null}
