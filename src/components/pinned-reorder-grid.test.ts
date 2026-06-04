@@ -30,7 +30,8 @@ describe("PinnedReorderGrid behavior contract", () => {
   });
 
   it("keeps failure recovery visible", () => {
-    expect(source).toContain("Could not save order");
+    expect(source).toContain('useTranslations("pinnedReorder")');
+    expect(source).toContain('t("saveError", { error })');
     expect(source).toContain("Retry");
     expect(source).toContain("Restore saved order");
   });

@@ -16,8 +16,9 @@ describe("DesktopAnnouncementModal theme classes", () => {
     expect(source).not.toContain("vibe-search");
   });
 
-  it("announces the Desktop App feature", () => {
-    expect(source).toContain("Desktop App");
-    expect(source).toContain("cta_download");
+  it("announces through the desktop announcement message namespace", () => {
+    expect(source).toContain('useTranslations("desktopAnnouncement")');
+    expect(source).toContain('t("title")');
+    expect(source).toContain('t("downloadCta")');
   });
 });
