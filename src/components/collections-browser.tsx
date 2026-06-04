@@ -325,7 +325,7 @@ const CollectionCard = memo(function CollectionCard({
       data-slot="card"
       className="group relative flex h-full flex-col overflow-hidden rounded-3xl border border-black/10 bg-surface/76 shadow-sm shadow-blue-950/5 backdrop-blur transition has-[[aria-expanded=true]]:z-30 hover:-translate-y-0.5 hover:bg-white hover:shadow-xl hover:shadow-blue-950/10 dark:border-white/10 dark:hover:bg-stone-800"
     >
-      <Link href={`/collections/${c.slug}`} className="block">
+      <Link href={`/collections/${c.slug}`} prefetch={false} className="block">
         <CollectionCover
           pets={c.pets}
           coverSlug={c.coverPetSlug}
@@ -355,7 +355,9 @@ const CollectionCard = memo(function CollectionCard({
               </span>
             </div>
             <h3 className="mt-2 text-lg font-semibold tracking-tight text-foreground">
-              <Link href={`/collections/${c.slug}`}>{c.title}</Link>
+              <Link href={`/collections/${c.slug}`} prefetch={false}>
+                {c.title}
+              </Link>
             </h3>
           </div>
           {c.externalUrl ? (

@@ -275,7 +275,11 @@ async function FeaturedCollections({
               key={collection.slug}
               className="group relative flex h-full flex-col gap-0 overflow-hidden rounded-3xl border border-border-base bg-surface/80 py-0 ring-0 transition hover:border-border-strong hover:shadow-xl hover:shadow-blue-950/10 has-[[aria-expanded=true]]:z-30"
             >
-              <Link href={`/collections/${collection.slug}`} className="block">
+              <Link
+                href={`/collections/${collection.slug}`}
+                prefetch={false}
+                className="block"
+              >
                 <CollectionCover
                   pets={collection.pets}
                   coverSlug={collection.coverPetSlug}

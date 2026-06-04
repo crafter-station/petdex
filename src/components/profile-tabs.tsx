@@ -526,7 +526,11 @@ function CollectionsPanel({
               </span>
             </div>
             <h3 className="mt-2 text-lg font-semibold tracking-tight text-foreground">
-              <Link href={`/collections/${c.slug}`} className="hover:underline">
+              <Link
+                href={`/collections/${c.slug}`}
+                prefetch={false}
+                className="hover:underline"
+              >
                 {c.title}
               </Link>
             </h3>
@@ -557,6 +561,7 @@ function CollectionsPanel({
       <div className="mt-5 flex flex-wrap items-center gap-3">
         <Link
           href={`/collections/${collection?.slug}`}
+          prefetch={false}
           className="inline-flex h-10 items-center rounded-full bg-inverse px-4 text-sm font-medium text-on-inverse transition hover:bg-inverse-hover"
         >
           View collection
