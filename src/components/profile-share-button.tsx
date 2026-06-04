@@ -8,10 +8,11 @@ import {
   useState,
 } from "react";
 
-import { track } from "@vercel/analytics";
 import { Check, X as CloseIcon, Link2, Share2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { createPortal } from "react-dom";
+
+import { track } from "@/lib/vercel-analytics";
 
 const SITE_URL = "https://petdex.crafter.run";
 

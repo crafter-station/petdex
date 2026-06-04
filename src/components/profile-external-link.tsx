@@ -1,7 +1,8 @@
 "use client";
 
-import { track } from "@vercel/analytics";
 import { ExternalLink } from "lucide-react";
+
+import { track } from "@/lib/vercel-analytics";
 
 export function ProfileExternalLink({
   handle,

@@ -2,9 +2,10 @@
 
 import { Fragment, useState } from "react";
 
-import { track } from "@vercel/analytics";
 import { Check, CircleAlert, Copy } from "lucide-react";
 import { useTranslations } from "next-intl";
+
+import { track } from "@/lib/vercel-analytics";
 
 import { CodexLogo } from "@/components/codex-logo";
 

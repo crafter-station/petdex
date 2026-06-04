@@ -3,12 +3,12 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 
 import { useAuth, useClerk } from "@clerk/nextjs";
-import { track } from "@vercel/analytics";
 import { Heart } from "lucide-react";
 import { useLocale } from "next-intl";
 
 import { formatLocalizedNumber } from "@/lib/format-number";
 import { loadPetMetrics } from "@/lib/pet-metrics-client";
+import { track } from "@/lib/vercel-analytics";
 
 import { Button } from "@/components/ui/button";
 

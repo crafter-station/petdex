@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
-import { track } from "@vercel/analytics";
 import {
   Check,
   X as CloseIcon,
@@ -22,6 +21,8 @@ import {
   XCircle,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
+
+import { track } from "@/lib/vercel-analytics";
 
 import { CodexLogo } from "@/components/codex-logo";
 import { GithubIcon } from "@/components/github-icon";

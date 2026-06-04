@@ -4,12 +4,12 @@ import { useRouter } from "next/navigation";
 import { memo, useCallback, useState } from "react";
 
 import { useClerk } from "@clerk/nextjs";
-import { track } from "@vercel/analytics";
 import { Download, Heart, Loader2, Share2, TerminalSquare } from "lucide-react";
 import { useLocale } from "next-intl";
 
 import { formatLocalizedNumber } from "@/lib/format-number";
 import { cn } from "@/lib/utils";
+import { track } from "@/lib/vercel-analytics";
 
 import { PetSoundButton } from "@/components/pet-sound-button";
 import { Button } from "@/components/ui/button";

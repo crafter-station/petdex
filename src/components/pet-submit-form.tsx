@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 
 import { useUser } from "@clerk/nextjs";
-import { track } from "@vercel/analytics";
 import JSZip from "jszip";
 import {
   AlertTriangle,
@@ -18,6 +17,7 @@ import {
 import { useTranslations } from "next-intl";
 
 import { petStates } from "@/lib/pet-states";
+import { track } from "@/lib/vercel-analytics";
 
 type ParsedPet = {
   petId: string;

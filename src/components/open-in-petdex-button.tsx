@@ -4,7 +4,6 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
-import { track } from "@vercel/analytics";
 import { ArrowRight } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
@@ -13,6 +12,7 @@ import {
   isMacDesktop,
   openPetdexDeepLink,
 } from "@/lib/petdex-desktop-link";
+import { track } from "@/lib/vercel-analytics";
 
 type OpenInPetdexButtonProps = {
   slug: string;

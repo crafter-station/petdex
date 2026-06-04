@@ -1,9 +1,10 @@
 "use client";
 
 import { SignInButton, useUser } from "@clerk/nextjs";
-import { track } from "@vercel/analytics";
 import { ArrowRight } from "lucide-react";
 import { useTranslations } from "next-intl";
+
+import { track } from "@/lib/vercel-analytics";
 
 // Inline "Is this you?" prompt shown on /pets/[slug] for discovered
 // pets when the viewer is either signed-out or signed in as someone

@@ -2,10 +2,10 @@
 
 import { useEffect, useMemo, useRef } from "react";
 
-import { track } from "@vercel/analytics";
 import { useLocale } from "next-intl";
 
 import type { PublicFeedAd } from "@/lib/ads/queries";
+import { track } from "@/lib/vercel-analytics";
 
 import { AdCard } from "@/components/ads/ad-card";
 

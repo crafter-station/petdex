@@ -10,7 +10,6 @@ import {
   useState,
 } from "react";
 
-import { track } from "@vercel/analytics";
 import {
   ArrowUp,
   Check,
@@ -23,6 +22,8 @@ import {
   X,
 } from "lucide-react";
 import { useTranslations } from "next-intl";
+
+import { track } from "@/lib/vercel-analytics";
 
 import { ClaimRequestButton } from "@/components/claim-request-button";
 

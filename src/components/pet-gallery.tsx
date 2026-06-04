@@ -11,7 +11,6 @@ import {
   useState,
 } from "react";
 
-import { track } from "@vercel/analytics";
 import {
   Check,
   CheckCircle2,
@@ -32,6 +31,7 @@ import type { PetWithMetrics } from "@/lib/pets";
 import { PET_KINDS, PET_VIBES, type PetKind, type PetVibe } from "@/lib/types";
 import { isAllowedAvatarUrl } from "@/lib/url-allowlist";
 import { cn } from "@/lib/utils";
+import { track } from "@/lib/vercel-analytics";
 
 import { FeedAdSlot } from "@/components/ads/feed-ad-slot";
 import { useHeaderState } from "@/components/header-state-provider";

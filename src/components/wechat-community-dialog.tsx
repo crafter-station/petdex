@@ -3,10 +3,10 @@
 import Image from "next/image";
 import { useState } from "react";
 
-import { track } from "@vercel/analytics";
 import { Loader2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { track } from "@/lib/vercel-analytics";
 
 import { WeChatIcon } from "@/components/icons/wechat-icon";
 import {

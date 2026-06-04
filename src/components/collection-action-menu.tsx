@@ -3,7 +3,6 @@
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 
-import { track } from "@vercel/analytics";
 import {
   Check,
   X as CloseIcon,
@@ -22,6 +21,7 @@ import {
   isMacDesktop,
   openPetdexDeepLink,
 } from "@/lib/petdex-desktop-link";
+import { track } from "@/lib/vercel-analytics";
 
 import { CodexLogo } from "@/components/codex-logo";
 

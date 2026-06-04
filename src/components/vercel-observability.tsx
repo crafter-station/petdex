@@ -5,6 +5,11 @@ import type { ComponentProps } from "react";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 
+import {
+  speedInsightsEnabled,
+  webAnalyticsEnabled,
+} from "@/lib/vercel-analytics";
+
 type AnalyticsEvent = Parameters<
   NonNullable<ComponentProps<typeof Analytics>["beforeSend"]>
 >[0];
@@ -21,13 +26,22 @@ const LOW_VALUE_PATHS = [
 ];
 
 export function VercelObservability() {
+  const analyticsEnabled = webAnalyticsEnabled();
+  const speedEnabled = speedInsightsEnabled();
+
+  if (!(analyticsEnabled || speedEnabled)) return null;
+
   return (
     <>
-      <Analytics beforeSend={filterAnalyticsEvent} />
-      <SpeedInsights
-        sampleRate={speedInsightsSampleRate()}
-        beforeSend={filterSpeedInsightsEvent}
-      />
+      {analyticsEnabled ? (
+        <Analytics beforeSend={filterAnalyticsEvent} />
+      ) : null}
+      {speedEnabled ? (
+        <SpeedInsights
+          sampleRate={speedInsightsSampleRate()}
+          beforeSend={filterSpeedInsightsEvent}
+        />
+      ) : null}
     </>
   );
 }
