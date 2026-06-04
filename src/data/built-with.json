@@ -372,6 +372,24 @@
       "screenshot": "/built-with/codexpet-nest.png"
     },
     {
+      "slug": "desktop-pet",
+      "name": "desktop-pet",
+      "tagline": "Tauri v2 desktop pet app with Claude Code hooks, AI chat, and automatic discovery/import of Petdex pet packages from ~/.petdex/pets.",
+      "category": "desktop-companion",
+      "repo": "zzw980709/desktop-pet",
+      "homepage": null,
+      "stars": 2,
+      "language": "TypeScript",
+      "platforms": ["macOS", "Windows", "Linux"],
+      "addedAt": "2026-06-04",
+      "evidence": {
+        "type": "readme",
+        "quote": "**Petdex 生态兼容** — 自动发现 `~/.petdex/pets/` 目录下的宠物包，无需手动导入",
+        "url": "https://github.com/zzw980709/desktop-pet#readme"
+      },
+      "screenshot": "/built-with/desktop-pet.png"
+    },
+    {
       "slug": "codex-pet-platformer",
       "name": "Codex Pet Platformer",
       "tagline": "Codex and Claude Code skill that turns any Petdex pet into a customizable side-scrolling platformer deployable to Netlify.",
