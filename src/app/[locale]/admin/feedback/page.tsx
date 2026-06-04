@@ -365,6 +365,7 @@ export default async function AdminFeedbackPage({
                     {info?.handle ? (
                       <Link
                         href={`/u/${info.handle}`}
+                        prefetch={false}
                         target="_blank"
                         rel="noreferrer"
                         title={`View @${info.handle}'s profile`}

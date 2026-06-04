@@ -376,6 +376,7 @@ export function AdminReviewRow({
           {ownerHandle ? (
             <Link
               href={`/u/${ownerHandle}`}
+              prefetch={false}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 underline-offset-4 transition hover:text-foreground hover:underline"

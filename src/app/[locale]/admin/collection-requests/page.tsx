@@ -216,6 +216,7 @@ function RequestRow({
             {requester ? (
               <Link
                 href={`/u/${requester.handle}`}
+                prefetch={false}
                 className="text-foreground hover:underline"
               >
                 {requester.name}

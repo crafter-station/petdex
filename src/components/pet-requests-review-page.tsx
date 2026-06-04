@@ -304,6 +304,7 @@ function RequestRow({
             {requester ? (
               <Link
                 href={`/u/${requester.handle}`}
+                prefetch={false}
                 target="_blank"
                 rel="noreferrer"
                 className="inline-flex items-center gap-1.5 rounded-full bg-surface-muted px-2 py-1 transition hover:bg-surface-muted hover:text-stone-900 dark:hover:text-stone-100"

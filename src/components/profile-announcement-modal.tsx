@@ -139,6 +139,7 @@ export function ProfileAnnouncementModal() {
           <div className="flex items-center gap-2 pt-1">
             <Link
               href={`/u/${handle}`}
+              prefetch={false}
               onClick={() => close("cta_view")}
               className="inline-flex h-10 flex-1 items-center justify-center gap-1.5 rounded-full bg-inverse px-5 text-sm font-medium text-on-inverse transition hover:bg-inverse-hover"
             >

@@ -381,6 +381,7 @@ const CollectionCard = memo(function CollectionCard({
           <div className="mt-auto border-t border-black/[0.05] pt-2 dark:border-white/[0.05]">
             <Link
               href={`/u/${owner.handle}`}
+              prefetch={false}
               className="font-mono text-[10px] tracking-[0.12em] text-muted-3 uppercase hover:text-foreground"
             >
               {t("card.byOwner", { name: owner.name })}

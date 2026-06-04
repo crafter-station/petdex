@@ -708,6 +708,7 @@ function RequestCard({
             {request.requester ? (
               <Link
                 href={`/u/${request.requester.handle}`}
+                prefetch={false}
                 className="inline-flex items-center gap-1.5 rounded-full bg-surface-muted px-2 py-0.5 text-muted-2 transition hover:bg-surface-muted hover:text-stone-900 dark:hover:text-stone-100"
               >
                 {request.requester.imageUrl ? (

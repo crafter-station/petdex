@@ -149,6 +149,7 @@ export default async function CollectionPage({ params }: PageProps) {
                 {owner ? (
                   <Link
                     href={`/u/${owner.handle}`}
+                    prefetch={false}
                     className="inline-flex h-10 items-center rounded-full bg-inverse px-4 text-sm font-medium text-on-inverse transition hover:bg-inverse-hover"
                   >
                     View creator

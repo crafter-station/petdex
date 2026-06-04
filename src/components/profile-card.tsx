@@ -139,6 +139,7 @@ export function ProfileCard({ profile }: { profile: ProfileData }) {
         <div className="flex shrink-0 items-center gap-2">
           <Link
             href={`/u/${profile.handle}`}
+            prefetch={false}
             target="_blank"
             rel="noreferrer"
             className="inline-flex h-9 items-center gap-1.5 rounded-full border border-border-base bg-surface px-3 text-xs font-medium text-muted-2 transition hover:border-border-strong"
