@@ -24,6 +24,11 @@ import {
   stopDesktop,
 } from "../src/desktop/process.js";
 import { runUpdate } from "../src/desktop/update.js";
+import {
+  collectSelectableSlugs,
+  reloadDesktopAfterSelect,
+  setActivePet,
+} from "../src/desktop/select.js";
 import { runInstall as runHooksInstall } from "../src/hooks/install.js";
 import {
   getKillswitchState,
@@ -108,7 +113,7 @@ async function getAuth(): Promise<ClerkCliAuth> {
   return _auth;
 }
 
-const VERSION = "0.4.1";
+const VERSION = "0.4.2";
 
 // ─── entrypoint ────────────────────────────────────────────────────────────
 main().catch((err) => {
@@ -554,27 +559,11 @@ async function cmdList() {
 async function cmdSelect(args: string[]) {
   p.intro(pc.bgMagenta(pc.white(" petdex select ")));
 
-  // Scan both pet roots the desktop uses, deduplicated.
-  const petRoots = [
-    path.join(homedir(), ".petdex", "pets"),
-    path.join(homedir(), ".codex", "pets"),
-  ];
-  const slugSet = new Set<string>();
-  for (const dir of petRoots) {
-    try {
-      const entries = await readdir(dir, { withFileTypes: true });
-      for (const e of entries) {
-        if (e.isDirectory()) slugSet.add(e.name);
-      }
-    } catch {
-      // directory doesn't exist — skip
-    }
-  }
-  const installedSlugs = [...slugSet].sort();
+  const installedSlugs = await collectSelectableSlugs();
 
   if (installedSlugs.length === 0) {
     p.cancel(
-      `No pets installed. Run ${pc.cyan("petdex install <slug>")} first.`,
+      `No usable pets installed. Run ${pc.cyan("petdex install <slug>")} first.`,
     );
     process.exit(1);
   }
@@ -598,22 +587,16 @@ async function cmdSelect(args: string[]) {
     process.exit(1);
   }
 
-  const activeJsonPath = path.join(homedir(), ".petdex", "active.json");
-  await mkdir(path.dirname(activeJsonPath), { recursive: true });
-  await writeFile(activeJsonPath, JSON.stringify({ slug }) + "\n", "utf8");
+  await setActivePet(slug);
 
-  // Restart the desktop so the new active pet is visible immediately.
-  // Non-fatal: if the desktop isn't running the stop is a no-op and
-  // the start will launch it fresh.
   const s = p.spinner();
   s.start("Reloading desktop…");
-  try {
-    await stopDesktop();
-    await startDesktop();
+  const reload = await reloadDesktopAfterSelect();
+  if (reload.status === "reloaded") {
     s.stop(`${pc.green("✓")} Active pet set to ${pc.cyan(slug)}`);
-  } catch {
+  } else {
     s.stop(
-      `${pc.green("✓")} Active pet set to ${pc.cyan(slug)} — restart the desktop to see the change`,
+      `${pc.green("✓")} Active pet set to ${pc.cyan(slug)}. ${pc.yellow("Restart the desktop to see the change.")} ${pc.dim(reload.reason)}`,
     );
   }
 }

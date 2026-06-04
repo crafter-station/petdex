@@ -742,7 +742,7 @@ const MAX_PET_BYTES = 16 * 1024 * 1024;
 // the desktop binary would actually accept: present, openable,
 // stat-able, and within the size cap. Mirrors the validation in
 // main.zig's hasSpritesheet/checkSpritesheetVariant.
-function isPetUsable(slugDir: string): boolean {
+export function isPetUsable(slugDir: string): boolean {
   for (const name of ["spritesheet.webp", "spritesheet.png"]) {
     const file = path.join(slugDir, name);
     try {

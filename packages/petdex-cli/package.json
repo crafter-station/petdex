@@ -1,6 +1,6 @@
 {
   "name": "petdex",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "CLI for Petdex. Install, browse, and submit Codex pets from your terminal.",
   "homepage": "https://petdex.crafter.run",
   "repository": {
