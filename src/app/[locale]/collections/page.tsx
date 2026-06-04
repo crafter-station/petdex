@@ -1,6 +1,10 @@
 import { getTranslations } from "next-intl/server";
 
-import { getCollectionsForListing } from "@/lib/collections";
+import { sortCollectionListingItems } from "@/lib/collection-listing-order";
+import {
+  getCollectionListingMetadata,
+  getCollectionListingPreviewsBySlugs,
+} from "@/lib/collections";
 import { buildLocaleAlternates } from "@/lib/locale-routing";
 import { resolveOwnerCredits } from "@/lib/owner-credit";
 
@@ -19,6 +23,7 @@ export const revalidate = 86400;
 
 const SITE_URL = "https://petdex.crafter.run";
 const MIN_PETS = 4;
+const INITIAL_PREVIEW_COUNT = 24;
 
 export async function generateMetadata({
   params,
@@ -50,7 +55,16 @@ export default async function CollectionsPage({
     locale: hasLocale(locale) ? locale : "en",
     namespace: "collectionsPage",
   });
-  const collections = await getCollectionsForListing(MIN_PETS, 6);
+  const collections = await getCollectionListingMetadata(MIN_PETS);
+  const defaultVisibleOrder = sortCollectionListingItems(collections, "size");
+  const initialPreviewCollections = await getCollectionListingPreviewsBySlugs(
+    defaultVisibleOrder.slice(0, INITIAL_PREVIEW_COUNT).map((c) => c.slug),
+    MIN_PETS,
+    6,
+  );
+  const previewPetsBySlug = new Map(
+    initialPreviewCollections.map((c) => [c.slug, c.pets]),
+  );
 
   const ownerIds = collections
     .map((c) => c.ownerId)
@@ -89,7 +103,7 @@ export default async function CollectionsPage({
     externalUrl: c.externalUrl,
     coverPetSlug: c.coverPetSlug,
     petCount: c.petCount,
-    pets: c.pets.map((pet) => ({
+    pets: (previewPetsBySlug.get(c.slug) ?? []).map((pet) => ({
       slug: pet.slug,
       displayName: pet.displayName,
       spritesheetPath: pet.spritesheetPath,

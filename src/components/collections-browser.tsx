@@ -11,6 +11,10 @@ import {
   collectionKind,
   KIND_SLUG,
 } from "@/lib/collection-kind";
+import {
+  type CollectionListingSortKey,
+  sortCollectionListingItems,
+} from "@/lib/collection-listing-order";
 import type { OwnerCredit } from "@/lib/owner-credit";
 
 import { CollectionActionMenu } from "@/components/collection-action-menu";
@@ -44,7 +48,14 @@ type CollectionItem = {
   pets: CollectionCoverPet[];
 };
 
-type SortKey = "size" | "title";
+type CollectionPreviewResponse = {
+  collections?: Array<{
+    slug: string;
+    pets: CollectionCoverPet[];
+  }>;
+};
+
+type SortKey = CollectionListingSortKey;
 
 type KindFilterValue = "all" | CollectionKind;
 
@@ -65,6 +76,7 @@ const SORT_KEYS: SortKey[] = ["size", "title"];
 // which racked up ~500 mounts in idle and dropped FPS to 3-30 during
 // scroll). 24 covers the common viewport without needing a tick.
 const PAGE_SIZE = 24;
+const PREVIEW_FETCH_LIMIT = PAGE_SIZE;
 
 export function CollectionsBrowser({
   collections,
@@ -78,6 +90,23 @@ export function CollectionsBrowser({
   const [kind, setKind] = useState<KindFilterValue>("all");
   const [sort, setSort] = useState<SortKey>("size");
   const [pageCount, setPageCount] = useState(1);
+  const initialPreviewPets = useMemo(
+    () =>
+      new Map(
+        collections
+          .filter((collection) => collection.pets.length > 0)
+          .map((collection) => [collection.slug, collection.pets]),
+      ),
+    [collections],
+  );
+  const [previewPetsBySlug, setPreviewPetsBySlug] =
+    useState<Map<string, CollectionCoverPet[]>>(initialPreviewPets);
+  const requestedPreviewSlugsRef = useRef(new Set(initialPreviewPets.keys()));
+
+  useEffect(() => {
+    requestedPreviewSlugsRef.current = new Set(initialPreviewPets.keys());
+    setPreviewPetsBySlug(initialPreviewPets);
+  }, [initialPreviewPets]);
 
   const counts = useMemo(() => {
     const map: Record<string, number> = { all: collections.length };
@@ -90,7 +119,7 @@ export function CollectionsBrowser({
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
-    let list = collections.filter((c) => {
+    const list = collections.filter((c) => {
       if (kind !== "all" && collectionKind(c.slug) !== kind) return false;
       if (!q) return true;
       return (
@@ -99,29 +128,7 @@ export function CollectionsBrowser({
         c.slug.toLowerCase().includes(q)
       );
     });
-    list = [...list];
-
-    // Hand-picked slugs that should always lead the list, mirroring
-    // the home page Featured Collections strip. Anything in this set
-    // outranks the user-selected sort; collections outside this set
-    // fall through to the requested sort.
-    const PRIORITY_SLUGS = [
-      "franchise-pokemon",
-      "franchise-league-of-legends",
-      "franchise-jojos-bizarre-adventure",
-    ];
-    const priorityIndex = new Map(PRIORITY_SLUGS.map((s, i) => [s, i]));
-
-    list.sort((a, b) => {
-      const ai = priorityIndex.get(a.slug);
-      const bi = priorityIndex.get(b.slug);
-      if (ai !== undefined && bi !== undefined) return ai - bi;
-      if (ai !== undefined) return -1;
-      if (bi !== undefined) return 1;
-      if (sort === "size") return b.petCount - a.petCount;
-      return a.title.localeCompare(b.title);
-    });
-    return list;
+    return sortCollectionListingItems(list, sort);
   }, [collections, query, kind, sort]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentional reset on filter/query/sort change
@@ -134,6 +141,63 @@ export function CollectionsBrowser({
     [visible, pageCount],
   );
   const hasMore = visibleSlice.length < visible.length;
+
+  useEffect(() => {
+    const missing = visibleSlice
+      .filter(
+        (collection) =>
+          !previewPetsBySlug.has(collection.slug) &&
+          !requestedPreviewSlugsRef.current.has(collection.slug),
+      )
+      .slice(0, PREVIEW_FETCH_LIMIT)
+      .map((collection) => collection.slug);
+    if (missing.length === 0) return;
+
+    for (const slug of missing) requestedPreviewSlugsRef.current.add(slug);
+    const controller = new AbortController();
+    const params = new URLSearchParams({ slugs: missing.join(",") });
+    const releaseMissing = (except = new Set<string>()) => {
+      for (const slug of missing) {
+        if (!except.has(slug)) requestedPreviewSlugsRef.current.delete(slug);
+      }
+    };
+
+    fetch(`/api/collections/previews?${params.toString()}`, {
+      signal: controller.signal,
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          releaseMissing();
+          return null;
+        }
+        return (await res.json()) as CollectionPreviewResponse;
+      })
+      .then((data) => {
+        if (!data?.collections?.length) {
+          releaseMissing();
+          return;
+        }
+        const returned = new Set(data.collections.map((item) => item.slug));
+        releaseMissing(returned);
+        setPreviewPetsBySlug((current) => {
+          const next = new Map(current);
+          for (const collection of data.collections ?? []) {
+            if (!collection.slug || !Array.isArray(collection.pets)) continue;
+            next.set(collection.slug, collection.pets);
+          }
+          return next;
+        });
+      })
+      .catch((error: unknown) => {
+        releaseMissing();
+        if ((error as { name?: string }).name === "AbortError") return;
+      });
+
+    return () => {
+      releaseMissing();
+      controller.abort();
+    };
+  }, [visibleSlice, previewPetsBySlug]);
 
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -255,7 +319,16 @@ export function CollectionsBrowser({
         <div className="grid auto-rows-fr gap-5 md:grid-cols-2 lg:grid-cols-3">
           {visibleSlice.map((c) => {
             const owner = c.ownerId ? credits[c.ownerId] : null;
-            return <CollectionCard key={c.slug} collection={c} owner={owner} />;
+            return (
+              <CollectionCard
+                key={c.slug}
+                collection={{
+                  ...c,
+                  pets: previewPetsBySlug.get(c.slug) ?? c.pets,
+                }}
+                owner={owner}
+              />
+            );
           })}
         </div>
       )}

@@ -31,6 +31,14 @@ export type PetCollectionWithPets = PetCollection & {
   pets: PetWithMetrics[];
 };
 
+export type CollectionListingMetadata = PetCollection & {
+  petCount: number;
+};
+
+export type CollectionListingPreview = CollectionListingMetadata & {
+  pets: PetWithMetrics[];
+};
+
 export type CollectionSitemapEntry = {
   slug: string;
   updatedAt: Date;
@@ -133,17 +141,11 @@ export async function getCollectionSitemapEntries(): Promise<
   )();
 }
 
-// Returns featured collections that have at least `minPets` approved
-// pets, with a small sample for the cover preview. Used by the public
-// /collections listing — keeps the page fast even with hundreds of
-// collections by filtering at the SQL level.
-export async function getCollectionsForListing(
+export async function getCollectionListingMetadata(
   minPets = 4,
-  petsPerPreview = 6,
-): Promise<(PetCollectionWithPets & { petCount: number })[]> {
+): Promise<CollectionListingMetadata[]> {
   return withNextDataCache(
     async () => {
-      let rows: (PetCollection & { petCount: number })[];
       try {
         const result = await db
           .select({
@@ -173,7 +175,7 @@ export async function getCollectionsForListing(
             desc(dsql`count(${schema.petCollectionItems.petSlug})`),
             asc(schema.petCollections.title),
           );
-        rows = result.map((r) => ({
+        return result.map((r) => ({
           ...r,
           petCount: Number(r.petCount),
         }));
@@ -181,18 +183,32 @@ export async function getCollectionsForListing(
         if (isMissingCollectionTableError(error)) return [];
         throw error;
       }
-
-      const hydrated = await hydrateCollections(rows, petsPerPreview);
-      // Re-attach the pet count we computed (hydrate doesn't carry it).
-      const countBySlug = new Map(rows.map((r) => [r.slug, r.petCount]));
-      return hydrated.map((c) => ({
-        ...c,
-        petCount: countBySlug.get(c.slug) ?? c.pets.length,
-      }));
     },
-    ["petdex-collections-for-listing", String(minPets), String(petsPerPreview)],
+    ["petdex-collection-listing-metadata", String(minPets)],
     { tags: ["collection:list"], revalidate: 86400 },
   )();
+}
+
+export async function getCollectionsForListing(
+  minPets = 4,
+  petsPerPreview = 6,
+): Promise<CollectionListingPreview[]> {
+  const rows = await getCollectionListingMetadata(minPets);
+  return hydrateCollectionListingRows(rows, petsPerPreview);
+}
+
+export async function getCollectionListingPreviewsBySlugs(
+  slugs: string[],
+  minPets = 4,
+  petsPerPreview = 6,
+): Promise<CollectionListingPreview[]> {
+  if (slugs.length === 0) return [];
+  const allowed = new Set(slugs);
+  const order = new Map(slugs.map((slug, index) => [slug, index]));
+  const rows = (await getCollectionListingMetadata(minPets))
+    .filter((row) => allowed.has(row.slug))
+    .sort((a, b) => (order.get(a.slug) ?? 0) - (order.get(b.slug) ?? 0));
+  return hydrateCollectionListingRows(rows, petsPerPreview);
 }
 
 export async function getCollection(
@@ -242,6 +258,18 @@ export async function getOwnerCollection(
 
   const [collection] = await hydrateCollections(rows);
   return collection ?? null;
+}
+
+async function hydrateCollectionListingRows(
+  rows: CollectionListingMetadata[],
+  petsPerPreview: number,
+): Promise<CollectionListingPreview[]> {
+  const hydrated = await hydrateCollections(rows, petsPerPreview);
+  const countBySlug = new Map(rows.map((r) => [r.slug, r.petCount]));
+  return hydrated.map((c) => ({
+    ...c,
+    petCount: countBySlug.get(c.slug) ?? c.pets.length,
+  }));
 }
 
 // Personal collections owned by a creator. NOT filtered by featured —
