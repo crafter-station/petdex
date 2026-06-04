@@ -12,7 +12,7 @@ export const INITIAL_HEADER_STATE: HeaderState = {
   caught: [],
 };
 
-export const HEADER_STATE_POLL_MS = 900_000;
+export const HEADER_STATE_POLL_MS = 1_800_000;
 export const HEADER_STATE_MIN_REFRESH_MS = HEADER_STATE_POLL_MS;
 export const HEADER_STATE_CACHE_TTL_MS = HEADER_STATE_MIN_REFRESH_MS;
 export const HEADER_STATE_BROWSER_CACHE_SECONDS = 300;
@@ -171,12 +171,15 @@ export function headerStateResponseSavedAt(
   now: number,
 ) {
   const dateMs = Date.parse(headers.get("date") ?? "");
-  if (Number.isFinite(dateMs) && dateMs <= now) return dateMs;
+  const validDateMs = Number.isFinite(dateMs) && dateMs <= now ? dateMs : null;
   const ageSeconds = Number(headers.get("age") ?? NaN);
   if (Number.isFinite(ageSeconds) && ageSeconds >= 0) {
-    return Math.max(0, now - ageSeconds * 1000);
+    const agedSavedAt = Math.max(0, now - ageSeconds * 1000);
+    return validDateMs === null
+      ? agedSavedAt
+      : Math.min(validDateMs, agedSavedAt);
   }
-  return now;
+  return validDateMs ?? now;
 }
 
 export function withHeaderUnreadCount(

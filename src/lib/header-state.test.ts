@@ -61,6 +61,14 @@ describe("header state helpers", () => {
         lastRefreshAt: 1_000,
         now: 902_000,
       }),
+    ).toBe(false);
+    expect(
+      shouldRequestHeaderState({
+        isLoaded: true,
+        isSignedIn: true,
+        lastRefreshAt: 1_000,
+        now: 1_802_000,
+      }),
     ).toBe(true);
     expect(
       shouldRequestHeaderState({
@@ -84,7 +92,7 @@ describe("header state helpers", () => {
     const raw = serializeHeaderState(state, 1_000);
 
     expect(parseCachedHeaderState(raw, 30_000)?.state).toEqual(state);
-    expect(parseCachedHeaderState(raw, 901_001)).toBeNull();
+    expect(parseCachedHeaderState(raw, 1_801_001)).toBeNull();
     expect(parseCachedHeaderState(raw, 500)).toBeNull();
   });
 
@@ -169,11 +177,11 @@ describe("header state helpers", () => {
       );
       window.sessionStorage.setItem(
         cacheKey,
-        serializeHeaderState(sessionState, 900_000),
+        serializeHeaderState(sessionState, 1_800_000),
       );
 
       expect(
-        readCachedHeaderStateFromBrowser(cacheKey, 901_001)?.state,
+        readCachedHeaderStateFromBrowser(cacheKey, 1_801_001)?.state,
       ).toEqual(sessionState);
     } finally {
       restore();
@@ -320,10 +328,10 @@ describe("header state helpers", () => {
   });
 
   it("schedules cached polls by remaining freshness window", () => {
-    expect(nextHeaderStatePollDelay(0, 1_000)).toBe(900_000);
-    expect(nextHeaderStatePollDelay(1_000, 61_000)).toBe(840_000);
-    expect(nextHeaderStatePollDelay(1_000, 901_000)).toBe(0);
-    expect(nextHeaderStatePollDelay(10_000, 1_000)).toBe(900_000);
+    expect(nextHeaderStatePollDelay(0, 1_000)).toBe(1_800_000);
+    expect(nextHeaderStatePollDelay(1_000, 61_000)).toBe(1_740_000);
+    expect(nextHeaderStatePollDelay(1_000, 1_801_000)).toBe(0);
+    expect(nextHeaderStatePollDelay(10_000, 1_000)).toBe(1_800_000);
   });
 
   it("scopes cache keys by signed-in user", () => {
@@ -348,12 +356,17 @@ describe("header state helpers", () => {
     const futureDate = new Headers({
       date: "Thu, 04 Jun 2026 12:46:00 GMT",
     });
+    const dateAndAge = new Headers({
+      date: "Thu, 04 Jun 2026 12:44:30 GMT",
+      age: "120",
+    });
 
     expect(headerStateResponseSavedAt(date, now)).toBe(
       Date.parse("2026-06-04T12:40:00.000Z"),
     );
     expect(headerStateResponseSavedAt(age, now)).toBe(now - 120_000);
     expect(headerStateResponseSavedAt(futureDate, now)).toBe(now);
+    expect(headerStateResponseSavedAt(dateAndAge, now)).toBe(now - 120_000);
     expect(headerStateResponseSavedAt(new Headers(), now)).toBe(now);
   });
 
