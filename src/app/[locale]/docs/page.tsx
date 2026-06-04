@@ -178,19 +178,13 @@ export default async function DocsPage({
                 number="3"
                 title={t("sections.quickStart.steps.select.title")}
                 body={t.rich("sections.quickStart.steps.select.body", rich)}
-                result={t.rich(
-                  "sections.quickStart.steps.select.result",
-                  rich,
-                )}
+                result={t.rich("sections.quickStart.steps.select.result", rich)}
               />
               <QuickStartStep
                 number="4"
                 title={t("sections.quickStart.steps.verify.title")}
                 body={t.rich("sections.quickStart.steps.verify.body", rich)}
-                result={t.rich(
-                  "sections.quickStart.steps.verify.result",
-                  rich,
-                )}
+                result={t.rich("sections.quickStart.steps.verify.result", rich)}
               >
                 <CommandLine
                   command="npx petdex doctor"
