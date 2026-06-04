@@ -10,6 +10,7 @@ import { formatLocalizedNumber } from "@/lib/format-number";
 import { loadPetMetrics } from "@/lib/pet-metrics-client";
 import { track } from "@/lib/vercel-analytics";
 
+import { useHeaderState } from "@/components/header-state-provider";
 import { Button } from "@/components/ui/button";
 
 type LikeButtonProps = {
@@ -26,6 +27,7 @@ export function LikeButton({ slug }: LikeButtonProps) {
   const clerk = useClerk();
   const loadVersionRef = useRef(0);
   const mutationVersionRef = useRef(0);
+  const { refresh } = useHeaderState();
 
   useEffect(() => {
     const loadVersion = loadVersionRef.current + 1;
@@ -119,6 +121,7 @@ export function LikeButton({ slug }: LikeButtonProps) {
         if (mutationVersionRef.current !== mutationVersion) return;
         setLiked(data.liked);
         setCount(data.count);
+        void refresh({ force: true });
         if (data.liked) {
           track("pet_liked", { slug });
         }

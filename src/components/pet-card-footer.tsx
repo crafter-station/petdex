@@ -11,6 +11,7 @@ import { formatLocalizedNumber } from "@/lib/format-number";
 import { cn } from "@/lib/utils";
 import { track } from "@/lib/vercel-analytics";
 
+import { useHeaderState } from "@/components/header-state-provider";
 import { PetSoundButton } from "@/components/pet-sound-button";
 import { Button } from "@/components/ui/button";
 
@@ -40,6 +41,7 @@ function PetCardFooterImpl({
   const router = useRouter();
   const clerk = useClerk();
   const locale = useLocale();
+  const { refresh } = useHeaderState();
 
   const [liked, setLiked] = useState(initialLiked ?? false);
   const [count, setCount] = useState(likeCount);
@@ -77,11 +79,12 @@ function PetCardFooterImpl({
         } | null;
         if (j && typeof j.likeCount === "number") setCount(j.likeCount);
         if (j && typeof j.liked === "boolean") setLiked(j.liked);
+        void refresh({ force: true });
       } finally {
         setBusy(false);
       }
     },
-    [busy, clerk, liked, router, slug],
+    [busy, clerk, liked, refresh, router, slug],
   );
 
   const copyInstall = useCallback(
