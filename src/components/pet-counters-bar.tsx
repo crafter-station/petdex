@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { useLocale } from "next-intl";
 
 import { formatLocalizedNumber } from "@/lib/format-number";
+import { loadPetMetrics } from "@/lib/pet-metrics-client";
 
 type PetCountersBarProps = {
   slug: string;
@@ -20,12 +21,10 @@ export function PetCountersBar({ slug }: PetCountersBarProps) {
   const [counts, setCounts] = useState<CountersResponse | null>(null);
 
   useEffect(() => {
-    const controller = new AbortController();
-    void fetch(`/api/pets/${slug}/metrics`, { signal: controller.signal })
-      .then((res) =>
-        res.ok ? (res.json() as Promise<CountersResponse>) : null,
-      )
+    let active = true;
+    void loadPetMetrics(slug)
       .then((data) => {
+        if (!active) return;
         if (!data) return;
         setCounts({
           installCount: data.installCount,
@@ -35,7 +34,9 @@ export function PetCountersBar({ slug }: PetCountersBarProps) {
       .catch(() => {
         /* network/abort — keep skeleton */
       });
-    return () => controller.abort();
+    return () => {
+      active = false;
+    };
   }, [slug]);
 
   return (

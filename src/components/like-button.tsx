@@ -8,6 +8,7 @@ import { Heart } from "lucide-react";
 import { useLocale } from "next-intl";
 
 import { formatLocalizedNumber } from "@/lib/format-number";
+import { loadPetMetrics } from "@/lib/pet-metrics-client";
 
 import { Button } from "@/components/ui/button";
 
@@ -37,6 +38,7 @@ export function LikeButton({ slug }: LikeButtonProps) {
 
     const mutationVersion = mutationVersionRef.current;
     const controller = new AbortController();
+    let active = true;
     setLikeStateLoading(true);
 
     // Signed-in users hit /like (returns authoritative count + their
@@ -47,16 +49,20 @@ export function LikeButton({ slug }: LikeButtonProps) {
       ? `/api/pets/${slug}/like`
       : `/api/pets/${slug}/metrics`;
 
-    void fetch(url, {
-      signal: controller.signal,
-      headers: { accept: "application/json" },
-    })
-      .then((res) => (res.ok ? res.json() : null))
+    void (
+      isSignedIn
+        ? fetch(url, {
+            signal: controller.signal,
+            headers: { accept: "application/json" },
+          }).then((res) => (res.ok ? res.json() : null))
+        : loadPetMetrics(slug)
+    )
       .then(
         (
           data: { liked?: boolean; count?: number; likeCount?: number } | null,
         ) => {
           if (!data) return;
+          if (!active) return;
           if (loadVersionRef.current !== loadVersion) return;
           if (mutationVersionRef.current !== mutationVersion) return;
           if (isSignedIn) {
@@ -69,18 +75,23 @@ export function LikeButton({ slug }: LikeButtonProps) {
         },
       )
       .catch((error: unknown) => {
+        if (!active) return;
         if (loadVersionRef.current !== loadVersion) return;
         if ((error as Error).name !== "AbortError") {
           setLiked(false);
         }
       })
       .finally(() => {
+        if (!active) return;
         if (loadVersionRef.current === loadVersion) {
           setLikeStateLoading(false);
         }
       });
 
-    return () => controller.abort();
+    return () => {
+      active = false;
+      controller.abort();
+    };
   }, [isLoaded, isSignedIn, slug]);
 
   function handleClick() {

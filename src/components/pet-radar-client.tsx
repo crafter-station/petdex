@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 
+import { loadPetMetrics } from "@/lib/pet-metrics-client";
 import { computeStatsFromSummary, type PetStats } from "@/lib/pet-stats";
 
 import { PetRadar } from "@/components/pet-radar";
@@ -16,12 +17,6 @@ type PetRadarClientProps = {
     loved: string;
     freshness: string;
   };
-};
-
-type MetricsResponse = {
-  installCount: number;
-  likeCount: number;
-  summary: { maxInstallCount: number; maxLikeCount: number };
 };
 
 const PLACEHOLDER_STATS: PetStats = {
@@ -40,10 +35,10 @@ export function PetRadarClient({
   const [stats, setStats] = useState<PetStats | null>(null);
 
   useEffect(() => {
-    const controller = new AbortController();
-    void fetch(`/api/pets/${slug}/metrics`, { signal: controller.signal })
-      .then((res) => (res.ok ? (res.json() as Promise<MetricsResponse>) : null))
+    let active = true;
+    void loadPetMetrics(slug)
       .then((data) => {
+        if (!active) return;
         if (!data) return;
         setStats(
           computeStatsFromSummary(
@@ -61,7 +56,9 @@ export function PetRadarClient({
       .catch(() => {
         /* keep placeholder */
       });
-    return () => controller.abort();
+    return () => {
+      active = false;
+    };
   }, [slug, importedAt]);
 
   const display = stats ?? PLACEHOLDER_STATS;
