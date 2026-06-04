@@ -82,7 +82,7 @@ export function serializeHeaderState(state: HeaderState, savedAt: number) {
 }
 
 export function headerStateFetchCacheMode(force?: boolean): RequestCache {
-  return force ? "no-store" : "default";
+  return force ? "reload" : "default";
 }
 
 export function headerStateResponseSavedAt(

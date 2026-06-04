@@ -97,10 +97,10 @@ describe("header state helpers", () => {
     );
   });
 
-  it("uses browser cache only for non-forced header refreshes", () => {
+  it("uses network reload only for forced header refreshes", () => {
     expect(headerStateFetchCacheMode()).toBe("default");
     expect(headerStateFetchCacheMode(false)).toBe("default");
-    expect(headerStateFetchCacheMode(true)).toBe("no-store");
+    expect(headerStateFetchCacheMode(true)).toBe("reload");
   });
 
   it("preserves browser-cached response age for session storage freshness", () => {
