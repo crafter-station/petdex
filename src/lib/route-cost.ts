@@ -90,7 +90,6 @@ const STATIC_ROUTE_SET = new Set([
   "api/internal/route-cost",
   "api/manifest",
   "api/manifest/full",
-  "api/me/caught-slugs",
   "api/me/header-state",
   "api/my-pets/approved",
   "api/my-pets/claim",
