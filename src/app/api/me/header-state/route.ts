@@ -4,8 +4,12 @@ import { auth } from "@clerk/nextjs/server";
 import { sql as dsql } from "drizzle-orm";
 
 import { isAdmin } from "@/lib/admin";
+import { hasClerkSessionCookie } from "@/lib/clerk-session-cookie";
 import { db } from "@/lib/db/client";
-import { HEADER_STATE_BROWSER_CACHE_SECONDS } from "@/lib/header-state";
+import {
+  HEADER_STATE_BROWSER_CACHE_SECONDS,
+  INITIAL_HEADER_STATE,
+} from "@/lib/header-state";
 
 export const runtime = "nodejs";
 
@@ -24,26 +28,29 @@ type HeaderStateRow = {
 // Returns lightweight counts + the caught slug set. The full
 // notifications list (`items[]`) still lives at /api/notifications and
 // is only fetched when the bell dropdown opens.
-export async function GET(): Promise<Response> {
+export async function GET(req: Request): Promise<Response> {
+  if (!hasClerkSessionCookie(req.headers.get("cookie"))) {
+    return NextResponse.json(INITIAL_HEADER_STATE, {
+      headers: {
+        "Cache-Control":
+          "public, max-age=60, s-maxage=300, stale-while-revalidate=3600",
+        Vary: "Cookie",
+      },
+    });
+  }
+
   const { userId } = await auth();
 
   if (!userId) {
     // Anonymous viewers always get the same empty payload, so let the
     // edge cache absorb most of the load. 5min CDN cache + 1h SWR keeps
     // the header snappy for visitors without hitting the function.
-    return NextResponse.json(
-      {
-        signedIn: false,
-        notifications: { unreadCount: 0 },
-        feedback: { count: 0, adminCount: 0 },
-        caught: [] as string[],
+    return NextResponse.json(INITIAL_HEADER_STATE, {
+      headers: {
+        "Cache-Control": "public, s-maxage=300, stale-while-revalidate=3600",
+        Vary: "Cookie",
       },
-      {
-        headers: {
-          "Cache-Control": "public, s-maxage=300, stale-while-revalidate=3600",
-        },
-      },
-    );
+    });
   }
 
   const headers = {
