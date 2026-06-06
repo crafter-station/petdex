@@ -17,9 +17,6 @@ describe("route cost helpers", () => {
   });
 
   it("normalizes app dynamic route ids before storing buckets", () => {
-    expect(normalizeRouteCostPath("/en/admin/feedback/fbk_abc123def")).toBe(
-      "/admin/feedback/[id]",
-    );
     expect(
       normalizeRouteCostPath("/en/advertise/dashboard/ad_abc123def/edit"),
     ).toBe("/advertise/dashboard/[campaignId]/edit");
@@ -29,8 +26,8 @@ describe("route cost helpers", () => {
     expect(normalizeRouteCostPath("/api/ads/ad_abc123def")).toBe(
       "/api/ads/[id]",
     );
-    expect(normalizeRouteCostPath("/api/admin/edits/edit_abc123def")).toBe(
-      "/api/admin/edits/[id]",
+    expect(normalizeRouteCostPath("/api/feedback/fb_abc123def")).toBe(
+      "/api/feedback/[id]",
     );
   });
 
@@ -48,9 +45,6 @@ describe("route cost helpers", () => {
     );
     expect(normalizeRouteCostPath("/api/feedback/unread")).toBe(
       "/api/feedback/unread",
-    );
-    expect(normalizeRouteCostPath("/api/admin/request-candidates")).toBe(
-      "/api/admin/request-candidates",
     );
     expect(normalizeRouteCostPath("/api/ads/checkout")).toBe(
       "/api/ads/checkout",

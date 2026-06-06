@@ -19,8 +19,6 @@ type SpeedInsightsEvent = Parameters<
 
 const LOW_VALUE_PATHS = [
   /^\/api(?:\/|$)/,
-  /^\/(?:en|es|zh)?\/?admin(?:\/|$)/,
-  /^\/(?:en|es|zh)?\/?collaborator(?:\/|$)/,
   /^\/(?:en|es|zh)?\/?my-feedback(?:\/|$)/,
   /^\/(?:en|es|zh)?\/?unsubscribe(?:\/|$)/,
 ];
