@@ -12,8 +12,7 @@
 //
 // We sign a short-lived URL via ali-oss and stream the response. Cached
 // at the edge for 5 minutes so a hot homepage doesn't translate into
-// thousands of upstream OSS reads — fresh enough that a rotation via
-// /collaborator/wechat-qr propagates within minutes.
+// thousands of upstream OSS reads while still allowing quick QR rotation.
 
 import { NextResponse } from "next/server";
 

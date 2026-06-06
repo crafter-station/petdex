@@ -18,9 +18,8 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 
-// Use the same server-side proxy as the collaborator QR panel. The raw
-// Aliyun object may be private, and Next's optimizer can keep serving an
-// expired QR after rotation.
+// Use the server-side proxy so the raw Aliyun object can stay private and
+// Next's optimizer does not keep serving an expired QR after rotation.
 const WECHAT_QR_URL = "/api/wechat-qr";
 
 function WechatQrImage({ className }: { className?: string }) {
@@ -119,7 +118,7 @@ export function WechatCommunityQrCard() {
       </div>
       <WechatQrImage className="border-[#07C160]/20" />
       <p className="mt-3 text-xs leading-5 text-muted-2">
-        微信扫码加入中文社区。二维码过期时，Henry 可以在协作者页面更新。
+        微信扫码加入中文社区。如果二维码过期，请联系维护者更新。
       </p>
     </div>
   );

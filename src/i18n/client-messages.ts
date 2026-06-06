@@ -1,21 +1,11 @@
 type MessageNode = Record<string, unknown>;
 
 export const CLIENT_MESSAGE_PATHS = [
-  "admin.editActions",
-  "admin.feedback.filters",
-  "admin.feedbackActions",
-  "admin.kinds",
-  "admin.requestActions",
-  "admin.status",
-  "admin.tabs",
-  "adminReview",
   "advertise.card",
   "advertise.dashboard.edit",
   "advertise.form",
   "buildUpdate",
   "claim",
-  "collaborator.tabs",
-  "collaboratorWechatQr",
   "collectionActionMenu",
   "collectionEditor",
   "collectionsBrowser",
