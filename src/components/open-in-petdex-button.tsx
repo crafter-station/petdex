@@ -12,7 +12,6 @@ import {
   isMacDesktop,
   openPetdexDeepLink,
 } from "@/lib/petdex-desktop-link";
-import { track } from "@/lib/vercel-analytics";
 
 type OpenInPetdexButtonProps = {
   slug: string;
@@ -55,7 +54,6 @@ export function OpenInPetdexButton({ slug }: OpenInPetdexButtonProps) {
 
   function handleClick(e: React.MouseEvent<HTMLAnchorElement>) {
     if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
-    track("open_in_petdex_click", { slug, source: "pet_page" });
     e.preventDefault();
     openPetdexDeepLink(deepLink, downloadHref);
   }

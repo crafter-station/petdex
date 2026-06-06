@@ -1,13 +1,6 @@
 "use client";
 
-// Client wrapper around the Discord invite anchor so we can attribute
-// clicks per surface (footer vs /community vs anywhere else we add it
-// later). Vercel Analytics will roll up `discord_click` events with
-// the surface as a custom property.
-
 import type { ReactNode } from "react";
-
-import { track } from "@/lib/vercel-analytics";
 
 type DiscordLinkProps = {
   href: string;
@@ -19,7 +12,6 @@ type DiscordLinkProps = {
 
 export function DiscordLink({
   href,
-  source,
   children,
   className,
   ariaLabel,
@@ -31,9 +23,6 @@ export function DiscordLink({
       rel="noreferrer"
       aria-label={ariaLabel}
       className={className}
-      onClick={() => {
-        track("discord_click", { source });
-      }}
     >
       {children}
     </a>

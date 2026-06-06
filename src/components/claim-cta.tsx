@@ -4,8 +4,6 @@ import { SignInButton, useUser } from "@clerk/nextjs";
 import { ArrowRight } from "lucide-react";
 import { useTranslations } from "next-intl";
 
-import { track } from "@/lib/vercel-analytics";
-
 // Inline "Is this you?" prompt shown on /pets/[slug] for discovered
 // pets when the viewer is either signed-out or signed in as someone
 // other than the listed author. Pushes them to sign in with the
@@ -62,20 +60,12 @@ export function ClaimCTA({
       {isSignedIn ? (
         // Already signed in — send them to their own profile where the
         // claim banner inside ProfileTabs does the actual transfer.
-        <a
-          href={profileHrefForUser(user)}
-          onClick={() => track("claim_cta_clicked", { signed_in: true })}
-          className="inline-flex"
-        >
+        <a href={profileHrefForUser(user)} className="inline-flex">
           {inner}
         </a>
       ) : (
         <SignInButton mode="modal" forceRedirectUrl="/" fallbackRedirectUrl="/">
-          <button
-            type="button"
-            onClick={() => track("claim_cta_clicked", { signed_in: false })}
-            className="inline-flex"
-          >
+          <button type="button" className="inline-flex">
             {inner}
           </button>
         </SignInButton>

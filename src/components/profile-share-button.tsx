@@ -12,8 +12,6 @@ import { Check, X as CloseIcon, Link2, Share2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { createPortal } from "react-dom";
 
-import { track } from "@/lib/vercel-analytics";
-
 const SITE_URL = "https://petdex.dev";
 
 type Props = {
@@ -102,30 +100,27 @@ export function ProfileShareButton({ handle, displayName }: Props) {
     try {
       await navigator.clipboard.writeText(profileUrl);
       setCopied(true);
-      track("profile_share", { handle, target: "copy" });
       window.setTimeout(() => setCopied(false), 1400);
     } catch {
       /* ignore clipboard failures */
     }
-  }, [handle, profileUrl]);
+  }, [profileUrl]);
 
   const onShareX = useCallback(() => {
     const url = `https://x.com/intent/tweet?text=${encodeURIComponent(
       shareText,
     )}&url=${encodeURIComponent(profileUrl)}`;
-    track("profile_share", { handle, target: "x" });
     window.open(url, "_blank", "noopener,noreferrer,width=560,height=540");
     setOpen(false);
-  }, [handle, profileUrl, shareText]);
+  }, [profileUrl, shareText]);
 
   const onShareLinkedIn = useCallback(() => {
     const url = `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(
       profileUrl,
     )}`;
-    track("profile_share", { handle, target: "linkedin" });
     window.open(url, "_blank", "noopener,noreferrer,width=620,height=600");
     setOpen(false);
-  }, [handle, profileUrl]);
+  }, [profileUrl]);
 
   const onShareNative = useCallback(async () => {
     if (typeof navigator === "undefined" || !("share" in navigator)) return;
@@ -139,12 +134,11 @@ export function ProfileShareButton({ handle, displayName }: Props) {
         text: shareText,
         url: profileUrl,
       });
-      track("profile_share", { handle, target: "native" });
       setOpen(false);
     } catch {
       /* user cancelled */
     }
-  }, [handle, profileUrl, shareLabel, shareText]);
+  }, [profileUrl, shareLabel, shareText]);
 
   const supportsNative =
     typeof navigator !== "undefined" && "share" in navigator;
