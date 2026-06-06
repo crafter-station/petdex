@@ -8,7 +8,6 @@ import {
   getCollectionsBySlugs,
   type PetCollectionWithPets,
 } from "@/lib/collections";
-import { getDexNumberMap } from "@/lib/dex";
 import { formatLocalizedNumber } from "@/lib/format-number";
 import { buildLocaleAlternates } from "@/lib/locale-routing";
 import { searchPets } from "@/lib/pet-search";
@@ -90,11 +89,10 @@ export default async function Home({
     "franchise-jojos-bizarre-adventure",
   ];
 
-  const [heroPets, initialSearch, dexEntries, collections, feedAds, randomPet] =
+  const [heroPets, initialSearch, collections, feedAds, randomPet] =
     await Promise.all([
       getFeaturedPetsWithMetrics(6),
       searchPets({ sort: "alpha", limit: HOME_INITIAL_GALLERY_LIMIT }),
-      getDexNumberMap(),
       getCollectionsBySlugs(LANDING_COLLECTION_ORDER, 6),
       getActiveFeedAds(6),
       getRandomPet(),
@@ -103,10 +101,6 @@ export default async function Home({
   const formattedTotalPets = formatLocalizedNumber(totalPets, locale);
   const showWechatCommunity = isZh;
   const surprisePet = randomPet ? toSurprisePet(randomPet) : null;
-
-  // Plain-object so the server -> client serializer doesn't choke on a
-  // Map. Same source of truth either way.
-  const dexMap = Object.fromEntries(dexEntries.entries());
 
   const jsonLd = [
     {
@@ -230,7 +224,6 @@ export default async function Home({
           <PetGallery
             initial={initialSearch}
             totalPets={totalPets}
-            dexMap={dexMap}
             ads={feedAds}
           />
         ) : null}

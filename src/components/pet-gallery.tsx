@@ -83,14 +83,6 @@ type PetGalleryProps = {
   initial: InitialSearchPayload;
   totalPets: number;
   caughtSlugs?: string[];
-  /**
-   * slug -> canonical dex number (ROW_NUMBER over approved_at). Built
-   * once on the server for the whole approved catalog and shipped to
-   * the client so every PetCard — including pets that arrive via the
-   * /api/pets/search infinite-scroll — can show the right number
-   * without a per-row lookup.
-   */
-  dexMap?: Record<string, number>;
   ads?: PublicFeedAd[];
 };
 
@@ -124,7 +116,6 @@ const FAMILY_DOT: Record<ColorFamily, string> = {
 export function PetGallery({
   initial,
   totalPets,
-  dexMap,
   caughtSlugs,
   ads = [],
 }: PetGalleryProps) {
@@ -576,7 +567,7 @@ export function PetGallery({
                 pet={pet}
                 index={index}
                 stateCount={stateCount}
-                dexNumber={dexMap?.[pet.slug] ?? null}
+                dexNumber={pet.dexNumber ?? null}
                 caught={caughtSet.has(pet.slug)}
               />
               {ad ? <FeedAdSlot ad={ad} /> : null}

@@ -22,7 +22,10 @@ import { withNextDataCache } from "@/lib/next-data-cache";
 import { toCurrentR2PublicUrl } from "@/lib/r2-public-url";
 import type { PetdexPet, PetKind, PetVibe } from "@/lib/types";
 
-export type PetWithMetrics = PetdexPet & { metrics: Metrics };
+export type PetWithMetrics = PetdexPet & {
+  dexNumber?: number | null;
+  metrics: Metrics;
+};
 
 export type PetSitemapEntry = {
   slug: string;

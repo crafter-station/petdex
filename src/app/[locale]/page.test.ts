@@ -10,5 +10,7 @@ describe("home gallery payload", () => {
     expect(source).toContain(
       'searchPets({ sort: "alpha", limit: HOME_INITIAL_GALLERY_LIMIT })',
     );
+    expect(source).not.toContain("getDexNumberMap");
+    expect(source).not.toContain("dexMap=");
   });
 });
