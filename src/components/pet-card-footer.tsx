@@ -9,7 +9,6 @@ import { useLocale } from "next-intl";
 
 import { formatLocalizedNumber } from "@/lib/format-number";
 import { cn } from "@/lib/utils";
-import { track } from "@/lib/vercel-analytics";
 
 import { useHeaderState } from "@/components/header-state-provider";
 import { PetSoundButton } from "@/components/pet-sound-button";
@@ -71,7 +70,6 @@ function PetCardFooterImpl({
       const next = !liked;
       setLiked(next);
       setCount((c) => Math.max(0, c + (next ? 1 : -1)));
-      track("pet_like_toggled", { slug, liked: next, source: "card-footer" });
       try {
         const res = await fetch(`/api/pets/${slug}/like`, {
           method: "POST",
@@ -114,7 +112,6 @@ function PetCardFooterImpl({
       try {
         await navigator.clipboard.writeText(cmd);
         setCopied(true);
-        track("pet_install_copied", { slug, source: "card-footer" });
         setTimeout(() => setCopied(false), 1400);
       } catch {
         /* swallow */
@@ -128,7 +125,6 @@ function PetCardFooterImpl({
       e.preventDefault();
       e.stopPropagation();
       if (!zipUrl) return;
-      track("pet_zip_downloaded", { slug, source: "card-footer" });
       const a = document.createElement("a");
       a.href = zipUrl;
       a.download = `${slug}.zip`;
@@ -145,7 +141,6 @@ function PetCardFooterImpl({
       e.preventDefault();
       e.stopPropagation();
       const url = `${typeof window !== "undefined" ? window.location.origin : ""}/pets/${slug}`;
-      track("pet_shared", { slug, source: "card-footer" });
       if (navigator.share) {
         navigator.share({ title: displayName, url }).catch(() => {});
         return;

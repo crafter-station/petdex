@@ -6,7 +6,6 @@ import { useState } from "react";
 import { Loader2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import { track } from "@/lib/vercel-analytics";
 
 import { WeChatIcon } from "@/components/icons/wechat-icon";
 import {
@@ -63,15 +62,10 @@ type WechatCommunityDialogProps = {
 
 export function WechatCommunityDialog({
   className,
-  source = "community_page_hero",
   children = "加入微信群",
 }: WechatCommunityDialogProps) {
   return (
-    <Dialog
-      onOpenChange={(open) => {
-        if (open) track("wechat_qr_open", { source });
-      }}
-    >
+    <Dialog>
       <DialogTrigger
         render={
           <button
@@ -80,9 +74,6 @@ export function WechatCommunityDialog({
               "inline-flex h-11 items-center gap-2 rounded-full border border-[#07C160]/25 bg-[#07C160]/12 px-5 text-sm font-semibold text-[#07C160] backdrop-blur transition hover:bg-[#07C160]/18",
               className,
             )}
-            onClick={() => {
-              track("wechat_click", { source });
-            }}
           >
             <WeChatIcon className="size-4" />
             {children}

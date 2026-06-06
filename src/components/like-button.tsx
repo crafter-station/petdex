@@ -8,7 +8,6 @@ import { useLocale } from "next-intl";
 
 import { formatLocalizedNumber } from "@/lib/format-number";
 import { loadPetMetrics } from "@/lib/pet-metrics-client";
-import { track } from "@/lib/vercel-analytics";
 
 import { useHeaderState } from "@/components/header-state-provider";
 import { Button } from "@/components/ui/button";
@@ -122,9 +121,6 @@ export function LikeButton({ slug }: LikeButtonProps) {
         setLiked(data.liked);
         setCount(data.count);
         void refresh({ force: true });
-        if (data.liked) {
-          track("pet_liked", { slug });
-        }
       } catch {
         if (mutationVersionRef.current !== mutationVersion) return;
         setLiked(!nextLiked);

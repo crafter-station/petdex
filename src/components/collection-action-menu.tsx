@@ -21,7 +21,6 @@ import {
   isMacDesktop,
   openPetdexDeepLink,
 } from "@/lib/petdex-desktop-link";
-import { track } from "@/lib/vercel-analytics";
 
 import { CodexLogo } from "@/components/codex-logo";
 
@@ -177,10 +176,6 @@ export function CollectionActionMenu({ collection }: Props) {
                     ) {
                       return;
                     }
-                    track("open_in_petdex_click", {
-                      source: "collection",
-                      count: installSlugs.length,
-                    });
                     e.preventDefault();
                     setOpen(false);
                     openPetdexDeepLink(petdexInstallUrl, downloadHref);
