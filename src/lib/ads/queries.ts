@@ -1,13 +1,4 @@
-import {
-  and,
-  asc,
-  desc,
-  eq,
-  isNull,
-  lt,
-  type SQL,
-  sql,
-} from "drizzle-orm";
+import { and, asc, desc, eq, isNull, lt, type SQL, sql } from "drizzle-orm";
 
 import { type AdUtmFields, buildAdClickUrl } from "@/lib/ads/url";
 import { db, schema } from "@/lib/db/client";
