@@ -13,6 +13,7 @@ import {
 import { db, schema } from "@/lib/db/client";
 import { renderSubmissionTakedownEmail } from "@/lib/email-templates/submission-takedown";
 import { createNotification } from "@/lib/notifications";
+import { petPublicArtifactKeys } from "@/lib/pet-public-artifact-keys";
 import { deleteR2Objects, keyFromR2Url } from "@/lib/r2";
 import { getPreferredLocaleForUser } from "@/lib/user-locale";
 
@@ -117,15 +118,15 @@ export async function takedownPet(
   await invalidateAggregates(AGGREGATE_KEYS.metricsIndex);
   await invalidateMetricCaches(pet.slug);
 
-  // 6. Best-effort R2 cleanup. We derive keys from the URLs the
-  //    submission stored; anything off-host (legacy or external credit
-  //    image) is skipped. R2 errors are logged but don't fail the
-  //    takedown — the DB is already gone.
+  // 6. Best-effort R2 cleanup. Stored source URLs and deterministic
+  //    public derivatives are removed together. Anything off-host is
+  //    skipped. R2 errors are logged but don't fail the takedown.
   const keys = [
     keyFromR2Url(pet.spritesheetUrl),
     keyFromR2Url(pet.petJsonUrl),
     keyFromR2Url(pet.zipUrl),
     keyFromR2Url(pet.soundUrl),
+    ...petPublicArtifactKeys(slug),
   ].filter((k): k is string => Boolean(k));
   try {
     await deleteR2Objects(keys);

@@ -11,6 +11,12 @@ describe("public traffic guard", () => {
     expect(
       publicTrafficGuardRule({
         method: "GET",
+        pathname: "/api/pets/nukey/thumb",
+      }),
+    ).toBe("sticker");
+    expect(
+      publicTrafficGuardRule({
+        method: "GET",
         pathname: "/api/pets/nukey/sticker",
       }),
     ).toBe("sticker");
@@ -118,13 +124,7 @@ describe("public traffic guard", () => {
     ).toBe("page");
   });
 
-  it("does not target cheap reads or non-read methods", () => {
-    expect(
-      publicTrafficGuardRule({
-        method: "GET",
-        pathname: "/api/pets/nukey/thumb",
-      }),
-    ).toBeNull();
+  it("does not target non-read methods or private surfaces", () => {
     expect(
       publicTrafficGuardRule({
         method: "POST",

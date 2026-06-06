@@ -28,6 +28,7 @@ import {
   findBlockedKeyword,
 } from "@/lib/keyword-blocklist";
 import { createNotification } from "@/lib/notifications";
+import { petPublicArtifactKeys } from "@/lib/pet-public-artifact-keys";
 import { deleteR2Objects, keyFromR2Url } from "@/lib/r2";
 import { getPreferredLocaleForUser } from "@/lib/user-locale";
 
@@ -158,6 +159,7 @@ async function takedownOne(pet: Pet, reason: string) {
     keyFromR2Url(pet.petJsonUrl),
     keyFromR2Url(pet.zipUrl),
     keyFromR2Url(pet.soundUrl),
+    ...petPublicArtifactKeys(slug),
   ].filter((k): k is string => Boolean(k));
   try {
     await deleteR2Objects(keys);

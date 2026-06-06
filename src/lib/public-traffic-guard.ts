@@ -19,7 +19,9 @@ export function publicTrafficGuardRule(input: {
 }): PublicTrafficGuardRule | null {
   if (input.method !== "GET" && input.method !== "HEAD") return null;
   const pathname = input.pathname;
-  if (/^\/api\/pets\/[^/]+\/sticker\/?$/.test(pathname)) return "sticker";
+  if (/^\/api\/pets\/[^/]+\/(?:thumb|sticker)\/?$/.test(pathname)) {
+    return "sticker";
+  }
   if (/^\/api\/pets\/[^/]+\/wastickers\/?$/.test(pathname)) return "pack";
   if (pathname === "/api/manifest") return "catalog";
   if (pathname === "/api/collections/previews") return "catalog";
