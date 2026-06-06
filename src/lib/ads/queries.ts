@@ -3,15 +3,12 @@ import {
   asc,
   desc,
   eq,
-  ilike,
   isNull,
   lt,
-  or,
   type SQL,
   sql,
 } from "drizzle-orm";
 
-import type { AdminAdCampaignFilters } from "@/lib/ads/admin-filters";
 import { type AdUtmFields, buildAdClickUrl } from "@/lib/ads/url";
 import { db, schema } from "@/lib/db/client";
 
@@ -57,34 +54,6 @@ type CampaignMetrics = Pick<
 >;
 
 type AdvertiserCampaignRow = Omit<AdvertiserCampaign, keyof CampaignMetrics>;
-
-export type AdminAdvertiserCampaign = AdvertiserCampaign & {
-  userId: string;
-  contactEmail: string;
-};
-
-export type AdminAdCampaignOverview = {
-  totalCampaigns: number;
-  pendingPaymentCampaigns: number;
-  activeCampaigns: number;
-  exhaustedCampaigns: number;
-  pausedCampaigns: number;
-  deletedCampaigns: number;
-  totalPackageViews: number;
-  totalViewsServed: number;
-  totalSpendCents: number;
-  totalImpressions: number;
-  hovers: number;
-  clicks: number;
-  dismissals: number;
-  avgTimeInViewMs: number;
-  ctr: number;
-};
-
-export type AdminAdCampaignList = {
-  campaigns: AdminAdvertiserCampaign[];
-  totalCount: number;
-};
 
 export type UpdateOwnedAdCampaignCreativeParams = {
   id: string;
@@ -419,142 +388,6 @@ export async function getUserAdCampaigns(
     .orderBy(desc(schema.adCampaigns.createdAt));
 
   return hydrateCampaignMetrics(campaigns);
-}
-
-export async function getAdminAdCampaignOverview(): Promise<AdminAdCampaignOverview> {
-  const result = await db.execute<{
-    total_campaigns: number | string;
-    pending_payment_campaigns: number | string;
-    active_campaigns: number | string;
-    exhausted_campaigns: number | string;
-    paused_campaigns: number | string;
-    deleted_campaigns: number | string;
-    total_package_views: number | string;
-    total_views_served: number | string;
-    total_spend_cents: number | string;
-    total_impressions: number | string;
-    hovers: number | string;
-    clicks: number | string;
-    dismissals: number | string;
-    avg_time_in_view_ms: number | string | null;
-  }>(sql`
-    WITH campaign_totals AS (
-      SELECT
-        count(*)::int AS total_campaigns,
-        count(*) FILTER (WHERE status = 'pending_payment')::int AS pending_payment_campaigns,
-        count(*) FILTER (WHERE status = 'active')::int AS active_campaigns,
-        count(*) FILTER (WHERE status = 'exhausted')::int AS exhausted_campaigns,
-        count(*) FILTER (WHERE status = 'paused')::int AS paused_campaigns,
-        count(*) FILTER (WHERE status = 'deleted')::int AS deleted_campaigns,
-        coalesce(sum(package_views), 0)::int AS total_package_views,
-        coalesce(sum(views_served), 0)::int AS total_views_served,
-        coalesce(sum(price_cents), 0)::int AS total_spend_cents
-      FROM ad_campaigns
-    ), impression_totals AS (
-      SELECT count(*)::int AS total_impressions
-      FROM ad_impressions
-    ), event_totals AS (
-      SELECT
-        count(*) FILTER (WHERE kind = 'hover')::int AS hovers,
-        count(*) FILTER (WHERE kind = 'click')::int AS clicks,
-        count(*) FILTER (WHERE kind = 'dismissed')::int AS dismissals,
-        avg(duration_ms) FILTER (WHERE kind = 'time_in_view')::int AS avg_time_in_view_ms
-      FROM ad_events
-    )
-    SELECT *
-    FROM campaign_totals
-    CROSS JOIN impression_totals
-    CROSS JOIN event_totals
-  `);
-
-  const row = result.rows[0];
-  const totalViewsServed = Number(row?.total_views_served ?? 0);
-  const clicks = Number(row?.clicks ?? 0);
-
-  return {
-    totalCampaigns: Number(row?.total_campaigns ?? 0),
-    pendingPaymentCampaigns: Number(row?.pending_payment_campaigns ?? 0),
-    activeCampaigns: Number(row?.active_campaigns ?? 0),
-    exhaustedCampaigns: Number(row?.exhausted_campaigns ?? 0),
-    pausedCampaigns: Number(row?.paused_campaigns ?? 0),
-    deletedCampaigns: Number(row?.deleted_campaigns ?? 0),
-    totalPackageViews: Number(row?.total_package_views ?? 0),
-    totalViewsServed,
-    totalSpendCents: Number(row?.total_spend_cents ?? 0),
-    totalImpressions: Number(row?.total_impressions ?? 0),
-    hovers: Number(row?.hovers ?? 0),
-    clicks,
-    dismissals: Number(row?.dismissals ?? 0),
-    avgTimeInViewMs: Number(row?.avg_time_in_view_ms ?? 0),
-    ctr: totalViewsServed > 0 ? (clicks / totalViewsServed) * 100 : 0,
-  };
-}
-
-export async function getAdminAdCampaigns(
-  filters: AdminAdCampaignFilters,
-): Promise<AdminAdCampaignList> {
-  const where = buildAdminCampaignWhere(filters);
-  const [countRow] = await db
-    .select({ total: sql<number>`count(*)::int` })
-    .from(schema.adCampaigns)
-    .where(where);
-
-  const campaigns = await db
-    .select({
-      id: schema.adCampaigns.id,
-      userId: schema.adCampaigns.userId,
-      contactEmail: schema.adCampaigns.contactEmail,
-      companyName: schema.adCampaigns.companyName,
-      title: schema.adCampaigns.title,
-      description: schema.adCampaigns.description,
-      imageUrl: schema.adCampaigns.imageUrl,
-      destinationUrl: schema.adCampaigns.destinationUrl,
-      utmSource: schema.adCampaigns.utmSource,
-      utmMedium: schema.adCampaigns.utmMedium,
-      utmCampaign: schema.adCampaigns.utmCampaign,
-      utmTerm: schema.adCampaigns.utmTerm,
-      utmContent: schema.adCampaigns.utmContent,
-      packageViews: schema.adCampaigns.packageViews,
-      priceCents: schema.adCampaigns.priceCents,
-      viewsServed: schema.adCampaigns.viewsServed,
-      status: schema.adCampaigns.status,
-      createdAt: schema.adCampaigns.createdAt,
-      paidAt: schema.adCampaigns.paidAt,
-      activatedAt: schema.adCampaigns.activatedAt,
-      deletedAt: schema.adCampaigns.deletedAt,
-      removalReason: schema.adCampaigns.removalReason,
-    })
-    .from(schema.adCampaigns)
-    .where(where)
-    .orderBy(desc(schema.adCampaigns.createdAt))
-    .limit(filters.limit);
-
-  return {
-    totalCount: Number(countRow?.total ?? 0),
-    campaigns: await hydrateCampaignMetrics(campaigns),
-  };
-}
-
-function buildAdminCampaignWhere(filters: AdminAdCampaignFilters) {
-  const conditions: SQL[] = [];
-
-  if (filters.status !== "all") {
-    conditions.push(eq(schema.adCampaigns.status, filters.status));
-  }
-
-  if (filters.q) {
-    const like = `%${filters.q}%`;
-    const keywordFilter = or(
-      ilike(schema.adCampaigns.title, like),
-      ilike(schema.adCampaigns.companyName, like),
-      ilike(schema.adCampaigns.contactEmail, like),
-      ilike(schema.adCampaigns.userId, like),
-      ilike(schema.adCampaigns.destinationUrl, like),
-    );
-    if (keywordFilter) conditions.push(keywordFilter);
-  }
-
-  return conditions.length > 0 ? and(...conditions) : undefined;
 }
 
 async function hydrateCampaignMetrics<T extends AdvertiserCampaignRow>(
