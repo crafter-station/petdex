@@ -17,7 +17,6 @@ import {
 import { useTranslations } from "next-intl";
 
 import { petStates } from "@/lib/pet-states";
-import { track } from "@/lib/vercel-analytics";
 
 type ParsedPet = {
   petId: string;
@@ -277,26 +276,6 @@ export function PetSubmitForm() {
         issues,
         source,
       });
-
-      if (issues.length === 0) {
-        track("pet_pack_validated", {
-          pet_id: petId,
-          size_kb: Math.round(zipBlob.size / 1024),
-          width,
-          height,
-          source,
-        });
-      } else {
-        track("pet_pack_validation_failed", {
-          pet_id: petId,
-          issue_count: issues.length,
-          first_issue: (issues[0] ?? "unknown").slice(0, 80),
-          source,
-          width,
-          height,
-          file_count: items.length,
-        });
-      }
     } finally {
       setIsReading(false);
     }
@@ -306,10 +285,6 @@ export function PetSubmitForm() {
     if (!parsed || parsed.issues.length > 0) return;
     if (!isSignedIn) return;
 
-    const startedAt = performance.now();
-    let uploadStartedAt = startedAt;
-    let uploadFinishedAt = startedAt;
-    track("pet_submission_started", { pet_id: parsed.petId });
     setSubmission({ kind: "uploading", step: "validating" });
 
     const zipFile = new File([parsed.zipBlob], parsed.zipFileName, {
@@ -338,7 +313,6 @@ export function PetSubmitForm() {
     let petJsonUrl: string;
 
     try {
-      uploadStartedAt = performance.now();
       const presignRes = await fetch("/api/r2/presign", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -424,17 +398,8 @@ export function PetSubmitForm() {
       zipUrl = zipSlot.publicUrl;
       spritesheetUrl = spriteSlot.publicUrl;
       petJsonUrl = petJsonSlot.publicUrl;
-      uploadFinishedAt = performance.now();
     } catch (err) {
       const reason = (err as Error).message ?? "unknown";
-      track("pet_submission_failed", {
-        pet_id: parsed.petId,
-        stage: "upload",
-        reason: reason.slice(0, 120),
-        duration_ms: elapsedMs(startedAt),
-        duration_bucket: durationBucket(elapsedMs(startedAt)),
-        upload_duration_ms: elapsedMs(uploadStartedAt),
-      });
       setSubmission({
         kind: "error",
         message: t("errors.uploadFailed", { reason }),
@@ -443,7 +408,6 @@ export function PetSubmitForm() {
     }
 
     setSubmission({ kind: "uploading", step: "registering" });
-    const registerStartedAt = performance.now();
 
     const res = await fetch("/api/submit", {
       method: "POST",
@@ -466,17 +430,6 @@ export function PetSubmitForm() {
         error?: string;
       };
       const errorCode = data.error ?? "unknown";
-      track("pet_submission_failed", {
-        pet_id: parsed.petId,
-        stage: "register",
-        error_code: errorCode,
-        status: res.status,
-        duration_ms: elapsedMs(startedAt),
-        duration_bucket: durationBucket(elapsedMs(startedAt)),
-        upload_duration_ms: Math.round(uploadFinishedAt - uploadStartedAt),
-        register_duration_ms: elapsedMs(registerStartedAt),
-        register_duration_bucket: durationBucket(elapsedMs(registerStartedAt)),
-      });
       setSubmission({
         kind: "error",
         message: submissionErrorMessage(errorCode, t),
@@ -485,17 +438,6 @@ export function PetSubmitForm() {
     }
 
     const data = (await res.json()) as SubmitResponse;
-    track("pet_submission_succeeded", {
-      pet_id: parsed.petId,
-      slug: data.slug,
-      review_decision: data.review.decision,
-      review_applied: data.review.applied,
-      duration_ms: elapsedMs(startedAt),
-      duration_bucket: durationBucket(elapsedMs(startedAt)),
-      upload_duration_ms: Math.round(uploadFinishedAt - uploadStartedAt),
-      register_duration_ms: elapsedMs(registerStartedAt),
-      register_duration_bucket: durationBucket(elapsedMs(registerStartedAt)),
-    });
     setSubmission({
       kind: "success",
       slug: data.slug,
@@ -770,17 +712,6 @@ function submissionErrorMessage(
     default:
       return t("errors.submissionFailedWithCode", { code });
   }
-}
-
-function elapsedMs(startedAt: number): number {
-  return Math.max(0, Math.round(performance.now() - startedAt));
-}
-
-function durationBucket(ms: number): string {
-  if (ms < 5000) return "under_5s";
-  if (ms < 15_000) return "5_15s";
-  if (ms < 30_000) return "15_30s";
-  return "over_30s";
 }
 
 function CopyPathButton({ path }: { path: string }) {
