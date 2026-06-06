@@ -87,7 +87,6 @@ const STATIC_ROUTE_SET = new Set([
   "api/collections/previews",
   "api/desktop/latest-release",
   "api/feedback",
-  "api/feedback/unread",
   "api/internal/route-cost",
   "api/manifest",
   "api/manifest/full",

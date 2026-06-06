@@ -43,9 +43,6 @@ describe("route cost helpers", () => {
     expect(normalizeRouteCostPath("/en/collections/opengraph-image")).toBe(
       "/collections/opengraph-image",
     );
-    expect(normalizeRouteCostPath("/api/feedback/unread")).toBe(
-      "/api/feedback/unread",
-    );
     expect(normalizeRouteCostPath("/api/ads/checkout")).toBe(
       "/api/ads/checkout",
     );
