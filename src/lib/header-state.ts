@@ -1,14 +1,14 @@
 export type HeaderState = {
   signedIn: boolean;
   notifications: { unreadCount: number };
-  feedback: { count: number; adminCount: number };
+  feedback: { count: number };
   caught: string[];
 };
 
 export const INITIAL_HEADER_STATE: HeaderState = {
   signedIn: false,
   notifications: { unreadCount: 0 },
-  feedback: { count: 0, adminCount: 0 },
+  feedback: { count: 0 },
   caught: [],
 };
 
@@ -211,7 +211,6 @@ function normalizeHeaderState(value: unknown): HeaderState {
     },
     feedback: {
       count: toNumber(feedback.count),
-      adminCount: toNumber(feedback.adminCount),
     },
     caught: Array.isArray(input.caught) ? input.caught.filter(isString) : [],
   };

@@ -86,7 +86,7 @@ describe("header state helpers", () => {
       ...INITIAL_HEADER_STATE,
       signedIn: true,
       notifications: { unreadCount: 2 },
-      feedback: { count: 1, adminCount: 0 },
+      feedback: { count: 1 },
       caught: ["byte"],
     };
     const raw = serializeHeaderState(state, 1_000);

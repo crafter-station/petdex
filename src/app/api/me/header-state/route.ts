@@ -3,7 +3,6 @@ import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { sql as dsql } from "drizzle-orm";
 
-import { isAdmin } from "@/lib/admin";
 import { hasClerkSessionCookie } from "@/lib/clerk-session-cookie";
 import { db } from "@/lib/db/client";
 import {
@@ -16,7 +15,6 @@ export const runtime = "nodejs";
 type HeaderStateRow = {
   notification_count: number | string;
   feedback_count: number | string;
-  admin_count: number | string;
   caught_slugs: unknown;
 };
 
@@ -57,7 +55,6 @@ export async function GET(req: Request): Promise<Response> {
     "Cache-Control": `private, max-age=${HEADER_STATE_BROWSER_CACHE_SECONDS}, must-revalidate`,
     Vary: "Cookie",
   };
-  const admin = isAdmin(userId);
   const result = (await db.execute(dsql`
     WITH notification_state AS (
       SELECT count(*)::int AS notification_count
@@ -84,32 +81,12 @@ export async function GET(req: Request): Promise<Response> {
               OR fr.created_at > f.user_last_read_at
             )
         )
-    ),
-    admin_feedback_state AS (
-      SELECT
-        CASE
-          WHEN ${admin}::boolean THEN count(*)::int
-          ELSE 0
-        END AS admin_count
-      FROM feedback f
-      WHERE ${admin}::boolean
-        AND EXISTS (
-          SELECT 1
-          FROM feedback_replies fr
-          WHERE fr.feedback_id = f.id
-            AND fr.author_kind = 'user'
-            AND (
-              f.admin_last_read_at IS NULL
-              OR fr.created_at > f.admin_last_read_at
-            )
-        )
     )
     SELECT
       notification_state.notification_count,
       caught_state.caught_slugs,
-      feedback_state.feedback_count,
-      admin_feedback_state.admin_count
-    FROM notification_state, caught_state, feedback_state, admin_feedback_state
+      feedback_state.feedback_count
+    FROM notification_state, caught_state, feedback_state
   `)) as unknown as { rows: HeaderStateRow[] };
   const row = result.rows[0];
 
@@ -119,7 +96,6 @@ export async function GET(req: Request): Promise<Response> {
       notifications: { unreadCount: toNumber(row?.notification_count) },
       feedback: {
         count: toNumber(row?.feedback_count),
-        adminCount: toNumber(row?.admin_count),
       },
       caught: toStringArray(row?.caught_slugs),
     },
