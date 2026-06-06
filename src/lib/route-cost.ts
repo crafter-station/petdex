@@ -46,7 +46,6 @@ const DYNAMIC_ROUTE_PATTERNS = [
   ["api", "feedback", "[id]"],
   ["api", "feedback", "[id]", "replies"],
   ["api", "install-pet", "[slug]"],
-  ["api", "internal", "submissions", "[id]", "review"],
   ["api", "my-pets", "[id]", "edit"],
   ["api", "my-pets", "[id]", "edit-presign"],
   ["api", "my-pets", "[id]", "withdraw"],
