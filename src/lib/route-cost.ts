@@ -104,7 +104,6 @@ const STATIC_ROUTE_SET = new Set([
   "api/profile/collection",
   "api/profile/collections",
   "api/profile/gallery-order",
-  "api/profile/me",
   "api/r2/presign",
   "api/stripe/webhook",
   "api/submit",
