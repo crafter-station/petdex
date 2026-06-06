@@ -4,7 +4,6 @@ import {
   publicTrafficGuardKey,
   publicTrafficGuardRule,
   shouldBlockKnownAbusiveClient,
-  shouldBlockUntrustedAssetExport,
 } from "@/lib/public-traffic-guard";
 
 describe("public traffic guard", () => {
@@ -138,71 +137,6 @@ describe("public traffic guard", () => {
         pathname: "/admin",
       }),
     ).toBeNull();
-  });
-
-  it("blocks untrusted asset exports but allows same-origin browser fetches", () => {
-    expect(
-      shouldBlockUntrustedAssetExport({
-        method: "GET",
-        pathname: "/api/pets/nukey/sticker",
-        headers: { "user-agent": "python-requests/2.32" },
-        origin: "https://petdex.crafter.run",
-      }),
-    ).toBe(true);
-    expect(
-      shouldBlockUntrustedAssetExport({
-        method: "GET",
-        pathname: "/api/pets/nukey/sticker",
-        headers: { "user-agent": "curl/8.7.1" },
-        origin: "https://petdex.crafter.run",
-      }),
-    ).toBe(true);
-    expect(
-      shouldBlockUntrustedAssetExport({
-        method: "GET",
-        pathname: "/api/pets/nukey/sticker",
-        headers: {
-          "sec-fetch-site": "none",
-          "user-agent": "Mozilla/5.0",
-        },
-        origin: "https://petdex.crafter.run",
-      }),
-    ).toBe(true);
-    expect(
-      shouldBlockUntrustedAssetExport({
-        method: "GET",
-        pathname: "/api/pets/nukey/sticker",
-        headers: {
-          "sec-fetch-site": "same-origin",
-          "user-agent": "Mozilla/5.0",
-        },
-        origin: "https://petdex.crafter.run",
-      }),
-    ).toBe(false);
-    expect(
-      shouldBlockUntrustedAssetExport({
-        method: "GET",
-        pathname: "/api/pets/nukey/sticker",
-        headers: {
-          referer: "https://petdex.crafter.run/pets/nukey",
-          "sec-fetch-site": "same-origin",
-          "user-agent": "Mozilla/5.0",
-        },
-        origin: "https://petdex.crafter.run",
-      }),
-    ).toBe(false);
-    expect(
-      shouldBlockUntrustedAssetExport({
-        method: "GET",
-        pathname: "/api/pets/nukey/sticker",
-        headers: {
-          referer: "https://example.com/embed",
-          "sec-fetch-site": "cross-site",
-          "user-agent": "Mozilla/5.0",
-        },
-        origin: "https://petdex.crafter.run",
-      }),
-    ).toBe(true);
   });
 
   it("keys limits by client IP headers", () => {

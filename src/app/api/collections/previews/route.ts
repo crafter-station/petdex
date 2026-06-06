@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getCollectionListingPreviewsBySlugs } from "@/lib/collections";
+import { petThumbnailUrlForSource } from "@/lib/pet-thumbnail";
 
 export const runtime = "nodejs";
 
@@ -35,6 +36,9 @@ export async function GET(req: Request): Promise<Response> {
           slug: pet.slug,
           displayName: pet.displayName,
           spritesheetPath: pet.spritesheetPath,
+          thumbUrl:
+            petThumbnailUrlForSource(pet.slug, pet.spritesheetPath) ??
+            undefined,
         })),
       })),
     },

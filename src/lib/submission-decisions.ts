@@ -186,6 +186,24 @@ async function runPostApprovalEffects(
     }
   }
 
+  try {
+    const { publishPetPublicArtifacts } = await import(
+      "@/lib/pet-public-artifacts"
+    );
+    const artifacts = await publishPetPublicArtifacts({
+      slug: row.slug,
+      spritesheetUrl: row.spritesheetUrl,
+    });
+    if (!artifacts.ok) {
+      console.error(`[${actor}] public artifact publish failed`, {
+        slug: row.slug,
+        failed: artifacts.failed,
+      });
+    }
+  } catch (e) {
+    console.error(`[${actor}] public artifact publish failed`, e);
+  }
+
   const { refreshSimilarityFor } = await import("@/lib/similarity");
   void refreshSimilarityFor(row.id).catch((err) => {
     console.warn(`[${actor}] similarity refresh failed:`, err);

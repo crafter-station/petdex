@@ -1,8 +1,3 @@
-import {
-  classifyRouteCostReferrerSource,
-  classifyRouteCostTrafficSource,
-} from "@/lib/route-cost";
-
 type HeaderBag =
   | Pick<Headers, "get">
   | Record<string, string | null | undefined>;
@@ -69,30 +64,6 @@ export function shouldBlockKnownAbusiveClient(
   return BLOCKED_USER_AGENTS.some((blocked) => userAgent.includes(blocked));
 }
 
-export function shouldBlockUntrustedAssetExport(input: {
-  headers?: HeaderBag;
-  method: string;
-  origin?: string;
-  pathname: string;
-}): boolean {
-  const rule = publicTrafficGuardRule(input);
-  if (rule !== "sticker" && rule !== "pack") return false;
-  const trafficSource = classifyRouteCostTrafficSource(input.headers);
-  const referrerSource = classifyRouteCostReferrerSource(
-    input.headers,
-    input.origin,
-  );
-  const secFetchSite = readHeader(input.headers, "sec-fetch-site")
-    .trim()
-    .toLowerCase();
-  const trustedBrowser =
-    (trafficSource === "browser" || trafficSource === "prefetch") &&
-    (referrerSource === "internal" ||
-      secFetchSite === "same-origin" ||
-      isRequestOrigin(input.headers, input.origin));
-  return !trustedBrowser;
-}
-
 export function publicTrafficGuardKey(headers: HeaderBag | undefined): string {
   const ip =
     readHeader(headers, "x-real-ip") ||
@@ -132,17 +103,4 @@ function isPublicPagePath(pathname: string): boolean {
     "/legal/telemetry",
     "/requests",
   ].includes(path);
-}
-
-function isRequestOrigin(
-  headers: HeaderBag | undefined,
-  origin: string | undefined,
-): boolean {
-  const requestOrigin = readHeader(headers, "origin");
-  if (!requestOrigin || !origin) return false;
-  try {
-    return new URL(requestOrigin).origin === new URL(origin).origin;
-  } catch {
-    return false;
-  }
 }

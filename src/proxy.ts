@@ -11,7 +11,6 @@ import {
   publicTrafficGuardKey,
   publicTrafficGuardRule,
   shouldBlockKnownAbusiveClient,
-  shouldBlockUntrustedAssetExport,
 } from "@/lib/public-traffic-guard";
 import {
   packAssetRatelimit,
@@ -122,20 +121,6 @@ async function guardPublicTraffic(
   req: NextRequest,
 ): Promise<NextResponse | null> {
   if (shouldBlockKnownAbusiveClient(req.headers)) {
-    return new NextResponse(null, {
-      status: 403,
-      headers: { "cache-control": "no-store" },
-    });
-  }
-
-  if (
-    shouldBlockUntrustedAssetExport({
-      headers: req.headers,
-      method: req.method,
-      origin: req.nextUrl.origin,
-      pathname: req.nextUrl.pathname,
-    })
-  ) {
     return new NextResponse(null, {
       status: 403,
       headers: { "cache-control": "no-store" },
