@@ -146,8 +146,7 @@ export function CommandLine({
   async function handleCopy() {
     // Display the natural `npx petdex` form, but copy the
     // version-pinned `petdex@latest` so every paste resolves to
-    // the most recent release. Tracking still uses the visual
-    // form so dashboards stay readable.
+    // the most recent release.
     const toCopy = pinToLatest(command);
     try {
       await writeClipboard(toCopy);
