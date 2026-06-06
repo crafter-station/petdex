@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
-import { useUser } from "@clerk/nextjs";
 import {
   BookOpenIcon,
   CrownIcon,
@@ -19,7 +18,6 @@ import {
 import { ExternalLink, Menu, X } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
-import { isAdminClientSafe } from "@/lib/admin";
 import { withLocale } from "@/lib/locale-routing";
 import { cn } from "@/lib/utils";
 
@@ -65,10 +63,7 @@ export function SiteHeader({ hideSubmitCta = false }: SiteHeaderProps) {
   const common = useTranslations("common");
 
   // /download is public now (post pre-launch).
-  const { user } = useUser();
-  void user;
   const showDownload = true;
-  void isAdminClientSafe;
 
   function href(pathname: string) {
     return withLocale(pathname, currentLocale);
