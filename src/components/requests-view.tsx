@@ -23,8 +23,6 @@ import {
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 
-import { track } from "@/lib/vercel-analytics";
-
 import { ClaimRequestButton } from "@/components/claim-request-button";
 
 type ClerkInfo = {
@@ -234,7 +232,6 @@ export function RequestsView({
       return;
     }
     const requestQuery = toStoredRequestQuery(requestKind, trimmed);
-    track("pet_request_clicked", { from: "requests_form" });
     setFormError(null);
     setSubmitting(true);
     try {
@@ -246,7 +243,6 @@ export function RequestsView({
       });
       if (!res.ok) {
         if (res.status === 401) {
-          track("pet_request_blocked", { reason: "unauthorized" });
           setFormError(t("errors.signInRequest"));
           return;
         }
@@ -254,7 +250,6 @@ export function RequestsView({
           message?: string;
           error?: string;
         };
-        track("pet_request_failed", { status: res.status });
         setFormError(
           data.message ??
             data.error ??
@@ -267,10 +262,6 @@ export function RequestsView({
         upvoteCount: number;
         id: string;
       };
-      track("pet_request_succeeded", {
-        mode: data.mode,
-        upvotes: data.upvoteCount,
-      });
       setLastResult({
         mode: data.mode,
         query: requestQuery,
@@ -290,7 +281,6 @@ export function RequestsView({
         /* ignore */
       }
     } catch (err) {
-      track("pet_request_failed", { reason: "network" });
       setFormError(
         err instanceof Error ? err.message : t("errors.networkRetry"),
       );
@@ -301,7 +291,6 @@ export function RequestsView({
 
   async function upvote(req: RequestRow) {
     if (pending.has(req.id) || req.voted || req.status === "fulfilled") return;
-    track("pet_request_upvote_clicked", { id: req.id });
     setPending((s) => new Set(s).add(req.id));
     setError(null);
     try {
