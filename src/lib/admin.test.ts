@@ -1,22 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 
 import {
-  canAccessCollaboratorArea,
-  canAccessCollaboratorAreaClientSafe,
-  canModeratePublishedPets,
-  canModeratePublishedPetsClientSafe,
-  canReviewPetSubmissions,
+  getAdminUserIds,
+  getPublicAdminUserIds,
   isAdmin,
-  isCollaborator,
+  isAdminClientSafe,
 } from "@/lib/admin";
 
 const ENV_KEYS = [
   "PETDEX_ADMIN_USER_IDS",
   "NEXT_PUBLIC_PETDEX_ADMIN_USER_IDS",
-  "PETDEX_COLLABORATOR_USER_IDS",
-  "NEXT_PUBLIC_PETDEX_COLLABORATOR_USER_IDS",
-  "PETDEX_MODERATOR_USER_IDS",
-  "NEXT_PUBLIC_PETDEX_MODERATOR_USER_IDS",
 ] as const;
 
 const originalEnv = new Map<string, string | undefined>();
@@ -40,29 +33,21 @@ afterEach(() => {
   originalEnv.clear();
 });
 
-describe("published pet moderation permissions", () => {
-  it("lets moderators enter collaborator area without review permissions", () => {
-    process.env.PETDEX_MODERATOR_USER_IDS = "user_mod";
+describe("admin permissions", () => {
+  it("parses private admin user IDs", () => {
+    process.env.PETDEX_ADMIN_USER_IDS = " user_a, user_b ,,";
 
-    expect(canModeratePublishedPets("user_mod")).toBe(true);
-    expect(canAccessCollaboratorArea("user_mod")).toBe(true);
-    expect(isAdmin("user_mod")).toBe(false);
-    expect(isCollaborator("user_mod")).toBe(false);
-    expect(canReviewPetSubmissions("user_mod")).toBe(false);
+    expect([...getAdminUserIds()]).toEqual(["user_a", "user_b"]);
+    expect(isAdmin("user_a")).toBe(true);
+    expect(isAdmin("user_x")).toBe(false);
+    expect(isAdmin(null)).toBe(false);
   });
 
-  it("keeps public moderator visibility separate from collaborator review", () => {
-    process.env.NEXT_PUBLIC_PETDEX_MODERATOR_USER_IDS = "user_mod";
+  it("keeps public admin IDs visibility-only", () => {
+    process.env.NEXT_PUBLIC_PETDEX_ADMIN_USER_IDS = " user_public ";
 
-    expect(canModeratePublishedPetsClientSafe("user_mod")).toBe(true);
-    expect(canAccessCollaboratorAreaClientSafe("user_mod")).toBe(true);
-  });
-
-  it("treats admins as moderators", () => {
-    process.env.PETDEX_ADMIN_USER_IDS = "user_admin";
-    process.env.NEXT_PUBLIC_PETDEX_ADMIN_USER_IDS = "user_admin";
-
-    expect(canModeratePublishedPets("user_admin")).toBe(true);
-    expect(canModeratePublishedPetsClientSafe("user_admin")).toBe(true);
+    expect([...getPublicAdminUserIds()]).toEqual(["user_public"]);
+    expect(isAdminClientSafe("user_public")).toBe(true);
+    expect(isAdmin("user_public")).toBe(false);
   });
 });
