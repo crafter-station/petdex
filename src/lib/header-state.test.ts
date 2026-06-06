@@ -8,6 +8,7 @@ import {
   headerStateResponseSavedAt,
   INITIAL_HEADER_STATE,
   nextHeaderStatePollDelay,
+  normalizeHeaderState,
   parseCachedHeaderState,
   readCachedHeaderStateFromBrowser,
   releaseHeaderStateRefreshClaim,
@@ -87,6 +88,7 @@ describe("header state helpers", () => {
       signedIn: true,
       notifications: { unreadCount: 2 },
       feedback: { count: 1 },
+      profile: { handle: "byte-owner" },
       caught: ["byte"],
     };
     const raw = serializeHeaderState(state, 1_000);
@@ -94,6 +96,24 @@ describe("header state helpers", () => {
     expect(parseCachedHeaderState(raw, 30_000)?.state).toEqual(state);
     expect(parseCachedHeaderState(raw, 1_801_001)).toBeNull();
     expect(parseCachedHeaderState(raw, 500)).toBeNull();
+  });
+
+  it("normalizes legacy payloads without profile state", () => {
+    expect(
+      normalizeHeaderState({
+        signedIn: true,
+        notifications: { unreadCount: 1 },
+        feedback: { count: 2 },
+        caught: ["byte"],
+      }),
+    ).toEqual({
+      ...INITIAL_HEADER_STATE,
+      signedIn: true,
+      notifications: { unreadCount: 1 },
+      feedback: { count: 2 },
+      profile: { handle: null },
+      caught: ["byte"],
+    });
   });
 
   it("reads shared browser cache before tab-local fallback cache", () => {
@@ -337,7 +357,7 @@ describe("header state helpers", () => {
   it("scopes cache keys by signed-in user", () => {
     expect(headerStateCacheKey(null)).toBeNull();
     expect(headerStateCacheKey("user_123")).toBe(
-      "petdex:header-state:user_123",
+      "petdex:header-state:v2:user_123",
     );
   });
 

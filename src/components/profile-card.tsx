@@ -8,6 +8,8 @@ import { ExternalLink, Loader2, Pencil, Pin, Star, X } from "lucide-react";
 
 import { MAX_PINNED_PETS } from "@/lib/profiles";
 
+import { useHeaderState } from "@/components/header-state-provider";
+
 type ApprovedPet = {
   slug: string;
   displayName: string;
@@ -32,6 +34,7 @@ export function ProfileCard({ profile }: { profile: ProfileData }) {
   const [pinned, setPinned] = useState<string[]>(profile.featuredPetSlugs);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { refresh: refreshHeaderState } = useHeaderState();
   const [, startTransition] = useTransition();
 
   useEffect(() => {
@@ -85,6 +88,7 @@ export function ProfileCard({ profile }: { profile: ProfileData }) {
         return;
       }
       setOpen(false);
+      await refreshHeaderState({ force: true });
       startTransition(() => router.refresh());
     } finally {
       setBusy(false);

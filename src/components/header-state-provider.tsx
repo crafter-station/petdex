@@ -21,6 +21,7 @@ import {
   headerStateResponseSavedAt,
   INITIAL_HEADER_STATE,
   nextHeaderStatePollDelay,
+  normalizeHeaderState,
   parseCachedHeaderState,
   readCachedHeaderStateFromBrowser,
   releaseHeaderStateRefreshClaim,
@@ -102,7 +103,7 @@ export function HeaderStateProvider({
           cache: headerStateFetchCacheMode(options?.force),
         });
         if (!res.ok) return;
-        const json = (await res.json()) as HeaderState;
+        const json = normalizeHeaderState(await res.json());
         if (
           !mounted.current ||
           generation !== requestGeneration.current ||
@@ -202,7 +203,7 @@ export function HeaderStateProvider({
         nextHeaderStatePollDelay(lastRefreshAt.current, Date.now()),
       );
     };
-    void refresh().finally(schedulePoll);
+    void refresh({ force: !hasCachedState }).finally(schedulePoll);
     const onFocus = () => refreshIfVisible();
     const onVisibilityChange = () => refreshIfVisible();
     const onStorage = (ev: StorageEvent) => {

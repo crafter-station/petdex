@@ -2,6 +2,7 @@ export type HeaderState = {
   signedIn: boolean;
   notifications: { unreadCount: number };
   feedback: { count: number };
+  profile: { handle: string | null };
   caught: string[];
 };
 
@@ -9,6 +10,7 @@ export const INITIAL_HEADER_STATE: HeaderState = {
   signedIn: false,
   notifications: { unreadCount: 0 },
   feedback: { count: 0 },
+  profile: { handle: null },
   caught: [],
 };
 
@@ -30,7 +32,7 @@ export type HeaderStateRefreshClaim = {
 };
 
 export function headerStateCacheKey(userId: string | null | undefined) {
-  return userId ? `petdex:header-state:${userId}` : null;
+  return userId ? `petdex:header-state:v2:${userId}` : null;
 }
 
 export function shouldRequestHeaderState(input: {
@@ -198,12 +200,13 @@ export function withHeaderUnreadCount(
   };
 }
 
-function normalizeHeaderState(value: unknown): HeaderState {
+export function normalizeHeaderState(value: unknown): HeaderState {
   const input = isRecord(value) ? value : {};
   const notifications = isRecord(input.notifications)
     ? input.notifications
     : {};
   const feedback = isRecord(input.feedback) ? input.feedback : {};
+  const profile = isRecord(input.profile) ? input.profile : {};
   return {
     signedIn: input.signedIn === true,
     notifications: {
@@ -211,6 +214,9 @@ function normalizeHeaderState(value: unknown): HeaderState {
     },
     feedback: {
       count: toNumber(feedback.count),
+    },
+    profile: {
+      handle: typeof profile.handle === "string" ? profile.handle : null,
     },
     caught: Array.isArray(input.caught) ? input.caught.filter(isString) : [],
   };

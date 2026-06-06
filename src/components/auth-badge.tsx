@@ -2,7 +2,6 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useState } from "react";
 
 import { SignInButton, useAuth, useClerk, useUser } from "@clerk/nextjs";
 import {
@@ -91,7 +90,9 @@ function UserDropdown({ compact = false }: { compact?: boolean }) {
   const { user, isLoaded } = useUser();
   const { signOut, openUserProfile } = useClerk();
   const showAdmin = isAdminClientSafe(user?.id);
-  const unread = useHeaderState().state.feedback.count;
+  const headerState = useHeaderState().state;
+  const unread = headerState.feedback.count;
+  const dbHandle = headerState.profile?.handle ?? null;
   const t = useTranslations("header");
   const locale = useLocale();
   const currentLocale: Locale = hasLocale(locale) ? locale : "en";
@@ -99,32 +100,6 @@ function UserDropdown({ compact = false }: { compact?: boolean }) {
   const adminHref =
     process.env.NEXT_PUBLIC_PETDEX_ADMIN_URL?.replace(/\/$/, "") ||
     "https://admin.petdex.dev";
-
-  // Source of truth for the public profile handle is our DB
-  // (user_profiles.handle), not Clerk's username field. Clerk username
-  // is allowed to drift — Thib's was null while his DB handle was
-  // "thibgl", so the avatar dropdown was deep-linking to /u/<id-slice>
-  // and 404ing. Fetch the real handle once on mount, fall back to the
-  // old slice-of-id while the request is in flight so the dropdown is
-  // never empty.
-  const [dbHandle, setDbHandle] = useState<string | null>(null);
-  useEffect(() => {
-    if (!user) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch("/api/profile/me");
-        if (!res.ok) return;
-        const j = (await res.json()) as { handle?: string | null };
-        if (!cancelled && j.handle) setDbHandle(j.handle);
-      } catch {
-        /* swallow — fallback handle still works */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [user]);
 
   if (!isLoaded || !user) {
     return <AvatarSkeleton compact={compact} />;

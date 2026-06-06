@@ -15,13 +15,14 @@ export const runtime = "nodejs";
 type HeaderStateRow = {
   notification_count: number | string;
   feedback_count: number | string;
+  profile_handle: string | null;
   caught_slugs: unknown;
 };
 
 // GET /api/me/header-state -> single aggregate the SiteHeader needs on
-// every page-view. Combines what used to be three separate endpoints
-// (notifications unread, feedback unread, caught slugs) so we ship
-// one Edge Request per page-view instead of three.
+// every page-view. Combines notifications unread, feedback unread,
+// caught slugs, and the canonical profile handle so signed-in headers
+// do not fan out into separate reads.
 //
 // Returns lightweight counts + the caught slug set. The full
 // notifications list (`items[]`) still lives at /api/notifications and
@@ -85,7 +86,13 @@ export async function GET(req: Request): Promise<Response> {
     SELECT
       notification_state.notification_count,
       caught_state.caught_slugs,
-      feedback_state.feedback_count
+      feedback_state.feedback_count,
+      (
+        SELECT handle
+        FROM user_profiles
+        WHERE user_id = ${userId}
+        LIMIT 1
+      ) AS profile_handle
     FROM notification_state, caught_state, feedback_state
   `)) as unknown as { rows: HeaderStateRow[] };
   const row = result.rows[0];
@@ -96,6 +103,9 @@ export async function GET(req: Request): Promise<Response> {
       notifications: { unreadCount: toNumber(row?.notification_count) },
       feedback: {
         count: toNumber(row?.feedback_count),
+      },
+      profile: {
+        handle: row?.profile_handle ?? null,
       },
       caught: toStringArray(row?.caught_slugs),
     },

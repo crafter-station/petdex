@@ -240,12 +240,11 @@ export async function PATCH(req: Request): Promise<Response> {
     invalidatePublicHandleCaches(previousHandle, patch.handle),
   ]);
 
-  // Sync Clerk username with the DB handle so the AuthBadge dropdown,
-  // which reads from useUser() in the browser, also lands on the right
-  // /u/<handle>. Clerk username has stricter rules (uniqueness across
-  // the whole instance, format constraints) — if the call fails, log
-  // and move on. The DB stays source-of-truth and AuthBadge already
-  // reads /api/profile/me as its primary source.
+  // Sync Clerk username with the DB handle so Clerk's fallback browser
+  // user object also lands on the right /u/<handle>. Clerk username has
+  // stricter rules (uniqueness across the whole instance, format
+  // constraints) — if the call fails, log and move on. The DB stays
+  // source-of-truth and /api/me/header-state is the primary source.
   if (patch.handle !== undefined && patch.handle) {
     try {
       const cc = await clerkClient();

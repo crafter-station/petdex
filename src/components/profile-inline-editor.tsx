@@ -8,6 +8,8 @@ import { useTranslations } from "next-intl";
 
 import { MAX_PINNED_PETS } from "@/lib/profiles";
 
+import { useHeaderState } from "@/components/header-state-provider";
+
 type ApprovedPet = {
   slug: string;
   displayName: string;
@@ -39,6 +41,7 @@ export function ProfileInlineEditor({
   const [pinned, setPinned] = useState<string[]>(initialFeaturedSlugs);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { refresh: refreshHeaderState } = useHeaderState();
   const [, startTransition] = useTransition();
 
   function togglePin(slug: string) {
@@ -72,6 +75,7 @@ export function ProfileInlineEditor({
         return;
       }
       setOpen(false);
+      await refreshHeaderState({ force: true });
       if (j?.handle && j.handle !== handle) {
         startTransition(() => router.replace(`/u/${j.handle}`));
       } else {
