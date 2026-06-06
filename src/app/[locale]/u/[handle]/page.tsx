@@ -24,7 +24,6 @@ import { toCurrentR2PublicUrl } from "@/lib/r2-public-url";
 
 import { JsonLd } from "@/components/json-ld";
 import type { Submission } from "@/components/my-pets-view";
-import { ProfileAnalytics } from "@/components/profile-analytics";
 import { ProfileExternalLink } from "@/components/profile-external-link";
 import { ProfileInlineEditor } from "@/components/profile-inline-editor";
 import { ProfilePinningSurface } from "@/components/profile-pinning-surface";
@@ -236,13 +235,6 @@ export default async function UserProfilePage({ params }: PageProps) {
     featured: c.featured,
   }));
 
-  // Resolve pinned slugs to full pet objects, preserving owner-chosen
-  // order. Drop any that are no longer approved (would otherwise break
-  // the layout with empty cards).
-  const featuredPets = featuredSlugs
-    .map((slug) => pets.find((p) => p.slug === slug))
-    .filter((p): p is PetWithMetrics => Boolean(p));
-
   // Aggregate stats.
   const totalLikes = pets.reduce((acc, p) => acc + p.metrics.likeCount, 0);
   const totalInstalls = pets.reduce(
@@ -283,12 +275,6 @@ export default async function UserProfilePage({ params }: PageProps) {
   return (
     <main className="min-h-dvh bg-background text-foreground">
       <JsonLd data={jsonLd} />
-      <ProfileAnalytics
-        handle={publicHandle}
-        petCount={pets.length}
-        pinnedCount={featuredPets.length}
-        viewerIsOwner={isOwner}
-      />
 
       <SiteHeader />
       <section className="petdex-cloud relative -mt-[84px] overflow-clip pt-[84px]">
