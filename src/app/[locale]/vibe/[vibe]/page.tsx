@@ -3,7 +3,8 @@ import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 
 import { buildLocaleAlternates, withLocale } from "@/lib/locale-routing";
-import { getApprovedPetsWithMetrics, type PetWithMetrics } from "@/lib/pets";
+import { withNextDataCache } from "@/lib/next-data-cache";
+import { searchPets } from "@/lib/pet-search";
 import { PET_VIBES, type PetVibe } from "@/lib/types";
 
 import { FacetPage } from "@/components/facet-page";
@@ -11,16 +12,8 @@ import { JsonLd } from "@/components/json-ld";
 
 import { hasLocale } from "@/i18n/config";
 
-function curatedSort(pets: PetWithMetrics[]): PetWithMetrics[] {
-  return [...pets].sort((a, b) => {
-    const fa = a.featured ? 0 : 1;
-    const fb = b.featured ? 0 : 1;
-    if (fa !== fb) return fa - fb;
-    return a.displayName.localeCompare(b.displayName);
-  });
-}
-
 const SITE_URL = "https://petdex.dev";
+const FACET_PAGE_LIMIT = 60;
 
 type Props = { params: Promise<{ locale: string; vibe: string }> };
 
@@ -33,6 +26,14 @@ export function generateStaticParams() {
 function resolveVibe(slug: string): PetVibe | null {
   const lower = slug.toLowerCase() as PetVibe;
   return PET_VIBES.includes(lower) ? lower : null;
+}
+
+function loadVibeFacet(vibe: PetVibe) {
+  return withNextDataCache(
+    () => searchPets({ vibes: [vibe], limit: FACET_PAGE_LIMIT }),
+    ["petdex-facet-page", "vibe", vibe, String(FACET_PAGE_LIMIT)],
+    { tags: ["pet:list", "petdex:facets"], revalidate: 86400 },
+  )();
 }
 
 export async function generateMetadata({ params }: Props) {
@@ -74,18 +75,15 @@ export default async function VibePage({ params }: Props) {
   const vibe = resolveVibe(raw);
   if (!vibe) notFound();
 
-  const all = await getApprovedPetsWithMetrics();
-  const filtered = curatedSort(all.filter((p) => p.vibes.includes(vibe)));
+  const results = await loadVibeFacet(vibe);
+  const filtered = results.pets;
+  const total = results.total;
 
-  if (filtered.length === 0) notFound();
+  if (total === 0) notFound();
 
-  // Related vibes: top 6 other vibes by count, excluding current.
-  const facetCounts = new Map<PetVibe, number>();
-  for (const p of all)
-    for (const v of p.vibes) {
-      facetCounts.set(v, (facetCounts.get(v) ?? 0) + 1);
-    }
-  const related = [...facetCounts.entries()]
+  const related = PET_VIBES.map(
+    (v) => [v, results.facets.vibes[v] ?? 0] as const,
+  )
     .filter(([v]) => v !== vibe)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 6)
@@ -104,7 +102,7 @@ export default async function VibePage({ params }: Props) {
     isPartOf: { "@type": "WebSite", "@id": `${SITE_URL}/#website` },
     mainEntity: {
       "@type": "ItemList",
-      numberOfItems: filtered.length,
+      numberOfItems: total,
       itemListElement: filtered.slice(0, 20).map((p, i) => ({
         "@type": "ListItem",
         position: i + 1,
@@ -121,7 +119,7 @@ export default async function VibePage({ params }: Props) {
         eyebrow={t("vibeEyebrow", { vibe: t(`vibes.${vibe}.label`) })}
         title={t(`vibes.${vibe}.title`)}
         intro={t(`vibes.${vibe}.intro`)}
-        countLabel={t("count", { count: filtered.length })}
+        countLabel={t("count", { count: total })}
         pets={filtered}
         exampleSlug={filtered[0]?.slug}
         relatedLabel={t("relatedVibes")}

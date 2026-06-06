@@ -3,7 +3,8 @@ import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 
 import { buildLocaleAlternates, withLocale } from "@/lib/locale-routing";
-import { getApprovedPetsWithMetrics, type PetWithMetrics } from "@/lib/pets";
+import { withNextDataCache } from "@/lib/next-data-cache";
+import { searchPets } from "@/lib/pet-search";
 import { PET_KINDS, type PetKind } from "@/lib/types";
 
 import { FacetPage } from "@/components/facet-page";
@@ -12,6 +13,7 @@ import { JsonLd } from "@/components/json-ld";
 import { hasLocale } from "@/i18n/config";
 
 const SITE_URL = "https://petdex.dev";
+const FACET_PAGE_LIMIT = 60;
 
 type Props = { params: Promise<{ kind: string; locale: string }> };
 
@@ -26,13 +28,12 @@ function resolveKind(slug: string): PetKind | null {
   return PET_KINDS.includes(lower) ? lower : null;
 }
 
-function curatedSort(pets: PetWithMetrics[]): PetWithMetrics[] {
-  return [...pets].sort((a, b) => {
-    const fa = a.featured ? 0 : 1;
-    const fb = b.featured ? 0 : 1;
-    if (fa !== fb) return fa - fb;
-    return a.displayName.localeCompare(b.displayName);
-  });
+function loadKindFacet(kind: PetKind) {
+  return withNextDataCache(
+    () => searchPets({ kinds: [kind], limit: FACET_PAGE_LIMIT }),
+    ["petdex-facet-page", "kind", kind, String(FACET_PAGE_LIMIT)],
+    { tags: ["pet:list", "petdex:facets"], revalidate: 86400 },
+  )();
 }
 
 export async function generateMetadata({ params }: Props) {
@@ -74,16 +75,17 @@ export default async function KindPage({ params }: Props) {
   const kind = resolveKind(raw);
   if (!kind) notFound();
 
-  const all = await getApprovedPetsWithMetrics();
-  const filtered = curatedSort(all.filter((p) => p.kind === kind));
+  const results = await loadKindFacet(kind);
+  const filtered = results.pets;
+  const total = results.total;
 
-  if (filtered.length === 0) notFound();
+  if (total === 0) notFound();
 
   const otherKinds = PET_KINDS.filter((k) => k !== kind);
   const related = otherKinds.map((k) => ({
     href: withLocale(`/kind/${k}`, localeValue),
     label: t(`kinds.${k}.label`),
-    count: all.filter((p) => p.kind === k).length,
+    count: results.facets.kinds[k] ?? 0,
   }));
 
   const jsonLd = {
@@ -95,7 +97,7 @@ export default async function KindPage({ params }: Props) {
     isPartOf: { "@type": "WebSite", "@id": `${SITE_URL}/#website` },
     mainEntity: {
       "@type": "ItemList",
-      numberOfItems: filtered.length,
+      numberOfItems: total,
       itemListElement: filtered.slice(0, 20).map((p, i) => ({
         "@type": "ListItem",
         position: i + 1,
@@ -112,7 +114,7 @@ export default async function KindPage({ params }: Props) {
         eyebrow={t("kindEyebrow", { kind: t(`kinds.${kind}.label`) })}
         title={t(`kinds.${kind}.title`)}
         intro={t(`kinds.${kind}.intro`)}
-        countLabel={t("count", { count: filtered.length })}
+        countLabel={t("count", { count: total })}
         pets={filtered}
         exampleSlug={filtered[0]?.slug}
         relatedLabel={t("relatedKinds")}
