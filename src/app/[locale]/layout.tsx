@@ -15,7 +15,6 @@ import { FeedbackWidget } from "@/components/feedback-widget";
 import { HeaderStateProvider } from "@/components/header-state-provider";
 import { ProfileAnnouncementModal } from "@/components/profile-announcement-modal";
 import { AppProviders } from "@/components/theme-providers";
-import { VercelObservability } from "@/components/vercel-observability";
 import { TopPromoStrip } from "@/components/zh/top-promo-strip";
 import { ZhLayoutSpacer } from "@/components/zh/zh-layout-spacer";
 
@@ -121,7 +120,6 @@ export default async function LocaleLayout({ children, params }: Props) {
               <AnnouncementQueue />
               <ProfileAnnouncementModal />
               <BuildVersionWatcher />
-              <VercelObservability />
             </HeaderStateProvider>
           </AppProviders>
         </NextIntlClientProvider>
