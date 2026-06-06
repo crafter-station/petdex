@@ -22,8 +22,6 @@ import {
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 
-import { track } from "@/lib/vercel-analytics";
-
 import { CodexLogo } from "@/components/codex-logo";
 import { GithubIcon } from "@/components/github-icon";
 import {
@@ -94,7 +92,6 @@ export function PetTakedownReportButton({
         aria-label={t("reportTakedownAria", { name: pet.displayName })}
         onClick={() => {
           setReportOpen(true);
-          track("pet_takedown_report_opened", { slug: pet.slug });
         }}
         className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-border-base bg-surface px-4 text-sm font-medium text-muted-2 transition hover:border-chip-danger-fg/40 hover:text-chip-danger-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-chip-danger-fg/45"
       >
@@ -172,7 +169,6 @@ export function PetTakedownReportButton({
             target="_blank"
             rel="noreferrer"
             onClick={() => {
-              track("pet_takedown_report_confirmed", { slug: pet.slug });
               setReportOpen(false);
             }}
             className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-full bg-inverse px-4 text-sm font-medium text-on-inverse transition hover:bg-inverse-hover sm:w-auto"
@@ -235,29 +231,26 @@ export function PetActionMenu({ pet, variant = "card", ownerActions }: Props) {
       try {
         await navigator.clipboard.writeText(text);
         setCopied(kind);
-        track("pet_action_copy", { slug: pet.slug, kind });
         window.setTimeout(() => setCopied(null), 1400);
       } catch {
         // ignore clipboard failures (Safari permission issues etc.)
       }
     },
-    [pet.slug],
+    [],
   );
 
   const onShareX = useCallback(() => {
     const text = `${pet.displayName}: an animated Codex pet on Petdex.\n\n${installCmd}`;
     const url = `https://x.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(pageUrl)}`;
-    track("pet_action_share", { slug: pet.slug, target: "x" });
     window.open(url, "_blank", "noopener,noreferrer,width=560,height=540");
     setOpen(false);
-  }, [pet.slug, pet.displayName, installCmd, pageUrl]);
+  }, [pet.displayName, installCmd, pageUrl]);
 
   const onShareLinkedIn = useCallback(() => {
     const url = `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(pageUrl)}`;
-    track("pet_action_share", { slug: pet.slug, target: "linkedin" });
     window.open(url, "_blank", "noopener,noreferrer,width=620,height=600");
     setOpen(false);
-  }, [pet.slug, pageUrl]);
+  }, [pageUrl]);
 
   const onShareNative = useCallback(async () => {
     if (typeof navigator === "undefined" || !("share" in navigator)) return;
@@ -271,15 +264,13 @@ export function PetActionMenu({ pet, variant = "card", ownerActions }: Props) {
         text: `${pet.displayName}: an animated Codex pet`,
         url: pageUrl,
       });
-      track("pet_action_share", { slug: pet.slug, target: "native" });
       setOpen(false);
     } catch {
       // user cancelled, ignore
     }
-  }, [pet.slug, pet.displayName, pageUrl]);
+  }, [pet.displayName, pageUrl]);
 
   const onZipClick = useCallback(() => {
-    track("zip_downloaded", { slug: pet.slug, source: "menu" });
     void fetch(`/api/pets/${pet.slug}/track-zip`, { method: "POST" }).catch(
       () => {},
     );
@@ -318,7 +309,6 @@ export function PetActionMenu({ pet, variant = "card", ownerActions }: Props) {
         setDeleting(false);
         return;
       }
-      track("pet_owner_deleted", { slug: pet.slug });
       setOpen(false);
       router.refresh();
     } catch {
@@ -354,14 +344,13 @@ export function PetActionMenu({ pet, variant = "card", ownerActions }: Props) {
         setWithdrawing(false);
         return;
       }
-      track("pet_owner_withdrew", { slug: pet.slug });
       setOpen(false);
       router.refresh();
     } catch {
       setWithdrawError("network_error");
       setWithdrawing(false);
     }
-  }, [withdrawing, ownerActions, pet.slug, pet.displayName, router]);
+  }, [withdrawing, ownerActions, pet.displayName, router]);
 
   // Detail variant: bigger trigger that reads as an action button next to
   // the like button. Card variant: compact circular icon in a corner.
