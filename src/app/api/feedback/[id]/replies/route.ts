@@ -145,7 +145,7 @@ export async function POST(
 
   // In-app notification: when admin replies, push a bell entry to the
   // original author. We don't notify admins of user follow-ups via the
-  // bell — they already have an admin-side counter on /admin/feedback.
+  // bell — they already have an admin-side counter on admin.petdex.dev.
   if (adminCaller && row.userId) {
     void createNotification({
       userId: row.userId,
@@ -209,7 +209,7 @@ export async function POST(
           statusLabel: row.status,
           originalMessage: row.message,
           replyBody: text,
-          threadUrl: `https://petdex.dev/admin/feedback?status=all&focus=${id}`,
+          threadUrl: `https://admin.petdex.dev/feedback?status=all&focus=${id}`,
           excerpt: `${excerpt}${row.message.length > 80 ? "…" : ""}`,
         });
         await resend.emails.send({
