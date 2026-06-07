@@ -9,10 +9,10 @@ import { getLocale } from "next-intl/server";
 import type { SearchPet } from "@/lib/pet-search";
 import { cn } from "@/lib/utils";
 
-import { PetCard } from "@/components/pet-gallery";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { StaticCommandLine } from "@/components/static-command-line";
+import { StaticFacetPetCard } from "@/components/static-facet-pet-card";
 
 type FacetPageProps = {
   eyebrow: string;
@@ -69,7 +69,12 @@ export async function FacetPage({
           )}
         >
           {pets.map((pet, index) => (
-            <PetCard key={pet.slug} pet={pet} index={index} />
+            <StaticFacetPetCard
+              key={pet.slug}
+              pet={pet}
+              index={index}
+              locale={locale}
+            />
           ))}
         </div>
 
