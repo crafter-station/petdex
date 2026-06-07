@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import {
   type CSSProperties,
@@ -24,7 +25,6 @@ import { PET_KINDS, PET_VIBES, type PetKind, type PetVibe } from "@/lib/types";
 import { isAllowedAvatarUrl } from "@/lib/url-allowlist";
 import { cn } from "@/lib/utils";
 
-import { FeedAdSlot } from "@/components/ads/feed-ad-slot";
 import { useHeaderState } from "@/components/header-state-provider";
 import { PetActionMenu } from "@/components/pet-action-menu";
 import { PetCardFooter } from "@/components/pet-card-footer";
@@ -96,6 +96,14 @@ const SORT_LABELS: Record<SortKey, string> = {
 };
 
 const PAGE_SIZE = 24;
+
+const FeedAdSlot = dynamic<{ ad: PublicFeedAd }>(
+  () => import("@/components/ads/feed-ad-slot").then((mod) => mod.FeedAdSlot),
+  {
+    loading: FeedAdSlotLoading,
+    ssr: false,
+  },
+);
 
 const FAMILY_DOT: Record<ColorFamily, string> = {
   red: "#ef4444",
@@ -688,6 +696,38 @@ function FilterGroup({
       </p>
       <div className="flex flex-wrap gap-1.5">{children}</div>
     </div>
+  );
+}
+
+function FeedAdSlotLoading() {
+  return (
+    <article
+      aria-hidden="true"
+      className="flex h-full min-h-[30rem] flex-col overflow-hidden rounded-3xl border border-border-base bg-surface/76 shadow-sm shadow-blue-950/5 backdrop-blur"
+    >
+      <div className="flex min-h-[46px] items-center justify-between border-border-base border-b px-5 py-3">
+        <div className="h-3 w-20 rounded bg-surface-muted" />
+        <div className="size-4 rounded-full bg-surface-muted" />
+      </div>
+      <div className="h-[210px] max-h-[210px] bg-surface-muted/60 md:h-[190px] md:max-h-[190px] 2xl:h-[210px] 2xl:max-h-[210px]" />
+      <div className="flex flex-1 flex-col gap-3 border-border-base border-t px-5 pt-4 pb-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="h-5 w-32 rounded bg-surface-muted" />
+          <div className="h-3 w-8 rounded bg-surface-muted" />
+        </div>
+        <div className="space-y-2">
+          <div className="h-3 w-full rounded bg-surface-muted/80" />
+          <div className="h-3 w-3/4 rounded bg-surface-muted/80" />
+        </div>
+        <div className="h-5 w-20 rounded-full bg-surface-muted/80" />
+        <div className="mt-1 flex gap-1.5">
+          <div className="h-3 w-20 rounded bg-surface-muted/70" />
+          <div className="h-3 w-16 rounded bg-surface-muted/70" />
+        </div>
+        <div className="mt-2 h-5 border-border-base border-t pt-2" />
+      </div>
+      <div className="mt-auto min-h-[52px] border-border-base border-t px-5 py-2" />
+    </article>
   );
 }
 
