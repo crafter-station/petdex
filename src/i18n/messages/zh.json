@@ -1620,7 +1620,7 @@
   "collectionsPage": {
     "metadata": {
       "title": "精选合集",
-      "description": "按系列、类别或主题浏览 Petdex 合集。搜索、排序和筛选，找到你的一套。"
+      "description": "按系列、类别或主题浏览 Petdex 合集，使用快速的公开目录。"
     },
     "hero": {
       "eyebrow": "精选合集 Featured collections",

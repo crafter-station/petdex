@@ -30,12 +30,6 @@ describe("public traffic guard", () => {
       publicTrafficGuardRule({ method: "GET", pathname: "/api/manifest" }),
     ).toBe("catalog");
     expect(
-      publicTrafficGuardRule({
-        method: "GET",
-        pathname: "/api/collections/previews",
-      }),
-    ).toBe("catalog");
-    expect(
       publicTrafficGuardRule({ method: "GET", pathname: "/api/pets/random" }),
     ).toBe("catalog");
     expect(

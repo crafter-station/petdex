@@ -7,7 +7,6 @@ export const CLIENT_MESSAGE_PATHS = [
   "claim",
   "collectionActionMenu",
   "collectionEditor",
-  "collectionsBrowser",
   "commandLine",
   "common",
   "feedback",

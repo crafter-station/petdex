@@ -24,7 +24,6 @@ export function publicTrafficGuardRule(input: {
   }
   if (/^\/api\/pets\/[^/]+\/wastickers\/?$/.test(pathname)) return "pack";
   if (pathname === "/api/manifest") return "catalog";
-  if (pathname === "/api/collections/previews") return "catalog";
   if (pathname === "/api/pets/random") return "catalog";
   if (pathname === "/api/pets/search") return "catalog";
   if (pathname === "/api/me/header-state") return "state";

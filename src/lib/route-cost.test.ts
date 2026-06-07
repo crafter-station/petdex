@@ -47,9 +47,6 @@ describe("route cost helpers", () => {
       "/api/ads/checkout",
     );
     expect(normalizeRouteCostPath("/api/ads/event")).toBe("/api/ads/event");
-    expect(normalizeRouteCostPath("/api/collections/previews")).toBe(
-      "/api/collections/previews",
-    );
   });
 
   it("buckets unmatched paths without preserving random segments", () => {
