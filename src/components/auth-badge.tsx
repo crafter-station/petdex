@@ -1,41 +1,40 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import Image from "next/image";
-import Link from "next/link";
+import { useCallback, useState } from "react";
 
 import { SignInButton, useAuth, useClerk, useUser } from "@clerk/nextjs";
-import {
-  GearSixIcon,
-  IdentificationCardIcon,
-  InfoIcon,
-  ShieldCheckIcon,
-  ShieldWarningIcon,
-  SignOutIcon,
-} from "@phosphor-icons/react";
-import { ChatCircleDotsIcon } from "@phosphor-icons/react/dist/ssr";
-import { ExternalLink } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 
 import { isAdminClientSafe } from "@/lib/admin";
-import { withLocale } from "@/lib/locale-routing";
 import { cn } from "@/lib/utils";
 
 import { useHeaderState } from "@/components/header-state-provider";
-import { LocaleSwitcher } from "@/components/locale-switcher";
 import { NotificationsBell } from "@/components/notifications-bell";
-import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import type { UserDropdownContentProps } from "@/components/user-dropdown-content";
 
-import { hasLocale, type Locale } from "@/i18n/config";
+function loadUserDropdownContent() {
+  return import("@/components/user-dropdown-content");
+}
+
+function preloadUserDropdownContent() {
+  void loadUserDropdownContent();
+}
+
+const UserDropdownContent = dynamic<UserDropdownContentProps>(
+  () => loadUserDropdownContent().then((mod) => mod.UserDropdownContent),
+  {
+    loading: UserDropdownContentLoading,
+    ssr: false,
+  },
+);
 
 export function AuthBadge({ compact = false }: { compact?: boolean }) {
   const { isLoaded, isSignedIn } = useAuth();
@@ -94,12 +93,16 @@ function UserDropdown({ compact = false }: { compact?: boolean }) {
   const unread = headerState.feedback.count;
   const dbHandle = headerState.profile?.handle ?? null;
   const t = useTranslations("header");
-  const locale = useLocale();
-  const currentLocale: Locale = hasLocale(locale) ? locale : "en";
-  const href = (pathname: string) => withLocale(pathname, currentLocale);
+  const [menuOpen, setMenuOpen] = useState(false);
   const adminHref =
     process.env.NEXT_PUBLIC_PETDEX_ADMIN_URL?.replace(/\/$/, "") ||
     "https://admin.petdex.dev";
+  const handleManageAccount = useCallback(() => {
+    openUserProfile();
+  }, [openUserProfile]);
+  const handleSignOut = useCallback(() => {
+    void signOut({ redirectUrl: "/" });
+  }, [signOut]);
 
   if (!isLoaded || !user) {
     return <AvatarSkeleton compact={compact} />;
@@ -113,14 +116,17 @@ function UserDropdown({ compact = false }: { compact?: boolean }) {
   const avatarUrl = user.imageUrl;
   const displayName =
     user.fullName || user.username || user.primaryEmailAddress?.emailAddress;
+  const email = user.primaryEmailAddress?.emailAddress ?? null;
 
   return (
-    <DropdownMenu>
+    <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
       <DropdownMenuTrigger
         render={
           <button
             type="button"
             aria-label={t("openUserMenu")}
+            onFocus={preloadUserDropdownContent}
+            onPointerEnter={preloadUserDropdownContent}
             className={cn(
               "group/avatar relative grid place-items-center overflow-hidden rounded-full ring-1 ring-foreground/10 transition-[width,height] duration-200 hover:ring-foreground/30 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none data-popup-open:ring-foreground/30",
               compact ? "size-9" : "size-11",
@@ -146,109 +152,18 @@ function UserDropdown({ compact = false }: { compact?: boolean }) {
       </DropdownMenuTrigger>
 
       <DropdownMenuContent align="end" sideOffset={8} className="w-64 p-1.5">
-        {displayName ? (
-          <DropdownMenuGroup>
-            <DropdownMenuLabel className="px-3 py-2">
-              <div className="truncate text-sm font-medium text-foreground">
-                {displayName}
-              </div>
-              {user.primaryEmailAddress?.emailAddress &&
-              user.primaryEmailAddress.emailAddress !== displayName ? (
-                <div className="truncate text-xs text-muted-3">
-                  {user.primaryEmailAddress.emailAddress}
-                </div>
-              ) : null}
-            </DropdownMenuLabel>
-          </DropdownMenuGroup>
+        {menuOpen ? (
+          <UserDropdownContent
+            adminHref={adminHref}
+            displayName={displayName ?? null}
+            email={email}
+            handle={handle}
+            onManageAccount={handleManageAccount}
+            onSignOut={handleSignOut}
+            showAdmin={showAdmin}
+            unread={unread}
+          />
         ) : null}
-
-        <DropdownMenuSeparator />
-
-        <DropdownMenuGroup>
-          <DropdownMenuItem
-            render={<Link href={`/u/${handle}`} prefetch={false} />}
-          >
-            <IdentificationCardIcon weight="duotone" className="size-4" />
-            {t("myProfile")}
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            render={<Link href="/my-feedback" prefetch={false} />}
-          >
-            <ChatCircleDotsIcon weight="duotone" className="size-4" />
-            {t("myFeedback")}
-            {unread > 0 ? (
-              <span className="ml-auto rounded-full bg-brand-tint px-1.5 py-0.5 font-mono text-[9px] font-semibold text-brand dark:bg-brand-tint-dark">
-                {unread > 9 ? "9+" : unread}
-              </span>
-            ) : null}
-          </DropdownMenuItem>
-          {showAdmin ? (
-            <DropdownMenuItem
-              render={<Link href={adminHref} prefetch={false} />}
-            >
-              <ShieldCheckIcon weight="duotone" className="size-4" />
-              {t("admin")}
-            </DropdownMenuItem>
-          ) : null}
-        </DropdownMenuGroup>
-
-        <DropdownMenuSeparator />
-
-        <DropdownMenuGroup>
-          <DropdownMenuItem
-            render={<Link href={href("/about")} prefetch={false} />}
-          >
-            <InfoIcon weight="duotone" className="size-4" />
-            {t("about")}
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            render={<Link href={href("/legal/takedown")} prefetch={false} />}
-          >
-            <ShieldWarningIcon weight="duotone" className="size-4" />
-            {t("takedown")}
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onClick={() =>
-              window.open(
-                "https://x.com/raillyhugo",
-                "_blank",
-                "noopener,noreferrer",
-              )
-            }
-            className="justify-between"
-          >
-            <span className="inline-flex items-center gap-2">
-              <XLogo className="size-3.5 text-muted-3" />
-              {t("followOnX")}
-            </span>
-            <ExternalLink className="size-3.5 text-muted-4" />
-          </DropdownMenuItem>
-        </DropdownMenuGroup>
-
-        <DropdownMenuSeparator />
-
-        <DropdownMenuGroup>
-          <DropdownMenuLabel className="px-3 pt-1 pb-1.5 font-mono text-[10px] tracking-[0.18em] text-muted-3 uppercase">
-            {t("settings")}
-          </DropdownMenuLabel>
-          <div className="flex items-center gap-2 px-2 pb-1">
-            <ThemeToggle />
-            <LocaleSwitcher />
-          </div>
-        </DropdownMenuGroup>
-
-        <DropdownMenuSeparator />
-
-        <DropdownMenuGroup>
-          <DropdownMenuItem onClick={() => openUserProfile()}>
-            <GearSixIcon weight="duotone" className="size-4" />
-            {t("manageAccount")}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => signOut({ redirectUrl: "/" })}>
-            <SignOutIcon weight="duotone" className="size-4" />
-            {t("signOut")}
-          </DropdownMenuItem>
-        </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -266,15 +181,19 @@ function AvatarSkeleton({ compact = false }: { compact?: boolean }) {
   );
 }
 
-function XLogo({ className }: { className?: string }) {
+function UserDropdownContentLoading() {
   return (
-    <svg
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-      className={className}
-      fill="currentColor"
-    >
-      <path d="M18.244 2H21l-6.55 7.49L22 22h-6.93l-4.83-6.31L4.6 22H1.84l7.01-8.02L1 2h7.07l4.36 5.78L18.244 2zm-2.43 18h1.91L7.27 4H5.27l10.544 16z" />
-    </svg>
+    <div aria-hidden="true" className="space-y-1 p-2">
+      <div className="mb-2 space-y-1 px-1">
+        <div className="h-4 w-28 animate-pulse rounded bg-surface-muted" />
+        <div className="h-3 w-36 animate-pulse rounded bg-surface-muted/80" />
+      </div>
+      <div className="h-px bg-border-base" />
+      <div className="h-8 animate-pulse rounded-xl bg-surface-muted/70" />
+      <div className="h-8 animate-pulse rounded-xl bg-surface-muted/70" />
+      <div className="h-px bg-border-base" />
+      <div className="h-8 animate-pulse rounded-xl bg-surface-muted/70" />
+      <div className="h-8 animate-pulse rounded-xl bg-surface-muted/70" />
+    </div>
   );
 }
