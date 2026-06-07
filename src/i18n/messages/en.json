@@ -403,6 +403,11 @@
       "chart": {
         "label": "Impressions over time",
         "empty": "No activity recorded yet.",
+        "exactValues": "Exact values",
+        "bucket": "Bucket",
+        "impressions": "Impressions",
+        "hovers": "Hovers",
+        "clicks": "Clicks",
         "windows": {
           "eightHours": "Last 8 hours",
           "day": "Last 24 hours",

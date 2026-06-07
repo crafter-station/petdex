@@ -420,6 +420,11 @@
       "chart": {
         "label": "曝光随时间变化",
         "empty": "还没有记录到活动。",
+        "exactValues": "精确数值",
+        "bucket": "时间段",
+        "impressions": "曝光",
+        "hovers": "悬停",
+        "clicks": "点击",
         "windows": {
           "eightHours": "最近 8 小时",
           "day": "最近 24 小时",

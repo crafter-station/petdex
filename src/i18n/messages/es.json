@@ -403,6 +403,11 @@
       "chart": {
         "label": "Impresiones en el tiempo",
         "empty": "Todavía no hay actividad registrada.",
+        "exactValues": "Valores exactos",
+        "bucket": "Intervalo",
+        "impressions": "Impresiones",
+        "hovers": "Hovers",
+        "clicks": "Clicks",
         "windows": {
           "eightHours": "Últimas 8 horas",
           "day": "Últimas 24 horas",
