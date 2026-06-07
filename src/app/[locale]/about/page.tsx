@@ -5,10 +5,10 @@ import { getTranslations } from "next-intl/server";
 import { buildLocaleAlternates, withLocale } from "@/lib/locale-routing";
 import { getApprovedPetCount } from "@/lib/pets";
 
-import { CommandLine } from "@/components/command-line";
 import { JsonLd } from "@/components/json-ld";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
+import { StaticCommandLine } from "@/components/static-command-line";
 
 import { hasLocale } from "@/i18n/config";
 
@@ -111,9 +111,8 @@ export default async function AboutPage({
                 strong: (chunks) => <strong>{chunks}</strong>,
               })}
             </p>
-            <CommandLine
+            <StaticCommandLine
               command="npx petdex install boba"
-              source="about-hero"
               className="mt-5 w-full max-w-sm"
             />
           </div>

@@ -9,10 +9,10 @@ import { getLocale } from "next-intl/server";
 import type { SearchPet } from "@/lib/pet-search";
 import { cn } from "@/lib/utils";
 
-import { CommandLine } from "@/components/command-line";
 import { PetCard } from "@/components/pet-gallery";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
+import { StaticCommandLine } from "@/components/static-command-line";
 
 type FacetPageProps = {
   eyebrow: string;
@@ -53,11 +53,7 @@ export async function FacetPage({
             <p className="mt-5 max-w-2xl text-balance text-base leading-7 text-muted-1 md:text-lg">
               {intro}
             </p>
-            <CommandLine
-              command={cmd}
-              source="facet-hero"
-              className="mt-5 w-full max-w-sm"
-            />
+            <StaticCommandLine command={cmd} className="mt-5 w-full max-w-sm" />
             <p className="mt-3 font-mono text-[11px] tracking-[0.18em] text-muted-3 uppercase">
               {countLabel}
             </p>

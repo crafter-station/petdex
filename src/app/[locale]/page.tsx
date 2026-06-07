@@ -18,7 +18,6 @@ import { cn } from "@/lib/utils";
 
 import { CollectionActionMenu } from "@/components/collection-action-menu";
 import { CollectionCover } from "@/components/collection-cover";
-import { CommandLine } from "@/components/command-line";
 import { DiscordLink } from "@/components/discord-link";
 import { DownloadDesktopCTA } from "@/components/download-desktop-cta";
 import { DiscordIcon } from "@/components/icons/wechat-icon";
@@ -27,6 +26,7 @@ import { PetGallery } from "@/components/pet-gallery";
 import { PetSprite } from "@/components/pet-sprite";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
+import { StaticCommandLine } from "@/components/static-command-line";
 import { SubmitCTA } from "@/components/submit-cta";
 import { SurprisePetCard } from "@/components/surprise-pet-card";
 import {
@@ -164,9 +164,8 @@ export default async function Home({
               })}
             </p>
             <div className="mt-5 flex w-full flex-col items-stretch justify-center gap-2 sm:flex-row sm:items-center">
-              <CommandLine
+              <StaticCommandLine
                 command="npx petdex install boba"
-                source="hero"
                 className="w-full sm:w-auto"
               />
               <DownloadDesktopCTA
