@@ -18,10 +18,7 @@ import { JsonLd } from "@/components/json-ld";
 import { LikeButton } from "@/components/like-button";
 import { OpenInPetdexButton } from "@/components/open-in-petdex-button";
 import { OwnerPetControls } from "@/components/owner-pet-controls";
-import {
-  PetActionMenu,
-  PetTakedownReportButton,
-} from "@/components/pet-action-menu";
+import { PetActionMenu } from "@/components/pet-action-menu";
 import { PetCountersBar } from "@/components/pet-counters-bar";
 import { PetFloater } from "@/components/pet-floater";
 import { PetKeyboardNav } from "@/components/pet-keyboard-nav";
@@ -29,6 +26,7 @@ import { PetRadarClient } from "@/components/pet-radar-client";
 import { PetSoundButton } from "@/components/pet-sound-button";
 import { PetSprite } from "@/components/pet-sprite";
 import { PetStateViewerLazy } from "@/components/pet-state-viewer-lazy";
+import { PetTakedownReportButton } from "@/components/pet-takedown-report-button";
 import { ReducedMotionHint } from "@/components/reduced-motion-hint";
 import { SaveAsSticker } from "@/components/save-as-sticker";
 import { SiteFooter } from "@/components/site-footer";
