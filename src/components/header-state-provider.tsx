@@ -12,27 +12,27 @@ import {
 import { useAuth } from "@clerk/nextjs";
 
 import {
-  claimHeaderStateRefresh,
   clearCachedHeaderStateFromBrowser,
-  HEADER_STATE_POLL_MS,
+  HEADER_STATE_EVENTUAL_REFRESH_MS,
+  HEADER_STATE_MIN_REFRESH_MS,
   type HeaderState,
   headerStateCacheKey,
   headerStateFetchCacheMode,
   headerStateResponseSavedAt,
   INITIAL_HEADER_STATE,
-  nextHeaderStatePollDelay,
   normalizeHeaderState,
   parseCachedHeaderState,
   readCachedHeaderStateFromBrowser,
-  releaseHeaderStateRefreshClaim,
   shouldRequestHeaderState,
   withHeaderUnreadCount,
   writeCachedHeaderStateToBrowser,
 } from "@/lib/header-state";
 
+type HeaderRefreshResult = "failed" | "fetched" | "skipped";
+
 type Ctx = {
   state: HeaderState;
-  refresh: (options?: { force?: boolean }) => Promise<void>;
+  refresh: (options?: { force?: boolean }) => Promise<HeaderRefreshResult>;
   setUnreadCount: (next: number | ((current: number) => number)) => void;
 };
 
@@ -93,23 +93,25 @@ export function HeaderStateProvider({
           now,
         })
       ) {
-        return;
+        return "skipped";
       }
-      if (!options?.force && inFlightUser.current === requestUserId) return;
+      if (!options?.force && inFlightUser.current === requestUserId) {
+        return "skipped";
+      }
       const generation = ++requestGeneration.current;
       inFlightUser.current = requestUserId;
       try {
         const res = await fetch("/api/me/header-state", {
           cache: headerStateFetchCacheMode(options?.force),
         });
-        if (!res.ok) return;
+        if (!res.ok) return "failed";
         const json = normalizeHeaderState(await res.json());
         if (
           !mounted.current ||
           generation !== requestGeneration.current ||
           userScope.current !== requestUserId
         ) {
-          return;
+          return "skipped";
         }
         const savedAt = headerStateResponseSavedAt(res.headers, now);
         setState(json);
@@ -117,8 +119,9 @@ export function HeaderStateProvider({
         if (cacheKey) {
           writeCachedHeaderStateToBrowser(cacheKey, json, savedAt);
         }
+        return "fetched";
       } catch {
-        return;
+        return "failed";
       } finally {
         if (inFlightUser.current === requestUserId) {
           inFlightUser.current = null;
@@ -161,51 +164,42 @@ export function HeaderStateProvider({
       setState(INITIAL_HEADER_STATE);
       lastRefreshAt.current = 0;
     }
-    const refreshIfVisible = (options?: { force?: boolean }) => {
-      if (document.visibilityState !== "visible") return;
-      void refresh(options);
+    const nextRefreshDelay = (result: HeaderRefreshResult | "hidden") => {
+      if (result === "fetched" || result === "hidden") {
+        return HEADER_STATE_EVENTUAL_REFRESH_MS;
+      }
+      if (result === "failed") return HEADER_STATE_MIN_REFRESH_MS;
+      const elapsed = Date.now() - lastRefreshAt.current;
+      return Math.max(1_000, HEADER_STATE_MIN_REFRESH_MS - elapsed);
+    };
+    const refreshIfVisible = async (options?: { force?: boolean }) => {
+      if (document.visibilityState !== "visible") return "hidden" as const;
+      return refresh(options);
     };
     let cancelled = false;
-    let intervalId: number | null = null;
-    let timeoutId: number | null = null;
-    const poll = () => {
-      if (document.visibilityState !== "visible") return;
-      const now = Date.now();
-      applyCachedState(now);
-      if (
-        !shouldRequestHeaderState({
-          isLoaded,
-          isSignedIn,
-          lastRefreshAt: lastRefreshAt.current,
-          now,
-        })
-      ) {
-        return;
+    let eventualRefreshId: number | null = null;
+    const scheduleEventualRefresh = (delay: number) => {
+      eventualRefreshId = window.setTimeout(() => {
+        void (async () => {
+          const refreshed = await refreshIfVisible();
+          if (!cancelled) {
+            scheduleEventualRefresh(nextRefreshDelay(refreshed));
+          }
+        })();
+      }, delay);
+    };
+    void (async () => {
+      const refreshed = await refresh({ force: !hasCachedState });
+      if (!cancelled) {
+        scheduleEventualRefresh(nextRefreshDelay(refreshed));
       }
-      const claim = cacheKey
-        ? claimHeaderStateRefresh(cacheKey, now)
-        : { shouldRefresh: true, token: null };
-      if (!claim.shouldRefresh) return;
-      void refresh({ force: true }).finally(() => {
-        if (cacheKey && claim.token) {
-          releaseHeaderStateRefreshClaim(cacheKey, claim.token);
-        }
-      });
+    })();
+    const onFocus = () => {
+      void refreshIfVisible();
     };
-    const schedulePoll = () => {
-      if (cancelled) return;
-      timeoutId = window.setTimeout(
-        () => {
-          if (cancelled) return;
-          poll();
-          intervalId = window.setInterval(poll, HEADER_STATE_POLL_MS);
-        },
-        nextHeaderStatePollDelay(lastRefreshAt.current, Date.now()),
-      );
+    const onVisibilityChange = () => {
+      void refreshIfVisible();
     };
-    void refresh({ force: !hasCachedState }).finally(schedulePoll);
-    const onFocus = () => refreshIfVisible();
-    const onVisibilityChange = () => refreshIfVisible();
     const onStorage = (ev: StorageEvent) => {
       if (ev.key !== cacheKey || !ev.newValue) return;
       const cached = parseCachedHeaderState(ev.newValue, Date.now());
@@ -217,11 +211,12 @@ export function HeaderStateProvider({
     window.addEventListener("storage", onStorage);
     document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
-      cancelled = true;
       mounted.current = false;
+      cancelled = true;
       requestGeneration.current += 1;
-      if (timeoutId !== null) window.clearTimeout(timeoutId);
-      if (intervalId !== null) window.clearInterval(intervalId);
+      if (eventualRefreshId !== null) {
+        window.clearTimeout(eventualRefreshId);
+      }
       window.removeEventListener("focus", onFocus);
       window.removeEventListener("storage", onStorage);
       document.removeEventListener("visibilitychange", onVisibilityChange);
@@ -239,7 +234,7 @@ export function useHeaderState(): Ctx {
   const ctx = useContext(HeaderStateContext);
   if (ctx) return ctx;
   return {
-    refresh: async () => {},
+    refresh: async () => "skipped",
     setUnreadCount: () => {},
     state: INITIAL_HEADER_STATE,
   };

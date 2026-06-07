@@ -14,21 +14,15 @@ export const INITIAL_HEADER_STATE: HeaderState = {
   caught: [],
 };
 
-export const HEADER_STATE_POLL_MS = 1_800_000;
-export const HEADER_STATE_MIN_REFRESH_MS = HEADER_STATE_POLL_MS;
+export const HEADER_STATE_MIN_REFRESH_MS = 1_800_000;
 export const HEADER_STATE_CACHE_TTL_MS = HEADER_STATE_MIN_REFRESH_MS;
 export const HEADER_STATE_BROWSER_CACHE_SECONDS =
   HEADER_STATE_CACHE_TTL_MS / 1000;
-export const HEADER_STATE_REFRESH_LOCK_MS = 15_000;
+export const HEADER_STATE_EVENTUAL_REFRESH_MS = 6 * 60 * 60_000;
 
 export type CachedHeaderState = {
   savedAt: number;
   state: HeaderState;
-};
-
-export type HeaderStateRefreshClaim = {
-  shouldRefresh: boolean;
-  token: string | null;
 };
 
 export function headerStateCacheKey(userId: string | null | undefined) {
@@ -50,15 +44,6 @@ export function shouldRequestHeaderState(input: {
     input.now - input.lastRefreshAt >=
       (input.minRefreshMs ?? HEADER_STATE_MIN_REFRESH_MS)
   );
-}
-
-export function nextHeaderStatePollDelay(
-  lastRefreshAt: number,
-  now: number,
-  pollMs = HEADER_STATE_POLL_MS,
-) {
-  if (lastRefreshAt <= 0 || lastRefreshAt > now) return pollMs;
-  return Math.max(0, pollMs - (now - lastRefreshAt));
 }
 
 export function parseCachedHeaderState(
@@ -120,49 +105,6 @@ export function writeCachedHeaderStateToBrowser(
 export function clearCachedHeaderStateFromBrowser(cacheKey: string) {
   removeStorageValue(browserStorage("localStorage"), cacheKey);
   removeStorageValue(browserStorage("sessionStorage"), cacheKey);
-  removeStorageValue(
-    browserStorage("localStorage"),
-    headerStateRefreshLockKey(cacheKey),
-  );
-}
-
-export function claimHeaderStateRefresh(
-  cacheKey: string,
-  now = Date.now(),
-  lockMs = HEADER_STATE_REFRESH_LOCK_MS,
-  token = `${now}:${Math.random()}`,
-): HeaderStateRefreshClaim {
-  const storage = browserStorage("localStorage");
-  if (!storage) return { shouldRefresh: true, token: null };
-  const lockKey = headerStateRefreshLockKey(cacheKey);
-  const current = parseRefreshLock(readStorageValue(storage, lockKey));
-  if (current && current.expiresAt > now) {
-    return { shouldRefresh: false, token: null };
-  }
-  const next = JSON.stringify({ expiresAt: now + lockMs, token });
-  if (!writeStorageValue(storage, lockKey, next)) {
-    return { shouldRefresh: true, token: null };
-  }
-  const saved = parseRefreshLock(readStorageValue(storage, lockKey));
-  return saved?.token === token
-    ? { shouldRefresh: true, token }
-    : { shouldRefresh: false, token: null };
-}
-
-export function releaseHeaderStateRefreshClaim(
-  cacheKey: string,
-  token: string,
-) {
-  const storage = browserStorage("localStorage");
-  if (!storage) return;
-  const lockKey = headerStateRefreshLockKey(cacheKey);
-  const current = parseRefreshLock(readStorageValue(storage, lockKey));
-  if (current?.token !== token) return;
-  try {
-    storage.removeItem(lockKey);
-  } catch {
-    return;
-  }
 }
 
 export function headerStateFetchCacheMode(force?: boolean): RequestCache {
@@ -232,28 +174,6 @@ function isString(value: unknown): value is string {
 
 function toNumber(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
-}
-
-function headerStateRefreshLockKey(cacheKey: string) {
-  return `${cacheKey}:refresh-lock`;
-}
-
-function parseRefreshLock(raw: string | null): {
-  expiresAt: number;
-  token: string;
-} | null {
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as { expiresAt?: unknown; token?: unknown };
-    if (
-      typeof parsed.expiresAt === "number" &&
-      Number.isFinite(parsed.expiresAt) &&
-      typeof parsed.token === "string"
-    ) {
-      return { expiresAt: parsed.expiresAt, token: parsed.token };
-    }
-  } catch {}
-  return null;
 }
 
 function browserStorage(

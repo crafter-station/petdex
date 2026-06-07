@@ -1,17 +1,14 @@
 import { describe, expect, it } from "bun:test";
 
 import {
-  claimHeaderStateRefresh,
   clearCachedHeaderStateFromBrowser,
   headerStateCacheKey,
   headerStateFetchCacheMode,
   headerStateResponseSavedAt,
   INITIAL_HEADER_STATE,
-  nextHeaderStatePollDelay,
   normalizeHeaderState,
   parseCachedHeaderState,
   readCachedHeaderStateFromBrowser,
-  releaseHeaderStateRefreshClaim,
   serializeHeaderState,
   shouldRequestHeaderState,
   withHeaderUnreadCount,
@@ -261,97 +258,14 @@ describe("header state helpers", () => {
         cacheKey,
         serializeHeaderState(state, 1_000),
       );
-      expect(claimHeaderStateRefresh(cacheKey, 1_000, 15_000, "tab-a")).toEqual(
-        {
-          shouldRefresh: true,
-          token: "tab-a",
-        },
-      );
 
       clearCachedHeaderStateFromBrowser(cacheKey);
 
       expect(window.localStorage.getItem(cacheKey)).toBeNull();
       expect(window.sessionStorage.getItem(cacheKey)).toBeNull();
-      expect(claimHeaderStateRefresh(cacheKey, 2_000, 15_000, "tab-b")).toEqual(
-        {
-          shouldRefresh: true,
-          token: "tab-b",
-        },
-      );
     } finally {
       restore();
     }
-  });
-
-  it("claims automatic refreshes with a short shared browser lock", () => {
-    const restore = installWindowStorage(
-      new MemoryStorage(),
-      new MemoryStorage(),
-    );
-    const cacheKey = signedInCacheKey();
-
-    try {
-      expect(claimHeaderStateRefresh(cacheKey, 1_000, 15_000, "tab-a")).toEqual(
-        {
-          shouldRefresh: true,
-          token: "tab-a",
-        },
-      );
-      expect(claimHeaderStateRefresh(cacheKey, 2_000, 15_000, "tab-b")).toEqual(
-        {
-          shouldRefresh: false,
-          token: null,
-        },
-      );
-      expect(
-        claimHeaderStateRefresh(cacheKey, 16_001, 15_000, "tab-b"),
-      ).toEqual({
-        shouldRefresh: true,
-        token: "tab-b",
-      });
-    } finally {
-      restore();
-    }
-  });
-
-  it("releases only the matching automatic refresh claim", () => {
-    const restore = installWindowStorage(
-      new MemoryStorage(),
-      new MemoryStorage(),
-    );
-    const cacheKey = signedInCacheKey();
-
-    try {
-      expect(claimHeaderStateRefresh(cacheKey, 1_000, 15_000, "tab-a")).toEqual(
-        {
-          shouldRefresh: true,
-          token: "tab-a",
-        },
-      );
-      releaseHeaderStateRefreshClaim(cacheKey, "tab-b");
-      expect(claimHeaderStateRefresh(cacheKey, 2_000, 15_000, "tab-c")).toEqual(
-        {
-          shouldRefresh: false,
-          token: null,
-        },
-      );
-      releaseHeaderStateRefreshClaim(cacheKey, "tab-a");
-      expect(claimHeaderStateRefresh(cacheKey, 3_000, 15_000, "tab-c")).toEqual(
-        {
-          shouldRefresh: true,
-          token: "tab-c",
-        },
-      );
-    } finally {
-      restore();
-    }
-  });
-
-  it("schedules cached polls by remaining freshness window", () => {
-    expect(nextHeaderStatePollDelay(0, 1_000)).toBe(1_800_000);
-    expect(nextHeaderStatePollDelay(1_000, 61_000)).toBe(1_740_000);
-    expect(nextHeaderStatePollDelay(1_000, 1_801_000)).toBe(0);
-    expect(nextHeaderStatePollDelay(10_000, 1_000)).toBe(1_800_000);
   });
 
   it("scopes cache keys by signed-in user", () => {
