@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Star } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -27,11 +27,30 @@ export function GithubStarsLink({
   className?: string;
   size?: "nav" | "mobile";
 }) {
+  const rootRef = useRef<HTMLAnchorElement | null>(null);
   const [stars, setStars] = useState<number | null>(null);
+  const [shouldLoad, setShouldLoad] = useState(false);
   const t = useTranslations("header");
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    const node = rootRef.current;
+    if (!node || !("IntersectionObserver" in window)) {
+      setShouldLoad(true);
+      return;
+    }
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        setShouldLoad(true);
+        observer.disconnect();
+      }
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!shouldLoad || typeof window === "undefined") return;
 
     // Hydrate from cache so the count flickers in immediately on a
     // returning visitor; then refresh in the background if stale.
@@ -75,7 +94,7 @@ export function GithubStarsLink({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [shouldLoad]);
 
   const iconSize = size === "mobile" ? "size-5" : "size-4";
 
@@ -92,6 +111,7 @@ export function GithubStarsLink({
       render={
         // biome-ignore lint/a11y/useAnchorContent: children are injected by Button via render prop merging
         <a
+          ref={rootRef}
           href="https://github.com/crafter-station/petdex"
           target="_blank"
           rel="noreferrer"
