@@ -14,6 +14,16 @@ import { useHeaderState } from "@/components/header-state-provider";
 import { PetSoundButton } from "@/components/pet-sound-button";
 import { Button } from "@/components/ui/button";
 
+export type PetCardFooterProps = {
+  slug: string;
+  displayName: string;
+  zipUrl?: string;
+  soundUrl: string | null;
+  installCount: number;
+  likeCount: number;
+  initialLiked?: boolean;
+};
+
 // Inline footer bar at the bottom of each gallery card. Surfaces the
 // four most-used actions (like, install, download, share) without
 // forcing the user to open the pet page or the overflow menu.
@@ -28,15 +38,7 @@ function PetCardFooterImpl({
   installCount,
   likeCount,
   initialLiked,
-}: {
-  slug: string;
-  displayName: string;
-  zipUrl?: string;
-  soundUrl: string | null;
-  installCount: number;
-  likeCount: number;
-  initialLiked?: boolean;
-}) {
+}: PetCardFooterProps) {
   const router = useRouter();
   const clerk = useClerk();
   const locale = useLocale();
