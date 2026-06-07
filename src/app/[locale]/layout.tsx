@@ -9,10 +9,8 @@ import {
   setRequestLocale,
 } from "next-intl/server";
 
-import { AnnouncementQueue } from "@/components/announcement-queue";
 import { FeedbackWidget } from "@/components/feedback-widget";
 import { HeaderStateProvider } from "@/components/header-state-provider";
-import { ProfileAnnouncementModal } from "@/components/profile-announcement-modal";
 import { AppProviders } from "@/components/theme-providers";
 import { TopPromoStrip } from "@/components/zh/top-promo-strip";
 import { ZhLayoutSpacer } from "@/components/zh/zh-layout-spacer";
@@ -116,8 +114,6 @@ export default async function LocaleLayout({ children, params }: Props) {
             <HeaderStateProvider>
               {isZh ? <ZhLayoutSpacer>{children}</ZhLayoutSpacer> : children}
               <FeedbackWidget />
-              <AnnouncementQueue />
-              <ProfileAnnouncementModal />
             </HeaderStateProvider>
           </AppProviders>
         </NextIntlClientProvider>
