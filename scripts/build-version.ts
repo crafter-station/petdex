@@ -2,10 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-import { createBuildVersionToken } from "../src/lib/build-version-token";
-
 export type BuildVersionInfo = {
-  buildKey: string;
   builtAt: string;
   version: string;
 };
@@ -16,9 +13,8 @@ export function createBuildVersionInfo(
 ): BuildVersionInfo {
   const version = resolveBuildVersion(root);
   const builtAt = now.toISOString();
-  const buildKey = createBuildVersionToken({ builtAt, version }) ?? version;
 
-  return { buildKey, builtAt, version };
+  return { builtAt, version };
 }
 
 export function writeBuildVersionFile(
@@ -28,7 +24,6 @@ export function writeBuildVersionFile(
   const paths = getBuildVersionPaths(root);
 
   mkdirSync(paths.publicDir, { recursive: true });
-  mkdirSync(paths.generatedDir, { recursive: true });
   writeFileSync(
     paths.versionPath,
     `${JSON.stringify(
@@ -40,10 +35,6 @@ export function writeBuildVersionFile(
       2,
     )}\n`,
   );
-  writeFileSync(
-    paths.currentBuildPath,
-    `export const CURRENT_BUILD_KEY = ${JSON.stringify(versionInfo.buildKey)};\n`,
-  );
 
   return versionInfo;
 }
@@ -51,7 +42,7 @@ export function writeBuildVersionFile(
 export function ensureBuildVersionFiles(root = process.cwd()) {
   const paths = getBuildVersionPaths(root);
 
-  if (existsSync(paths.versionPath) && existsSync(paths.currentBuildPath)) {
+  if (existsSync(paths.versionPath)) {
     return;
   }
 
@@ -60,11 +51,8 @@ export function ensureBuildVersionFiles(root = process.cwd()) {
 
 function getBuildVersionPaths(root: string) {
   const publicDir = path.join(root, "public");
-  const generatedDir = path.join(root, "src", "generated");
 
   return {
-    currentBuildPath: path.join(generatedDir, "current-build.ts"),
-    generatedDir,
     publicDir,
     versionPath: path.join(publicDir, "version.json"),
   };
