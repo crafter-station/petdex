@@ -2,8 +2,9 @@
 
 ## Commands
 - Use Bun for repo work: `bun install`, not `npm install`. Published CLI docs mention `npm`/`npx` for end users only.
-- Recommended local app dev is `bun run dev:mock`; it needs no `.env.local`, loads `.env.mock`, auto-signs in as `contributor@petdex.local`, seeds PGlite from `pets/ideas.json`, and runs `next dev --webpack` because PGlite wasm/workers break under Turbopack.
-- Real-service dev is `bun dev` with `.env.local` copied from `.env.example`; this path expects Clerk, Postgres/Neon, R2, Upstash, Resend, OpenAI, and ElevenLabs credentials.
+- Recommended local app dev is `bun run dev:docker`; it boots local Postgres and Redis with shared Clerk dev defaults from `.env.dev`.
+- Maintainer dev is `bun dev` with `.env.local` copied from `.env.example`; this path expects Clerk, Postgres/Neon, R2, Upstash, Resend, OpenAI, and ElevenLabs credentials.
+- `bun run dev:mock` is deprecated and intentionally exits. Keep `.env.mock` only for targeted mock-backed tests or build checks.
 - Root checks: `bun run check` for Biome, `bun run format` to write Biome fixes, `bun run build` for the Next app, `bun test` for Bun tests, and `bun run i18n:check` after editing translation messages. There is no root `typecheck` script.
 - Focused tests use `bun test path/to/file.test.ts`. Tests that import `src/lib/db/client.ts` directly or indirectly, including `src/lib/pet-search.test.ts` and `src/lib/security.test.ts`, need a usable `DATABASE_URL` or mock env: `bun test --env-file=.env.mock src/lib/security.test.ts`.
 - `packages/petdex-cli` and `packages/discord-bot` are independent packages, not root workspaces; run their own `bun install` and package scripts from inside each directory. Root `tsconfig.json` excludes `packages`.
@@ -22,6 +23,6 @@
 - Submission identity and credit data must come from verified Clerk session or CLI bearer token, never from request bodies. Keep this split in `src/lib/submissions.ts`, `/api/submit`, and `/api/cli/submit*`.
 - State-changing browser endpoints should use `requireSameOrigin` from `src/lib/same-origin.ts`; CLI/server callers authenticate separately by bearer or service-side checks.
 - User-supplied asset/avatar/external URLs are allowlisted in `src/lib/url-allowlist.ts`. Adding a new host usually also needs CSP updates in `next.config.ts` and regression coverage in `src/lib/security.test.ts`.
-- CSP is explicit in `next.config.ts`; new Clerk/R2/UploadThing/analytics/media hosts must be added to the matching `script-src`, `connect-src`, `img-src`, `frame-src`, or `media-src` directive.
+- CSP is explicit in `next.config.ts`; new Clerk/R2/analytics/media hosts must be added to the matching `script-src`, `connect-src`, `img-src`, `frame-src`, or `media-src` directive.
 - Tailwind v4 tokens live in `src/app/globals.css` via `@theme inline` rather than `tailwind.config.*`; components should use semantic tokens such as `bg-surface`, `text-foreground`, and `border-border-base` instead of hardcoded `bg-white dark:*` pairs.
 - `bun run generate-assets` rewrites app/public icons and OG images from `public/brand/petdex-mark.svg`, including `src/app/favicon.ico` because Next 16 prefers the app favicon.

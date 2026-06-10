@@ -23,6 +23,11 @@ import {
   startDesktop,
   stopDesktop,
 } from "../src/desktop/process.js";
+import {
+  collectSelectableSlugs,
+  reloadDesktopAfterSelect,
+  setActivePet,
+} from "../src/desktop/select.js";
 import { runUpdate } from "../src/desktop/update.js";
 import { runInstall as runHooksInstall } from "../src/hooks/install.js";
 import {
@@ -39,8 +44,9 @@ import {
 } from "../src/telemetry.js";
 
 // ─── config ────────────────────────────────────────────────────────────────
-const PETDEX_URL = process.env.PETDEX_URL ?? "https://petdex.crafter.run";
-const FALLBACK_ISSUER = "https://clerk.petdex.crafter.run";
+const PETDEX_URL = process.env.PETDEX_URL ?? "https://petdex.dev";
+const PETDEX_REFERER = `${PETDEX_URL.replace(/\/+$/, "")}/`;
+const FALLBACK_ISSUER = "https://clerk.petdex.dev";
 const FALLBACK_CLIENT_ID = "LcThwEayl6KAA1Qm";
 const DEFAULT_SCOPES = ["profile", "email", "openid", "offline_access"];
 
@@ -108,7 +114,7 @@ async function getAuth(): Promise<ClerkCliAuth> {
   return _auth;
 }
 
-const VERSION = "0.4.1";
+const VERSION = "0.4.2";
 
 // ─── entrypoint ────────────────────────────────────────────────────────────
 main().catch((err) => {
@@ -178,6 +184,9 @@ async function main() {
     case "list":
       await cmdList();
       break;
+    case "select":
+      await cmdSelect(args.slice(1));
+      break;
     case "hooks":
       await cmdHooks(args.slice(1));
       break;
@@ -238,6 +247,7 @@ function printHelp() {
       `    ${pc.bold("install")} <slug...>  Install one or more pets into ~/.petdex/pets and ~/.codex/pets`,
       `    ${pc.bold("install desktop")}    Install the petdex-desktop binary (alternative to the .dmg)`,
       `    ${pc.bold("list")}               List approved pets`,
+      `    ${pc.bold("select")} [slug]      Set the active pet shown by the desktop mascot`,
       `    ${pc.bold("mcp-server")}          Start the MCP protocol server for Antigravity integration`,
       `    ${pc.bold("hooks install")}      Wire petdex-desktop into your coding agents`,
       `    ${pc.bold("toggle")}             One-shot wake/sleep. Flips the mascot on or off depending on current state`,
@@ -254,6 +264,8 @@ function printHelp() {
       `    ${dim("$")} petdex submit ~/.codex/pets/boba       ${dim("# single folder")}`,
       `    ${dim("$")} petdex install boba                    ${dim("# install a pet by slug")}`,
       `    ${dim("$")} petdex install boba doraemon mochi     ${dim("# install several at once")}`,
+      `    ${dim("$")} petdex select                          ${dim("# pick active mascot from installed pets")}`,
+      `    ${dim("$")} petdex select boba                     ${dim("# set active mascot directly")}`,
       `    ${dim("$")} petdex toggle                          ${dim("# wake or sleep the mascot")}`,
       `    ${dim("$")} petdex doctor                          ${dim("# diagnose install + agents")}`,
       `    ${dim("$")} petdex update                          ${dim("# pull the latest release")}`,
@@ -355,7 +367,7 @@ async function installOne(pet: ManifestPet): Promise<void> {
   // Validate response status before reading the body so a 404/500
   // doesn't silently land HTML inside pet.json or spritesheet.*.
   const fetchOrThrow = async (url: string): Promise<ArrayBuffer> => {
-    const res = await fetch(url);
+    const res = await fetch(url, { headers: { Referer: PETDEX_REFERER } });
     if (!res.ok) {
       throw new Error(`download ${url} -> ${res.status} ${res.statusText}`);
     }
@@ -508,7 +520,7 @@ async function cmdInstall(args: string[]) {
 }
 
 async function _download(url: string, dest: string): Promise<void> {
-  const res = await fetch(url);
+  const res = await fetch(url, { headers: { Referer: PETDEX_REFERER } });
   if (!res.ok) {
     throw new Error(`download ${url} → ${res.status}`);
   }
@@ -543,6 +555,51 @@ async function cmdList() {
   console.log(
     `\n${pc.dim("Install with")} ${pc.cyan("petdex install <slug>")}\n${pc.dim("Browse:")} ${pc.underline(PETDEX_URL)}`,
   );
+}
+
+async function cmdSelect(args: string[]) {
+  p.intro(pc.bgMagenta(pc.white(" petdex select ")));
+
+  const installedSlugs = await collectSelectableSlugs();
+
+  if (installedSlugs.length === 0) {
+    p.cancel(
+      `No usable pets installed. Run ${pc.cyan("petdex install <slug>")} first.`,
+    );
+    process.exit(1);
+  }
+
+  let slug = args[0];
+
+  if (!slug) {
+    const choice = await p.select({
+      message: "Which pet should the desktop mascot show?",
+      options: installedSlugs.map((s) => ({ value: s, label: s })),
+    });
+    if (p.isCancel(choice)) {
+      p.cancel("Cancelled.");
+      process.exit(0);
+    }
+    slug = choice as string;
+  } else if (!installedSlugs.includes(slug)) {
+    p.cancel(
+      `${pc.cyan(slug)} is not installed. Run ${pc.cyan(`petdex install ${slug}`)} first.`,
+    );
+    process.exit(1);
+  }
+
+  await setActivePet(slug);
+
+  const s = p.spinner();
+  s.start("Reloading desktop…");
+  const reload = await reloadDesktopAfterSelect();
+  if (reload.status === "reloaded") {
+    s.stop(`${pc.green("✓")} Active pet set to ${pc.cyan(slug)}`);
+  } else {
+    s.stop(
+      `${pc.green("✓")} Active pet set to ${pc.cyan(slug)}. ${pc.yellow("Restart the desktop to see the change.")} ${pc.dim(reload.reason)}`,
+    );
+  }
 }
 
 async function cmdSubmit(args: string[]) {
@@ -1438,7 +1495,7 @@ function cmdHooksKillswitch(sub: "toggle" | "on" | "off" | "status"): void {
   }
 }
 
-// One-shot first-run setup. The petdex.crafter.run/download landing
+// One-shot first-run setup. The petdex.dev/download landing
 // tells users to drag the DMG into Applications and then run this,
 // so init has to be idempotent across both layouts:
 //

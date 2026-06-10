@@ -1,6 +1,6 @@
 import { defaultLocale, type Locale } from "@/i18n/config";
 
-export const SITE_URL = "https://petdex.crafter.run";
+export const SITE_URL = "https://petdex.dev";
 
 const HREFLANG_BY_LOCALE: Record<Locale, string> = {
   en: "en",

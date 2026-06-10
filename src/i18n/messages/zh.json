@@ -126,7 +126,7 @@
     "petAnimated__fixme": true,
     "petParadeAria": "精选宠物",
     "surprise": {
-      "eyebrow": "惊喜掉落",
+      "eyebrow": "精选惊喜",
       "title": "有只宠物找到了你",
       "title__fixme": true,
       "dismiss": "关闭惊喜宠物",
@@ -420,6 +420,11 @@
       "chart": {
         "label": "曝光随时间变化",
         "empty": "还没有记录到活动。",
+        "exactValues": "精确数值",
+        "bucket": "时间段",
+        "impressions": "曝光",
+        "hovers": "悬停",
+        "clicks": "点击",
         "windows": {
           "eightHours": "最近 8 小时",
           "day": "最近 24 小时",
@@ -459,255 +464,6 @@
       "moreDetail": "请再多说一点（至少 4 个字符）。",
       "submitFailed": "提交失败（{status}）。",
       "network": "网络错误。请重试。"
-    }
-  },
-  "admin": {
-    "metadata": {
-      "title": "Petdex 管理后台"
-    },
-    "tabs": {
-      "ariaLabel": "管理分区",
-      "submissions": "提交",
-      "edits": "编辑",
-      "requests": "请求",
-      "collections": "合集",
-      "feedback": "反馈",
-      "campaigns": "广告活动",
-      "mailing": "邮件",
-      "manifest": "Manifest",
-      "insights": "数据",
-      "telemetry": "Telemetry",
-      "telemetry__fixme": true
-    },
-    "status": {
-      "pending": "待处理",
-      "held": "已保留",
-      "review_failed": "审核失败",
-      "auto_approved": "自动通过",
-      "auto_rejected": "自动拒绝",
-      "approved": "已通过",
-      "rejected": "已拒绝",
-      "discovered": "已发现",
-      "all": "全部",
-      "open": "开放",
-      "fulfilled": "已完成",
-      "dismissed": "已忽略",
-      "addressed": "已处理",
-      "archived": "已归档"
-    },
-    "kinds": {
-      "all": "所有类型",
-      "suggestion": "建议",
-      "bug": "Bug",
-      "praise": "表扬",
-      "other": "其他",
-      "suggestShort": "建议"
-    },
-    "queue": {
-      "eyebrow": "提交队列",
-      "title": "审核宠物",
-      "empty": "这个视图里没有宠物。"
-    },
-    "review": {
-      "needsName": "需要名字",
-      "edit": "编辑",
-      "placeholders": {
-        "displayName": "宠物显示名",
-        "slug": "slug（URL 安全）",
-        "description": "描述"
-      },
-      "rejectPrompt": "拒绝原因（可选）",
-      "requestFailed": "请求失败（{status}）",
-      "save": "保存",
-      "cancel": "取消",
-      "approve": "通过",
-      "reject": "拒绝",
-      "revive": "恢复为待处理",
-      "links": {
-        "zip": "zip",
-        "sprite": "精灵图Sprite",
-        "petJson": "pet.json"
-      },
-      "relative": {
-        "justNow": "刚刚"
-      },
-      "petTime": "PET",
-      "petAnimation": "宠物动画",
-      "similar": {
-        "possibleDuplicate": "可能重复",
-        "looksSimilar": "看起来相似",
-        "sameCharacter": "同一个角色？",
-        "hide": "隐藏",
-        "show": "显示"
-      }
-    },
-    "edits": {
-      "eyebrow": "编辑队列",
-      "title": "待审核编辑",
-      "description": "这是主人提交、等待重新审核的文本修改。在你处理之前，线上页面会继续显示已批准的内容。",
-      "empty": "没有待审核编辑。",
-      "submitted": "提交时间",
-      "displayName": "显示名",
-      "descriptionLabel": "描述",
-      "tags": "标签",
-      "emptyValue": "空",
-      "noChanges": "没有变化",
-      "noDiff": "检测到提交了编辑，但没有发现实际变化。可以拒绝以清空它。"
-    },
-    "editActions": {
-      "approve": "通过编辑",
-      "reject": "拒绝",
-      "rejectPrompt": "原因（可选，会发给主人）：",
-      "failed": "失败：{error}"
-    },
-    "feedback": {
-      "eyebrow": "收件箱",
-      "title": "反馈",
-      "empty": "这个视图里没有反馈。",
-      "thread": "线程",
-      "threadWithCount": "线程（{count}）",
-      "profile": "资料",
-      "viewProfile": "查看 @{handle} 的资料",
-      "sendEmail": "改为发送邮件",
-      "anonymous": "匿名",
-      "clerk": "clerk",
-      "filters": {
-        "pending": "待处理",
-        "addressed": "已处理",
-        "archived": "已归档",
-        "all": "全部"
-      },
-      "mailto": {
-        "bodyIntro": "感谢你在 Petdex 提交 {kind}",
-        "subject": "Re: 你的 Petdex 反馈：{excerpt}"
-      }
-    },
-    "feedbackActions": {
-      "address": "标记为已处理",
-      "archive": "归档",
-      "reopen": "重新打开为待处理",
-      "failed": "失败：{error}"
-    },
-    "campaigns": {
-      "eyebrow": "广告运营",
-      "title": "广告活动",
-      "description": "查看所有用户的广告活动，包括所有者信息、投放指标和活动图表。",
-      "overview": {
-        "totalCampaigns": "活动总数",
-        "totalSpend": "已预订花费 {value}",
-        "active": "投放中",
-        "statusDetail": "{paused} 个暂停，{exhausted} 个耗尽",
-        "pendingPayment": "待付款",
-        "deletedDetail": "{count} 个已删除",
-        "inventory": "已购买曝光",
-        "servedDetail": "已投放 {value}",
-        "impressions": "原始曝光",
-        "rawImpressionsDetail": "ad_impressions 表记录数",
-        "clicks": "点击",
-        "ctr": "点击率 {value}",
-        "hovers": "悬停",
-        "dismissals": "{value} 次隐藏",
-        "avgTime": "平均可见时间",
-        "avgTimeDetail": "基于 time-in-view 事件"
-      },
-      "filters": {
-        "status": "状态",
-        "search": "搜索",
-        "searchPlaceholder": "标题、公司、邮箱、用户 ID、URL",
-        "limit": "数量限制",
-        "apply": "应用筛选",
-        "clear": "清除"
-      },
-      "statuses": {
-        "all": "所有状态",
-        "pending_payment": "待付款",
-        "active": "投放中",
-        "exhausted": "已耗尽",
-        "paused": "已暂停",
-        "deleted": "已删除"
-      },
-      "owner": {
-        "title": "所有者",
-        "userId": "用户 ID",
-        "contactEmail": "联系邮箱",
-        "company": "公司"
-      },
-      "showing": "显示 {total} 个匹配活动中的 {shown} 个",
-      "empty": "没有广告活动匹配这些筛选条件。"
-    },
-    "requests": {
-      "eyebrow": "社区愿望单",
-      "title": "宠物请求",
-      "summary": "{open} 个开放 · {fulfilled} 个完成 · {dismissed} 个忽略",
-      "openSection": "开放中",
-      "fulfilledSection": "已完成",
-      "dismissedSection": "已忽略",
-      "emptyOpen": "现在没有开放请求。",
-      "votes": "票",
-      "moreVoters": "+{count} 更多",
-      "anonymous": "匿名"
-    },
-    "requestActions": {
-      "fulfill": "完成",
-      "dismiss": "忽略",
-      "reopen": "重新打开",
-      "approveImage": "批准图片",
-      "approveImage__fixme": true,
-      "rejectImage": "拒绝图片",
-      "rejectImage__fixme": true,
-      "slug": "slug",
-      "placeholder": "cool-clippy",
-      "mark": "标记"
-    },
-    "manifest": {
-      "eyebrow": "遥测",
-      "title": "Manifest 拉取",
-      "description": "这里显示谁在拉取 /api/manifest。IP 会按天做 SHA-256 哈希，所以同一天内可分组，但不能反查。",
-      "total": "总量（全部时间）",
-      "last24": "最近 24 小时",
-      "distinct24": "不同 IP（24 小时）",
-      "byDay": "按天 · 最近 14 天",
-      "loudestIps": "最活跃的 IP · 最近 7 天",
-      "topUserAgents": "最常见的 user-agent · 最近 7 天",
-      "byCountry": "按国家 · 最近 7 天",
-      "headers": {
-        "ipHash": "IP 哈希",
-        "country": "国家",
-        "lastUa": "最新 UA",
-        "fetches": "拉取次数"
-      },
-      "noUa": "无 UA"
-    },
-    "threadPage": {
-      "back": "← 收件箱"
-    },
-    "telemetry": {
-      "__fixme": true,
-      "eyebrow": "Telemetry",
-      "title": "CLI usage telemetry",
-      "description": "Anonymous install volume, OS distribution, and agent adoption from petdex CLI users.",
-      "stats": {
-        "totalInstalls": "Total installs",
-        "weeklyActive": "Weekly active installs",
-        "totalEvents": "Total events"
-      },
-      "sections": {
-        "adoptionCurve": "Adoption over 30 days",
-        "osDistribution": "OS distribution",
-        "archDistribution": "Arch distribution",
-        "versionAdoption": "Version adoption",
-        "topAgents": "Top agents",
-        "funnel": "Conversion funnel",
-        "geoTop10": "Top 10 countries"
-      },
-      "funnel": {
-        "install": "Install desktop",
-        "hooks": "Hooks install",
-        "start": "Desktop start",
-        "firstEvent": "First state"
-      },
-      "empty": "No telemetry events yet.",
-      "noData": "No data"
     }
   },
   "submit": {
@@ -814,30 +570,6 @@
         "unreadableSpritesheet": "无法读取精灵图集 Spritesheet 图片。",
         "tooSmall": "精灵图集 Spritesheet 看起来太小（{width}×{height}）。请使用 8×9 帧网格（推荐 {recommendedWidth}×{recommendedHeight}）。"
       }
-    }
-  },
-  "collaborator": {
-    "metadata": {
-      "title": "Petdex Collaborator"
-    },
-    "tabs": {
-      "ariaLabel": "协作者分区",
-      "submissions": "提交",
-      "moderation": "已发布审核",
-      "edits": "元数据编辑",
-      "requests": "宠物请求",
-      "collections": "合集",
-      "wechatQr": "WeChat QR"
-    },
-    "moderation": {
-      "eyebrow": "审核",
-      "title": "已发布宠物",
-      "searchPlaceholder": "按名称、slug、描述或 owner 搜索",
-      "search": "搜索",
-      "clear": "清除",
-      "previous": "上一页",
-      "next": "下一页",
-      "empty": "没有匹配的已发布宠物。"
     }
   },
   "requests": {
@@ -1059,11 +791,11 @@
   "builtWith": {
     "metadata": {
       "titleTemplate": "用 Petdex 构建：{total} 个社区项目",
-      "description": "{total} 个基于 Petdex 构建的开源项目：桌面伙伴、专注工具、可穿戴设备、SDK 和 pet 创作者。"
+      "description": "{total} 个基于 Petdex 构建的开源和源码可见项目：桌面伙伴、专注工具、可穿戴设备、SDK 和 pet 创作者。"
     },
     "eyebrow": "用 Petdex 构建",
     "title": "社区正在 Petdex 上发布的应用",
-    "subtitle": "{total} 个开源项目使用 Petdex 的图库、API 或 pet 格式。专注工具、可穿戴设备、SDK 和创作者。精选、有证据、不靠感觉。",
+    "subtitle": "{total} 个开源和源码可见项目使用 Petdex 的图库、API 或 pet 格式。专注工具、可穿戴设备、SDK 和创作者。精选、有证据、不靠感觉。",
     "stats": {
       "stars": "总计 {total} stars",
       "projects": "{total} 个项目",
@@ -1852,6 +1584,21 @@
     "downloadCta": "下载",
     "seeHowCta": "了解工作原理"
   },
+  "securityUpdate": {
+    "ariaLabel": "Petdex 安全更新",
+    "dismissAria": "忽略安全更新",
+    "closeAria": "关闭",
+    "eyebrow": "安全更新",
+    "title": "更新 Petdex 以继续安装宠物",
+    "description": "我们加入了受保护的资源下载，用来阻止 hotlink、直接抓取和非官方 origin。",
+    "impact": "Petdex 网站、最新版 CLI 和最新版桌面应用已经支持。旧的 CLI 快照在刷新前可能无法安装宠物。",
+    "commandLabel": "在终端运行一次：",
+    "commandHint": "这会拉取最新桌面版本，并刷新 Petdex Desktop 使用的 CLI 快照。",
+    "originTitle": "想从其他 origin 使用 Petdex 资源？",
+    "originBody": "请提交 issue，写上 origin URL 和使用场景。我们会逐个审核 allowlist 请求。",
+    "doneCta": "我会更新",
+    "originCta": "申请 origin 访问"
+  },
   "githubStar": {
     "eyebrow": "开源 · Petdex",
     "title": "帮助 Petdex 成长。在 GitHub 上加星",
@@ -1873,7 +1620,7 @@
   "collectionsPage": {
     "metadata": {
       "title": "精选合集",
-      "description": "按系列、类别或主题浏览 Petdex 合集。搜索、排序和筛选，找到你的一套。"
+      "description": "按系列、类别或主题浏览 Petdex 合集，使用快速的公开目录。"
     },
     "hero": {
       "eyebrow": "精选合集 Featured collections",
@@ -1950,19 +1697,6 @@
   "onboarding": {
     "skip": "跳过引导"
   },
-  "adminReview": {
-    "namePlaceholder": "宠物显示名称",
-    "descriptionPlaceholder": "描述",
-    "editAria": "编辑宠物",
-    "automationEvidence": "自动审核证据",
-    "noSummary": "暂无摘要。",
-    "confidence": "置信度：{confidence}%。",
-    "evidenceAssets": "素材",
-    "evidenceSecurity": "安全",
-    "evidencePolicy": "政策",
-    "evidenceVisualText": "图中文字",
-    "evidenceVisualSignals": "视觉信号"
-  },
   "sticker": {
     "ctaWeChat": "保存为微信表情",
     "ctaGeneric": "保存为表情",
@@ -1986,25 +1720,6 @@
     "howToWhatsApp": "WhatsApp：用 Sticker Maker 应用导入 zip 包",
     "desktopNote": "WhatsApp 桌面版只显示首帧 · 手机端正常播放动画",
     "errorGeneric": "出错了，请重试"
-  },
-  "collaboratorWechatQr": {
-    "panelTitle": "微信群二维码管理",
-    "currentQr": "当前二维码",
-    "expiresIn": "{days}天后过期",
-    "expired": "已过期",
-    "uploadCta": "上传新二维码",
-    "dropZoneHint": "拖拽 JPG / PNG 图片，最大 200KB",
-    "validating": "AI 验证中...",
-    "validationFailed": "验证失败",
-    "uploadSuccess": "上传成功！",
-    "history": "历史记录",
-    "historyEmpty": "还没有上传记录",
-    "statusActive": "当前",
-    "statusReplaced": "已替换",
-    "statusRejected": "已拒绝",
-    "uploadedBy": "上传者",
-    "rotateNow": "立即更新",
-    "viewOnPublic": "在公共页面查看"
   },
   "collectionActionMenu": {
     "moreActions": "{title} 的更多操作",
@@ -2248,8 +1963,29 @@
     "sections": {
       "quickStart": {
         "title": "快速开始",
-        "intro": "一条命令就能把精选宠物装进 Codex。安装不需要账号，只有提交作品时才需要登录。",
-        "afterCommand": "CLI 会拉取宠物包，并放到 <code>~/.codex/pets/boba/</code>。要在 Codex 里启用它，打开 <strong>Settings → Appearance → Pets</strong>，然后点击 <strong>Select</strong>。在 Codex 里使用 <code>/pet</code> 可以让宠物 wake 或 sleep。",
+        "intro": "按这份清单走完，就能把宠物装好、在 Codex 里看到它，并接上桌面应用。安装不需要账号，只有提交作品时才需要登录。",
+        "steps": {
+          "install": {
+            "title": "先安装一只已知宠物",
+            "body": "建议先用 Boba，这样 Codex 里一定有一个可以选择的宠物目录。",
+            "result": "你应该能看到 <code>~/.codex/pets/boba/</code>，里面包含 <code>pet.json</code> 和 spritesheet。"
+          },
+          "desktop": {
+            "title": "初始化桌面应用和 hooks",
+            "body": "如果你想让宠物浮在桌面上，并响应 coding agent 的活动，就运行完整初始化。",
+            "result": "Petdex 会下载并启动桌面应用，同时给支持的 agent 接上 <code>/petdex</code>。"
+          },
+          "select": {
+            "title": "在 Codex 里选择宠物",
+            "body": "打开 Codex，进入 <strong>Settings → Appearance → Pets</strong>，选择 <strong>Boba</strong>，然后点击 <strong>Select</strong>。",
+            "result": "在 Codex 里使用 <code>/pet</code> 可以唤醒宠物，也可以把它收起来。"
+          },
+          "verify": {
+            "title": "验证配置是否正常",
+            "body": "如果宠物没有出现，运行诊断命令；安装 hooks 后，也可以在支持的 agent 里输入 <code>/petdex status</code>。",
+            "result": "doctor 会指出缺失的 binary、hook、token 或宠物目录，并给出具体修复提示。"
+          }
+        },
         "callout": "还没有宠物点子？先用 Codex Hatch Pet skill <link>孵化一只</link>，再回来运行 <code>petdex submit</code>。"
       },
       "install": {
@@ -2264,14 +2000,14 @@
       "authenticate": {
         "title": "登录",
         "intro": "登录一次之后，submit 这类需要身份的命令就能直接运行。",
-        "flow": "登录流程使用 OAuth 2.0 + PKCE：CLI 会打开浏览器，你在 <code>accounts.petdex.crafter.run</code> 通过 Clerk 登录，浏览器再把授权码回传给一次性的 localhost listener。CLI 会用授权码换取 token，并保存到系统钥匙串。密钥不会明文落盘。",
+        "flow": "登录流程使用 OAuth 2.0 + PKCE：CLI 会打开浏览器，你在 <code>accounts.petdex.dev</code> 通过 Clerk 登录，浏览器再把授权码回传给一次性的 localhost listener。CLI 会用授权码换取 token，并保存到系统钥匙串。密钥不会明文落盘。",
         "otherCommands": "其它登录相关命令："
       },
       "commands": {
         "title": "命令",
         "intro": "CLI 覆盖完整流程：发现、安装、孵化、发布，以及桌面应用和 Agent hooks。所有命令都支持 <code>--help</code>。",
         "listBody": "列出所有已通过审核的宠物和署名信息。安装前用它来浏览很方便。",
-        "installBody": "把宠物放到 <code>~/.codex/pets/{petName}/</code>。效果等同于 <code>curl -sSf https://petdex.crafter.run/install/{petName} | sh</code>。",
+        "installBody": "把宠物放到 <code>~/.codex/pets/{petName}/</code>。效果等同于 <code>curl -sSf https://petdex.dev/install/{petName} | sh</code>。",
         "submitIntro": "把你的宠物发布到图库。CLI 支持三种提交形式：",
         "submitSingle": "<strong>单个文件夹</strong>：<code>petdex submit ~/.codex/pets/boba</code>",
         "submitZip": "<strong>单个 zip</strong>：<code>petdex submit ~/Downloads/boba.zip</code>",
@@ -2374,8 +2110,8 @@
       "config": {
         "title": "配置",
         "intro": "CLI 内置了指向生产环境的默认配置。只有在测试非生产部署时，才需要覆盖环境变量。",
-        "petdexUrl": "<code>PETDEX_URL</code>：基础 URL，默认 <code>https://petdex.crafter.run</code>",
-        "clerkIssuer": "<code>CLERK_ISSUER</code>：OAuth issuer，默认 <code>https://clerk.petdex.crafter.run</code>",
+        "petdexUrl": "<code>PETDEX_URL</code>：基础 URL，默认 <code>https://petdex.dev</code>",
+        "clerkIssuer": "<code>CLERK_ISSUER</code>：OAuth issuer，默认 <code>https://clerk.petdex.dev</code>",
         "clerkClientId": "<code>CLERK_OAUTH_CLIENT_ID</code>：公开 client id（内置在 CLI 二进制文件里）"
       },
       "contribute": {

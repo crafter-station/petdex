@@ -1,13 +1,17 @@
 import { getTranslations } from "next-intl/server";
 
-import { getCollectionsForListing } from "@/lib/collections";
+import { sortCollectionListingItems } from "@/lib/collection-listing-order";
+import {
+  getCollectionListingMetadata,
+  getCollectionListingPreviewsBySlugs,
+} from "@/lib/collections";
 import { buildLocaleAlternates } from "@/lib/locale-routing";
 import { resolveOwnerCredits } from "@/lib/owner-credit";
 
-import { CollectionsBrowser } from "@/components/collections-browser";
 import { JsonLd } from "@/components/json-ld";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
+import { StaticCollectionCard } from "@/components/static-collection-card";
 
 import { hasLocale } from "@/i18n/config";
 
@@ -17,8 +21,9 @@ import { hasLocale } from "@/i18n/config";
 // a function on every visit.
 export const revalidate = 86400;
 
-const SITE_URL = "https://petdex.crafter.run";
+const SITE_URL = "https://petdex.dev";
 const MIN_PETS = 4;
+const INITIAL_PREVIEW_COUNT = 24;
 
 export async function generateMetadata({
   params,
@@ -50,7 +55,20 @@ export default async function CollectionsPage({
     locale: hasLocale(locale) ? locale : "en",
     namespace: "collectionsPage",
   });
-  const collections = await getCollectionsForListing(MIN_PETS, 6);
+  const browserT = await getTranslations({
+    locale: hasLocale(locale) ? locale : "en",
+    namespace: "collectionsBrowser",
+  });
+  const collections = await getCollectionListingMetadata(MIN_PETS);
+  const defaultVisibleOrder = sortCollectionListingItems(collections, "size");
+  const initialPreviewCollections = await getCollectionListingPreviewsBySlugs(
+    defaultVisibleOrder.slice(0, INITIAL_PREVIEW_COUNT).map((c) => c.slug),
+    MIN_PETS,
+    6,
+  );
+  const previewPetsBySlug = new Map(
+    initialPreviewCollections.map((c) => [c.slug, c.pets]),
+  );
 
   const ownerIds = collections
     .map((c) => c.ownerId)
@@ -81,7 +99,7 @@ export default async function CollectionsPage({
     },
   };
 
-  const browserItems = collections.map((c) => ({
+  const browserItems = defaultVisibleOrder.map((c) => ({
     slug: c.slug,
     title: c.title,
     description: c.description,
@@ -89,7 +107,11 @@ export default async function CollectionsPage({
     externalUrl: c.externalUrl,
     coverPetSlug: c.coverPetSlug,
     petCount: c.petCount,
-    pets: c.pets,
+    pets: (previewPetsBySlug.get(c.slug) ?? []).map((pet) => ({
+      slug: pet.slug,
+      displayName: pet.displayName,
+      spritesheetPath: pet.spritesheetPath,
+    })),
   }));
 
   return (
@@ -113,7 +135,43 @@ export default async function CollectionsPage({
       </section>
 
       <section className="mx-auto w-full max-w-[1440px] px-5 py-10 md:px-8 md:py-14">
-        <CollectionsBrowser collections={browserItems} credits={creditsObj} />
+        <div className="mb-4 flex items-center justify-end">
+          <span className="text-xs text-muted-3">
+            {browserT("showingCount", {
+              visible: browserItems.length,
+              total: browserItems.length,
+            })}
+          </span>
+        </div>
+        <div className="grid auto-rows-fr gap-5 md:grid-cols-2 lg:grid-cols-3">
+          {browserItems.map((collection) => {
+            const owner = collection.ownerId
+              ? (creditsObj[collection.ownerId] ?? null)
+              : null;
+            return (
+              <StaticCollectionCard
+                key={collection.slug}
+                collection={collection}
+                owner={owner}
+                labels={{
+                  kind: {
+                    franchise: browserT("kindLabel.franchise"),
+                    category: browserT("kindLabel.category"),
+                    categorySub: browserT("kindLabel.categorySub"),
+                    other: browserT("kindLabel.other"),
+                  },
+                  petCount: browserT("card.petCount", {
+                    count: collection.petCount,
+                  }),
+                  siteLink: browserT("card.siteLink"),
+                  byOwner: owner
+                    ? browserT("card.byOwner", { name: owner.name })
+                    : null,
+                }}
+              />
+            );
+          })}
+        </div>
       </section>
 
       <SiteFooter />

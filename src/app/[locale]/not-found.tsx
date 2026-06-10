@@ -3,9 +3,9 @@ import Link from "next/link";
 import { ArrowRight, Search, Sparkles } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 
-import { CommandLine } from "@/components/command-line";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
+import { StaticCommandLine } from "@/components/static-command-line";
 
 export async function generateMetadata({
   params,
@@ -75,9 +75,8 @@ export default async function NotFound() {
           <p className="font-mono text-[10px] tracking-[0.22em] text-muted-3 uppercase">
             {t("terminalEyebrow")}
           </p>
-          <CommandLine
+          <StaticCommandLine
             command="npx petdex install boba"
-            source="not-found"
             className="mt-3"
           />
         </div>

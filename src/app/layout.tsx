@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 
 import "./globals.css";
 
-const SITE_URL = "https://petdex.crafter.run";
+const SITE_URL = "https://petdex.dev";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),

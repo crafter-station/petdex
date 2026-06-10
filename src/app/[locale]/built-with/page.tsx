@@ -15,7 +15,7 @@ import { SiteHeader } from "@/components/site-header";
 import builtWithData from "@/data/built-with.json";
 import { hasLocale } from "@/i18n/config";
 
-const SITE_URL = "https://petdex.crafter.run";
+const SITE_URL = "https://petdex.dev";
 const SUBMIT_ISSUE_URL =
   "https://github.com/crafter-station/petdex/issues/new?template=built-with.yml";
 const REGISTRY_URL =

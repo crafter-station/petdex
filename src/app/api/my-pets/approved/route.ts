@@ -4,6 +4,7 @@ import { auth } from "@clerk/nextjs/server";
 import { and, desc, eq } from "drizzle-orm";
 
 import { db, schema } from "@/lib/db/client";
+import { toCurrentR2PublicUrl } from "@/lib/r2-public-url";
 
 export const runtime = "nodejs";
 
@@ -33,5 +34,10 @@ export async function GET(): Promise<Response> {
     )
     .orderBy(desc(schema.submittedPets.approvedAt));
 
-  return NextResponse.json({ pets: rows });
+  return NextResponse.json({
+    pets: rows.map((row) => ({
+      ...row,
+      spritesheetUrl: toCurrentR2PublicUrl(row.spritesheetUrl),
+    })),
+  });
 }

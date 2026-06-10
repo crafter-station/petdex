@@ -11,6 +11,7 @@ import {
   eq,
   ilike,
   inArray,
+  ne,
   or,
   type SQL,
   sql,
@@ -22,10 +23,16 @@ import { db, schema } from "@/lib/db/client";
 import { getAvailableBatches } from "@/lib/dex-batch.server";
 import { PETDEX_EMBEDDING_MODEL } from "@/lib/embeddings";
 import { withNextDataCache } from "@/lib/next-data-cache";
-import type { PetWithMetrics } from "@/lib/pets";
 import { rowToPet } from "@/lib/pets";
 import { embedQuery, looksLikeVibeQuery } from "@/lib/query-embed";
-import { PET_KINDS, PET_VIBES, type PetKind, type PetVibe } from "@/lib/types";
+import { toCurrentR2PublicUrl } from "@/lib/r2-public-url";
+import {
+  PET_KINDS,
+  PET_VIBES,
+  type PetdexPet,
+  type PetKind,
+  type PetVibe,
+} from "@/lib/types";
 
 const rawSql = neon(process.env.DATABASE_URL ?? "");
 
@@ -57,8 +64,33 @@ export type SearchFacets = {
   batches: Array<{ key: string; label: string; count: number }>;
 };
 
+export type SearchPet = Pick<
+  PetdexPet,
+  | "slug"
+  | "displayName"
+  | "description"
+  | "spritesheetPath"
+  | "zipUrl"
+  | "soundUrl"
+  | "featured"
+  | "kind"
+  | "vibes"
+  | "tags"
+  | "dominantColor"
+  | "submittedBy"
+  | "source"
+  | "approvedAt"
+> & {
+  dexNumber?: number | null;
+  metrics: {
+    installCount: number;
+    likeCount: number;
+    zipDownloadCount: number;
+  };
+};
+
 export type SearchOutput = {
-  pets: PetWithMetrics[];
+  pets: SearchPet[];
   total: number;
   nextCursor: number | null;
   /** Which path produced the results. 'vibe' = embedding cosine match,
@@ -166,7 +198,6 @@ export async function searchPets(
   const installCountSql = sql<number>`coalesce(${schema.petMetrics.installCount}, 0)`;
   const likeCountSql = sql<number>`coalesce(${schema.petMetrics.likeCount}, 0)`;
   const zipDownloadCountSql = sql<number>`coalesce(${schema.petMetrics.zipDownloadCount}, 0)`;
-
   const orderBy = orderForSort(
     sortKey,
     installCountSql,
@@ -174,18 +205,53 @@ export async function searchPets(
     input.shuffleSeed,
   );
 
+  const dexNumbers = db.$with("dex_numbers").as(
+    db
+      .select({
+        slug: schema.submittedPets.slug,
+        dexNumber:
+          sql<number>`row_number() OVER (ORDER BY ${schema.submittedPets.approvedAt} ASC, ${schema.submittedPets.createdAt} ASC)::int`.as(
+            "dex_number",
+          ),
+      })
+      .from(schema.submittedPets)
+      .where(
+        and(
+          eq(schema.submittedPets.status, "approved"),
+          ne(schema.submittedPets.source, "discover"),
+        ),
+      ),
+  );
+
   const pageRows = await db
+    .with(dexNumbers)
     .select({
-      pet: schema.submittedPets,
+      slug: schema.submittedPets.slug,
+      displayName: schema.submittedPets.displayName,
+      description: schema.submittedPets.description,
+      spritesheetUrl: schema.submittedPets.spritesheetUrl,
+      zipUrl: schema.submittedPets.zipUrl,
+      soundUrl: schema.submittedPets.soundUrl,
+      featured: schema.submittedPets.featured,
+      kind: schema.submittedPets.kind,
+      vibes: schema.submittedPets.vibes,
+      tags: schema.submittedPets.tags,
+      dominantColor: schema.submittedPets.dominantColor,
+      creditName: schema.submittedPets.creditName,
+      creditImage: schema.submittedPets.creditImage,
+      source: schema.submittedPets.source,
+      approvedAt: schema.submittedPets.approvedAt,
       installCount: installCountSql,
       likeCount: likeCountSql,
       zipDownloadCount: zipDownloadCountSql,
+      dexNumber: dexNumbers.dexNumber,
     })
     .from(schema.submittedPets)
     .leftJoin(
       schema.petMetrics,
       eq(schema.petMetrics.petSlug, schema.submittedPets.slug),
     )
+    .leftJoin(dexNumbers, eq(dexNumbers.slug, schema.submittedPets.slug))
     .where(where)
     .orderBy(...orderBy)
     .offset(cursor)
@@ -194,14 +260,7 @@ export async function searchPets(
   const hasNext = pageRows.length > limit;
   const slice = hasNext ? pageRows.slice(0, limit) : pageRows;
 
-  const pets: PetWithMetrics[] = slice.map((row) => ({
-    ...rowToPet(row.pet),
-    metrics: {
-      installCount: row.installCount ?? 0,
-      likeCount: row.likeCount ?? 0,
-      zipDownloadCount: row.zipDownloadCount ?? 0,
-    },
-  }));
+  const pets = slice.map(toSearchPetFromRow);
 
   const out: SearchPageOutput = {
     pets,
@@ -253,6 +312,11 @@ async function vibeSearch(args: {
   // pgvector cosine distance: <=> returns 0 (identical) -> 2 (opposite).
   // similarity = 1 - distance, so 1.0 = perfect match.
   const rows = (await rawSql`
+    WITH dex_numbers AS (
+      SELECT slug, row_number() OVER (ORDER BY approved_at ASC, created_at ASC)::int AS dex_number
+      FROM submitted_pets
+      WHERE status = 'approved' AND source <> 'discover'
+    )
     SELECT
       sp.id, sp.slug, sp.display_name, sp.description,
       sp.spritesheet_url, sp.pet_json_url, sp.zip_url, sp.sound_url,
@@ -264,9 +328,11 @@ async function vibeSearch(args: {
       coalesce(pm.install_count, 0) as install_count,
       coalesce(pm.like_count, 0) as like_count,
       coalesce(pm.zip_download_count, 0) as zip_download_count,
+      dn.dex_number,
       1 - (sp.embedding <=> ${literal}::vector) as similarity
     FROM submitted_pets sp
     LEFT JOIN pet_metrics pm ON pm.pet_slug = sp.slug
+    LEFT JOIN dex_numbers dn ON dn.slug = sp.slug
     WHERE sp.status = 'approved'
       AND sp.embedding IS NOT NULL
       AND sp.embedding_model = ${PETDEX_EMBEDDING_MODEL}
@@ -278,14 +344,14 @@ async function vibeSearch(args: {
   const slice = ranked.slice(args.cursor, args.cursor + args.limit);
   const hasNext = ranked.length > args.cursor + args.limit;
 
-  const pets: PetWithMetrics[] = slice.map((row) => ({
-    ...rowToPet(rowToSchema(row)),
-    metrics: {
+  const pets = slice.map((row) =>
+    toSearchPet(rowToPet(rowToSchema(row)), {
+      dexNumber: row.dex_number == null ? null : Number(row.dex_number),
       installCount: Number(row.install_count) || 0,
       likeCount: Number(row.like_count) || 0,
       zipDownloadCount: Number(row.zip_download_count) || 0,
-    },
-  }));
+    }),
+  );
 
   const out: SearchPageOutput = {
     pets,
@@ -295,6 +361,81 @@ async function vibeSearch(args: {
   if (args.includeTotal) out.total = ranked.length;
   if (args.includeFacets) out.facets = await loadFacets();
   return out;
+}
+
+function toSearchPet(
+  pet: PetdexPet,
+  metrics: SearchPet["metrics"] & { dexNumber?: number | null },
+): SearchPet {
+  return {
+    slug: pet.slug,
+    displayName: pet.displayName,
+    description: pet.description,
+    spritesheetPath: pet.spritesheetPath,
+    zipUrl: pet.zipUrl,
+    soundUrl: pet.soundUrl,
+    featured: pet.featured,
+    kind: pet.kind,
+    vibes: pet.vibes,
+    tags: pet.tags,
+    dominantColor: pet.dominantColor,
+    submittedBy: pet.submittedBy,
+    source: pet.source,
+    approvedAt: pet.approvedAt,
+    dexNumber: metrics.dexNumber,
+    metrics: {
+      installCount: metrics.installCount,
+      likeCount: metrics.likeCount,
+      zipDownloadCount: metrics.zipDownloadCount,
+    },
+  };
+}
+
+function toSearchPetFromRow(row: {
+  slug: string;
+  displayName: string;
+  description: string;
+  spritesheetUrl: string;
+  zipUrl: string | null;
+  soundUrl: string | null;
+  featured: boolean;
+  kind: string;
+  vibes: unknown;
+  tags: unknown;
+  dominantColor: string | null;
+  creditName: string | null;
+  creditImage: string | null;
+  source: PetdexPet["source"];
+  approvedAt: Date | null;
+  dexNumber: number | null;
+  installCount: number | null;
+  likeCount: number | null;
+  zipDownloadCount: number | null;
+}): SearchPet {
+  return {
+    slug: row.slug,
+    displayName: row.displayName,
+    description: row.description,
+    spritesheetPath: toCurrentR2PublicUrl(row.spritesheetUrl),
+    zipUrl: toCurrentR2PublicUrl(row.zipUrl) ?? undefined,
+    soundUrl: toCurrentR2PublicUrl(row.soundUrl),
+    featured: row.featured,
+    kind: row.kind as PetKind,
+    vibes: Array.isArray(row.vibes) ? (row.vibes as PetVibe[]) : [],
+    tags: Array.isArray(row.tags) ? (row.tags as string[]) : [],
+    dominantColor: row.dominantColor,
+    submittedBy: row.creditName
+      ? { name: row.creditName, imageUrl: row.creditImage ?? undefined }
+      : undefined,
+    source: row.source,
+    approvedAt: row.approvedAt?.toISOString() ?? null,
+    dexNumber: row.dexNumber,
+    metrics: {
+      installCount: row.installCount ?? 0,
+      likeCount: row.likeCount ?? 0,
+      zipDownloadCount: row.zipDownloadCount ?? 0,
+    },
+  };
 }
 
 // Map a snake_case row out of the raw query into the camelCase shape

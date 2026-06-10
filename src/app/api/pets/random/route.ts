@@ -1,21 +1,13 @@
 import { NextResponse } from "next/server";
 
-import { and, eq, ne } from "drizzle-orm";
-
-import { AGGREGATE_KEYS, cachedAggregate } from "@/lib/db/cached-aggregates";
-import { db, schema } from "@/lib/db/client";
+import { getRandomPetPool } from "@/lib/random-pet-pool";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const RANDOM_POOL_TTL_SECONDS = 300;
-
-type RandomPet = {
-  slug: string;
-  displayName: string;
-  description: string;
-  spritesheetPath: string;
-};
+const RANDOM_CACHE_CONTROL =
+  "public, max-age=30, s-maxage=60, stale-while-revalidate=300";
+const RANDOM_VARY = "Accept";
 
 // GET /api/pets/random?exclude=current-slug
 //
@@ -52,36 +44,23 @@ export async function GET(req: Request): Promise<Response> {
         href: `/pets/${next.slug}`,
         installHref: `/install/${next.slug}`,
       },
-      { headers: { "Cache-Control": "private, no-store" } },
+      {
+        headers: {
+          "Cache-Control": RANDOM_CACHE_CONTROL,
+          Vary: RANDOM_VARY,
+        },
+      },
     );
   }
 
   if (!next) {
-    return NextResponse.redirect(new URL("/", req.url), 302);
+    return NextResponse.redirect(new URL("/", req.url), {
+      status: 302,
+      headers: { "Cache-Control": "private, no-store", Vary: RANDOM_VARY },
+    });
   }
-  return NextResponse.redirect(new URL(`/pets/${next.slug}`, req.url), 302);
-}
-
-async function getRandomPetPool(): Promise<RandomPet[]> {
-  return cachedAggregate(
-    {
-      key: AGGREGATE_KEYS.randomPetPool,
-      ttlSeconds: RANDOM_POOL_TTL_SECONDS,
-    },
-    async () =>
-      db
-        .select({
-          slug: schema.submittedPets.slug,
-          displayName: schema.submittedPets.displayName,
-          description: schema.submittedPets.description,
-          spritesheetPath: schema.submittedPets.spritesheetUrl,
-        })
-        .from(schema.submittedPets)
-        .where(
-          and(
-            eq(schema.submittedPets.status, "approved"),
-            ne(schema.submittedPets.source, "discover"),
-          ),
-        ),
-  );
+  return NextResponse.redirect(new URL(`/pets/${next.slug}`, req.url), {
+    status: 302,
+    headers: { "Cache-Control": RANDOM_CACHE_CONTROL, Vary: RANDOM_VARY },
+  });
 }

@@ -18,7 +18,7 @@ bun run start
 - **Slash commands**: `/install <slug>`, `/featured`, `/leaderboard`,
   `/collection <slug>`. See `src/commands.ts`.
 - **Webhook receiver** at `:8086/webhook` for events from
-  petdex.crafter.run:
+  petdex.dev:
   - `pet_approved` → posts to `#showcase` with embed + image OG
   - `collection_featured` → posts to `#ip-spotlight`
   - HMAC-signed with `PETDEX_WEBHOOK_SECRET`.
@@ -38,5 +38,5 @@ bun run dev
 
 # expose webhook for prod testing
 cloudflared tunnel --url http://localhost:8086
-# then point petdex.crafter.run/api/discord/webhook at the temp URL
+# then point petdex.dev/api/discord/webhook at the temp URL
 ```

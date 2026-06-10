@@ -8,16 +8,16 @@ import {
   getCollectionsBySlugs,
   type PetCollectionWithPets,
 } from "@/lib/collections";
-import { getDexNumberMap } from "@/lib/dex";
 import { formatLocalizedNumber } from "@/lib/format-number";
 import { buildLocaleAlternates } from "@/lib/locale-routing";
 import { searchPets } from "@/lib/pet-search";
 import { getFeaturedPetsWithMetrics, type PetWithMetrics } from "@/lib/pets";
+import { getRandomPet } from "@/lib/random-pet-pool";
+import { toSurprisePet } from "@/lib/surprise-pets";
 import { cn } from "@/lib/utils";
 
 import { CollectionActionMenu } from "@/components/collection-action-menu";
 import { CollectionCover } from "@/components/collection-cover";
-import { CommandLine } from "@/components/command-line";
 import { DiscordLink } from "@/components/discord-link";
 import { DownloadDesktopCTA } from "@/components/download-desktop-cta";
 import { DiscordIcon } from "@/components/icons/wechat-icon";
@@ -26,6 +26,7 @@ import { PetGallery } from "@/components/pet-gallery";
 import { PetSprite } from "@/components/pet-sprite";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
+import { StaticCommandLine } from "@/components/static-command-line";
 import { SubmitCTA } from "@/components/submit-cta";
 import { SurprisePetCard } from "@/components/surprise-pet-card";
 import {
@@ -38,10 +39,10 @@ import { WechatCommunityDialog } from "@/components/wechat-community-dialog";
 
 import { hasLocale, locales } from "@/i18n/config";
 
-// ISR. The home page renders an alpha-ordered, anon shell — the
+// ISR. The home page renders an alpha-ordered, anon shell.
 // visitor's shuffle seed and caught-slug set are pulled client-side
-// (PetGallery re-fetches /api/pets/search; /api/me/caught-slugs feeds
-// the "caught" highlight). With a 24h ceiling and tag-based
+// after interaction; /api/me/header-state feeds the "caught" highlight.
+// With a 24h ceiling and tag-based
 // invalidation on submit/feature/withdraw, the page stays fresh for
 // editorial changes without burning a function on every visit.
 export const dynamic = "force-static";
@@ -60,7 +61,9 @@ export async function generateMetadata({
     ),
   };
 }
-const SITE_URL = "https://petdex.crafter.run";
+const SITE_URL = "https://petdex.dev";
+const HOME_INITIAL_GALLERY_LIMIT = 10;
+
 export function generateStaticParams() {
   return locales.map((locale) => ({ locale }));
 }
@@ -86,24 +89,18 @@ export default async function Home({
     "franchise-jojos-bizarre-adventure",
   ];
 
-  const [heroPets, initialSearch, dexEntries, collections, feedAds] =
+  const [heroPets, initialSearch, collections, feedAds, randomPet] =
     await Promise.all([
       getFeaturedPetsWithMetrics(6),
-      // No shuffleSeed → searchPets falls back to alpha order, which is
-      // the same for every visitor and therefore safe to cache. The
-      // client re-fetches with the visitor's seed on hydration.
-      searchPets({ sort: "curated" }),
-      getDexNumberMap(),
+      searchPets({ sort: "alpha", limit: HOME_INITIAL_GALLERY_LIMIT }),
       getCollectionsBySlugs(LANDING_COLLECTION_ORDER, 6),
       getActiveFeedAds(6),
+      getRandomPet(),
     ]);
   const totalPets = initialSearch.total;
   const formattedTotalPets = formatLocalizedNumber(totalPets, locale);
   const showWechatCommunity = isZh;
-
-  // Plain-object so the server -> client serializer doesn't choke on a
-  // Map. Same source of truth either way.
-  const dexMap = Object.fromEntries(dexEntries.entries());
+  const surprisePet = randomPet ? toSurprisePet(randomPet) : null;
 
   const jsonLd = [
     {
@@ -144,7 +141,7 @@ export default async function Home({
   return (
     <main className="min-h-dvh bg-background text-foreground">
       <JsonLd data={jsonLd} />
-      <SurprisePetCard />
+      <SurprisePetCard initialPet={surprisePet} />
       <SiteHeader />
       <section className="petdex-cloud relative -mt-[84px] overflow-clip pt-[84px]">
         <div className="relative mx-auto flex w-full max-w-[1440px] flex-col px-5 pb-10 md:px-8">
@@ -167,9 +164,8 @@ export default async function Home({
               })}
             </p>
             <div className="mt-5 flex w-full flex-col items-stretch justify-center gap-2 sm:flex-row sm:items-center">
-              <CommandLine
+              <StaticCommandLine
                 command="npx petdex install boba"
-                source="hero"
                 className="w-full sm:w-auto"
               />
               <DownloadDesktopCTA
@@ -227,7 +223,6 @@ export default async function Home({
           <PetGallery
             initial={initialSearch}
             totalPets={totalPets}
-            dexMap={dexMap}
             ads={feedAds}
           />
         ) : null}
@@ -278,7 +273,11 @@ async function FeaturedCollections({
               key={collection.slug}
               className="group relative flex h-full flex-col gap-0 overflow-hidden rounded-3xl border border-border-base bg-surface/80 py-0 ring-0 transition hover:border-border-strong hover:shadow-xl hover:shadow-blue-950/10 has-[[aria-expanded=true]]:z-30"
             >
-              <Link href={`/collections/${collection.slug}`} className="block">
+              <Link
+                href={`/collections/${collection.slug}`}
+                prefetch={false}
+                className="block"
+              >
                 <CollectionCover
                   pets={collection.pets}
                   coverSlug={collection.coverPetSlug}
@@ -343,6 +342,7 @@ async function HeroPetParade({ pets, isZh }: HeroPetParadeProps) {
           <Link
             key={pet.slug}
             href={`/pets/${pet.slug}`}
+            prefetch={false}
             aria-label={t("openPet", { name: pet.displayName })}
             className={`group relative flex flex-col items-center rounded-2xl border border-border-base bg-surface/60 px-3 pt-3 pb-2 shadow-lg shadow-blue-900/10 backdrop-blur-md transition hover:-translate-y-1 hover:bg-surface ${tilt} ${lift}`}
           >

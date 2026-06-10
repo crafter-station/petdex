@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import {
   type CSSProperties,
@@ -11,32 +12,22 @@ import {
   useState,
 } from "react";
 
-import { track } from "@vercel/analytics";
-import {
-  Check,
-  CheckCircle2,
-  Loader2,
-  Plus,
-  Search,
-  Sparkles,
-  X,
-} from "lucide-react";
+import { Check, Loader2, Plus, Search, Sparkles, X } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import type { PublicFeedAd } from "@/lib/ads/queries";
 import { COLOR_FAMILIES, type ColorFamily } from "@/lib/color-families";
 import { formatBatchLabel, getBatchKey } from "@/lib/dex-batch";
 import { formatLocalizedNumber } from "@/lib/format-number";
+import type { SearchPet } from "@/lib/pet-search";
 import { petStates } from "@/lib/pet-states";
-import type { PetWithMetrics } from "@/lib/pets";
 import { PET_KINDS, PET_VIBES, type PetKind, type PetVibe } from "@/lib/types";
 import { isAllowedAvatarUrl } from "@/lib/url-allowlist";
 import { cn } from "@/lib/utils";
 
-import { FeedAdSlot } from "@/components/ads/feed-ad-slot";
 import { useHeaderState } from "@/components/header-state-provider";
 import { PetActionMenu } from "@/components/pet-action-menu";
-import { PetCardFooter } from "@/components/pet-card-footer";
+import type { PetCardFooterProps } from "@/components/pet-card-footer";
 import { PetSprite } from "@/components/pet-sprite";
 import { ProfilePinButton } from "@/components/profile-pin-button";
 import { Badge } from "@/components/ui/badge";
@@ -74,7 +65,7 @@ type Facets = {
 type SearchMode = "vibe" | "keyword" | "all";
 
 type SearchPayload = {
-  pets: PetWithMetrics[];
+  pets: SearchPet[];
   total?: number;
   nextCursor: number | null;
   searchMode?: SearchMode;
@@ -91,14 +82,6 @@ type PetGalleryProps = {
   initial: InitialSearchPayload;
   totalPets: number;
   caughtSlugs?: string[];
-  /**
-   * slug -> canonical dex number (ROW_NUMBER over approved_at). Built
-   * once on the server for the whole approved catalog and shipped to
-   * the client so every PetCard — including pets that arrive via the
-   * /api/pets/search infinite-scroll — can show the right number
-   * without a per-row lookup.
-   */
-  dexMap?: Record<string, number>;
   ads?: PublicFeedAd[];
 };
 
@@ -113,6 +96,22 @@ const SORT_LABELS: Record<SortKey, string> = {
 };
 
 const PAGE_SIZE = 24;
+
+const FeedAdSlot = dynamic<{ ad: PublicFeedAd }>(
+  () => import("@/components/ads/feed-ad-slot").then((mod) => mod.FeedAdSlot),
+  {
+    loading: FeedAdSlotLoading,
+    ssr: false,
+  },
+);
+
+const PetCardFooter = dynamic<PetCardFooterProps>(
+  () => import("@/components/pet-card-footer").then((mod) => mod.PetCardFooter),
+  {
+    loading: PetCardFooterLoading,
+    ssr: false,
+  },
+);
 
 const FAMILY_DOT: Record<ColorFamily, string> = {
   red: "#ef4444",
@@ -132,7 +131,6 @@ const FAMILY_DOT: Record<ColorFamily, string> = {
 export function PetGallery({
   initial,
   totalPets,
-  dexMap,
   caughtSlugs,
   ads = [],
 }: PetGalleryProps) {
@@ -145,16 +143,12 @@ export function PetGallery({
   const [activeVibes, setActiveVibes] = useState<Set<PetVibe>>(new Set());
   const [activeColors, setActiveColors] = useState<Set<ColorFamily>>(new Set());
   const [activeBatches, setActiveBatches] = useState<Set<string>>(new Set());
-  const [sort, setSort] = useState<SortKey>("curated");
-  // The home page no longer ships caughtSlugs server-side — that would
-  // make every SSR render per-visitor and kill ISR. We pull the caught
-  // slug set from the shared HeaderStateProvider (one polled aggregate
-  // instead of per-component fetch) so the "caught" highlight still
-  // works for signed-in users without an extra Edge Request per page.
+  const [sort, setSort] = useState<SortKey>("alpha");
+  const [sortTouched, setSortTouched] = useState(false);
   const headerCaught = useHeaderState().state.caught;
   const caughtSet = new Set(caughtSlugs ?? headerCaught);
 
-  const [pets, setPets] = useState<PetWithMetrics[]>(initial.pets);
+  const [pets, setPets] = useState<SearchPet[]>(initial.pets);
   const [total, setTotal] = useState<number>(initial.total);
   const [nextCursor, setNextCursor] = useState<number | null>(
     initial.nextCursor,
@@ -167,6 +161,7 @@ export function PetGallery({
   const [loadingMore, setLoadingMore] = useState(false);
 
   const requestSeq = useRef(0);
+  const hasMountedSearchEffect = useRef(false);
   const shuffleSeedRef = useRef<string | null>(initial.shuffleSeed ?? null);
   const stateCount = petStates.length;
 
@@ -181,6 +176,7 @@ export function PetGallery({
         p.set("batches", [...activeBatches].join(","));
       }
       if (sort === "curated") {
+        p.set("sort", sort);
         if (shuffleSeedRef.current) {
           p.set("shuffleSeed", shuffleSeedRef.current);
         }
@@ -195,8 +191,17 @@ export function PetGallery({
     [trimmedQuery, activeKinds, activeVibes, activeColors, activeBatches, sort],
   );
 
+  useEffect(() => {
+    if (sortTouched) return;
+    setSort(trimmedQuery ? "curated" : "alpha");
+  }, [sortTouched, trimmedQuery]);
+
   // Re-fetch on filter / sort / query changes (debounced for the query).
   useEffect(() => {
+    if (!hasMountedSearchEffect.current) {
+      hasMountedSearchEffect.current = true;
+      return;
+    }
     const seq = ++requestSeq.current;
     const controller = new AbortController();
     let cancelled = false;
@@ -219,23 +224,6 @@ export function PetGallery({
         if (data.facets) setFacets(data.facets);
         const mode = data.searchMode ?? "all";
         setSearchMode(mode);
-        // Track only meaningful searches (skip the empty initial load
-        // and very short typing). 'no_results' fires its own event
-        // because it gates the request CTA — we want to know which
-        // queries miss most often.
-        if (trimmedQuery.length >= 4 && mode !== "all") {
-          track("gallery_searched", {
-            mode,
-            length: trimmedQuery.length,
-            results: nextTotal,
-          });
-          if (nextTotal === 0) {
-            track("gallery_no_results", {
-              query_length: trimmedQuery.length,
-              mode,
-            });
-          }
-        }
       } catch (error) {
         if (isAbortError(error)) return;
         // soft-fail: keep whatever's already on screen
@@ -248,7 +236,7 @@ export function PetGallery({
       controller.abort();
       window.clearTimeout(handle);
     };
-  }, [buildParams, trimmedQuery]);
+  }, [buildParams]);
 
   const loadMore = useCallback(async () => {
     if (nextCursor == null || loadingMore || loadingPage) return;
@@ -330,7 +318,6 @@ export function PetGallery({
             <button
               type="button"
               onClick={() => {
-                track("filters_cleared");
                 clearFilters();
               }}
               className="rounded-full border border-border-base bg-surface px-2.5 py-1 text-muted-2 transition hover:border-border-strong hover:text-black dark:hover:text-stone-100"
@@ -375,7 +362,7 @@ export function PetGallery({
           <Select
             value={sort}
             onValueChange={(next) => {
-              track("sort_changed", { sort: next });
+              setSortTouched(true);
               setSort(next as SortKey);
             }}
           >
@@ -486,7 +473,6 @@ export function PetGallery({
               type="button"
               variant="petdex-pill"
               onClick={() => {
-                track("filters_cleared");
                 clearFilters();
               }}
               className="h-10 px-4 text-sm font-medium text-muted-2"
@@ -576,7 +562,7 @@ export function PetGallery({
                 pet={pet}
                 index={index}
                 stateCount={stateCount}
-                dexNumber={dexMap?.[pet.slug] ?? null}
+                dexNumber={pet.dexNumber ?? null}
                 caught={caughtSet.has(pet.slug)}
               />
               {ad ? <FeedAdSlot ad={ad} /> : null}
@@ -666,11 +652,6 @@ function FilterChips({
             size="chip"
             pressed={isActive}
             onPressedChange={() => {
-              track("filter_toggled", {
-                tone,
-                value,
-                next: isActive ? "off" : "on",
-              });
               onToggle(value);
             }}
             className={tone === "batch" ? "" : "capitalize"}
@@ -726,6 +707,54 @@ function FilterGroup({
   );
 }
 
+function FeedAdSlotLoading() {
+  return (
+    <article
+      aria-hidden="true"
+      className="flex h-full min-h-[30rem] flex-col overflow-hidden rounded-3xl border border-border-base bg-surface/76 shadow-sm shadow-blue-950/5 backdrop-blur"
+    >
+      <div className="flex min-h-[46px] items-center justify-between border-border-base border-b px-5 py-3">
+        <div className="h-3 w-20 rounded bg-surface-muted" />
+        <div className="size-4 rounded-full bg-surface-muted" />
+      </div>
+      <div className="h-[210px] max-h-[210px] bg-surface-muted/60 md:h-[190px] md:max-h-[190px] 2xl:h-[210px] 2xl:max-h-[210px]" />
+      <div className="flex flex-1 flex-col gap-3 border-border-base border-t px-5 pt-4 pb-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="h-5 w-32 rounded bg-surface-muted" />
+          <div className="h-3 w-8 rounded bg-surface-muted" />
+        </div>
+        <div className="space-y-2">
+          <div className="h-3 w-full rounded bg-surface-muted/80" />
+          <div className="h-3 w-3/4 rounded bg-surface-muted/80" />
+        </div>
+        <div className="h-5 w-20 rounded-full bg-surface-muted/80" />
+        <div className="mt-1 flex gap-1.5">
+          <div className="h-3 w-20 rounded bg-surface-muted/70" />
+          <div className="h-3 w-16 rounded bg-surface-muted/70" />
+        </div>
+        <div className="mt-2 h-5 border-border-base border-t pt-2" />
+      </div>
+      <div className="mt-auto min-h-[52px] border-border-base border-t px-5 py-2" />
+    </article>
+  );
+}
+
+function PetCardFooterLoading() {
+  return (
+    <div
+      aria-hidden="true"
+      className="flex min-h-[49px] items-center border-t border-black/[0.05] px-2 py-2 dark:border-white/[0.05]"
+    >
+      <div className="flex items-center gap-1">
+        <div className="h-8 w-14 rounded-full bg-surface-muted/70" />
+        <div className="h-8 w-16 rounded-full bg-surface-muted/70" />
+        <div className="size-8 rounded-full bg-surface-muted/70" />
+        <div className="size-8 rounded-full bg-surface-muted/70" />
+      </div>
+    </div>
+  );
+}
+
 function adForPetIndex(
   ads: PublicFeedAd[],
   index: number,
@@ -777,11 +806,17 @@ export type PetCardPinState = {
   pinnedCount: number;
   /** Hard cap for the owner. Same constant the editor uses. */
   maxPins: number;
+  /** Mirrors the button's optimistic state into parent-owned layouts. */
+  onPinChange?: (isPinned: boolean) => void;
+  /** Temporarily prevents pin writes while another full-list pin save is in flight. */
+  disabled?: boolean;
+  disabledTitle?: string;
 };
 
 type PetCardProps = {
-  pet: PetWithMetrics;
+  pet: SearchPet;
   index: number;
+  /** User has already favorited/caught this pet; shown by the heart button. */
   caught?: boolean;
   /**
    * Optional. Kept on the type so older call sites that still pass
@@ -896,6 +931,7 @@ function PetCardImpl({
       />
       <Link
         href={href}
+        prefetch={false}
         aria-label={`Open ${pet.displayName}`}
         className="flex flex-1 flex-col rounded-3xl"
       >
@@ -904,11 +940,6 @@ function PetCardImpl({
             <span className="font-mono text-[11px] tracking-[0.22em] text-muted-3 uppercase">
               No. {dexLabel}
             </span>
-            {caught ? (
-              <span title={t("caughtTitle")} className="text-emerald-600">
-                <CheckCircle2 className="size-4 fill-current" />
-              </span>
-            ) : null}
           </div>
         </div>
 
@@ -1048,6 +1079,7 @@ function PetCardImpl({
           soundUrl={pet.soundUrl}
           installCount={installCount}
           likeCount={likeCount}
+          initialLiked={caught}
         />
       </div>
 
@@ -1075,6 +1107,9 @@ function PetCardImpl({
               pinnedCount={pinState.pinnedCount}
               maxPins={pinState.maxPins}
               appearance="subtle"
+              onOptimisticChange={pinState.onPinChange}
+              disabled={pinState.disabled}
+              disabledTitle={pinState.disabledTitle}
             />
           ) : null}
           <PetActionMenu
@@ -1100,6 +1135,9 @@ function PetCardImpl({
                 isPinned={pinState.isPinned}
                 pinnedCount={pinState.pinnedCount}
                 maxPins={pinState.maxPins}
+                onOptimisticChange={pinState.onPinChange}
+                disabled={pinState.disabled}
+                disabledTitle={pinState.disabledTitle}
               />
             </div>
           ) : null}
@@ -1159,7 +1197,6 @@ function NoResults({
 
   async function submitRequest() {
     if (!canRequest || state.tag === "submitting") return;
-    track("pet_request_clicked", { from: "gallery_empty_state" });
     setState({ tag: "submitting" });
     try {
       const res = await fetch("/api/pet-requests", {
@@ -1169,7 +1206,6 @@ function NoResults({
       });
       if (!res.ok) {
         if (res.status === 401) {
-          track("pet_request_blocked", { reason: "unauthorized" });
           setState({
             tag: "error",
             reason: "Sign in to request a pet.",
@@ -1180,7 +1216,6 @@ function NoResults({
           message?: string;
           error?: string;
         };
-        track("pet_request_failed", { status: res.status });
         setState({
           tag: "error",
           reason:
@@ -1192,17 +1227,12 @@ function NoResults({
         mode: "created" | "upvoted";
         upvoteCount: number;
       };
-      track("pet_request_succeeded", {
-        mode: data.mode,
-        upvotes: data.upvoteCount,
-      });
       setState({
         tag: "ok",
         mode: data.mode,
         count: data.upvoteCount,
       });
     } catch {
-      track("pet_request_failed", { reason: "network" });
       setState({ tag: "error", reason: "Network error, try again." });
     }
   }

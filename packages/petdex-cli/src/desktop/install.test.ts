@@ -433,7 +433,7 @@ describe("resolveDesktopInstallPlan", () => {
 //   - happy path → files land in both ~/.petdex/pets and ~/.codex/pets
 //   - partial download failure → rollback removes orphan directories
 
-const TRUSTED_HOST = "https://pub-94495283df974cfea5e98d6a9e3fa462.r2.dev";
+const TRUSTED_HOST = "https://assets.petdex.dev";
 
 describe("installStarterPet", () => {
   const realHome = process.env.HOME;
@@ -460,10 +460,10 @@ describe("installStarterPet", () => {
   }
 
   function makeFetch(
-    handler: (url: string) => Response | Promise<Response>,
+    handler: (url: string, init?: RequestInit) => Response | Promise<Response>,
   ): typeof fetch {
-    return (async (url: string | URL) => {
-      return handler(url.toString());
+    return (async (url: string | URL, init?: RequestInit) => {
+      return handler(url.toString(), init);
     }) as typeof fetch;
   }
 
@@ -551,7 +551,8 @@ describe("installStarterPet", () => {
   });
 
   test("happy path: writes pet.json + spritesheet to both roots", async () => {
-    const fetchImpl = makeFetch((url) => {
+    const assetReferers: Array<string | null> = [];
+    const fetchImpl = makeFetch((url, init) => {
       if (url.endsWith("/api/manifest")) {
         return new Response(
           JSON.stringify({
@@ -568,9 +569,11 @@ describe("installStarterPet", () => {
         );
       }
       if (url.endsWith("/spritesheet.webp")) {
+        assetReferers.push(new Headers(init?.headers).get("Referer"));
         return new Response("WEBP-BYTES", { status: 200 });
       }
       if (url.endsWith("/pet.json")) {
+        assetReferers.push(new Headers(init?.headers).get("Referer"));
         return new Response('{"displayName":"Boba"}', { status: 200 });
       }
       return new Response("not allowed", { status: 500 });
@@ -590,6 +593,10 @@ describe("installStarterPet", () => {
         '{"displayName":"Boba"}',
       );
     }
+    expect(assetReferers.sort()).toEqual([
+      "https://petdex.test/",
+      "https://petdex.test/",
+    ]);
   });
 
   test("partial failure: rolls back created directories", async () => {
@@ -882,23 +889,31 @@ describe("installStarterPet", () => {
 // could either reject legit installs or accept attacker bytes.
 
 describe("isTrustedAssetUrl", () => {
-  test("accepts the R2 public bucket", () => {
+  test("accepts the canonical asset host", () => {
+    expect(
+      isTrustedAssetUrl("https://assets.petdex.dev/pets/boba/spritesheet.webp"),
+    ).toBe(true);
+  });
+
+  test("rejects the retired R2 worker host", () => {
+    expect(
+      isTrustedAssetUrl(
+        "https://petdex-assets.raillyhugo.workers.dev/pets/boba/spritesheet.webp",
+      ),
+    ).toBe(false);
+  });
+
+  test("rejects the retired R2 public bucket host", () => {
     expect(
       isTrustedAssetUrl(
         "https://pub-94495283df974cfea5e98d6a9e3fa462.r2.dev/pets/boba/spritesheet.webp",
       ),
-    ).toBe(true);
-  });
-
-  test("accepts the legacy UploadThing host (pre-R2 migration)", () => {
-    expect(isTrustedAssetUrl("https://yu2vz9gndp.ufs.sh/f/abc123")).toBe(true);
+    ).toBe(false);
   });
 
   test("rejects http (must be https)", () => {
     expect(
-      isTrustedAssetUrl(
-        "http://pub-94495283df974cfea5e98d6a9e3fa462.r2.dev/pets/boba/spritesheet.webp",
-      ),
+      isTrustedAssetUrl("http://assets.petdex.dev/pets/boba/spritesheet.webp"),
     ).toBe(false);
   });
 

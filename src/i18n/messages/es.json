@@ -116,7 +116,7 @@
     "petAnimated": "{name} animado",
     "petParadeAria": "Mascotas destacadas",
     "surprise": {
-      "eyebrow": "Sorpresa diaria",
+      "eyebrow": "Sorpresa destacada",
       "title": "Una mascota te encontró",
       "dismiss": "Cerrar mascota sorpresa",
       "view": "Ver",
@@ -403,6 +403,11 @@
       "chart": {
         "label": "Impresiones en el tiempo",
         "empty": "Todavía no hay actividad registrada.",
+        "exactValues": "Valores exactos",
+        "bucket": "Intervalo",
+        "impressions": "Impresiones",
+        "hovers": "Hovers",
+        "clicks": "Clicks",
         "windows": {
           "eightHours": "Últimas 8 horas",
           "day": "Últimas 24 horas",
@@ -442,251 +447,6 @@
       "moreDetail": "Cuéntanos un poco más (4+ caracteres).",
       "submitFailed": "No se pudo enviar ({status}).",
       "network": "Error de red. Inténtalo de nuevo."
-    }
-  },
-  "admin": {
-    "metadata": {
-      "title": "Petdex Admin"
-    },
-    "tabs": {
-      "ariaLabel": "Secciones de admin",
-      "submissions": "Envíos",
-      "edits": "Ediciones",
-      "requests": "Pedidos",
-      "collections": "Colecciones",
-      "feedback": "Feedback",
-      "campaigns": "Campañas",
-      "mailing": "Mailing",
-      "manifest": "Manifest",
-      "insights": "Métricas",
-      "telemetry": "Telemetria"
-    },
-    "status": {
-      "pending": "Pendiente",
-      "held": "Retenido",
-      "review_failed": "Revisión fallida",
-      "auto_approved": "Autoaprobado",
-      "auto_rejected": "Autorechazado",
-      "approved": "Aprobado",
-      "rejected": "Rechazado",
-      "discovered": "Descubierto",
-      "all": "Todos",
-      "open": "Abierto",
-      "fulfilled": "Cumplido",
-      "dismissed": "Descartado",
-      "addressed": "Atendido",
-      "archived": "Archivado"
-    },
-    "kinds": {
-      "all": "Todos los tipos",
-      "suggestion": "Sugerencia",
-      "bug": "Bug",
-      "praise": "Elogio",
-      "other": "Otro",
-      "suggestShort": "Sug."
-    },
-    "queue": {
-      "eyebrow": "Cola de envíos",
-      "title": "Revisar mascotas",
-      "empty": "No hay mascotas en esta vista."
-    },
-    "review": {
-      "needsName": "Falta nombre",
-      "edit": "Editar",
-      "placeholders": {
-        "displayName": "Nombre visible de la mascota",
-        "slug": "slug (seguro para URL)",
-        "description": "Descripción"
-      },
-      "rejectPrompt": "Razón del rechazo (opcional)",
-      "requestFailed": "La solicitud falló ({status})",
-      "save": "Guardar",
-      "cancel": "Cancelar",
-      "approve": "Aprobar",
-      "reject": "Rechazar",
-      "revive": "Volver a pendiente",
-      "links": {
-        "zip": "zip",
-        "sprite": "sprite",
-        "petJson": "pet.json"
-      },
-      "relative": {
-        "justNow": "ahora mismo"
-      },
-      "petTime": "PET",
-      "petAnimation": "animación de la mascota",
-      "similar": {
-        "possibleDuplicate": "Posible duplicado",
-        "looksSimilar": "Se parece",
-        "sameCharacter": "¿Mismo personaje?",
-        "hide": "Ocultar",
-        "show": "Mostrar"
-      }
-    },
-    "edits": {
-      "eyebrow": "Cola de ediciones",
-      "title": "Ediciones pendientes",
-      "description": "Cambios de texto enviados por dueños que esperan re-aprobación. La página en vivo sigue mostrando los valores aprobados hasta que actúes.",
-      "empty": "No hay ediciones pendientes.",
-      "submitted": "enviado",
-      "displayName": "Nombre visible",
-      "descriptionLabel": "Descripción",
-      "tags": "Etiquetas",
-      "emptyValue": "vacío",
-      "noChanges": "Sin cambios",
-      "noDiff": "Se envió una edición pero no se detectaron cambios. Recházala para limpiarla."
-    },
-    "editActions": {
-      "approve": "Aprobar edición",
-      "reject": "Rechazar",
-      "rejectPrompt": "Razón (opcional, se envía al dueño):",
-      "failed": "Falló: {error}"
-    },
-    "feedback": {
-      "eyebrow": "Inbox",
-      "title": "Feedback",
-      "empty": "No hay feedback en esta vista.",
-      "thread": "Hilo",
-      "threadWithCount": "Hilo ({count})",
-      "profile": "Perfil",
-      "viewProfile": "Ver el perfil de @{handle}",
-      "sendEmail": "Enviar email en su lugar",
-      "anonymous": "Anónimo",
-      "clerk": "clerk",
-      "filters": {
-        "pending": "Pendiente",
-        "addressed": "Atendido",
-        "archived": "Archivado",
-        "all": "Todos"
-      },
-      "mailto": {
-        "bodyIntro": "Gracias por el {kind} en Petdex",
-        "subject": "Re: tu feedback de Petdex: {excerpt}"
-      }
-    },
-    "feedbackActions": {
-      "address": "Marcar como atendido",
-      "archive": "Archivar",
-      "reopen": "Reabrir como pendiente",
-      "failed": "Falló: {error}"
-    },
-    "campaigns": {
-      "eyebrow": "Operaciones de ads",
-      "title": "Campañas de ads",
-      "description": "Revisa todas las campañas de anunciantes, con datos del dueño, métricas de entrega y actividad en gráficos.",
-      "overview": {
-        "totalCampaigns": "Campañas totales",
-        "totalSpend": "{value} de gasto reservado",
-        "active": "Activas",
-        "statusDetail": "{paused} pausadas, {exhausted} agotadas",
-        "pendingPayment": "Pago pendiente",
-        "deletedDetail": "{count} eliminadas",
-        "inventory": "Impresiones compradas",
-        "servedDetail": "{value} servidas",
-        "impressions": "Impresiones raw",
-        "rawImpressionsDetail": "Filas en ad_impressions",
-        "clicks": "Clics",
-        "ctr": "{value} CTR",
-        "hovers": "Hovers",
-        "dismissals": "{value} descartes",
-        "avgTime": "Tiempo medio visible",
-        "avgTimeDetail": "En eventos time-in-view"
-      },
-      "filters": {
-        "status": "Estado",
-        "search": "Buscar",
-        "searchPlaceholder": "Título, empresa, email, user ID, URL",
-        "limit": "Límite",
-        "apply": "Aplicar filtros",
-        "clear": "Limpiar"
-      },
-      "statuses": {
-        "all": "Todos los estados",
-        "pending_payment": "Pago pendiente",
-        "active": "Activa",
-        "exhausted": "Agotada",
-        "paused": "Pausada",
-        "deleted": "Eliminada"
-      },
-      "owner": {
-        "title": "Dueño",
-        "userId": "User ID",
-        "contactEmail": "Email de contacto",
-        "company": "Empresa"
-      },
-      "showing": "Mostrando {shown} de {total} campañas coincidentes",
-      "empty": "Ninguna campaña coincide con estos filtros."
-    },
-    "requests": {
-      "eyebrow": "Wishlist de la comunidad",
-      "title": "Pedidos de mascotas",
-      "summary": "{open} abiertos · {fulfilled} cumplidos · {dismissed} descartados",
-      "openSection": "Abiertos",
-      "fulfilledSection": "Cumplidos",
-      "dismissedSection": "Descartados",
-      "emptyOpen": "No hay pedidos abiertos ahora mismo.",
-      "votes": "votos",
-      "moreVoters": "+{count} más",
-      "anonymous": "anónimo"
-    },
-    "requestActions": {
-      "fulfill": "Cumplir",
-      "dismiss": "Descartar",
-      "reopen": "Reabrir",
-      "approveImage": "Aprobar imagen",
-      "rejectImage": "Rechazar imagen",
-      "slug": "slug",
-      "placeholder": "cool-clippy",
-      "mark": "Marcar"
-    },
-    "manifest": {
-      "eyebrow": "Telemetría",
-      "title": "Fetches del manifest",
-      "description": "Quién está llamando a /api/manifest. Las IP se hashean con SHA-256 por día, así que se agrupan dentro del mismo día pero no se pueden revertir.",
-      "total": "Total (histórico)",
-      "last24": "Últimas 24 h",
-      "distinct24": "IPs distintas (24 h)",
-      "byDay": "Por día · últimos 14 d",
-      "loudestIps": "IPs más ruidosas · últimos 7 d",
-      "topUserAgents": "User-agents más frecuentes · últimos 7 d",
-      "byCountry": "Por país · últimos 7 d",
-      "headers": {
-        "ipHash": "Hash IP",
-        "country": "País",
-        "lastUa": "Último UA",
-        "fetches": "Fetches"
-      },
-      "noUa": "sin UA"
-    },
-    "threadPage": {
-      "back": "← Inbox"
-    },
-    "telemetry": {
-      "eyebrow": "Telemetria",
-      "title": "Telemetria de uso del CLI",
-      "description": "Volumen de instalaciones, distribucion de SO y adopcion de agentes de forma anonima.",
-      "stats": {
-        "totalInstalls": "Total instalaciones",
-        "weeklyActive": "Instalaciones activas (semana)",
-        "totalEvents": "Total eventos"
-      },
-      "sections": {
-        "adoptionCurve": "Adopcion en 30 dias",
-        "osDistribution": "Distribucion de SO",
-        "archDistribution": "Distribucion de arquitectura",
-        "versionAdoption": "Adopcion de versiones",
-        "topAgents": "Agentes mas usados",
-        "funnel": "Embudo de conversion",
-        "geoTop10": "Top 10 paises"
-      },
-      "funnel": {
-        "install": "Instalar desktop",
-        "hooks": "Instalar hooks",
-        "start": "Iniciar desktop",
-        "firstEvent": "Primer estado"
-      },
-      "empty": "Sin eventos de telemetria aun.",
-      "noData": "Sin datos"
     }
   },
   "submit": {
@@ -789,30 +549,6 @@
         "unreadableSpritesheet": "No se puede leer la imagen del spritesheet.",
         "tooSmall": "El spritesheet parece muy pequeño ({width}×{height}). Usa una grilla de 8×9 frames (recomendado {recommendedWidth}×{recommendedHeight})."
       }
-    }
-  },
-  "collaborator": {
-    "metadata": {
-      "title": "Petdex Collaborator"
-    },
-    "tabs": {
-      "ariaLabel": "Secciones de colaborador",
-      "submissions": "Envíos",
-      "moderation": "Moderación publicada",
-      "edits": "Ediciones de metadata",
-      "requests": "Pedidos de mascotas",
-      "collections": "Colecciones",
-      "wechatQr": "QR de WeChat"
-    },
-    "moderation": {
-      "eyebrow": "Moderación",
-      "title": "Mascotas publicadas",
-      "searchPlaceholder": "Busca por nombre, slug, descripción o owner",
-      "search": "Buscar",
-      "clear": "Limpiar",
-      "previous": "Anterior",
-      "next": "Siguiente",
-      "empty": "Ninguna mascota publicada coincide con este filtro."
     }
   },
   "requests": {
@@ -969,11 +705,11 @@
   "builtWith": {
     "metadata": {
       "titleTemplate": "Hecho con Petdex: {total} proyectos de la comunidad",
-      "description": "{total} proyectos open source construidos sobre Petdex: companions de escritorio, apps de wellness, wearables, SDKs y creadores de pets."
+      "description": "{total} proyectos open source y source-available construidos sobre Petdex: companions de escritorio, apps de wellness, wearables, SDKs y creadores de pets."
     },
     "eyebrow": "Hecho con Petdex",
     "title": "Apps que la comunidad está shippeando sobre Petdex",
-    "subtitle": "{total} proyectos open source consumen la galería, la API o el formato de Petdex. Apps de wellness, wearables, SDKs y creadores. Curado, con evidencia, sin vibes.",
+    "subtitle": "{total} proyectos open source y source-available consumen la galería, la API o el formato de Petdex. Apps de wellness, wearables, SDKs y creadores. Curado, con evidencia, sin vibes.",
     "stats": {
       "stars": "{total} stars combinadas",
       "projects": "{total} proyectos",
@@ -1600,6 +1336,21 @@
     "downloadCta": "Descargar",
     "seeHowCta": "Ver cómo funciona"
   },
+  "securityUpdate": {
+    "ariaLabel": "Actualización de seguridad de Petdex",
+    "dismissAria": "Descartar actualización de seguridad",
+    "closeAria": "Cerrar",
+    "eyebrow": "Actualización de seguridad",
+    "title": "Actualiza Petdex para seguir instalando mascotas",
+    "description": "Agregamos descargas de assets protegidas para bloquear hotlinking, scraping directo y origins no oficiales.",
+    "impact": "Petdex web, el CLI más reciente y la app de escritorio más reciente están soportados. Snapshots viejos del CLI pueden fallar al instalar mascotas hasta que se actualicen.",
+    "commandLabel": "Corre esto una vez en tu terminal:",
+    "commandHint": "Esto baja la última release de desktop y refresca el snapshot del CLI que usa Petdex Desktop.",
+    "originTitle": "¿Quieres usar assets de Petdex desde otro origin?",
+    "originBody": "Abre un issue con el origin URL y el caso de uso. Revisaremos pedidos de allowlist caso por caso.",
+    "doneCta": "Voy a actualizar",
+    "originCta": "Pedir acceso de origin"
+  },
   "githubStar": {
     "eyebrow": "Open source · Petdex",
     "title": "Ayuda a Petdex a crecer. Dale una estrella en GitHub",
@@ -1621,7 +1372,7 @@
   "collectionsPage": {
     "metadata": {
       "title": "Colecciones destacadas",
-      "description": "Explora colecciones de Petdex por franquicia, categoría o temática. Busca, ordena y filtra para encontrar tu set."
+      "description": "Explora colecciones de Petdex por franquicia, categoría o temática en un catálogo público rápido."
     },
     "hero": {
       "eyebrow": "Colecciones destacadas",
@@ -1698,19 +1449,6 @@
   "onboarding": {
     "skip": "Saltar tour"
   },
-  "adminReview": {
-    "namePlaceholder": "Nombre de la mascota",
-    "descriptionPlaceholder": "Descripción",
-    "editAria": "Editar mascota",
-    "automationEvidence": "Evidencia automática",
-    "noSummary": "Sin resumen.",
-    "confidence": "Confianza: {confidence}%.",
-    "evidenceAssets": "Archivos",
-    "evidenceSecurity": "Seguridad",
-    "evidencePolicy": "Política",
-    "evidenceVisualText": "Texto visual",
-    "evidenceVisualSignals": "Señales visuales"
-  },
   "sticker": {
     "ctaWeChat": "Guardar para WeChat",
     "ctaGeneric": "Guardar para WhatsApp",
@@ -1734,25 +1472,6 @@
     "howToWhatsApp": "WhatsApp: importa el zip con Sticker Maker",
     "desktopNote": "WhatsApp Desktop muestra solo el primer frame · en celular se anima",
     "errorGeneric": "Algo salió mal, intenta de nuevo"
-  },
-  "collaboratorWechatQr": {
-    "panelTitle": "Gestión de QR de WeChat",
-    "currentQr": "QR actual",
-    "expiresIn": "Expira en {days} días",
-    "expired": "Expirado",
-    "uploadCta": "Subir nuevo QR",
-    "dropZoneHint": "Arrastra JPG / PNG aquí, máx 200KB",
-    "validating": "Validando con IA...",
-    "validationFailed": "Validación fallida",
-    "uploadSuccess": "¡Subida exitosa!",
-    "history": "Historial de subidas",
-    "historyEmpty": "Sin subidas aún",
-    "statusActive": "Activo",
-    "statusReplaced": "Reemplazado",
-    "statusRejected": "Rechazado",
-    "uploadedBy": "Subido por",
-    "rotateNow": "Rotar ahora",
-    "viewOnPublic": "Ver en página pública"
   },
   "collectionActionMenu": {
     "moreActions": "Más acciones para {title}",
@@ -1995,10 +1714,31 @@
     },
     "sections": {
       "quickStart": {
-        "title": "Quick start",
-        "intro": "Install a curated pet into your Codex setup with one command. No account required to install. Sign in only when you submit.",
-        "afterCommand": "The CLI fetches the pet pack and drops it into <code>~/.codex/pets/boba/</code>. To activate it inside Codex go to <strong>Settings → Appearance → Pets</strong> and click <strong>Select</strong>. Use <code>/pet</code> inside Codex to wake or tuck it away.",
-        "callout": "Don't have a pet idea yet? <link>Hatch your own</link> with the Codex Hatch Pet skill, then come back to <code>petdex submit</code>."
+        "title": "Inicio rápido",
+        "intro": "Sigue esta lista para instalar una mascota, verla en Codex y conectarla con la app de escritorio. No necesitas una cuenta para instalar. Inicia sesión solo cuando quieras enviar una mascota.",
+        "steps": {
+          "install": {
+            "title": "Instala una mascota conocida",
+            "body": "Empieza con Boba para tener una carpeta real que puedas seleccionar en Codex.",
+            "result": "Deberías ver <code>~/.codex/pets/boba/</code> con <code>pet.json</code> y un spritesheet."
+          },
+          "desktop": {
+            "title": "Inicializa escritorio y hooks",
+            "body": "Ejecuta la configuración completa si quieres la mascota flotante de escritorio y los hooks de actividad del agente.",
+            "result": "Petdex descarga la app de escritorio, la inicia y conecta los agentes compatibles con <code>/petdex</code>."
+          },
+          "select": {
+            "title": "Selecciona la mascota en Codex",
+            "body": "Abre Codex, ve a <strong>Settings → Appearance → Pets</strong>, elige <strong>Boba</strong> y haz clic en <strong>Select</strong>.",
+            "result": "Usa <code>/pet</code> dentro de Codex para despertar la mascota o guardarla."
+          },
+          "verify": {
+            "title": "Verifica la configuración",
+            "body": "Ejecuta el diagnóstico si la mascota no aparece, o escribe <code>/petdex status</code> dentro de un agente compatible después de instalar los hooks.",
+            "result": "Doctor informa cualquier binario, hook, token o carpeta de mascota faltante con una corrección concreta."
+          }
+        },
+        "callout": "¿Aún no tienes una idea de mascota? <link>Crea la tuya</link> con el skill Codex Hatch Pet y vuelve para ejecutar <code>petdex submit</code>."
       },
       "install": {
         "title": "Install",
@@ -2012,14 +1752,14 @@
       "authenticate": {
         "title": "Authenticate",
         "intro": "Sign in once, then any command that needs auth, such as submit, works seamlessly.",
-        "flow": "The flow is OAuth 2.0 + PKCE: the CLI opens your browser, you sign in with Clerk on <code>accounts.petdex.crafter.run</code>, and the browser redirects to a one-shot localhost listener with the authorization code. The CLI exchanges it for a token set and stores it in the keychain. No secrets touch disk.",
+        "flow": "The flow is OAuth 2.0 + PKCE: the CLI opens your browser, you sign in with Clerk on <code>accounts.petdex.dev</code>, and the browser redirects to a one-shot localhost listener with the authorization code. The CLI exchanges it for a token set and stores it in the keychain. No secrets touch disk.",
         "otherCommands": "Other auth commands:"
       },
       "commands": {
         "title": "Commands",
         "intro": "The CLI covers the full lifecycle: discover, install, hatch, publish, plus the desktop app and agent hooks. All commands accept <code>--help</code>.",
         "listBody": "Print every approved pet with credit. Useful for discovery before installing.",
-        "installBody": "Drop a pet into <code>~/.codex/pets/{petName}/</code>. Equivalent to <code>curl -sSf https://petdex.crafter.run/install/{petName} | sh</code>.",
+        "installBody": "Drop a pet into <code>~/.codex/pets/{petName}/</code>. Equivalent to <code>curl -sSf https://petdex.dev/install/{petName} | sh</code>.",
         "submitIntro": "Publish your pet(s) to the gallery. The CLI accepts three shapes:",
         "submitSingle": "<strong>Single folder</strong>: <code>petdex submit ~/.codex/pets/boba</code>",
         "submitZip": "<strong>Single zip</strong>: <code>petdex submit ~/Downloads/boba.zip</code>",
@@ -2122,8 +1862,8 @@
       "config": {
         "title": "Configuration",
         "intro": "The CLI ships with sensible defaults pointing at production. You only need to override env vars if you are testing against a non-production deployment.",
-        "petdexUrl": "<code>PETDEX_URL</code>: base URL, default <code>https://petdex.crafter.run</code>",
-        "clerkIssuer": "<code>CLERK_ISSUER</code>: OAuth issuer, default <code>https://clerk.petdex.crafter.run</code>",
+        "petdexUrl": "<code>PETDEX_URL</code>: base URL, default <code>https://petdex.dev</code>",
+        "clerkIssuer": "<code>CLERK_ISSUER</code>: OAuth issuer, default <code>https://clerk.petdex.dev</code>",
         "clerkClientId": "<code>CLERK_OAUTH_CLIENT_ID</code>: public client id (baked into the CLI binary)"
       },
       "contribute": {

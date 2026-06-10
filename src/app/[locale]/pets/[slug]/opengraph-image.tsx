@@ -9,6 +9,7 @@ import { ImageResponse } from "next/og";
 import sharp from "sharp";
 
 import { getPet } from "@/lib/pets";
+import { fetchR2Asset } from "@/lib/r2-fetch";
 import { isAllowedAssetUrl } from "@/lib/url-allowlist";
 
 import { defaultLocale, hasLocale } from "@/i18n/config";
@@ -262,7 +263,7 @@ export default async function Image({
             textTransform: "uppercase",
           }}
         >
-          petdex.crafter.run
+          petdex.dev
         </div>
       </div>
     </div>,
@@ -297,7 +298,7 @@ async function loadFirstFrameAsDataUrl(url: string): Promise<string | null> {
   try {
     // No `cache: "force-cache"` — sprites are >2MB and Next's data cache caps
     // at 2MB. R2 + the route's own ISR handle caching at the CDN edge.
-    const res = await fetch(url, { redirect: "error" });
+    const res = await fetchR2Asset(url, { redirect: "error" });
     if (!res.ok) return null;
     const buf = Buffer.from(await res.arrayBuffer());
 

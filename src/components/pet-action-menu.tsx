@@ -1,394 +1,84 @@
 "use client";
 
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import dynamic from "next/dynamic";
+import { useCallback, useState } from "react";
 
-import { track } from "@vercel/analytics";
-import {
-  Check,
-  X as CloseIcon,
-  Copy,
-  Download,
-  ExternalLink,
-  Flag,
-  Link2,
-  Loader2,
-  MoreHorizontal,
-  Pencil,
-  Plus,
-  Terminal,
-  Trash2,
-  XCircle,
-} from "lucide-react";
+import { MoreHorizontal } from "lucide-react";
 import { useTranslations } from "next-intl";
 
-import { CodexLogo } from "@/components/codex-logo";
-import { GithubIcon } from "@/components/github-icon";
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import type {
+  PetActionMenuContentProps,
+  PetActionMenuOwnerActions,
+  PetActionMenuPet,
+} from "@/components/pet-action-menu-content";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-const SITE_URL = "https://petdex.crafter.run";
-const TAKEDOWN_ISSUE_URL =
-  "https://github.com/crafter-station/petdex/issues/new";
+export type {
+  PetActionMenuOwnerActions,
+  PetActionMenuPet,
+} from "@/components/pet-action-menu-content";
 
-export type PetActionMenuPet = {
-  slug: string;
-  displayName: string;
-  zipUrl?: string | null;
-  description?: string;
-};
-
-export type PetActionMenuOwnerActions = {
-  /** Submission id for the owner-action API endpoints. */
-  submissionId: string;
-  status: "pending" | "approved" | "rejected";
-};
-
-type Variant = "card" | "detail";
+type PetActionMenuVariant = "card" | "detail";
 
 type Props = {
   pet: PetActionMenuPet;
-  variant?: Variant;
-  /** When the viewer is the owner, surfaces status-aware actions
-   *  (Withdraw, Edit link, Submit new version) inside the dropdown. */
+  variant?: PetActionMenuVariant;
   ownerActions?: PetActionMenuOwnerActions;
 };
 
-export function buildPetTakedownIssueUrl(pet: Pick<PetActionMenuPet, "slug">) {
-  const params = new URLSearchParams({
-    template: "takedown.yml",
-    title: `[Takedown] ${pet.slug}`,
-    "pet-slug": pet.slug,
-  });
-
-  return `${TAKEDOWN_ISSUE_URL}?${params.toString()}`;
+function loadPetActionMenuContent() {
+  return import("@/components/pet-action-menu-content");
 }
 
-export function PetTakedownReportButton({
-  pet,
-}: {
-  pet: Pick<PetActionMenuPet, "slug" | "displayName">;
-}) {
-  const t = useTranslations("petActions");
-  const [reportOpen, setReportOpen] = useState(false);
-  const href = buildPetTakedownIssueUrl(pet);
-
-  return (
-    <Dialog open={reportOpen} onOpenChange={setReportOpen}>
-      <button
-        type="button"
-        aria-label={t("reportTakedownAria", { name: pet.displayName })}
-        onClick={() => {
-          setReportOpen(true);
-          track("pet_takedown_report_opened", { slug: pet.slug });
-        }}
-        className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-border-base bg-surface px-4 text-sm font-medium text-muted-2 transition hover:border-chip-danger-fg/40 hover:text-chip-danger-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-chip-danger-fg/45"
-      >
-        <Flag className="size-4" />
-        {t("reportTakedown")}
-      </button>
-
-      <DialogContent
-        showCloseButton={false}
-        className="flex max-h-[min(88dvh,44rem)] flex-col gap-4 overflow-y-auto rounded-2xl border border-border-base bg-popover p-4 text-popover-foreground shadow-2xl shadow-blue-950/20 sm:max-w-xl sm:gap-5 sm:p-5 lg:max-w-2xl"
-      >
-        <DialogClose
-          render={
-            <button
-              type="button"
-              aria-label={t("closeMenu")}
-              className="absolute top-3 right-3 grid size-8 place-items-center rounded-full text-muted-3 transition hover:bg-surface-muted hover:text-foreground"
-            >
-              <CloseIcon className="size-4" />
-            </button>
-          }
-        />
-
-        <header className="flex flex-col gap-3 pr-8">
-          <p className="font-mono text-[11px] tracking-[0.22em] text-brand uppercase">
-            {t("takedownDialog.eyebrow")}
-          </p>
-          <DialogTitle className="text-2xl leading-none font-semibold tracking-tight text-foreground sm:text-3xl">
-            {t("takedownDialog.title")}
-          </DialogTitle>
-          <DialogDescription className="text-sm leading-6 text-muted-2">
-            {t("takedownDialog.body")}
-          </DialogDescription>
-        </header>
-
-        <section className="space-y-3 rounded-2xl border border-border-base bg-surface/76 p-4">
-          <h3 className="text-base font-semibold text-foreground">
-            {t("takedownDialog.howItWorks")}
-          </h3>
-          <ol className="list-decimal space-y-2 pl-5 text-sm leading-6 text-muted-2">
-            <li>{t("takedownDialog.step1")}</li>
-            <li>{t("takedownDialog.step2")}</li>
-            <li>{t("takedownDialog.step3")}</li>
-            <li>{t("takedownDialog.step4")}</li>
-          </ol>
-          <p className="pt-1 text-xs leading-5 text-muted-3">
-            {t("takedownDialog.nonIp")}
-          </p>
-        </section>
-
-        <div className="rounded-xl bg-surface-muted px-3 py-2 text-xs text-muted-2">
-          <span className="font-medium text-foreground">
-            {t("takedownDialog.prefillLabel")}
-          </span>{" "}
-          <span className="font-mono">{pet.slug}</span>
-        </div>
-
-        <p className="border-t border-border-base pt-4 text-xs leading-5 text-muted-3">
-          {t("takedownDialog.confirmation")}
-        </p>
-
-        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-          <DialogClose
-            render={
-              <button
-                type="button"
-                className="inline-flex h-10 w-full items-center justify-center rounded-full px-4 text-sm font-medium text-muted-2 transition hover:bg-surface-muted hover:text-foreground sm:w-auto"
-              >
-                {t("takedownDialog.cancel")}
-              </button>
-            }
-          />
-          <a
-            href={href}
-            target="_blank"
-            rel="noreferrer"
-            onClick={() => {
-              track("pet_takedown_report_confirmed", { slug: pet.slug });
-              setReportOpen(false);
-            }}
-            className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-full bg-inverse px-4 text-sm font-medium text-on-inverse transition hover:bg-inverse-hover sm:w-auto"
-          >
-            <GithubIcon className="size-4" />
-            {t("takedownDialog.openRequest")}
-          </a>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
+function preloadPetActionMenuContent() {
+  void loadPetActionMenuContent();
 }
+
+const PetActionMenuContent = dynamic<PetActionMenuContentProps>(
+  () => loadPetActionMenuContent().then((mod) => mod.PetActionMenuContent),
+  {
+    loading: PetActionMenuContentLoading,
+    ssr: false,
+  },
+);
 
 export function PetActionMenu({ pet, variant = "card", ownerActions }: Props) {
   const t = useTranslations("petActions");
-  const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [copied, setCopied] = useState<"install" | "link" | null>(null);
-  const [deleting, setDeleting] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [withdrawing, setWithdrawing] = useState(false);
-  const [withdrawError, setWithdrawError] = useState<string | null>(null);
-  // canDelete is fetched lazily the first time the menu opens. The
-  // public PetdexPet shape deliberately doesn't carry ownerId, so the
-  // viewer/owner check has to round-trip. /api/pets/[slug]/can-delete
-  // is auth-cookie gated and private, no-store — anonymous viewers
-  // get false instantly.
-  const [canDelete, setCanDelete] = useState<boolean | null>(null);
-
-  const installCmd = `npx petdex install ${pet.slug}`;
-  const pageUrl = `${SITE_URL}/pets/${pet.slug}`;
-
-  // Lazy ownership check. Only fires the first time the menu opens —
-  // result is cached in component state. If the user signs in / out
-  // mid-session the menu won't notice until next mount, but that's
-  // fine: the actual delete still re-checks ownership server-side.
-  useEffect(() => {
-    if (!open || canDelete !== null) return;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const res = await fetch(`/api/pets/${pet.slug}/can-delete`);
-        if (!res.ok) {
-          if (!cancelled) setCanDelete(false);
-          return;
-        }
-        const data = (await res.json()) as { canDelete: boolean };
-        if (!cancelled) setCanDelete(Boolean(data.canDelete));
-      } catch {
-        if (!cancelled) setCanDelete(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [open, canDelete, pet.slug]);
-
-  const copyText = useCallback(
-    async (text: string, kind: "install" | "link") => {
-      try {
-        await navigator.clipboard.writeText(text);
-        setCopied(kind);
-        track("pet_action_copy", { slug: pet.slug, kind });
-        window.setTimeout(() => setCopied(null), 1400);
-      } catch {
-        // ignore clipboard failures (Safari permission issues etc.)
-      }
-    },
-    [pet.slug],
-  );
-
-  const onShareX = useCallback(() => {
-    const text = `${pet.displayName}: an animated Codex pet on Petdex.\n\n${installCmd}`;
-    const url = `https://x.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(pageUrl)}`;
-    track("pet_action_share", { slug: pet.slug, target: "x" });
-    window.open(url, "_blank", "noopener,noreferrer,width=560,height=540");
-    setOpen(false);
-  }, [pet.slug, pet.displayName, installCmd, pageUrl]);
-
-  const onShareLinkedIn = useCallback(() => {
-    const url = `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(pageUrl)}`;
-    track("pet_action_share", { slug: pet.slug, target: "linkedin" });
-    window.open(url, "_blank", "noopener,noreferrer,width=620,height=600");
-    setOpen(false);
-  }, [pet.slug, pageUrl]);
-
-  const onShareNative = useCallback(async () => {
-    if (typeof navigator === "undefined" || !("share" in navigator)) return;
-    try {
-      await (
-        navigator as Navigator & {
-          share: (data: ShareData) => Promise<void>;
-        }
-      ).share({
-        title: `${pet.displayName} | Petdex`,
-        text: `${pet.displayName}: an animated Codex pet`,
-        url: pageUrl,
-      });
-      track("pet_action_share", { slug: pet.slug, target: "native" });
-      setOpen(false);
-    } catch {
-      // user cancelled, ignore
-    }
-  }, [pet.slug, pet.displayName, pageUrl]);
-
-  const onZipClick = useCallback(() => {
-    track("zip_downloaded", { slug: pet.slug, source: "menu" });
-    void fetch(`/api/pets/${pet.slug}/track-zip`, { method: "POST" }).catch(
-      () => {},
-    );
-    setOpen(false);
-  }, [pet.slug]);
-
-  const onDelete = useCallback(async () => {
-    if (deleting) return;
-    // Two-step confirmation: typing the slug avoids muscle-memory
-    // clicks wiping a pet you actually still want. Same pattern the
-    // admin takedown uses.
-    const typed = window.prompt(
-      `Type "${pet.slug}" to confirm. This permanently removes ${pet.displayName} from Petdex and frees the slug. The pet's files and like history are deleted.`,
-    );
-    if (typed === null) return;
-    if (typed.trim() !== pet.slug) {
-      window.alert("Slug did not match. Pet was NOT removed.");
-      return;
-    }
-    setDeleting(true);
-    setDeleteError(null);
-    try {
-      const res = await fetch(`/api/pets/${pet.slug}/owner`, {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason: "owner_self_delete" }),
-      });
-      if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as {
-          error?: string;
-          message?: string;
-        };
-        setDeleteError(
-          data.message ?? data.error ?? `Request failed (${res.status})`,
-        );
-        setDeleting(false);
-        return;
-      }
-      track("pet_owner_deleted", { slug: pet.slug });
-      setOpen(false);
-      router.refresh();
-    } catch {
-      setDeleteError("network_error");
-      setDeleting(false);
-    }
-  }, [deleting, pet.slug, pet.displayName, router]);
-
-  const onWithdraw = useCallback(async () => {
-    if (withdrawing || !ownerActions) return;
-    if (
-      !window.confirm(
-        `Withdraw "${pet.displayName}"? Pending submissions can't be brought back. You'd have to resubmit.`,
-      )
-    ) {
-      return;
-    }
-    setWithdrawing(true);
-    setWithdrawError(null);
-    try {
-      const res = await fetch(
-        `/api/my-pets/${ownerActions.submissionId}/withdraw`,
-        { method: "POST" },
-      );
-      if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as {
-          error?: string;
-          message?: string;
-        };
-        setWithdrawError(
-          data.message ?? data.error ?? `Request failed (${res.status})`,
-        );
-        setWithdrawing(false);
-        return;
-      }
-      track("pet_owner_withdrew", { slug: pet.slug });
-      setOpen(false);
-      router.refresh();
-    } catch {
-      setWithdrawError("network_error");
-      setWithdrawing(false);
-    }
-  }, [withdrawing, ownerActions, pet.slug, pet.displayName, router]);
-
-  // Detail variant: bigger trigger that reads as an action button next to
-  // the like button. Card variant: compact circular icon in a corner.
+  const handleOpenChange = useCallback((nextOpen: boolean) => {
+    if (nextOpen) preloadPetActionMenuContent();
+    setOpen(nextOpen);
+  }, []);
   const triggerClassName =
     variant === "detail"
       ? "inline-flex h-10 items-center justify-center gap-2 rounded-full border border-border-base bg-surface px-4 text-sm font-medium text-muted-2 transition hover:border-border-strong"
       : "inline-flex size-8 items-center justify-center rounded-full border border-border-base bg-surface/90 text-muted-2 transition hover:border-border-strong hover:text-foreground";
-
   const menuAlign = variant === "detail" ? "start" : "end";
 
   return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: stopPropagation wrapper for card-anchor, not an interactive role
     <div
-      // While open, lift the wrapper above sibling cards. Sibling cards
-      // create their own stacking context via backdrop-blur, so a plain
-      // z-50 on the menu still gets occluded by the next card. Raising
-      // the wrapper's z-index keeps the menu above everything below.
       style={open ? { zIndex: 60 } : undefined}
       className={variant === "card" ? "relative" : "relative inline-flex"}
-      onClick={(e) => e.stopPropagation()}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") e.stopPropagation();
-      }}
     >
-      <DropdownMenu open={open} onOpenChange={setOpen}>
-        <DropdownMenuTriggerButton
-          className={triggerClassName}
-          aria-label={t("moreActions", { name: pet.displayName })}
+      <DropdownMenu open={open} onOpenChange={handleOpenChange}>
+        <DropdownMenuTrigger
+          render={
+            <button
+              type="button"
+              aria-label={t("moreActions", { name: pet.displayName })}
+              className={triggerClassName}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onFocus={preloadPetActionMenuContent}
+              onPointerEnter={preloadPetActionMenuContent}
+            />
+          }
         >
           {variant === "detail" ? (
             <>
@@ -398,211 +88,20 @@ export function PetActionMenu({ pet, variant = "card", ownerActions }: Props) {
           ) : (
             <MoreHorizontal className="size-4" />
           )}
-        </DropdownMenuTriggerButton>
+        </DropdownMenuTrigger>
 
         <DropdownMenuContent
           align={menuAlign}
           sideOffset={6}
           className="w-60 overflow-hidden rounded-2xl border border-border-base bg-surface p-0 shadow-xl shadow-blue-950/15"
         >
-          <div className="flex items-center justify-between border-b border-black/[0.06] px-3 py-2 dark:border-white/[0.06]">
-            <span className="font-mono text-[10px] tracking-[0.18em] text-muted-3 uppercase">
-              {pet.displayName}
-            </span>
-            <button
-              type="button"
-              aria-label={t("closeMenu")}
-              onClick={() => setOpen(false)}
-              className="grid size-6 place-items-center rounded-full text-muted-4 transition hover:bg-surface-muted hover:text-foreground"
-            >
-              <CloseIcon className="size-3.5" />
-            </button>
-          </div>
-
-          <div className="py-1">
-            <DropdownMenuItem
-              render={
-                // biome-ignore lint/a11y/useAnchorContent: content is provided via DropdownMenuItem children (Base UI render prop pattern)
-                <a
-                  href={`codex://new?prompt=${encodeURIComponent(`Install this Petdex pet by running: ${installCmd}`)}`}
-                />
-              }
-              className="flex items-center gap-2.5 px-3 py-2 text-sm text-muted-2"
-            >
-              <CodexLogo className="size-4" />
-              <span className="flex flex-col">
-                <span>{t("openInCodex")}</span>
-                <span className="font-mono text-[10px] tracking-tight text-muted-4">
-                  {t("openInCodexHint")}
-                </span>
-              </span>
-            </DropdownMenuItem>
-
-            <DropdownMenuItem
-              onClick={() => copyText(installCmd, "install")}
-              className="flex items-center gap-2.5 px-3 py-2 text-sm text-muted-2"
-            >
-              {copied === "install" ? (
-                <Check className="size-4 text-emerald-600" />
-              ) : (
-                <Terminal className="size-4" />
-              )}
-              <span className="flex flex-col">
-                <span>
-                  {copied === "install" ? t("copiedInstall") : t("copyInstall")}
-                </span>
-                <span className="font-mono text-[10px] tracking-tight text-muted-4">
-                  {installCmd}
-                </span>
-              </span>
-              <Copy className="ml-auto size-3.5 text-stone-300 dark:text-stone-600" />
-            </DropdownMenuItem>
-
-            <DropdownMenuItem
-              onClick={() => copyText(pageUrl, "link")}
-              className="flex items-center gap-2.5 px-3 py-2 text-sm text-muted-2"
-            >
-              {copied === "link" ? (
-                <Check className="size-4 text-emerald-600" />
-              ) : (
-                <Link2 className="size-4" />
-              )}
-              <span className="flex flex-col">
-                <span>
-                  {copied === "link" ? t("copiedLink") : t("copyPageLink")}
-                </span>
-                <span className="font-mono text-[10px] tracking-tight text-muted-4">
-                  {pageUrl.replace(/^https?:\/\//, "")}
-                </span>
-              </span>
-              <Copy className="ml-auto size-3.5 text-stone-300 dark:text-stone-600" />
-            </DropdownMenuItem>
-
-            <DropdownMenuItem
-              onClick={onShareX}
-              className="flex items-center gap-2.5 px-3 py-2 text-sm text-muted-2"
-            >
-              <XIcon className="size-4" />
-              <span>{t("shareToX")}</span>
-            </DropdownMenuItem>
-
-            <DropdownMenuItem
-              onClick={onShareLinkedIn}
-              className="flex items-center gap-2.5 px-3 py-2 text-sm text-muted-2"
-            >
-              <LinkedInIcon className="size-4" />
-              <span>{t("shareToLinkedIn")}</span>
-            </DropdownMenuItem>
-
-            {typeof navigator !== "undefined" && "share" in navigator ? (
-              <DropdownMenuItem
-                onClick={() => void onShareNative()}
-                className="flex items-center gap-2.5 px-3 py-2 text-sm text-muted-2"
-              >
-                <ExternalLink className="size-4" />
-                <span>{t("more")}</span>
-              </DropdownMenuItem>
-            ) : null}
-
-            {pet.zipUrl ? (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  render={
-                    // biome-ignore lint/a11y/useAnchorContent: content is provided via DropdownMenuItem children (Base UI render prop pattern)
-                    <a
-                      href={pet.zipUrl}
-                      download
-                      target="_blank"
-                      rel="noreferrer"
-                    />
-                  }
-                  onClick={onZipClick}
-                  className="flex items-center gap-2.5 px-3 py-2.5 text-sm text-muted-2"
-                >
-                  <Download className="size-4" />
-                  <span className="flex-1">{t("downloadZip")}</span>
-                </DropdownMenuItem>
-              </>
-            ) : null}
-
-            {ownerActions?.status === "pending" ? (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onClick={() => void onWithdraw()}
-                  disabled={withdrawing}
-                  className="flex items-center gap-2.5 px-3 py-2.5 text-sm text-chip-danger-fg"
-                >
-                  {withdrawing ? (
-                    <Loader2 className="size-4 animate-spin" />
-                  ) : (
-                    <XCircle className="size-4" />
-                  )}
-                  <span className="flex-1">
-                    {withdrawing ? t("withdrawing") : t("withdrawSubmission")}
-                  </span>
-                </DropdownMenuItem>
-              </>
-            ) : null}
-
-            {ownerActions?.status === "rejected" ? (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  render={<Link href="/submit" />}
-                  className="flex items-center gap-2.5 px-3 py-2.5 text-sm text-foreground"
-                >
-                  <Plus className="size-4" />
-                  <span className="flex-1">{t("submitNewVersion")}</span>
-                </DropdownMenuItem>
-              </>
-            ) : null}
-
-            {ownerActions?.status === "approved" ? (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  render={<Link href={`/pets/${pet.slug}#edit`} />}
-                  className="flex items-center gap-2.5 px-3 py-2.5 text-sm text-foreground"
-                >
-                  <Pencil className="size-4" />
-                  <span className="flex-1">{t("editDetails")}</span>
-                </DropdownMenuItem>
-              </>
-            ) : null}
-
-            {canDelete ? (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onClick={() => void onDelete()}
-                  disabled={deleting}
-                  variant="destructive"
-                  className="flex items-center gap-2.5 px-3 py-2.5 text-sm"
-                >
-                  {deleting ? (
-                    <Loader2 className="size-4 animate-spin" />
-                  ) : (
-                    <Trash2 className="size-4" />
-                  )}
-                  <span className="flex-1">
-                    {deleting ? t("removing") : t("removeFromPetdex")}
-                  </span>
-                </DropdownMenuItem>
-              </>
-            ) : null}
-          </div>
-
-          {deleteError ? (
-            <p className="border-t border-black/[0.06] bg-chip-danger-bg px-3 py-2 text-xs text-chip-danger-fg dark:border-white/[0.06]">
-              {deleteError}
-            </p>
-          ) : null}
-          {withdrawError ? (
-            <p className="border-t border-black/[0.06] bg-chip-danger-bg px-3 py-2 text-xs text-chip-danger-fg dark:border-white/[0.06]">
-              {withdrawError}
-            </p>
+          {open ? (
+            <PetActionMenuContent
+              onOpenChange={handleOpenChange}
+              open={open}
+              ownerActions={ownerActions}
+              pet={pet}
+            />
           ) : null}
         </DropdownMenuContent>
       </DropdownMenu>
@@ -610,56 +109,13 @@ export function PetActionMenu({ pet, variant = "card", ownerActions }: Props) {
   );
 }
 
-function DropdownMenuTriggerButton({
-  children,
-  className,
-  "aria-label": ariaLabel,
-}: {
-  children: React.ReactNode;
-  className: string;
-  "aria-label": string;
-}) {
+function PetActionMenuContentLoading() {
   return (
-    <DropdownMenuTrigger
-      render={
-        <button
-          type="button"
-          aria-label={ariaLabel}
-          className={className}
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-          }}
-        />
-      }
-    >
-      {children}
-    </DropdownMenuTrigger>
-  );
-}
-
-function XIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-      className={className}
-      fill="currentColor"
-    >
-      <path d="M18.244 2H21l-6.55 7.49L22 22h-6.93l-4.83-6.31L4.6 22H1.84l7.01-8.02L1 2h7.07l4.36 5.78L18.244 2zm-2.43 18h1.91L7.27 4H5.27l10.544 16z" />
-    </svg>
-  );
-}
-
-function LinkedInIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-      className={className}
-      fill="currentColor"
-    >
-      <path d="M19 3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM8.34 18.34V10.5H5.67v7.84zm-1.34-9a1.55 1.55 0 1 0 0-3.1 1.55 1.55 0 0 0 0 3.1zm11.34 9v-4.49c0-2.4-1.28-3.52-2.99-3.52a2.58 2.58 0 0 0-2.34 1.29h-.04V10.5h-2.55v7.84h2.66v-3.88c0-1.02.2-2.01 1.46-2.01 1.25 0 1.27 1.17 1.27 2.07v3.82z" />
-    </svg>
+    <div aria-hidden="true" className="space-y-1 p-2">
+      <div className="mb-2 h-6 rounded-lg bg-surface-muted/80" />
+      <div className="h-9 animate-pulse rounded-xl bg-surface-muted/70" />
+      <div className="h-9 animate-pulse rounded-xl bg-surface-muted/70" />
+      <div className="h-9 animate-pulse rounded-xl bg-surface-muted/70" />
+    </div>
   );
 }

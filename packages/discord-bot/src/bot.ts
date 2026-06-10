@@ -1,6 +1,6 @@
 // Petdex Discord bot. Runs the gateway connection, dispatches slash
 // commands, and exposes a small HTTP server (port 8086) for webhooks
-// from petdex.crafter.run (pet-approved → post to #showcase).
+// from petdex.dev (pet-approved → post to #showcase).
 
 import { createServer } from "node:http";
 
@@ -55,7 +55,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 await client.login(token);
 
 // Webhook server runs in the same process so we share the client. It
-// only listens locally — the petdex.crafter.run side fires through a
+// only listens locally — the petdex.dev side fires through a
 // Cloudflare tunnel or fly.io edge, never directly to the bot host.
 const PORT = Number(process.env.PORT ?? 8086);
 createServer((req, res) => {

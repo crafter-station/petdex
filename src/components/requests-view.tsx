@@ -10,7 +10,6 @@ import {
   useState,
 } from "react";
 
-import { track } from "@vercel/analytics";
 import {
   ArrowUp,
   Check,
@@ -29,14 +28,12 @@ import { ClaimRequestButton } from "@/components/claim-request-button";
 type ClerkInfo = {
   handle: string;
   displayName: string | null;
-  username: string | null;
   imageUrl: string | null;
 };
 
 type FulfilledPet = {
   slug: string;
   displayName: string;
-  spritesheetUrl: string;
 };
 
 export type RequestRow = {
@@ -62,7 +59,13 @@ const COLLECTION_PREFIX = "Collection:";
 type Sort = "top" | "new" | "fulfilled";
 type RequestKind = "pet" | "collection";
 
-export function RequestsView({ initial }: { initial: RequestRow[] }) {
+export function RequestsView({
+  initial,
+  refreshOnMount,
+}: {
+  initial: RequestRow[];
+  refreshOnMount: boolean;
+}) {
   const t = useTranslations("requests.view");
   const [requests, setRequests] = useState<RequestRow[]>(initial);
   const [pending, setPending] = useState<Set<string>>(new Set());
@@ -89,6 +92,7 @@ export function RequestsView({ initial }: { initial: RequestRow[] }) {
   // We always pull status=all so all three sort tabs work without
   // another roundtrip when the user toggles them.
   useEffect(() => {
+    if (!refreshOnMount) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -104,7 +108,7 @@ export function RequestsView({ initial }: { initial: RequestRow[] }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [refreshOnMount]);
 
   const counts = useMemo(() => {
     return {
@@ -228,7 +232,6 @@ export function RequestsView({ initial }: { initial: RequestRow[] }) {
       return;
     }
     const requestQuery = toStoredRequestQuery(requestKind, trimmed);
-    track("pet_request_clicked", { from: "requests_form" });
     setFormError(null);
     setSubmitting(true);
     try {
@@ -240,7 +243,6 @@ export function RequestsView({ initial }: { initial: RequestRow[] }) {
       });
       if (!res.ok) {
         if (res.status === 401) {
-          track("pet_request_blocked", { reason: "unauthorized" });
           setFormError(t("errors.signInRequest"));
           return;
         }
@@ -248,7 +250,6 @@ export function RequestsView({ initial }: { initial: RequestRow[] }) {
           message?: string;
           error?: string;
         };
-        track("pet_request_failed", { status: res.status });
         setFormError(
           data.message ??
             data.error ??
@@ -261,10 +262,6 @@ export function RequestsView({ initial }: { initial: RequestRow[] }) {
         upvoteCount: number;
         id: string;
       };
-      track("pet_request_succeeded", {
-        mode: data.mode,
-        upvotes: data.upvoteCount,
-      });
       setLastResult({
         mode: data.mode,
         query: requestQuery,
@@ -284,7 +281,6 @@ export function RequestsView({ initial }: { initial: RequestRow[] }) {
         /* ignore */
       }
     } catch (err) {
-      track("pet_request_failed", { reason: "network" });
       setFormError(
         err instanceof Error ? err.message : t("errors.networkRetry"),
       );
@@ -295,7 +291,6 @@ export function RequestsView({ initial }: { initial: RequestRow[] }) {
 
   async function upvote(req: RequestRow) {
     if (pending.has(req.id) || req.voted || req.status === "fulfilled") return;
-    track("pet_request_upvote_clicked", { id: req.id });
     setPending((s) => new Set(s).add(req.id));
     setError(null);
     try {
@@ -707,6 +702,7 @@ function RequestCard({
             {request.requester ? (
               <Link
                 href={`/u/${request.requester.handle}`}
+                prefetch={false}
                 className="inline-flex items-center gap-1.5 rounded-full bg-surface-muted px-2 py-0.5 text-muted-2 transition hover:bg-surface-muted hover:text-stone-900 dark:hover:text-stone-100"
               >
                 {request.requester.imageUrl ? (

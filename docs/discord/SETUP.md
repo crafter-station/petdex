@@ -88,7 +88,7 @@ Things the MCP can't do. Finish these in the Discord UI:
 - Server Settings → Overview → upload `public/brand/discord-icon.png`
   if the MCP didn't (the petdex repo has it).
 
-## 8. Wire the webhook from petdex.crafter.run
+## 8. Wire the webhook from petdex.dev
 
 Once the server is up, we'll add a webhook handler at
 `/api/discord/webhook` that the petdex backend hits on:

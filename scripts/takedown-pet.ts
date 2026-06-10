@@ -16,6 +16,7 @@ import { Resend } from "resend";
 import { db, schema } from "@/lib/db/client";
 import { renderSubmissionTakedownEmail } from "@/lib/email-templates/submission-takedown";
 import { createNotification } from "@/lib/notifications";
+import { petPublicArtifactKeys } from "@/lib/pet-public-artifact-keys";
 import { deleteR2Objects, keyFromR2Url } from "@/lib/r2";
 import { getPreferredLocaleForUser } from "@/lib/user-locale";
 
@@ -64,6 +65,7 @@ async function main() {
     keyFromR2Url(pet.petJsonUrl),
     keyFromR2Url(pet.zipUrl),
     keyFromR2Url(pet.soundUrl),
+    ...petPublicArtifactKeys(pet.slug),
   ].filter((k): k is string => Boolean(k));
 
   console.log("\nTakedown plan");

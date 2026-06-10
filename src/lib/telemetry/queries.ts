@@ -3,6 +3,12 @@ import "server-only";
 import { sql } from "drizzle-orm";
 
 import { db } from "@/lib/db/client";
+import {
+  combineRouteCostAttributionRows,
+  type RouteCostAttributionRow,
+  type RouteCostBucketInput,
+  type RouteCostSourceBucketInput,
+} from "@/lib/telemetry/route-cost-attribution";
 
 export type InstallsByDayRow = { date: string; count: number };
 export type OsRow = { os: string; count: number };
@@ -10,6 +16,7 @@ export type ArchRow = { arch: string; count: number };
 export type VersionRow = { binary_version: string; count: number };
 export type AgentRow = { agent: string; count: number };
 export type CountryRow = { country: string; count: number };
+export type RouteCostRow = RouteCostAttributionRow;
 export type VersionAdoptionRow = {
   day: string;
   version: string;
@@ -26,6 +33,7 @@ export type TelemetrySummary = {
   versionDistribution: VersionRow[];
   topAgents: AgentRow[];
   countryTop10: CountryRow[];
+  routeCostTop: RouteCostRow[];
   funnel: {
     install: number;
     hooks: number;
@@ -54,6 +62,7 @@ export async function getTelemetrySummary(): Promise<TelemetrySummary> {
     versionResult,
     agentsResult,
     countryResult,
+    routeCostResult,
     funnelResult,
   ] = await Promise.all([
     db.execute(sql`
@@ -120,6 +129,7 @@ export async function getTelemetrySummary(): Promise<TelemetrySummary> {
       ORDER BY count DESC
       LIMIT 10
     `),
+    getRouteCostTop(),
     db.execute(sql`
       SELECT
         COUNT(DISTINCT CASE WHEN event = 'cli_install_desktop_success' THEN install_id END) AS install,
@@ -191,6 +201,8 @@ export async function getTelemetrySummary(): Promise<TelemetrySummary> {
     ).rows ?? []
   ).map((r) => ({ country: r.country, count: toNum(r.count) }));
 
+  const routeCostTop = routeCostResult;
+
   const funnelRow = (
     funnelResult as unknown as {
       rows: Array<{
@@ -220,6 +232,7 @@ export async function getTelemetrySummary(): Promise<TelemetrySummary> {
     versionDistribution,
     topAgents,
     countryTop10,
+    routeCostTop,
     funnel: {
       install: fInstall,
       hooks: fHooks,
@@ -230,6 +243,106 @@ export async function getTelemetrySummary(): Promise<TelemetrySummary> {
       startToFirstPct: pct(fFirst, fStart),
     },
   };
+}
+
+async function getRouteCostTop(): Promise<RouteCostRow[]> {
+  let legacyRows: RouteCostBucketInput[];
+  try {
+    const legacyResult = await db.execute(sql`
+      SELECT
+        bucket_start,
+        method,
+        route,
+        route_kind,
+        SUM(sample_count) AS samples,
+        SUM(estimated_requests) AS estimated_requests
+      FROM route_cost_buckets
+      WHERE bucket_start >= now() - interval '24 hours'
+      GROUP BY bucket_start, method, route, route_kind
+    `);
+    legacyRows = mapLegacyRows(legacyResult);
+  } catch {
+    return [];
+  }
+
+  let sourceRows: RouteCostSourceBucketInput[] = [];
+  try {
+    const sourceResult = await db.execute(sql`
+      SELECT
+        bucket_start,
+        method,
+        referrer_source,
+        route,
+        route_kind,
+        traffic_source,
+        SUM(sample_count) AS samples,
+        SUM(estimated_requests) AS estimated_requests
+      FROM route_cost_source_buckets
+      WHERE bucket_start >= now() - interval '24 hours'
+      GROUP BY
+        bucket_start,
+        method,
+        route,
+        route_kind,
+        traffic_source,
+        referrer_source
+    `);
+    sourceRows = mapSourceRows(sourceResult);
+  } catch {}
+
+  return combineRouteCostAttributionRows(legacyRows, sourceRows, 20);
+}
+
+function mapLegacyRows(result: unknown): RouteCostBucketInput[] {
+  return (
+    (
+      result as {
+        rows?: Array<{
+          bucket_start: unknown;
+          estimated_requests: unknown;
+          method: string;
+          route: string;
+          route_kind: string;
+          samples: unknown;
+        }>;
+      }
+    ).rows ?? []
+  ).map((r) => ({
+    bucketStart: String(r.bucket_start),
+    estimatedRequests: toNum(r.estimated_requests),
+    method: r.method,
+    route: r.route,
+    routeKind: r.route_kind,
+    samples: toNum(r.samples),
+  }));
+}
+
+function mapSourceRows(result: unknown): RouteCostSourceBucketInput[] {
+  return (
+    (
+      result as {
+        rows?: Array<{
+          bucket_start: unknown;
+          estimated_requests: unknown;
+          method: string;
+          referrer_source: string;
+          route: string;
+          route_kind: string;
+          samples: unknown;
+          traffic_source: string;
+        }>;
+      }
+    ).rows ?? []
+  ).map((r) => ({
+    bucketStart: String(r.bucket_start),
+    estimatedRequests: toNum(r.estimated_requests),
+    method: r.method,
+    referrerSource: r.referrer_source,
+    route: r.route,
+    routeKind: r.route_kind,
+    samples: toNum(r.samples),
+    trafficSource: r.traffic_source,
+  }));
 }
 
 export async function versionAdoptionOverTime(): Promise<VersionAdoptionRow[]> {

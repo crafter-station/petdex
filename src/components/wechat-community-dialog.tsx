@@ -3,7 +3,6 @@
 import Image from "next/image";
 import { useState } from "react";
 
-import { track } from "@vercel/analytics";
 import { Loader2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -18,9 +17,8 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 
-// Use the same server-side proxy as the collaborator QR panel. The raw
-// Aliyun object may be private, and Next's optimizer can keep serving an
-// expired QR after rotation.
+// Use the server-side proxy so the raw Aliyun object can stay private and
+// Next's optimizer does not keep serving an expired QR after rotation.
 const WECHAT_QR_URL = "/api/wechat-qr";
 
 function WechatQrImage({ className }: { className?: string }) {
@@ -64,15 +62,10 @@ type WechatCommunityDialogProps = {
 
 export function WechatCommunityDialog({
   className,
-  source = "community_page_hero",
   children = "加入微信群",
 }: WechatCommunityDialogProps) {
   return (
-    <Dialog
-      onOpenChange={(open) => {
-        if (open) track("wechat_qr_open", { source });
-      }}
-    >
+    <Dialog>
       <DialogTrigger
         render={
           <button
@@ -81,9 +74,6 @@ export function WechatCommunityDialog({
               "inline-flex h-11 items-center gap-2 rounded-full border border-[#07C160]/25 bg-[#07C160]/12 px-5 text-sm font-semibold text-[#07C160] backdrop-blur transition hover:bg-[#07C160]/18",
               className,
             )}
-            onClick={() => {
-              track("wechat_click", { source });
-            }}
           >
             <WeChatIcon className="size-4" />
             {children}
@@ -119,7 +109,7 @@ export function WechatCommunityQrCard() {
       </div>
       <WechatQrImage className="border-[#07C160]/20" />
       <p className="mt-3 text-xs leading-5 text-muted-2">
-        微信扫码加入中文社区。二维码过期时，Henry 可以在协作者页面更新。
+        微信扫码加入中文社区。如果二维码过期，请联系维护者更新。
       </p>
     </div>
   );

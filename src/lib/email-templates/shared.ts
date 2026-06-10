@@ -1,6 +1,6 @@
 import { defaultLocale, type Locale, localizePath } from "@/i18n/config";
 
-const SITE_URL = "https://petdex.crafter.run";
+const SITE_URL = "https://petdex.dev";
 
 export function normalizeLocale(locale: Locale | null | undefined): Locale {
   return locale ?? defaultLocale;

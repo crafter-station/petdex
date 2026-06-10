@@ -7,31 +7,32 @@ import { Dice5, ExternalLink, PackageOpen, X } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { withLocale } from "@/lib/locale-routing";
+import type { SurprisePet } from "@/lib/surprise-pets";
 import { safeGetItem, safeSetItem } from "@/lib/utils";
 
 import { PetSprite } from "@/components/pet-sprite";
 
 import { hasLocale, type Locale } from "@/i18n/config";
 
-type SurprisePet = {
-  slug: string;
-  displayName: string;
-  description: string;
-  spritesheetPath: string;
-  href: string;
-  installHref: string;
-};
-
 const BASE_KEY = "petdex_surprise_pet_seen";
 const THUMBNAIL_SPRITE_SCALE = 0.45;
 
-export function SurprisePetCard() {
+type SurprisePetCardProps = {
+  initialPet?: SurprisePet | null;
+};
+
+export function SurprisePetCard({ initialPet = null }: SurprisePetCardProps) {
   const locale = useLocale();
   const currentLocale: Locale = hasLocale(locale) ? locale : "en";
   const t = useTranslations("home.surprise");
   const [pet, setPet] = useState<SurprisePet | null>(null);
   const [visible, setVisible] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  const showPet = useCallback((next: SurprisePet) => {
+    setPet(next);
+    setVisible(true);
+  }, []);
 
   const loadPet = useCallback(async () => {
     setLoading(true);
@@ -42,12 +43,11 @@ export function SurprisePetCard() {
       });
       if (!response.ok) return;
       const next = (await response.json()) as SurprisePet;
-      setPet(next);
-      setVisible(true);
+      showPet(next);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [showPet]);
 
   useEffect(() => {
     const today = new Date().toISOString().slice(0, 10);
@@ -55,10 +55,14 @@ export function SurprisePetCard() {
     if (safeGetItem(key) === "1") return;
     const timeout = window.setTimeout(() => {
       safeSetItem(key, "1");
-      void loadPet();
+      if (initialPet) {
+        showPet(initialPet);
+      } else {
+        void loadPet();
+      }
     }, 2200);
     return () => window.clearTimeout(timeout);
-  }, [loadPet]);
+  }, [initialPet, loadPet, showPet]);
 
   if (!visible || pet === null) return null;
 

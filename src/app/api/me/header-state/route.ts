@@ -3,50 +3,59 @@ import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { sql as dsql } from "drizzle-orm";
 
-import { isAdmin } from "@/lib/admin";
+import { hasClerkSessionCookie } from "@/lib/clerk-session-cookie";
 import { db } from "@/lib/db/client";
+import {
+  HEADER_STATE_BROWSER_CACHE_SECONDS,
+  INITIAL_HEADER_STATE,
+} from "@/lib/header-state";
 
 export const runtime = "nodejs";
 
 type HeaderStateRow = {
   notification_count: number | string;
   feedback_count: number | string;
-  admin_count: number | string;
+  profile_handle: string | null;
   caught_slugs: unknown;
 };
 
 // GET /api/me/header-state -> single aggregate the SiteHeader needs on
-// every page-view. Combines what used to be three separate endpoints
-// (notifications unread, feedback unread, caught slugs) so we ship
-// one Edge Request per page-view instead of three.
+// every page-view. Combines notifications unread, feedback unread,
+// caught slugs, and the canonical profile handle so signed-in headers
+// do not fan out into separate reads.
 //
 // Returns lightweight counts + the caught slug set. The full
 // notifications list (`items[]`) still lives at /api/notifications and
 // is only fetched when the bell dropdown opens.
-export async function GET(): Promise<Response> {
+export async function GET(req: Request): Promise<Response> {
+  if (!hasClerkSessionCookie(req.headers.get("cookie"))) {
+    return NextResponse.json(INITIAL_HEADER_STATE, {
+      headers: {
+        "Cache-Control":
+          "public, max-age=60, s-maxage=300, stale-while-revalidate=3600",
+        Vary: "Cookie",
+      },
+    });
+  }
+
   const { userId } = await auth();
 
   if (!userId) {
     // Anonymous viewers always get the same empty payload, so let the
     // edge cache absorb most of the load. 5min CDN cache + 1h SWR keeps
     // the header snappy for visitors without hitting the function.
-    return NextResponse.json(
-      {
-        signedIn: false,
-        notifications: { unreadCount: 0 },
-        feedback: { count: 0, adminCount: 0 },
-        caught: [] as string[],
+    return NextResponse.json(INITIAL_HEADER_STATE, {
+      headers: {
+        "Cache-Control": "public, s-maxage=300, stale-while-revalidate=3600",
+        Vary: "Cookie",
       },
-      {
-        headers: {
-          "Cache-Control": "public, s-maxage=300, stale-while-revalidate=3600",
-        },
-      },
-    );
+    });
   }
 
-  const headers = { "Cache-Control": "private, no-store" };
-  const admin = isAdmin(userId);
+  const headers = {
+    "Cache-Control": `private, max-age=${HEADER_STATE_BROWSER_CACHE_SECONDS}, must-revalidate`,
+    Vary: "Cookie",
+  };
   const result = (await db.execute(dsql`
     WITH notification_state AS (
       SELECT count(*)::int AS notification_count
@@ -73,32 +82,18 @@ export async function GET(): Promise<Response> {
               OR fr.created_at > f.user_last_read_at
             )
         )
-    ),
-    admin_feedback_state AS (
-      SELECT
-        CASE
-          WHEN ${admin}::boolean THEN count(*)::int
-          ELSE 0
-        END AS admin_count
-      FROM feedback f
-      WHERE ${admin}::boolean
-        AND EXISTS (
-          SELECT 1
-          FROM feedback_replies fr
-          WHERE fr.feedback_id = f.id
-            AND fr.author_kind = 'user'
-            AND (
-              f.admin_last_read_at IS NULL
-              OR fr.created_at > f.admin_last_read_at
-            )
-        )
     )
     SELECT
       notification_state.notification_count,
       caught_state.caught_slugs,
       feedback_state.feedback_count,
-      admin_feedback_state.admin_count
-    FROM notification_state, caught_state, feedback_state, admin_feedback_state
+      (
+        SELECT handle
+        FROM user_profiles
+        WHERE user_id = ${userId}
+        LIMIT 1
+      ) AS profile_handle
+    FROM notification_state, caught_state, feedback_state
   `)) as unknown as { rows: HeaderStateRow[] };
   const row = result.rows[0];
 
@@ -108,7 +103,9 @@ export async function GET(): Promise<Response> {
       notifications: { unreadCount: toNumber(row?.notification_count) },
       feedback: {
         count: toNumber(row?.feedback_count),
-        adminCount: toNumber(row?.admin_count),
+      },
+      profile: {
+        handle: row?.profile_handle ?? null,
       },
       caught: toStringArray(row?.caught_slugs),
     },

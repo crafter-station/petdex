@@ -9,8 +9,7 @@ import {
   SlashCommandBuilder,
 } from "discord.js";
 
-const PETDEX_API_BASE =
-  process.env.PETDEX_API_BASE ?? "https://petdex.crafter.run";
+const PETDEX_API_BASE = process.env.PETDEX_API_BASE ?? "https://petdex.dev";
 
 export const commandData = [
   new SlashCommandBuilder()

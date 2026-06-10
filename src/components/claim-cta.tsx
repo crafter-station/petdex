@@ -1,7 +1,6 @@
 "use client";
 
 import { SignInButton, useUser } from "@clerk/nextjs";
-import { track } from "@vercel/analytics";
 import { ArrowRight } from "lucide-react";
 import { useTranslations } from "next-intl";
 
@@ -61,20 +60,12 @@ export function ClaimCTA({
       {isSignedIn ? (
         // Already signed in — send them to their own profile where the
         // claim banner inside ProfileTabs does the actual transfer.
-        <a
-          href={profileHrefForUser(user)}
-          onClick={() => track("claim_cta_clicked", { signed_in: true })}
-          className="inline-flex"
-        >
+        <a href={profileHrefForUser(user)} className="inline-flex">
           {inner}
         </a>
       ) : (
         <SignInButton mode="modal" forceRedirectUrl="/" fallbackRedirectUrl="/">
-          <button
-            type="button"
-            onClick={() => track("claim_cta_clicked", { signed_in: false })}
-            className="inline-flex"
-          >
+          <button type="button" className="inline-flex">
             {inner}
           </button>
         </SignInButton>

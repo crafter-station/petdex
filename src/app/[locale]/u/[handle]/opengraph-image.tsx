@@ -15,6 +15,7 @@ import sharp from "sharp";
 
 import { db, schema } from "@/lib/db/client";
 import { userIdForHandle } from "@/lib/handles";
+import { fetchR2Asset } from "@/lib/r2-fetch";
 import { isAllowedAssetUrl, isAllowedAvatarUrl } from "@/lib/url-allowlist";
 
 export const runtime = "nodejs";
@@ -297,7 +298,7 @@ export default async function Image({
               textTransform: "uppercase",
             }}
           >
-            {petCount} {petCount === 1 ? "pet" : "pets"} · petdex.crafter.run
+            {petCount} {petCount === 1 ? "pet" : "pets"} · petdex.dev
           </div>
         </div>
       </div>
@@ -351,7 +352,7 @@ export default async function Image({
 async function loadFirstFrameAsDataUrl(url: string): Promise<string | null> {
   if (!isAllowedAssetUrl(url)) return null;
   try {
-    const res = await fetch(url, { redirect: "error" });
+    const res = await fetchR2Asset(url, { redirect: "error" });
     if (!res.ok) return null;
     const buf = Buffer.from(await res.arrayBuffer());
     const png = await sharp(buf)

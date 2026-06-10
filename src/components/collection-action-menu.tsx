@@ -3,7 +3,6 @@
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 
-import { track } from "@vercel/analytics";
 import {
   Check,
   X as CloseIcon,
@@ -25,7 +24,7 @@ import {
 
 import { CodexLogo } from "@/components/codex-logo";
 
-const SITE_URL = "https://petdex.crafter.run";
+const SITE_URL = "https://petdex.dev";
 // Cap on the install command length. Beyond this we truncate with a
 // hint so the user can paste the rest manually instead of getting a
 // 4 KB clipboard payload that some shells reject.
@@ -177,10 +176,6 @@ export function CollectionActionMenu({ collection }: Props) {
                     ) {
                       return;
                     }
-                    track("open_in_petdex_click", {
-                      source: "collection",
-                      count: installSlugs.length,
-                    });
                     e.preventDefault();
                     setOpen(false);
                     openPetdexDeepLink(petdexInstallUrl, downloadHref);

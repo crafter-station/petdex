@@ -10,7 +10,7 @@ bot replaces the placeholders with values from the webhook payload.
 > {{description}}
 
 Submitted by <@{{discordUserId}}> · catch them all at
-https://petdex.crafter.run/pets/{{slug}}
+https://petdex.dev/pets/{{slug}}
 
 `npx petdex install {{slug}}`
 
@@ -20,8 +20,8 @@ https://petdex.crafter.run/pets/{{slug}}
 
 - title: {{displayName}}
 - description: first 200 chars of {{description}}
-- url: https://petdex.crafter.run/pets/{{slug}}
-- image: https://petdex.crafter.run/pets/{{slug}}/opengraph-image
+- url: https://petdex.dev/pets/{{slug}}
+- image: https://petdex.dev/pets/{{slug}}/opengraph-image
 - color: 0x5266EA
 - fields:
   - name: kind, value: {{kind}}, inline: true

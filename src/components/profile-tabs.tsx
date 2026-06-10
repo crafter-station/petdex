@@ -53,6 +53,8 @@ export type ProfileTabsProps = {
   pinning?: {
     pinnedSlugs: string[];
     maxPins: number;
+    onPinChange?: (slug: string, isPinned: boolean) => void;
+    pinActionsDisabled?: boolean;
   } | null;
   // Owner-only: every collection this user owns (personal + featured).
   // When present and isOwner, the Collections tab swaps to the multi
@@ -176,6 +178,8 @@ export function ProfileTabs(props: ProfileTabsProps) {
           pinnedSet={pinnedSet}
           pinnedCount={pinnedCount}
           maxPins={pinning?.maxPins ?? null}
+          onPinChange={pinning?.onPinChange}
+          pinActionsDisabled={pinning?.pinActionsDisabled}
           isZh={isZh}
           approvedLabel={(count: number) => t("approvedSection", { count })}
         />
@@ -210,6 +214,8 @@ function PetsPanel({
   pinnedSet,
   pinnedCount,
   maxPins,
+  onPinChange,
+  pinActionsDisabled,
   isZh,
   approvedLabel,
 }: {
@@ -222,6 +228,8 @@ function PetsPanel({
   pinnedSet: Set<string> | null;
   pinnedCount: number;
   maxPins: number | null;
+  onPinChange?: (slug: string, isPinned: boolean) => void;
+  pinActionsDisabled?: boolean;
   isZh: boolean;
   approvedLabel: (count: number) => string;
 }) {
@@ -292,6 +300,10 @@ function PetsPanel({
                             isPinned: pinnedSet.has(pet.slug),
                             pinnedCount,
                             maxPins,
+                            onPinChange: (isPinned) =>
+                              onPinChange?.(pet.slug, isPinned),
+                            disabled: pinActionsDisabled,
+                            disabledTitle: "Pinned order is saving",
                           }
                         : undefined
                     }
@@ -526,7 +538,11 @@ function CollectionsPanel({
               </span>
             </div>
             <h3 className="mt-2 text-lg font-semibold tracking-tight text-foreground">
-              <Link href={`/collections/${c.slug}`} className="hover:underline">
+              <Link
+                href={`/collections/${c.slug}`}
+                prefetch={false}
+                className="hover:underline"
+              >
                 {c.title}
               </Link>
             </h3>
@@ -557,6 +573,7 @@ function CollectionsPanel({
       <div className="mt-5 flex flex-wrap items-center gap-3">
         <Link
           href={`/collections/${collection?.slug}`}
+          prefetch={false}
           className="inline-flex h-10 items-center rounded-full bg-inverse px-4 text-sm font-medium text-on-inverse transition hover:bg-inverse-hover"
         >
           View collection

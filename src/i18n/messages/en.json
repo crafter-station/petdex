@@ -116,7 +116,7 @@
     "petAnimated": "{name} animated",
     "petParadeAria": "Featured pets",
     "surprise": {
-      "eyebrow": "Surprise drop",
+      "eyebrow": "Featured surprise",
       "title": "A pet found you",
       "dismiss": "Dismiss surprise pet",
       "view": "View",
@@ -403,6 +403,11 @@
       "chart": {
         "label": "Impressions over time",
         "empty": "No activity recorded yet.",
+        "exactValues": "Exact values",
+        "bucket": "Bucket",
+        "impressions": "Impressions",
+        "hovers": "Hovers",
+        "clicks": "Clicks",
         "windows": {
           "eightHours": "Last 8 hours",
           "day": "Last 24 hours",
@@ -442,251 +447,6 @@
       "moreDetail": "Tell us a bit more (4+ chars).",
       "submitFailed": "Submit failed ({status}).",
       "network": "Network error. Try again."
-    }
-  },
-  "admin": {
-    "metadata": {
-      "title": "Petdex Admin"
-    },
-    "tabs": {
-      "ariaLabel": "Admin sections",
-      "submissions": "Submissions",
-      "edits": "Edits",
-      "requests": "Requests",
-      "collections": "Collections",
-      "feedback": "Feedback",
-      "campaigns": "Campaigns",
-      "mailing": "Mailing",
-      "manifest": "Manifest",
-      "insights": "Insights",
-      "telemetry": "Telemetry"
-    },
-    "status": {
-      "pending": "Pending",
-      "held": "Held",
-      "review_failed": "Review failed",
-      "auto_approved": "Auto approved",
-      "auto_rejected": "Auto rejected",
-      "approved": "Approved",
-      "rejected": "Rejected",
-      "discovered": "Discovered",
-      "all": "All",
-      "open": "Open",
-      "fulfilled": "Fulfilled",
-      "dismissed": "Dismissed",
-      "addressed": "Addressed",
-      "archived": "Archived"
-    },
-    "kinds": {
-      "all": "All kinds",
-      "suggestion": "Suggestion",
-      "bug": "Bug",
-      "praise": "Praise",
-      "other": "Other",
-      "suggestShort": "Suggest"
-    },
-    "queue": {
-      "eyebrow": "Submission queue",
-      "title": "Review pets",
-      "empty": "No pets in this view."
-    },
-    "review": {
-      "needsName": "Needs name",
-      "edit": "Edit",
-      "placeholders": {
-        "displayName": "Pet display name",
-        "slug": "slug (url-safe)",
-        "description": "Description"
-      },
-      "rejectPrompt": "Reason for rejection (optional)",
-      "requestFailed": "Request failed ({status})",
-      "save": "Save",
-      "cancel": "Cancel",
-      "approve": "Approve",
-      "reject": "Reject",
-      "revive": "Revive to pending",
-      "links": {
-        "zip": "zip",
-        "sprite": "sprite",
-        "petJson": "pet.json"
-      },
-      "relative": {
-        "justNow": "just now"
-      },
-      "petTime": "PET",
-      "petAnimation": "pet animation",
-      "similar": {
-        "possibleDuplicate": "Possible duplicate",
-        "looksSimilar": "Looks similar",
-        "sameCharacter": "Same character?",
-        "hide": "Hide",
-        "show": "Show"
-      }
-    },
-    "edits": {
-      "eyebrow": "Edit queue",
-      "title": "Pending edits",
-      "description": "Owner-submitted text changes awaiting re-approval. The live page keeps showing the approved values until you act.",
-      "empty": "No pending edits.",
-      "submitted": "submitted",
-      "displayName": "Display name",
-      "descriptionLabel": "Description",
-      "tags": "Tags",
-      "emptyValue": "empty",
-      "noChanges": "No changes",
-      "noDiff": "Edit submitted but no changes detected. Reject to clear."
-    },
-    "editActions": {
-      "approve": "Approve edit",
-      "reject": "Reject",
-      "rejectPrompt": "Reason (optional, sent to owner):",
-      "failed": "Failed: {error}"
-    },
-    "feedback": {
-      "eyebrow": "Inbox",
-      "title": "Feedback",
-      "empty": "No feedback in this view.",
-      "thread": "Thread",
-      "threadWithCount": "Thread ({count})",
-      "profile": "Profile",
-      "viewProfile": "View @{handle}'s profile",
-      "sendEmail": "Send email instead",
-      "anonymous": "Anonymous",
-      "clerk": "clerk",
-      "filters": {
-        "pending": "Pending",
-        "addressed": "Addressed",
-        "archived": "Archived",
-        "all": "All"
-      },
-      "mailto": {
-        "bodyIntro": "Thanks for the {kind} on Petdex",
-        "subject": "Re: your Petdex feedback: {excerpt}"
-      }
-    },
-    "feedbackActions": {
-      "address": "Mark as addressed",
-      "archive": "Archive",
-      "reopen": "Re-open into pending",
-      "failed": "Failed: {error}"
-    },
-    "campaigns": {
-      "eyebrow": "Ad operations",
-      "title": "Ad campaigns",
-      "description": "Review every advertiser campaign across users, including owner details, delivery metrics, and charted activity.",
-      "overview": {
-        "totalCampaigns": "Total campaigns",
-        "totalSpend": "{value} booked spend",
-        "active": "Active",
-        "statusDetail": "{paused} paused, {exhausted} exhausted",
-        "pendingPayment": "Pending payment",
-        "deletedDetail": "{count} deleted",
-        "inventory": "Purchased impressions",
-        "servedDetail": "{value} served",
-        "impressions": "Raw impressions",
-        "rawImpressionsDetail": "Rows in ad_impressions",
-        "clicks": "Clicks",
-        "ctr": "{value} CTR",
-        "hovers": "Hovers",
-        "dismissals": "{value} dismissals",
-        "avgTime": "Avg. time in view",
-        "avgTimeDetail": "Across time-in-view events"
-      },
-      "filters": {
-        "status": "Status",
-        "search": "Search",
-        "searchPlaceholder": "Title, company, email, user ID, URL",
-        "limit": "Limit",
-        "apply": "Apply filters",
-        "clear": "Clear"
-      },
-      "statuses": {
-        "all": "All statuses",
-        "pending_payment": "Pending payment",
-        "active": "Active",
-        "exhausted": "Exhausted",
-        "paused": "Paused",
-        "deleted": "Deleted"
-      },
-      "owner": {
-        "title": "Owner",
-        "userId": "User ID",
-        "contactEmail": "Contact email",
-        "company": "Company"
-      },
-      "showing": "Showing {shown} of {total} matching campaigns",
-      "empty": "No ad campaigns match these filters."
-    },
-    "requests": {
-      "eyebrow": "Community wishlist",
-      "title": "Pet requests",
-      "summary": "{open} open · {fulfilled} fulfilled · {dismissed} dismissed",
-      "openSection": "Open",
-      "fulfilledSection": "Fulfilled",
-      "dismissedSection": "Dismissed",
-      "emptyOpen": "No open requests right now.",
-      "votes": "votes",
-      "moreVoters": "+{count} more",
-      "anonymous": "anonymous"
-    },
-    "requestActions": {
-      "fulfill": "Fulfill",
-      "dismiss": "Dismiss",
-      "reopen": "Re-open",
-      "approveImage": "Approve image",
-      "rejectImage": "Reject image",
-      "slug": "slug",
-      "placeholder": "cool-clippy",
-      "mark": "Mark"
-    },
-    "manifest": {
-      "eyebrow": "Telemetry",
-      "title": "Manifest fetches",
-      "description": "Who's pulling /api/manifest. IPs are SHA-256 hashed daily so they group within a day but can't be reversed.",
-      "total": "Total (all time)",
-      "last24": "Last 24h",
-      "distinct24": "Distinct IPs (24h)",
-      "byDay": "By day · last 14d",
-      "loudestIps": "Loudest IPs · last 7d",
-      "topUserAgents": "Top user-agents · last 7d",
-      "byCountry": "By country · last 7d",
-      "headers": {
-        "ipHash": "IP hash",
-        "country": "Country",
-        "lastUa": "Last UA",
-        "fetches": "Fetches"
-      },
-      "noUa": "no UA"
-    },
-    "threadPage": {
-      "back": "← Inbox"
-    },
-    "telemetry": {
-      "eyebrow": "Telemetry",
-      "title": "CLI usage telemetry",
-      "description": "Anonymous install volume, OS distribution, and agent adoption from petdex CLI users.",
-      "stats": {
-        "totalInstalls": "Total installs",
-        "weeklyActive": "Weekly active installs",
-        "totalEvents": "Total events"
-      },
-      "sections": {
-        "adoptionCurve": "Adoption over 30 days",
-        "osDistribution": "OS distribution",
-        "archDistribution": "Arch distribution",
-        "versionAdoption": "Version adoption",
-        "topAgents": "Top agents",
-        "funnel": "Conversion funnel",
-        "geoTop10": "Top 10 countries"
-      },
-      "funnel": {
-        "install": "Install desktop",
-        "hooks": "Hooks install",
-        "start": "Desktop start",
-        "firstEvent": "First state"
-      },
-      "empty": "No telemetry events yet.",
-      "noData": "No data"
     }
   },
   "submit": {
@@ -789,30 +549,6 @@
         "unreadableSpritesheet": "Spritesheet image is unreadable.",
         "tooSmall": "Spritesheet seems too small ({width}×{height}). Use an 8×9 frame grid (recommended {recommendedWidth}×{recommendedHeight})."
       }
-    }
-  },
-  "collaborator": {
-    "metadata": {
-      "title": "Petdex Collaborator"
-    },
-    "tabs": {
-      "ariaLabel": "Collaborator sections",
-      "submissions": "Submissions",
-      "moderation": "Published moderation",
-      "edits": "Metadata edits",
-      "requests": "Pet requests",
-      "collections": "Collections",
-      "wechatQr": "WeChat QR"
-    },
-    "moderation": {
-      "eyebrow": "Moderation",
-      "title": "Published pets",
-      "searchPlaceholder": "Search name, slug, description, or owner",
-      "search": "Search",
-      "clear": "Clear",
-      "previous": "Previous",
-      "next": "Next",
-      "empty": "No published pets match this filter."
     }
   },
   "requests": {
@@ -969,11 +705,11 @@
   "builtWith": {
     "metadata": {
       "titleTemplate": "Built with Petdex: {total} community projects",
-      "description": "{total} open-source projects building on top of Petdex: desktop companions, wellness apps, wearables, SDKs, and pet creators."
+      "description": "{total} open-source and source-available projects building on top of Petdex: desktop companions, wellness apps, wearables, SDKs, and pet creators."
     },
     "eyebrow": "Built with Petdex",
     "title": "Apps the community is shipping on Petdex",
-    "subtitle": "{total} open-source projects pull from the Petdex gallery, API, or pet format. Wellness apps, wearables, SDKs, and creators. Curated, evidence-required, no vibes.",
+    "subtitle": "{total} open-source and source-available projects pull from the Petdex gallery, API, or pet format. Wellness apps, wearables, SDKs, and creators. Curated, evidence-required, no vibes.",
     "stats": {
       "stars": "{total} combined stars",
       "projects": "{total} projects",
@@ -1600,6 +1336,21 @@
     "downloadCta": "Download",
     "seeHowCta": "See how it works"
   },
+  "securityUpdate": {
+    "ariaLabel": "Petdex security update",
+    "dismissAria": "Dismiss security update",
+    "closeAria": "Close",
+    "eyebrow": "Security update",
+    "title": "Update Petdex to keep installing pets",
+    "description": "We added protected asset downloads to block hotlinking, direct scraping, and unofficial origins.",
+    "impact": "Petdex web, the latest CLI, and the latest desktop app are supported. Older CLI snapshots may fail when installing pets until they are refreshed.",
+    "commandLabel": "Run this once in your terminal:",
+    "commandHint": "This pulls the latest desktop release and refreshes the CLI snapshot used by Petdex Desktop.",
+    "originTitle": "Using Petdex assets from another origin?",
+    "originBody": "Open an issue with the origin URL and use case. We will review allowlist requests case by case.",
+    "doneCta": "I will update",
+    "originCta": "Request origin access"
+  },
   "githubStar": {
     "eyebrow": "Open source · Petdex",
     "title": "Help Petdex grow. Star us on GitHub",
@@ -1621,7 +1372,7 @@
   "collectionsPage": {
     "metadata": {
       "title": "Featured collections",
-      "description": "Browse Petdex collections by franchise, category, or theme. Search, sort, and filter to find your set."
+      "description": "Browse Petdex collections by franchise, category, or theme in a fast public catalog."
     },
     "hero": {
       "eyebrow": "Featured collections",
@@ -1698,19 +1449,6 @@
   "onboarding": {
     "skip": "Skip tour"
   },
-  "adminReview": {
-    "namePlaceholder": "Pet display name",
-    "descriptionPlaceholder": "Description",
-    "editAria": "Edit pet",
-    "automationEvidence": "Automation evidence",
-    "noSummary": "No summary.",
-    "confidence": "Confidence: {confidence}%.",
-    "evidenceAssets": "Assets",
-    "evidenceSecurity": "Security",
-    "evidencePolicy": "Policy",
-    "evidenceVisualText": "Visual text",
-    "evidenceVisualSignals": "Visual signals"
-  },
   "sticker": {
     "ctaWeChat": "Save for WeChat",
     "ctaGeneric": "Save for WhatsApp",
@@ -1734,25 +1472,6 @@
     "howToWhatsApp": "WhatsApp: import the zip with the Sticker Maker app",
     "desktopNote": "WhatsApp Desktop shows first frame only · plays full animation on phone",
     "errorGeneric": "Something went wrong, try again"
-  },
-  "collaboratorWechatQr": {
-    "panelTitle": "WeChat Group QR Manager",
-    "currentQr": "Current QR",
-    "expiresIn": "Expires in {days} days",
-    "expired": "Expired",
-    "uploadCta": "Upload new QR",
-    "dropZoneHint": "Drop JPG / PNG here, max 200KB",
-    "validating": "Validating with AI...",
-    "validationFailed": "Validation failed",
-    "uploadSuccess": "Upload successful!",
-    "history": "Upload history",
-    "historyEmpty": "No uploads yet",
-    "statusActive": "Active",
-    "statusReplaced": "Replaced",
-    "statusRejected": "Rejected",
-    "uploadedBy": "Uploaded by",
-    "rotateNow": "Rotate now",
-    "viewOnPublic": "View on public page"
   },
   "collectionActionMenu": {
     "moreActions": "More actions for {title}",
@@ -1996,8 +1715,29 @@
     "sections": {
       "quickStart": {
         "title": "Quick start",
-        "intro": "Install a curated pet into your Codex setup with one command. No account required to install. Sign in only when you submit.",
-        "afterCommand": "The CLI fetches the pet pack and drops it into <code>~/.codex/pets/boba/</code>. To activate it inside Codex go to <strong>Settings → Appearance → Pets</strong> and click <strong>Select</strong>. Use <code>/pet</code> inside Codex to wake or tuck it away.",
+        "intro": "Follow this checklist to get a pet installed, visible in Codex, and connected to the desktop app. No account required to install. Sign in only when you submit.",
+        "steps": {
+          "install": {
+            "title": "Install a known pet",
+            "body": "Start with Boba so you have a real pet folder to select in Codex.",
+            "result": "You should see <code>~/.codex/pets/boba/</code> with <code>pet.json</code> and a spritesheet."
+          },
+          "desktop": {
+            "title": "Initialize desktop and hooks",
+            "body": "Run the full setup when you want the floating desktop mascot and agent activity hooks.",
+            "result": "Petdex downloads the desktop app, starts it, and wires supported agents for <code>/petdex</code>."
+          },
+          "select": {
+            "title": "Select the pet in Codex",
+            "body": "Open Codex, go to <strong>Settings → Appearance → Pets</strong>, choose <strong>Boba</strong>, and click <strong>Select</strong>.",
+            "result": "Use <code>/pet</code> inside Codex to wake the pet or tuck it away."
+          },
+          "verify": {
+            "title": "Verify the setup",
+            "body": "Run diagnostics if the pet does not appear, or type <code>/petdex status</code> inside a supported agent after hooks are installed.",
+            "result": "The doctor reports any missing binary, hook, token, or pet folder with a concrete fix."
+          }
+        },
         "callout": "Don't have a pet idea yet? <link>Hatch your own</link> with the Codex Hatch Pet skill, then come back to <code>petdex submit</code>."
       },
       "install": {
@@ -2012,14 +1752,14 @@
       "authenticate": {
         "title": "Authenticate",
         "intro": "Sign in once, then any command that needs auth, such as submit, works seamlessly.",
-        "flow": "The flow is OAuth 2.0 + PKCE: the CLI opens your browser, you sign in with Clerk on <code>accounts.petdex.crafter.run</code>, and the browser redirects to a one-shot localhost listener with the authorization code. The CLI exchanges it for a token set and stores it in the keychain. No secrets touch disk.",
+        "flow": "The flow is OAuth 2.0 + PKCE: the CLI opens your browser, you sign in with Clerk on <code>accounts.petdex.dev</code>, and the browser redirects to a one-shot localhost listener with the authorization code. The CLI exchanges it for a token set and stores it in the keychain. No secrets touch disk.",
         "otherCommands": "Other auth commands:"
       },
       "commands": {
         "title": "Commands",
         "intro": "The CLI covers the full lifecycle: discover, install, hatch, publish, plus the desktop app and agent hooks. All commands accept <code>--help</code>.",
         "listBody": "Print every approved pet with credit. Useful for discovery before installing.",
-        "installBody": "Drop a pet into <code>~/.codex/pets/{petName}/</code>. Equivalent to <code>curl -sSf https://petdex.crafter.run/install/{petName} | sh</code>.",
+        "installBody": "Drop a pet into <code>~/.codex/pets/{petName}/</code>. Equivalent to <code>curl -sSf https://petdex.dev/install/{petName} | sh</code>.",
         "submitIntro": "Publish your pet(s) to the gallery. The CLI accepts three shapes:",
         "submitSingle": "<strong>Single folder</strong>: <code>petdex submit ~/.codex/pets/boba</code>",
         "submitZip": "<strong>Single zip</strong>: <code>petdex submit ~/Downloads/boba.zip</code>",
@@ -2122,8 +1862,8 @@
       "config": {
         "title": "Configuration",
         "intro": "The CLI ships with sensible defaults pointing at production. You only need to override env vars if you are testing against a non-production deployment.",
-        "petdexUrl": "<code>PETDEX_URL</code>: base URL, default <code>https://petdex.crafter.run</code>",
-        "clerkIssuer": "<code>CLERK_ISSUER</code>: OAuth issuer, default <code>https://clerk.petdex.crafter.run</code>",
+        "petdexUrl": "<code>PETDEX_URL</code>: base URL, default <code>https://petdex.dev</code>",
+        "clerkIssuer": "<code>CLERK_ISSUER</code>: OAuth issuer, default <code>https://clerk.petdex.dev</code>",
         "clerkClientId": "<code>CLERK_OAUTH_CLIENT_ID</code>: public client id (baked into the CLI binary)"
       },
       "contribute": {

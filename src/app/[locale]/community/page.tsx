@@ -24,7 +24,7 @@ import {
 import { hasLocale } from "@/i18n/config";
 
 export const dynamic = "force-static";
-const SITE_URL = "https://petdex.crafter.run";
+const SITE_URL = "https://petdex.dev";
 const WECHAT_COMMUNITY_ENABLED =
   process.env.NEXT_PUBLIC_WECHAT_COMMUNITY_ENABLED === "1";
 

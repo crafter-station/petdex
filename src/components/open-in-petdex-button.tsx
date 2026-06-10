@@ -4,7 +4,6 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
-import { track } from "@vercel/analytics";
 import { ArrowRight } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
@@ -55,7 +54,6 @@ export function OpenInPetdexButton({ slug }: OpenInPetdexButtonProps) {
 
   function handleClick(e: React.MouseEvent<HTMLAnchorElement>) {
     if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
-    track("open_in_petdex_click", { slug, source: "pet_page" });
     e.preventDefault();
     openPetdexDeepLink(deepLink, downloadHref);
   }
@@ -63,6 +61,7 @@ export function OpenInPetdexButton({ slug }: OpenInPetdexButtonProps) {
   return (
     <Link
       href={downloadHref}
+      prefetch={false}
       onClick={handleClick}
       aria-label={t("ariaLabel", { slug })}
       className="group relative isolate inline-flex w-full items-center gap-3 overflow-hidden rounded-2xl border border-brand/30 bg-gradient-to-br from-brand/15 via-brand-light/10 to-brand-deep/15 p-3 text-left shadow-[0_8px_32px_-8px_oklch(from_var(--brand)_l_c_h/0.35)] transition-all hover:border-brand/50 hover:shadow-[0_12px_40px_-8px_oklch(from_var(--brand)_l_c_h/0.45)] active:scale-[0.99]"

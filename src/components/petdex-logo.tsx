@@ -28,7 +28,12 @@ export function PetdexLogo({
 
   if (href) {
     return (
-      <Link href={href} className={classes} aria-label={ariaLabel}>
+      <Link
+        href={href}
+        prefetch={false}
+        className={classes}
+        aria-label={ariaLabel}
+      >
         {content}
       </Link>
     );

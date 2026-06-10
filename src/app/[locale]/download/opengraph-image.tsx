@@ -170,7 +170,7 @@ export default async function Image({
             textTransform: "uppercase",
           }}
         >
-          petdex.crafter.run/download
+          petdex.dev/download
         </div>
       </div>
     </div>,

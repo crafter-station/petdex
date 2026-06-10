@@ -169,8 +169,7 @@ function persistUpdateToken() {
 
 const TELEMETRY_FILE = join(homedir(), ".petdex", "telemetry.json");
 const TELEMETRY_ENDPOINT =
-  process.env.PETDEX_TELEMETRY_URL ??
-  "https://petdex.crafter.run/api/telemetry/event";
+  process.env.PETDEX_TELEMETRY_URL ?? "https://petdex.dev/api/telemetry/event";
 let firstStateEmitted = false;
 
 function readTelemetryConfig(): {

@@ -1,6 +1,6 @@
 import type { MetadataRoute } from "next";
 
-const SITE = "https://petdex.crafter.run";
+const SITE = "https://petdex.dev";
 
 export default function robots(): MetadataRoute.Robots {
   return {

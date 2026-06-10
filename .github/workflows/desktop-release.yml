@@ -24,7 +24,7 @@ jobs:
 
     steps:
       - name: Checkout petdex
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           # Manual workflow_dispatch must build from inputs.tag, not from
           # the branch the workflow file lives on. Tag pushes already
@@ -39,16 +39,19 @@ jobs:
         #
         # Source defaults to Railly/zero-native:feature/window-resize because
         # the floating-window options + window.resize + focusable flag aren't
-        # in vercel-labs/main yet. The feature/window-resize branch builds on
-        # top of feature/floating-window (the PR currently in review). Update
-        # ZERO_NATIVE_REMOTE / ZERO_NATIVE_BRANCH once everything merges
-        # upstream so CI can switch to vercel-labs/main.
+        # in vercel-labs/main yet. Pin the commit so a mutable fork branch
+        # cannot silently produce a desktop release without window.resize.
+        # Update ZERO_NATIVE_REMOTE / ZERO_NATIVE_BRANCH / ZERO_NATIVE_REF once
+        # everything merges upstream so CI can switch to vercel-labs/main.
         env:
           ZERO_NATIVE_REMOTE: "https://github.com/Railly/zero-native.git"
           ZERO_NATIVE_BRANCH: "feature/window-resize"
+          ZERO_NATIVE_REF: "c85ec92a170c5b1304543ffcbf0c1d6d3e413498"
         run: |
           set -euo pipefail
           git clone --depth 1 --branch "$ZERO_NATIVE_BRANCH" "$ZERO_NATIVE_REMOTE" "$GITHUB_WORKSPACE/zero-native"
+          git -C "$GITHUB_WORKSPACE/zero-native" fetch --depth 1 origin "$ZERO_NATIVE_REF"
+          git -C "$GITHUB_WORKSPACE/zero-native" checkout --detach "$ZERO_NATIVE_REF"
           echo "ZERO_NATIVE_PATH=$GITHUB_WORKSPACE/zero-native/" >> "$GITHUB_ENV"
 
       - name: Install Zig 0.16.0
@@ -64,7 +67,7 @@ jobs:
           ls -lh "petdex-desktop-${{ matrix.target }}"
 
       - name: Upload binary artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: petdex-desktop-${{ matrix.target }}
           path: packages/petdex-desktop/petdex-desktop-${{ matrix.target }}
@@ -74,7 +77,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout petdex
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ inputs.tag || github.ref }}
 
@@ -89,7 +92,7 @@ jobs:
           ls -lh server.js
 
       - name: Upload sidecar artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: petdex-desktop-sidecar
           path: packages/petdex-desktop/sidecar/server.js
@@ -99,7 +102,7 @@ jobs:
     runs-on: windows-2022
     steps:
       - name: Checkout petdex
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ inputs.tag || github.ref }}
 
@@ -135,7 +138,7 @@ jobs:
           Copy-Item $exe "petdex-desktop-win32-x64.exe"
 
       - name: Upload binary artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: petdex-desktop-win32-x64
           path: packages/petdex-desktop-windows/petdex-desktop-win32-x64.exe
@@ -148,12 +151,12 @@ jobs:
       contents: write
     steps:
       - name: Checkout petdex
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ inputs.tag || github.ref }}
 
       - name: Download all binaries
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
 
@@ -171,7 +174,7 @@ jobs:
           ls -lh release/
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           # `inputs.tag` is set on workflow_dispatch (manual run); on push of
           # a desktop-v* tag, `github.ref_name` carries the tag. The

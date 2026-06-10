@@ -30,6 +30,15 @@ export type AdCampaignCardLabels = {
     week: string;
     month: string;
   };
+  chart: {
+    label: string;
+    empty: string;
+    exactValues: string;
+    bucket: string;
+    impressions: string;
+    hovers: string;
+    clicks: string;
+  };
 };
 
 export type AdCampaignOwnerDetails = {
@@ -172,6 +181,7 @@ export function AdCampaignCard({
         <AdAnalyticsTabs
           series={campaign.timeSeries}
           labels={labels.chartWindows}
+          chartLabels={labels.chart}
         />
       </div>
     </article>

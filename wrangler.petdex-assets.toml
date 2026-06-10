@@ -1,0 +1,9 @@
+name = "petdex-assets"
+main = "workers/petdex-assets.ts"
+compatibility_date = "2026-06-04"
+account_id = "62819ee0a8411123c2635cbf37b577c1"
+workers_dev = true
+
+[[r2_buckets]]
+binding = "PETDEX_PETS"
+bucket_name = "petdex-pets"

@@ -10,6 +10,7 @@ import {
   powershellNotFoundScript,
   type ResolvedPet,
 } from "@/lib/install-script-render";
+import { toCurrentR2PublicUrl } from "@/lib/r2-public-url";
 import { isAllowedAssetUrl } from "@/lib/url-allowlist";
 
 export {
@@ -43,8 +44,8 @@ export async function resolveInstallablePet(
   return {
     slug,
     displayName: submitted.displayName,
-    petJsonUrl: submitted.petJsonUrl,
-    spritesheetUrl: submitted.spritesheetUrl,
+    petJsonUrl: toCurrentR2PublicUrl(submitted.petJsonUrl),
+    spritesheetUrl: toCurrentR2PublicUrl(submitted.spritesheetUrl),
     spriteExt: submitted.spritesheetUrl.endsWith(".png") ? "png" : "webp",
   };
 }

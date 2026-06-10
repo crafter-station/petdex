@@ -69,6 +69,48 @@ export const wastickersRatelimit = createRatelimit({
   prefix: "petdex:wastickers",
 });
 
+export const stickerAssetRatelimit = createRatelimit({
+  redis,
+  limiter: Ratelimit.slidingWindow(60, "1 h"),
+  prefix: "petdex:sticker-asset",
+});
+
+export const packAssetRatelimit = createRatelimit({
+  redis,
+  limiter: Ratelimit.slidingWindow(8, "1 h"),
+  prefix: "petdex:pack-asset",
+});
+
+export const publicCatalogRatelimit = createRatelimit({
+  redis,
+  limiter: Ratelimit.slidingWindow(60, "1 h"),
+  prefix: "petdex:public-catalog",
+});
+
+export const publicStateRatelimit = createRatelimit({
+  redis,
+  limiter: Ratelimit.slidingWindow(300, "1 h"),
+  prefix: "petdex:public-state",
+});
+
+export const publicPageRatelimit = createRatelimit({
+  redis,
+  limiter: Ratelimit.slidingWindow(600, "1 h"),
+  prefix: "petdex:public-page",
+});
+
+export const publicMetadataRatelimit = createRatelimit({
+  redis,
+  limiter: Ratelimit.slidingWindow(120, "1 h"),
+  prefix: "petdex:public-metadata",
+});
+
+export const publicTrafficBurstRatelimit = createRatelimit({
+  redis,
+  limiter: Ratelimit.slidingWindow(120, "1 m"),
+  prefix: "petdex:public-burst",
+});
+
 // Public metrics reads — `/api/pets/[slug]/metrics`. Browser pages hit
 // this on every visit, and the CDN caches the response for 60s so the
 // hot path is free. The limit only kicks in for direct bot/script

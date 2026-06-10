@@ -11,9 +11,9 @@
 </p>
 
 <p>
-  <a href="https://petdex.crafter.run"><strong>petdex.crafter.run</strong></a>
+  <a href="https://petdex.dev"><strong>petdex.dev</strong></a>
   &nbsp;·&nbsp;
-  <a href="https://petdex.crafter.run/built-with">Built with Petdex</a>
+  <a href="https://petdex.dev/built-with">Built with Petdex</a>
   &nbsp;·&nbsp;
   <a href="https://discord.gg/byhubdyBTe">Discord</a>
   &nbsp;·&nbsp;
@@ -35,7 +35,7 @@
 
 Petdex is three things working together:
 
-1. **A web gallery** at [petdex.crafter.run](https://petdex.crafter.run) where the community submits, reviews, and showcases animated pets in the Codex sprite format.
+1. **A web gallery** at [petdex.dev](https://petdex.dev) where the community submits, reviews, and showcases animated pets in the Codex sprite format.
 2. **A CLI** that installs any pet on your machine with one command and ships them straight into Codex.
 3. **A desktop app** that floats a pet on your screen and reacts to your coding agent's activity in real time.
 
@@ -43,24 +43,43 @@ Every pet is a folder. Every folder is a Pokédex entry. Every entry is one `npx
 
 ## Quick start
 
-```sh
-# Pick a pet. Install it. Your Codex desktop app picks it up automatically.
-npx petdex install boba
+Follow this checklist to get a pet installed, visible in Codex, and connected to the desktop app.
 
-# Or run the full Petdex desktop app with bubble UI and agent hooks.
+1. Install a known pet:
+
+```sh
+npx petdex install boba
+```
+
+You should see `~/.codex/pets/boba/` with `pet.json` and a spritesheet.
+
+2. Initialize Petdex Desktop and agent hooks:
+
+```sh
 npx petdex init
 ```
 
-Open Codex, go to **Settings → Appearance → Pets**, and pick the one you just installed.
+This downloads the desktop app, starts it, and wires supported agents for `/petdex`.
+
+3. Open Codex, go to **Settings → Appearance → Pets**, choose **Boba**, and click **Select**. Use `/pet` inside Codex to wake the pet or tuck it away.
+
+4. Verify the setup:
+
+```sh
+npx petdex doctor
+```
+
+If hooks are installed, you can also type `/petdex status` inside a supported agent.
 
 ## For users
 
 | You want to... | Do this |
 | --- | --- |
-| Browse pets | Visit [petdex.crafter.run](https://petdex.crafter.run) |
+| Browse pets | Visit [petdex.dev](https://petdex.dev) |
 | Install a pet | `npx petdex install <slug>` |
+| Switch active mascot | `npx petdex select` (interactive picker) or `npx petdex select <slug>` |
 | Run the desktop floater | `npx petdex init` (downloads the `.dmg` and wires Codex/Claude Code hooks) |
-| Make a pet | Use the `hatch-pet` skill inside Codex, or build one with the [Petdex creator tools](https://petdex.crafter.run/create) |
+| Make a pet | Use the `hatch-pet` skill inside Codex, or build one with the [Petdex creator tools](https://petdex.dev/create) |
 | Submit a pet | `npx petdex submit ./my-pet/` or drop it through the web submitter |
 | Join the community | [Discord](https://discord.gg/byhubdyBTe) |
 
@@ -70,10 +89,10 @@ Full CLI reference: [`packages/petdex-cli/README.md`](./packages/petdex-cli/READ
 
 If you want to build on top of Petdex (a desktop client, a wearable, an SDK, a Discord bot, anything), you have two stable surfaces:
 
-- **The HTTP API.** `petdex.crafter.run/api/manifest` returns every approved pet with its slug, spritesheet URL, animation states, and metadata.
+- **The HTTP API.** `petdex.dev/api/manifest` returns every approved pet with its slug, spritesheet URL, animation states, and metadata.
 - **The pet package format.** Every pet is a `pet.json` plus a `spritesheet.{webp,png}` rendered as an 8×9 grid of 192×208 frames.
 
-13 open-source projects already build on these. See [petdex.crafter.run/built-with](https://petdex.crafter.run/built-with) for the catalog, then [submit yours via the issue template](https://github.com/crafter-station/petdex/issues/new?template=built-with.yml).
+21 open-source and source-available projects already build on these. See [petdex.dev/built-with](https://petdex.dev/built-with) for the catalog, then [submit yours via the issue template](https://github.com/crafter-station/petdex/issues/new?template=built-with.yml).
 
 ## Architecture
 
@@ -86,7 +105,7 @@ crafter-station/petdex
 │   ├── app/api/admin/         Admin review surface for submissions, edits, collection requests
 │   └── lib/db/schema.ts       Drizzle schema (Postgres)
 ├── packages/
-│   ├── petdex-cli/            npm `petdex` (auth, list, install, submit, hooks, init)
+│   ├── petdex-cli/            npm `petdex` (auth, list, install, select, submit, hooks, init)
 │   ├── petdex-desktop/        Zig + WebKit floating mascot for macOS
 │   └── discord-bot/           Discord.js bot for the Petdex server
 ├── public/built-with/         Screenshots for the community page
@@ -100,22 +119,21 @@ crafter-station/petdex
 
 ## Develop locally
 
-Three paths, pick the one that matches what you want to change.
+Two paths are supported.
 
 | Goal | Command | Setup |
 | --- | --- | --- |
-| UI, copy, i18n, CSS | `bun run dev:mock` | Zero credentials. In-process Postgres + stubbed Clerk. |
-| DB queries, auth, submit, likes | `bun run dev:docker` | Docker or Podman, ~30s warm-up. |
+| Local full stack | `bun run dev:docker` | Docker or Podman, ~30s warm-up. |
 | Run against real services | `bun run dev` | `.env.local` filled (maintainers only). |
 
 ```sh
 git clone https://github.com/crafter-station/petdex.git
 cd petdex
 bun install
-bun run dev:mock
+bun run dev:docker
 ```
 
-Open [localhost:3000](http://localhost:3000). You're auto-signed-in as `contributor@petdex.local`. Full guide in [`CONTRIBUTING.md`](./CONTRIBUTING.md).
+Open [localhost:3000](http://localhost:3000). Full guide in [`CONTRIBUTING.md`](./CONTRIBUTING.md).
 
 ## Pet package format
 
@@ -131,7 +149,7 @@ Animation states are the rows: `idle`, `wave`, `run`, `failed`, `review`, `jump`
 
 ## Contribute
 
-- **Submit a pet:** [petdex.crafter.run/submit](https://petdex.crafter.run/submit) or `npx petdex submit <path>`.
+- **Submit a pet:** [petdex.dev/submit](https://petdex.dev/submit) or `npx petdex submit <path>`.
 - **List your project:** open a [Built with Petdex issue](https://github.com/crafter-station/petdex/issues/new?template=built-with.yml).
 - **Fix a bug or add a feature:** read [`CONTRIBUTING.md`](./CONTRIBUTING.md), then open a PR.
 - **Hang out:** [Discord](https://discord.gg/byhubdyBTe) has channels for shipping (`#wip`, `#ship-or-sink`), feedback (`#cli-feedback`), and showcases (`#showcase`).

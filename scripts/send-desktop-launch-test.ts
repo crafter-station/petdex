@@ -17,7 +17,7 @@ if (!TARGET_EMAIL) {
 
 const sql = neon(requiredEnv("DATABASE_URL"));
 const resend = new Resend(requiredEnv("RESEND_API_KEY"));
-const from = process.env.RESEND_FROM ?? "Petdex <hello@petdex.crafter.run>";
+const from = process.env.RESEND_FROM ?? "Petdex <hello@petdex.dev>";
 
 const rows = (await sql`
   SELECT email, locale, unsubscribe_token
@@ -48,7 +48,7 @@ const res = await resend.emails.send({
   html,
   text,
   headers: {
-    "List-Unsubscribe": `<https://petdex.crafter.run/unsubscribe?token=${encodeURIComponent(pref.unsubscribe_token)}>`,
+    "List-Unsubscribe": `<https://petdex.dev/unsubscribe?token=${encodeURIComponent(pref.unsubscribe_token)}>`,
     "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
   },
 });

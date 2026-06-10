@@ -3,8 +3,7 @@
 // only the userId (sub) and email returned by Clerk — never any value the
 // client sent in the request body.
 
-const ISSUER =
-  process.env.CLERK_CLI_ISSUER ?? "https://clerk.petdex.crafter.run";
+const ISSUER = process.env.CLERK_CLI_ISSUER ?? "https://clerk.petdex.dev";
 
 export type CliPrincipal = {
   userId: string;

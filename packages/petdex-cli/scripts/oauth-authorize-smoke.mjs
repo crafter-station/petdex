@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { createServer } from "node:http";
 
-const PETDEX_URL = "https://petdex.crafter.run";
+const PETDEX_URL = "https://petdex.dev";
 const DEFAULT_SCOPES = ["profile", "email", "openid", "offline_access"];
 const REQUEST_TIMEOUT_MS = 10_000;
 

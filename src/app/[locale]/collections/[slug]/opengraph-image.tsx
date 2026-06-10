@@ -9,6 +9,7 @@ import { ImageResponse } from "next/og";
 import sharp from "sharp";
 
 import { getCollection } from "@/lib/collections";
+import { fetchR2Asset } from "@/lib/r2-fetch";
 import { isAllowedAssetUrl } from "@/lib/url-allowlist";
 
 import { defaultLocale, hasLocale } from "@/i18n/config";
@@ -231,7 +232,7 @@ export default async function Image({
             textTransform: "uppercase",
           }}
         >
-          petdex.crafter.run/collections/{collection.slug}
+          petdex.dev/collections/{collection.slug}
         </div>
       </div>
     </div>,
@@ -276,7 +277,7 @@ async function loadFirstFrameAsDataUrl(url: string): Promise<string | null> {
     return null;
   }
   try {
-    const res = await fetch(url, { redirect: "error" });
+    const res = await fetchR2Asset(url, { redirect: "error" });
     if (!res.ok) return null;
     const buf = Buffer.from(await res.arrayBuffer());
     const png = await sharp(buf)

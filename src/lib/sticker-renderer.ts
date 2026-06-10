@@ -15,6 +15,7 @@ import { applyPalette, GIFEncoder, quantize } from "gifenc";
 import sharp from "sharp";
 
 import { defaultPetState, type PetStateId, petStates } from "@/lib/pet-states";
+import { fetchR2Asset } from "@/lib/r2-fetch";
 
 const FRAME_W = 192;
 const FRAME_H = 208;
@@ -54,7 +55,7 @@ function getStateSpec(stateId?: PetStateId) {
 export async function fetchSpritesheet(
   spritesheetUrl: string,
 ): Promise<Buffer> {
-  const res = await fetch(spritesheetUrl, { redirect: "error" });
+  const res = await fetchR2Asset(spritesheetUrl, { redirect: "error" });
   if (!res.ok) throw new Error(`upstream ${res.status}`);
   return Buffer.from(await res.arrayBuffer());
 }

@@ -15,7 +15,7 @@ body:
     id: pet-slug
     attributes:
       label: Pet slug
-      description: The slug from the pet URL — e.g. `goku` from petdex.crafter.run/pets/goku
+      description: The slug from the pet URL — e.g. `goku` from petdex.dev/pets/goku
       placeholder: pet-slug
     validations:
       required: true

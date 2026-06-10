@@ -75,7 +75,6 @@ const TABS: Tab[] = [
 export type LeaderboardPetThumb = {
   slug: string;
   displayName: string;
-  spritesheetUrl: string;
 };
 
 type LeaderboardViewProps = {
@@ -218,6 +217,7 @@ function LeaderboardRowItem({
     >
       <Link
         href={`/u/${handle}`}
+        prefetch={false}
         className="group flex items-center gap-4 rounded-2xl border border-border-base bg-surface/80 px-4 py-3 transition hover:border-border-strong"
       >
         <RankBadge rank={rank} />

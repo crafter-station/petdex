@@ -18,7 +18,7 @@ type Vars = {
 const BRAND_DEEP = "#3847f5";
 const BRAND_TINT = "#eef1ff";
 
-const ICON_URL = "https://petdex.crafter.run/brand/petdex-desktop-icon.png";
+const ICON_URL = "https://petdex.dev/brand/petdex-desktop-icon.png";
 
 export function renderDesktopLaunchEmail(
   locale: Locale,

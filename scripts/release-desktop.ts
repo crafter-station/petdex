@@ -363,7 +363,7 @@ function ghRelease(
 }
 
 async function probeProduction(tag: string): Promise<void> {
-  step("Probe https://petdex.crafter.run/api/desktop/latest-release");
+  step("Probe https://petdex.dev/api/desktop/latest-release");
   // 5-minute SWR cache means the prod endpoint may serve stale for a
   // bit. We hit the GH API directly first to confirm the release is
   // live, then probe the proxy with a short retry.
@@ -378,12 +378,9 @@ async function probeProduction(tag: string): Promise<void> {
   console.log(`  ✓ GH API has ${tag}`);
   // Probe proxy — informational only, don't fail the run.
   for (let i = 0; i < 3; i++) {
-    const r = await fetch(
-      "https://petdex.crafter.run/api/desktop/latest-release",
-      {
-        redirect: "manual",
-      },
-    );
+    const r = await fetch("https://petdex.dev/api/desktop/latest-release", {
+      redirect: "manual",
+    });
     const loc = r.headers.get("location") ?? "";
     if (loc.includes(tag)) {
       console.log(`  ✓ proxy resolved to ${loc}`);
@@ -430,7 +427,7 @@ async function main() {
   console.log(
     `  https://github.com/crafter-station/petdex/releases/tag/${tag}`,
   );
-  console.log(`  https://petdex.crafter.run/download`);
+  console.log(`  https://petdex.dev/download`);
 }
 
 main().catch((err) => {

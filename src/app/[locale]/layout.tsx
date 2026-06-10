@@ -2,8 +2,6 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { notFound } from "next/navigation";
 
-import { Analytics } from "@vercel/analytics/next";
-import { SpeedInsights } from "@vercel/speed-insights/next";
 import { NextIntlClientProvider } from "next-intl";
 import {
   getMessages,
@@ -11,15 +9,13 @@ import {
   setRequestLocale,
 } from "next-intl/server";
 
-import { AnnouncementQueue } from "@/components/announcement-queue";
-import { BuildVersionWatcher } from "@/components/build-version-watcher";
 import { FeedbackWidget } from "@/components/feedback-widget";
 import { HeaderStateProvider } from "@/components/header-state-provider";
-import { ProfileAnnouncementModal } from "@/components/profile-announcement-modal";
 import { AppProviders } from "@/components/theme-providers";
 import { TopPromoStrip } from "@/components/zh/top-promo-strip";
 import { ZhLayoutSpacer } from "@/components/zh/zh-layout-spacer";
 
+import { pickClientMessages } from "@/i18n/client-messages";
 import { hasLocale, locales } from "@/i18n/config";
 
 const geistSans = Geist({
@@ -37,7 +33,7 @@ type Props = {
   params: Promise<{ locale: string }>;
 };
 
-const SITE_URL = "https://petdex.crafter.run";
+const SITE_URL = "https://petdex.dev";
 
 export function generateStaticParams() {
   return locales.map((locale) => ({ locale }));
@@ -101,6 +97,7 @@ export default async function LocaleLayout({ children, params }: Props) {
 
   setRequestLocale(locale);
   const messages = await getMessages();
+  const clientMessages = pickClientMessages(messages);
 
   const isZh = locale === "zh";
 
@@ -111,17 +108,12 @@ export default async function LocaleLayout({ children, params }: Props) {
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-background text-foreground">
-        <NextIntlClientProvider messages={messages}>
+        <NextIntlClientProvider messages={clientMessages}>
           <AppProviders>
             {isZh && <TopPromoStrip />}
             <HeaderStateProvider>
               {isZh ? <ZhLayoutSpacer>{children}</ZhLayoutSpacer> : children}
               <FeedbackWidget />
-              <AnnouncementQueue />
-              <ProfileAnnouncementModal />
-              <BuildVersionWatcher />
-              <Analytics />
-              <SpeedInsights />
             </HeaderStateProvider>
           </AppProviders>
         </NextIntlClientProvider>

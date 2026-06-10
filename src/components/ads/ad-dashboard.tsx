@@ -79,6 +79,15 @@ export async function AdDashboard({
       week: t("chart.windows.week"),
       month: t("chart.windows.month"),
     },
+    chart: {
+      label: t("chart.label"),
+      empty: t("chart.empty"),
+      exactValues: t("chart.exactValues"),
+      bucket: t("chart.bucket"),
+      impressions: t("chart.impressions"),
+      hovers: t("chart.hovers"),
+      clicks: t("chart.clicks"),
+    },
   };
 
   return (

@@ -274,7 +274,7 @@ export function resolveDesktopInstallPlan(
     kind: "unsupported",
     target,
     reason: `No desktop binary for ${target.assetSuffix} in ${release.tag_name}.`,
-    hint: "Run `petdex hooks install` for hooks-only setup, or download a supported desktop build from https://petdex.crafter.run/download.",
+    hint: "Run `petdex hooks install` for hooks-only setup, or download a supported desktop build from https://petdex.dev/download.",
   };
 }
 
@@ -698,7 +698,7 @@ export type RunInstallDesktopResult = {
 // (404 page, facet pages). Easy to swap if we later want to make
 // this configurable per-release.
 const DEFAULT_PET_SLUG = "boba";
-const PETDEX_URL = process.env.PETDEX_URL ?? "https://petdex.crafter.run";
+const PETDEX_URL = process.env.PETDEX_URL ?? "https://petdex.dev";
 
 // Hosts we trust for serving pet assets (spritesheet + pet.json).
 // Mirrored from src/lib/url-allowlist.ts (the server-side validation
@@ -708,14 +708,7 @@ const PETDEX_URL = process.env.PETDEX_URL ?? "https://petdex.crafter.run";
 // malicious origin in CI/dev, an unrestricted fetch would write
 // attacker-controlled bytes to ~/.petdex/pets and ~/.codex/pets.
 // Keep this list in sync with the server-side allowlist.
-const TRUSTED_ASSET_HOSTS = new Set<string>([
-  // R2 public bucket (current asset origin).
-  "pub-94495283df974cfea5e98d6a9e3fa462.r2.dev",
-  // Legacy UploadThing host. Rows from before the R2 migration still
-  // point here; safe for GET because UT URLs are user-uploaded but
-  // namespaced. Drop when no manifest entries reference UT anymore.
-  "yu2vz9gndp.ufs.sh",
-]);
+const TRUSTED_ASSET_HOSTS = new Set<string>(["assets.petdex.dev"]);
 
 export function isTrustedAssetUrl(url: string): boolean {
   try {
@@ -753,7 +746,7 @@ const MAX_PET_BYTES = 16 * 1024 * 1024;
 // the desktop binary would actually accept: present, openable,
 // stat-able, and within the size cap. Mirrors the validation in
 // main.zig's hasSpritesheet/checkSpritesheetVariant.
-function isPetUsable(slugDir: string): boolean {
+export function isPetUsable(slugDir: string): boolean {
   for (const name of ["spritesheet.webp", "spritesheet.png"]) {
     const file = path.join(slugDir, name);
     try {
@@ -822,6 +815,7 @@ async function installStarterPet(
 ): Promise<string | null> {
   const fetchImpl = options.fetchOverride ?? fetch;
   const baseUrl = options.petdexUrl ?? PETDEX_URL;
+  const referer = `${baseUrl.replace(/\/+$/, "")}/`;
   type Pet = {
     slug: string;
     displayName: string;
@@ -864,7 +858,11 @@ async function installStarterPet(
   // If every candidate is taken or untrusted we give up — the
   // caller will surface a recoverable hint to the user.
   for (const candidate of ordered) {
-    const installed = await tryInstallStarterCandidate(candidate, fetchImpl);
+    const installed = await tryInstallStarterCandidate(
+      candidate,
+      fetchImpl,
+      referer,
+    );
     if (installed) return installed;
   }
   return null;
@@ -878,6 +876,7 @@ async function tryInstallStarterCandidate(
     petJsonUrl: string;
   },
   fetchImpl: typeof fetch,
+  referer: string,
 ): Promise<string | null> {
   // Belt-and-braces: the server-side /api/manifest already filters
   // submissions through the same allowlist, but a CLI installing
@@ -909,7 +908,10 @@ async function tryInstallStarterCandidate(
   }
 
   const fetchOrThrow = async (url: string): Promise<ArrayBuffer> => {
-    const res = await fetchImpl(url, { signal: AbortSignal.timeout(15_000) });
+    const res = await fetchImpl(url, {
+      headers: { Referer: referer },
+      signal: AbortSignal.timeout(15_000),
+    });
     if (!res.ok) throw new Error(`download ${url} → ${res.status}`);
     return res.arrayBuffer();
   };

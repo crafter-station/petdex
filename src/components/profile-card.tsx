@@ -8,6 +8,8 @@ import { ExternalLink, Loader2, Pencil, Pin, Star, X } from "lucide-react";
 
 import { MAX_PINNED_PETS } from "@/lib/profiles";
 
+import { useHeaderState } from "@/components/header-state-provider";
+
 type ApprovedPet = {
   slug: string;
   displayName: string;
@@ -32,6 +34,7 @@ export function ProfileCard({ profile }: { profile: ProfileData }) {
   const [pinned, setPinned] = useState<string[]>(profile.featuredPetSlugs);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { refresh: refreshHeaderState } = useHeaderState();
   const [, startTransition] = useTransition();
 
   useEffect(() => {
@@ -85,6 +88,7 @@ export function ProfileCard({ profile }: { profile: ProfileData }) {
         return;
       }
       setOpen(false);
+      await refreshHeaderState({ force: true });
       startTransition(() => router.refresh());
     } finally {
       setBusy(false);
@@ -133,12 +137,13 @@ export function ProfileCard({ profile }: { profile: ProfileData }) {
             {profile.displayName ?? `@${profile.handle}`}
           </p>
           <p className="font-mono text-[11px] tracking-[0.06em] text-muted-3">
-            petdex.crafter.run/u/{profile.handle}
+            petdex.dev/u/{profile.handle}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <Link
             href={`/u/${profile.handle}`}
+            prefetch={false}
             target="_blank"
             rel="noreferrer"
             className="inline-flex h-9 items-center gap-1.5 rounded-full border border-border-base bg-surface px-3 text-xs font-medium text-muted-2 transition hover:border-border-strong"
@@ -223,8 +228,8 @@ export function ProfileCard({ profile }: { profile: ProfileData }) {
                   Customize profile
                 </h2>
                 <p className="mt-1 text-xs text-muted-3">
-                  Lives at petdex.crafter.run/u/{profile.handle}. Changes go
-                  live instantly. No admin review.
+                  Lives at petdex.dev/u/{profile.handle}. Changes go live
+                  instantly. No admin review.
                 </p>
               </div>
               <button

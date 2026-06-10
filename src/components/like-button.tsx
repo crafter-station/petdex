@@ -3,12 +3,13 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 
 import { useAuth, useClerk } from "@clerk/nextjs";
-import { track } from "@vercel/analytics";
 import { Heart } from "lucide-react";
 import { useLocale } from "next-intl";
 
 import { formatLocalizedNumber } from "@/lib/format-number";
+import { loadPetMetrics } from "@/lib/pet-metrics-client";
 
+import { useHeaderState } from "@/components/header-state-provider";
 import { Button } from "@/components/ui/button";
 
 type LikeButtonProps = {
@@ -25,6 +26,7 @@ export function LikeButton({ slug }: LikeButtonProps) {
   const clerk = useClerk();
   const loadVersionRef = useRef(0);
   const mutationVersionRef = useRef(0);
+  const { refresh } = useHeaderState();
 
   useEffect(() => {
     const loadVersion = loadVersionRef.current + 1;
@@ -37,6 +39,7 @@ export function LikeButton({ slug }: LikeButtonProps) {
 
     const mutationVersion = mutationVersionRef.current;
     const controller = new AbortController();
+    let active = true;
     setLikeStateLoading(true);
 
     // Signed-in users hit /like (returns authoritative count + their
@@ -47,16 +50,20 @@ export function LikeButton({ slug }: LikeButtonProps) {
       ? `/api/pets/${slug}/like`
       : `/api/pets/${slug}/metrics`;
 
-    void fetch(url, {
-      signal: controller.signal,
-      headers: { accept: "application/json" },
-    })
-      .then((res) => (res.ok ? res.json() : null))
+    void (
+      isSignedIn
+        ? fetch(url, {
+            signal: controller.signal,
+            headers: { accept: "application/json" },
+          }).then((res) => (res.ok ? res.json() : null))
+        : loadPetMetrics(slug)
+    )
       .then(
         (
           data: { liked?: boolean; count?: number; likeCount?: number } | null,
         ) => {
           if (!data) return;
+          if (!active) return;
           if (loadVersionRef.current !== loadVersion) return;
           if (mutationVersionRef.current !== mutationVersion) return;
           if (isSignedIn) {
@@ -69,18 +76,23 @@ export function LikeButton({ slug }: LikeButtonProps) {
         },
       )
       .catch((error: unknown) => {
+        if (!active) return;
         if (loadVersionRef.current !== loadVersion) return;
         if ((error as Error).name !== "AbortError") {
           setLiked(false);
         }
       })
       .finally(() => {
+        if (!active) return;
         if (loadVersionRef.current === loadVersion) {
           setLikeStateLoading(false);
         }
       });
 
-    return () => controller.abort();
+    return () => {
+      active = false;
+      controller.abort();
+    };
   }, [isLoaded, isSignedIn, slug]);
 
   function handleClick() {
@@ -108,9 +120,7 @@ export function LikeButton({ slug }: LikeButtonProps) {
         if (mutationVersionRef.current !== mutationVersion) return;
         setLiked(data.liked);
         setCount(data.count);
-        if (data.liked) {
-          track("pet_liked", { slug });
-        }
+        void refresh({ force: true });
       } catch {
         if (mutationVersionRef.current !== mutationVersion) return;
         setLiked(!nextLiked);

@@ -20,7 +20,7 @@ export function renderRequestFulfilledRequesterEmail(
 ): { subject: string; html: string; text: string } {
   const current = normalizeLocale(locale);
   const petUrl = petdexUrl(current, `/pets/${vars.petSlug}`);
-  const installCmd = `curl -sSf https://petdex.crafter.run/install/${vars.petSlug} | sh`;
+  const installCmd = `curl -sSf https://petdex.dev/install/${vars.petSlug} | sh`;
 
   const copy =
     current === "es"

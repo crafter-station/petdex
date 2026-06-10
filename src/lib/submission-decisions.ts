@@ -128,6 +128,22 @@ export async function applySubmissionAction(
   if (body.action === "approve" && !options.skipSideEffects) {
     row = await runPostApprovalEffects(row, actor, db);
   }
+  if (
+    body.action === "edit" &&
+    current.status === "approved" &&
+    row.status === "approved" &&
+    current.slug !== row.slug &&
+    !options.skipSideEffects
+  ) {
+    await publishApprovedPublicArtifacts(row, actor);
+  }
+  if (
+    current.status === "approved" &&
+    (row.status !== "approved" || current.slug !== row.slug) &&
+    !options.skipSideEffects
+  ) {
+    await deletePetPublicArtifacts(current.slug, actor);
+  }
 
   const skipNotifications =
     options.skipNotifications ?? options.skipSideEffects ?? false;
@@ -186,6 +202,8 @@ async function runPostApprovalEffects(
     }
   }
 
+  await publishApprovedPublicArtifacts(row, actor);
+
   const { refreshSimilarityFor } = await import("@/lib/similarity");
   void refreshSimilarityFor(row.id).catch((err) => {
     console.warn(`[${actor}] similarity refresh failed:`, err);
@@ -214,20 +232,6 @@ async function runPostApprovalEffects(
     })();
   }
 
-  if (process.env.ELEVENLABS_API_KEY) {
-    void (async () => {
-      try {
-        const { getApprovedPetMissingSoundBySlug, processPetSound } =
-          await import("@/lib/pet-sound");
-        const pet = await getApprovedPetMissingSoundBySlug(row.slug);
-        if (!pet) return;
-        await processPetSound(pet, { workerKey: `${actor}-${row.slug}` });
-      } catch (e) {
-        console.error("sound gen failed", e);
-      }
-    })();
-  }
-
   // Suggest matching open requests as candidates for admin review.
   // Background only — never blocks the approve response. Failures
   // are logged and swallowed; the admin can still create candidates
@@ -249,6 +253,44 @@ async function runPostApprovalEffects(
   })();
 
   return row;
+}
+
+async function publishApprovedPublicArtifacts(
+  row: SubmittedPet,
+  actor: SubmissionActionActor,
+): Promise<void> {
+  try {
+    const { publishPetPublicArtifacts } = await import(
+      "@/lib/pet-public-artifacts"
+    );
+    const artifacts = await publishPetPublicArtifacts({
+      slug: row.slug,
+      spritesheetUrl: row.spritesheetUrl,
+    });
+    if (!artifacts.ok) {
+      console.error(`[${actor}] public artifact publish failed`, {
+        slug: row.slug,
+        failed: artifacts.failed,
+      });
+    }
+  } catch (e) {
+    console.error(`[${actor}] public artifact publish failed`, e);
+  }
+}
+
+async function deletePetPublicArtifacts(
+  slug: string,
+  actor: SubmissionActionActor,
+): Promise<void> {
+  try {
+    const [{ petPublicArtifactKeys }, { deleteR2Objects }] = await Promise.all([
+      import("@/lib/pet-public-artifact-keys"),
+      import("@/lib/r2"),
+    ]);
+    await deleteR2Objects(petPublicArtifactKeys(slug));
+  } catch (e) {
+    console.error(`[${actor}] public artifact cleanup failed`, { slug, e });
+  }
 }
 
 async function notifySubmissionOwner(row: SubmittedPet): Promise<void> {

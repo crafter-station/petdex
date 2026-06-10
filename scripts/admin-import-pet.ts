@@ -228,9 +228,9 @@ async function main() {
     `\nDB row inserted: ${id} (slug=${slug}, status=${args.approve ? "approved" : "pending"})`,
   );
   console.log(
-    `URL: ${R2_PUBLIC_BASE.replace("pub-", "petdex.crafter.run").replace(".r2.dev", "")}`,
+    `URL: ${R2_PUBLIC_BASE.replace("pub-", "petdex.dev").replace(".r2.dev", "")}`,
   );
-  console.log(`Public: https://petdex.crafter.run/pets/${slug}`);
+  console.log(`Public: https://petdex.dev/pets/${slug}`);
 }
 
 main().catch((err) => {

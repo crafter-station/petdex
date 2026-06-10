@@ -19,21 +19,15 @@ import { formatLocalizedNumber } from "@/lib/format-number";
 import { userIdForHandle } from "@/lib/handles";
 import { getOwnerRank } from "@/lib/leaderboard";
 import { buildLocaleAlternates } from "@/lib/locale-routing";
-import { petStates } from "@/lib/pet-states";
 import { type PetWithMetrics, rowToPet } from "@/lib/pets";
-import { MAX_PINNED_PETS } from "@/lib/profiles";
+import { toCurrentR2PublicUrl } from "@/lib/r2-public-url";
 
 import { JsonLd } from "@/components/json-ld";
 import type { Submission } from "@/components/my-pets-view";
-import { PetCard } from "@/components/pet-gallery";
-import { PetSprite } from "@/components/pet-sprite";
-import { PinnedReorderGrid } from "@/components/pinned-reorder-grid";
-import { ProfileAnalytics } from "@/components/profile-analytics";
 import { ProfileExternalLink } from "@/components/profile-external-link";
 import { ProfileInlineEditor } from "@/components/profile-inline-editor";
-import { ProfilePinButton } from "@/components/profile-pin-button";
+import { ProfilePinningSurface } from "@/components/profile-pinning-surface";
 import { ProfileShareButton } from "@/components/profile-share-button";
-import { ProfileTabs } from "@/components/profile-tabs";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 
@@ -41,7 +35,7 @@ import { hasLocale } from "@/i18n/config";
 
 export const dynamic = "force-dynamic";
 
-const SITE_URL = "https://petdex.crafter.run";
+const SITE_URL = "https://petdex.dev";
 
 type PageProps = { params: Promise<{ handle: string; locale: string }> };
 
@@ -197,8 +191,8 @@ export default async function UserProfilePage({ params }: PageProps) {
           slug: row.slug,
           displayName: row.displayName,
           description: row.description,
-          spritesheetUrl: row.spritesheetUrl,
-          zipUrl: row.zipUrl,
+          spritesheetUrl: toCurrentR2PublicUrl(row.spritesheetUrl),
+          zipUrl: toCurrentR2PublicUrl(row.zipUrl),
           kind: row.kind,
           vibes: (row.vibes as string[]) ?? [],
           tags: (row.tags as string[]) ?? [],
@@ -241,15 +235,6 @@ export default async function UserProfilePage({ params }: PageProps) {
     featured: c.featured,
   }));
 
-  // Resolve pinned slugs to full pet objects, preserving owner-chosen
-  // order. Drop any that are no longer approved (would otherwise break
-  // the layout with empty cards).
-  const featuredSet = new Set(featuredSlugs);
-  const featuredPets = featuredSlugs
-    .map((slug) => pets.find((p) => p.slug === slug))
-    .filter((p): p is PetWithMetrics => Boolean(p));
-  const restPets = pets.filter((p) => !featuredSet.has(p.slug));
-
   // Aggregate stats.
   const totalLikes = pets.reduce((acc, p) => acc + p.metrics.likeCount, 0);
   const totalInstalls = pets.reduce(
@@ -290,12 +275,6 @@ export default async function UserProfilePage({ params }: PageProps) {
   return (
     <main className="min-h-dvh bg-background text-foreground">
       <JsonLd data={jsonLd} />
-      <ProfileAnalytics
-        handle={publicHandle}
-        petCount={pets.length}
-        pinnedCount={featuredPets.length}
-        viewerIsOwner={isOwner}
-      />
 
       <SiteHeader />
       <section className="petdex-cloud relative -mt-[84px] overflow-clip pt-[84px]">
@@ -438,63 +417,11 @@ export default async function UserProfilePage({ params }: PageProps) {
       </section>
 
       <section className="mx-auto flex w-full max-w-[1440px] flex-col gap-8 px-5 py-12 md:px-8 md:py-16">
-        {featuredPets.length > 0 ? (
-          isOwner && featuredPets.length >= 2 ? (
-            <PinnedReorderGrid
-              pets={featuredPets}
-              petStateCount={petStates.length}
-              hideAuthor
-            />
-          ) : (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <p className="font-mono text-[11px] tracking-[0.22em] text-brand uppercase">
-                  ★ Pinned
-                </p>
-                <p className="font-mono text-[10px] tracking-[0.18em] text-muted-4 uppercase">
-                  {featuredPets.length} of {MAX_PINNED_PETS}
-                </p>
-              </div>
-              {featuredPets.length === 1 ? (
-                <div className="relative">
-                  <FeaturedPin
-                    pet={featuredPets[0]}
-                    locale={locale}
-                    installsLabel={(count: string) => t("installs", { count })}
-                  />
-                  {isOwner ? (
-                    <div className="absolute top-4 right-4 z-40">
-                      <ProfilePinButton
-                        slug={featuredPets[0].slug}
-                        isPinned
-                        pinnedCount={featuredPets.length}
-                        maxPins={MAX_PINNED_PETS}
-                      />
-                    </div>
-                  ) : null}
-                </div>
-              ) : (
-                <div className="grid grid-cols-2 gap-3 md:grid-cols-3 md:gap-4 lg:grid-cols-6">
-                  {featuredPets.map((pet, index) => (
-                    <div key={pet.slug} className="relative h-full">
-                      <PetCard
-                        pet={pet}
-                        index={index}
-                        stateCount={petStates.length}
-                        hideAuthor
-                      />
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )
-        ) : null}
-
-        <ProfileTabs
+        <ProfilePinningSurface
           isOwner={isOwner}
           publicHandle={publicHandle}
-          approvedPets={restPets}
+          pets={pets}
+          initialPinnedSlugs={featuredSlugs}
           ownerSubmissions={ownerSubmissions}
           likedPets={likedPets}
           collection={
@@ -515,11 +442,6 @@ export default async function UserProfilePage({ params }: PageProps) {
             displayName: p.displayName,
             spritesheetUrl: p.spritesheetPath,
           }))}
-          pinning={
-            isOwner
-              ? { pinnedSlugs: featuredSlugs, maxPins: MAX_PINNED_PETS }
-              : null
-          }
           ownerCollections={ownerCollectionsForTabs}
           maxOwnerCollections={MAX_OWNER_COLLECTIONS}
         />
@@ -527,60 +449,5 @@ export default async function UserProfilePage({ params }: PageProps) {
 
       <SiteFooter />
     </main>
-  );
-}
-
-function FeaturedPin({
-  pet,
-  locale,
-  installsLabel,
-}: {
-  pet: PetWithMetrics;
-  locale: string;
-  installsLabel: (count: string) => string;
-}) {
-  return (
-    <Link
-      href={`/pets/${pet.slug}`}
-      aria-label={`Open ${pet.displayName}`}
-      className="featured-pin-card group relative flex flex-col overflow-hidden rounded-3xl border border-brand-light/45 bg-surface/80 backdrop-blur transition hover:bg-white md:flex-row md:items-stretch dark:hover:bg-stone-800"
-    >
-      <div className="pet-sprite-stage featured-pin-stage flex shrink-0 items-center justify-center px-8 py-10 md:w-[420px] md:py-14">
-        <PetSprite
-          src={pet.spritesheetPath}
-          cycleStates
-          scale={1.1}
-          label={`${pet.displayName} animated`}
-        />
-      </div>
-      <div className="flex flex-1 flex-col justify-center gap-3 border-t border-black/[0.06] p-6 md:border-t-0 md:border-l dark:border-white/[0.06]">
-        <span className="font-mono text-[11px] tracking-[0.22em] text-brand uppercase">
-          ★ Pinned
-        </span>
-        <h2 className="text-3xl font-semibold tracking-tight text-foreground md:text-4xl">
-          {pet.displayName}
-        </h2>
-        <p className="max-w-2xl text-base leading-7 text-muted-2">
-          {pet.description}
-        </p>
-        <div className="mt-1 flex flex-wrap items-center gap-3 font-mono text-[10px] tracking-[0.18em] text-muted-3 uppercase">
-          {pet.metrics.likeCount > 0 ? (
-            <span className="inline-flex items-center gap-1.5">
-              <Heart className="size-3" />
-              {formatLocalizedNumber(pet.metrics.likeCount, locale)}
-            </span>
-          ) : null}
-          {pet.metrics.installCount > 0 ? (
-            <span className="inline-flex items-center gap-1.5">
-              <TerminalSquare className="size-3" />
-              {installsLabel(
-                formatLocalizedNumber(pet.metrics.installCount, locale),
-              )}
-            </span>
-          ) : null}
-          <span>{pet.kind}</span>
-        </div>
-      </div>
-    </Link>
   );
 }

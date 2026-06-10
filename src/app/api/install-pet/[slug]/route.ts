@@ -17,6 +17,12 @@ export const dynamic = "force-dynamic";
 
 type Params = { slug: string };
 
+const INSTALL_INVALID_SLUG_CACHE_CONTROL =
+  "public, max-age=60, s-maxage=120, stale-while-revalidate=300";
+const INSTALL_DB_MISS_CACHE_CONTROL = "private, no-store";
+const INSTALL_SUCCESS_CACHE_CONTROL = "private, no-store";
+const INSTALL_SLUG_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
+
 export async function GET(
   req: Request,
   ctx: { params: Promise<Params> },
@@ -26,10 +32,13 @@ export async function GET(
 
   // Slug shape gate before hitting the DB. Defends against odd inputs and
   // gives a clean 400 instead of 404 for nonsense.
-  if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(slug)) {
+  if (!INSTALL_SLUG_RE.test(slug)) {
     return Response.json(
       { ok: false, error: "invalid_slug" },
-      { status: 400, headers: { "cache-control": "no-store" } },
+      {
+        status: 400,
+        headers: { "cache-control": INSTALL_INVALID_SLUG_CACHE_CONTROL },
+      },
     );
   }
 
@@ -37,7 +46,10 @@ export async function GET(
   if (!pet) {
     return Response.json(
       { ok: false, error: "not_found", slug },
-      { status: 404, headers: { "cache-control": "no-store" } },
+      {
+        status: 404,
+        headers: { "cache-control": INSTALL_DB_MISS_CACHE_CONTROL },
+      },
     );
   }
 
@@ -66,7 +78,7 @@ export async function GET(
     {
       status: 200,
       headers: {
-        "cache-control": "public, max-age=60",
+        "cache-control": INSTALL_SUCCESS_CACHE_CONTROL,
         "content-type": "application/json",
       },
     },

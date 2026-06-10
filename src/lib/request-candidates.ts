@@ -4,6 +4,7 @@ import { and, sql as drizzleSql, eq } from "drizzle-orm";
 
 import { db, schema } from "@/lib/db/client";
 import { PETDEX_EMBEDDING_MODEL } from "@/lib/embeddings";
+import { toCurrentR2PublicUrl } from "@/lib/r2-public-url";
 
 // Cosine similarity threshold for auto-suggested matches. 0.70 chosen
 // empirically — pet/request pairs above this score read as "obviously
@@ -223,7 +224,7 @@ export async function listPendingCandidates(limit = 50): Promise<
     pet: {
       slug: row.pet_slug,
       displayName: row.pet_display_name,
-      spritesheetUrl: row.pet_spritesheet_url,
+      spritesheetUrl: toCurrentR2PublicUrl(row.pet_spritesheet_url),
       ownerId: row.pet_owner_id,
       creditName: row.pet_credit_name,
     },

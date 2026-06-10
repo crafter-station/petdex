@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { neon } from "@neondatabase/serverless";
-import { desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 
 import { db, schema } from "@/lib/db/client";
 import {
@@ -23,6 +23,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const rawSql = neon(process.env.DATABASE_URL ?? "");
+const VISIBLE_VOTER_LIMIT = 3;
 
 function normalize(q: string): string {
   return q
@@ -46,14 +47,34 @@ export async function GET(req: Request): Promise<Response> {
 
   const rows = includeAll
     ? await db
-        .select()
+        .select({
+          id: schema.petRequests.id,
+          query: schema.petRequests.query,
+          requestedBy: schema.petRequests.requestedBy,
+          upvoteCount: schema.petRequests.upvoteCount,
+          status: schema.petRequests.status,
+          fulfilledPetSlug: schema.petRequests.fulfilledPetSlug,
+          imageUrl: schema.petRequests.imageUrl,
+          imageReviewStatus: schema.petRequests.imageReviewStatus,
+          createdAt: schema.petRequests.createdAt,
+        })
         .from(schema.petRequests)
         .orderBy(
           sql`${schema.petRequests.upvoteCount} DESC, ${schema.petRequests.createdAt} DESC`,
         )
         .limit(limit)
     : await db
-        .select()
+        .select({
+          id: schema.petRequests.id,
+          query: schema.petRequests.query,
+          requestedBy: schema.petRequests.requestedBy,
+          upvoteCount: schema.petRequests.upvoteCount,
+          status: schema.petRequests.status,
+          fulfilledPetSlug: schema.petRequests.fulfilledPetSlug,
+          imageUrl: schema.petRequests.imageUrl,
+          imageReviewStatus: schema.petRequests.imageReviewStatus,
+          createdAt: schema.petRequests.createdAt,
+        })
         .from(schema.petRequests)
         .where(eq(schema.petRequests.status, statusParam))
         .orderBy(
@@ -70,12 +91,16 @@ export async function GET(req: Request): Promise<Response> {
     const v = await db
       .select({ requestId: schema.petRequestVotes.requestId })
       .from(schema.petRequestVotes)
-      .where(eq(schema.petRequestVotes.userId, userId));
+      .where(
+        and(
+          eq(schema.petRequestVotes.userId, userId),
+          inArray(schema.petRequestVotes.requestId, requestIds),
+        ),
+      );
     myVotes = new Set(v.map((r) => r.requestId));
   }
 
-  // Top voters per request (most-recent first; cap is enforced client-
-  // side as we render up to 3).
+  // Top voters per request, most-recent first.
   type VoteRow = { requestId: string; userId: string };
   const votes: VoteRow[] = requestIds.length
     ? ((await db
@@ -91,15 +116,23 @@ export async function GET(req: Request): Promise<Response> {
   // Batch one Clerk lookup for all relevant userIds (requesters + voters).
   const userIdSet = new Set<string>();
   for (const r of rows) if (r.requestedBy) userIdSet.add(r.requestedBy);
-  for (const v of votes) userIdSet.add(v.userId);
 
   type ClerkInfo = {
     handle: string;
     displayName: string | null;
-    username: string | null;
     imageUrl: string | null;
   };
   const clerkInfo = new Map<string, ClerkInfo>();
+  const votersByRequestId = new Map<string, string[]>();
+  const requesterByRequestId = new Map(rows.map((r) => [r.id, r.requestedBy]));
+  for (const v of votes) {
+    if (v.userId === requesterByRequestId.get(v.requestId)) continue;
+    const current = votersByRequestId.get(v.requestId) ?? [];
+    if (current.length >= VISIBLE_VOTER_LIMIT) continue;
+    current.push(v.userId);
+    votersByRequestId.set(v.requestId, current);
+    userIdSet.add(v.userId);
+  }
   if (userIdSet.size > 0) {
     try {
       const client = await clerkClient();
@@ -119,7 +152,6 @@ export async function GET(req: Request): Promise<Response> {
               ? u.username.toLowerCase()
               : u.id.slice(-8).toLowerCase(),
             displayName: displayName || null,
-            username: u.username ?? null,
             imageUrl: u.imageUrl ?? null,
           });
         }
@@ -141,7 +173,6 @@ export async function GET(req: Request): Promise<Response> {
         .select({
           slug: schema.submittedPets.slug,
           displayName: schema.submittedPets.displayName,
-          spritesheetUrl: schema.submittedPets.spritesheetUrl,
         })
         .from(schema.submittedPets)
         .where(inArray(schema.submittedPets.slug, fulfilledSlugs))
@@ -153,16 +184,10 @@ export async function GET(req: Request): Promise<Response> {
       const requester = r.requestedBy
         ? (clerkInfo.get(r.requestedBy) ?? null)
         : null;
-      // Exclude the requester from the voter stack — they auto-vote
-      // for their own request, but rendering them twice in the UI
-      // (chip + duplicate avatar) feels broken.
-      const voterUserIds = votes
-        .filter((v) => v.requestId === r.id && v.userId !== r.requestedBy)
-        .map((v) => v.userId);
-      const voters = voterUserIds
+      const voters = (votersByRequestId.get(r.id) ?? [])
         .map((id) => clerkInfo.get(id))
         .filter((v): v is ClerkInfo => Boolean(v))
-        .slice(0, 6);
+        .slice(0, VISIBLE_VOTER_LIMIT);
       const fulfilledPet = r.fulfilledPetSlug
         ? (petBySlug.get(r.fulfilledPetSlug) ?? null)
         : null;

@@ -151,9 +151,7 @@ describe("containsUrl — allowlisted legit domains", () => {
   });
 
   it("crafter.run passes (own brand)", () => {
-    expect(
-      containsUrl(["description", "more at petdex.crafter.run"]),
-    ).toBeNull();
+    expect(containsUrl(["description", "more at petdex.dev"])).toBeNull();
   });
 
   it("github.com passes (legit reference)", () => {

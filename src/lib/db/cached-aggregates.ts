@@ -144,13 +144,15 @@ export async function invalidateMetricCaches(
 export async function invalidatePublicProfileCaches(
   ...userIds: string[]
 ): Promise<void> {
+  const cleanUserIds = userIds.filter(Boolean);
   await invalidateAggregates(
-    ...userIds
-      .filter(Boolean)
-      .flatMap((userId) => [
-        publicProfileCacheKey(userId),
-        handleForUserCacheKey(userId),
-      ]),
+    ...cleanUserIds.flatMap((userId) => [
+      publicProfileCacheKey(userId),
+      handleForUserCacheKey(userId),
+    ]),
+  );
+  await expireNextCacheTags(
+    ...cleanUserIds.map((userId) => `petdex:profile:${userId}`),
   );
 }
 
@@ -167,8 +169,12 @@ export async function invalidatePublicHandleCaches(
 export async function invalidateCollectionBacklinks(
   ...slugs: string[]
 ): Promise<void> {
+  const cleanSlugs = slugs.filter(Boolean);
   await invalidateAggregates(
-    ...slugs.filter(Boolean).map((slug) => collectionBacklinksCacheKey(slug)),
+    ...cleanSlugs.map((slug) => collectionBacklinksCacheKey(slug)),
+  );
+  await expireNextCacheTags(
+    ...cleanSlugs.map((slug) => `collection:backlinks:${slug}`),
   );
 }
 
@@ -179,6 +185,7 @@ export async function invalidateCollectionBacklinks(
 const NEXT_TAGS_FOR_KEY: Record<string, string[]> = {
   [AGGREGATE_KEYS.facets]: ["petdex:facets"],
   [AGGREGATE_KEYS.dexNumbers]: ["petdex:dex"],
+  [AGGREGATE_KEYS.variantIndex]: ["petdex:variant-index"],
 };
 
 // Invalidate keys after writes that change the aggregate (approve,
@@ -203,16 +210,16 @@ export async function invalidateAggregates(...keys: string[]): Promise<void> {
   }
   if (tags.size === 0) return;
 
+  await expireNextCacheTags(...tags);
+}
+
+async function expireNextCacheTags(...tags: string[]): Promise<void> {
+  const cleanTags = tags.filter(Boolean);
+  if (cleanTags.length === 0) return;
+
   try {
     const { revalidateTag } = await import("next/cache");
-    // Next 16's `revalidateTag(tag, "max")` is stale-while-revalidate —
-    // it marks the entry stale and serves the old value while refreshing
-    // in the background. That's the wrong semantics here: after we've
-    // already deleted the Upstash value, a background refresh from the
-    // inner Next cache would re-seed Upstash with the stale data.
-    // `{ expire: 0 }` forces immediate eviction so the next read is a
-    // real miss that hits the DB.
-    for (const tag of tags) revalidateTag(tag, { expire: 0 });
+    for (const tag of cleanTags) revalidateTag(tag, { expire: 0 });
   } catch {
     /* next/cache unavailable in some runtime contexts (tests, scripts) */
   }

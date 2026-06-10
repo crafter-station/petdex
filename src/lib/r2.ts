@@ -5,13 +5,12 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
+import { keyFromR2PublicUrl, R2_PUBLIC_BASE } from "@/lib/r2-public-url";
+
 const ACCOUNT_ID = process.env.R2_ACCOUNT_ID;
 const ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
 const SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
 const BUCKET = process.env.R2_BUCKET ?? "petdex-pets";
-const PUBLIC_BASE =
-  process.env.R2_PUBLIC_BASE ??
-  "https://pub-94495283df974cfea5e98d6a9e3fa462.r2.dev";
 
 if (!ACCOUNT_ID || !ACCESS_KEY_ID || !SECRET_ACCESS_KEY) {
   // eslint-disable-next-line no-console
@@ -30,7 +29,7 @@ export const r2 = new S3Client({
 });
 
 export const R2_BUCKET = BUCKET;
-export const R2_PUBLIC_BASE = PUBLIC_BASE;
+export { R2_PUBLIC_BASE };
 
 export type PresignedPut = {
   uploadUrl: string;
@@ -56,7 +55,7 @@ export async function presignPut(
   });
   return {
     uploadUrl,
-    publicUrl: `${PUBLIC_BASE}/${key}`,
+    publicUrl: `${R2_PUBLIC_BASE}/${key}`,
     key,
   };
 }
@@ -65,16 +64,7 @@ export async function presignPut(
 // live under R2_PUBLIC_BASE; anything else (off-host credit images, legacy
 // URLs) returns null so callers can skip cleanly.
 export function keyFromR2Url(url: string | null | undefined): string | null {
-  if (!url) return null;
-  try {
-    const parsed = new URL(url);
-    const base = new URL(PUBLIC_BASE);
-    if (parsed.host !== base.host) return null;
-    const key = parsed.pathname.replace(/^\/+/, "");
-    return key.length > 0 ? key : null;
-  } catch {
-    return null;
-  }
+  return keyFromR2PublicUrl(url);
 }
 
 // Bulk-delete R2 objects. Silently ignores missing keys; throws only on

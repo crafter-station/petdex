@@ -1,4 +1,4 @@
-// Webhook receiver for petdex.crafter.run events. Validates the HMAC
+// Webhook receiver for petdex.dev events. Validates the HMAC
 // signature, dispatches by `event` field, and pushes messages into
 // Discord channels via the live gateway client.
 
@@ -8,8 +8,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { type Client, EmbedBuilder, type TextChannel } from "discord.js";
 
 const SECRET = process.env.PETDEX_WEBHOOK_SECRET;
-const PETDEX_API_BASE =
-  process.env.PETDEX_API_BASE ?? "https://petdex.crafter.run";
+const PETDEX_API_BASE = process.env.PETDEX_API_BASE ?? "https://petdex.dev";
 
 type PetApprovedEvent = {
   event: "pet_approved";

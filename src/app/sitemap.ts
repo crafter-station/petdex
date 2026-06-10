@@ -1,11 +1,11 @@
 import type { MetadataRoute } from "next";
 
-import { getAllCollections } from "@/lib/collections";
+import { getCollectionSitemapEntries } from "@/lib/collections";
 import {
   buildAbsoluteLocaleAlternates,
   buildAbsoluteUrl,
 } from "@/lib/locale-routing";
-import { getAllApprovedPets } from "@/lib/pets";
+import { getPetSitemapEntries } from "@/lib/pets";
 import { PET_KINDS, PET_VIBES } from "@/lib/types";
 
 export const revalidate = 86400;
@@ -47,8 +47,8 @@ function expandLocalizedEntry(entry: EntryInput): MetadataRoute.Sitemap {
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const [pets, collections] = await Promise.all([
-    getAllApprovedPets(),
-    getAllCollections(),
+    getPetSitemapEntries(),
+    getCollectionSitemapEntries(),
   ]);
   const now = new Date();
 

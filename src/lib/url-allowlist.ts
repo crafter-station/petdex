@@ -3,30 +3,21 @@
 // rejected at the validateSubmission boundary and skipped at the OG
 // fetch boundary so we never SSRF or echo attacker-controlled URLs.
 //
-// We allow:
-//   - the configured R2 public bucket (and the stable default fallback)
-//   - the legacy UploadThing host (rows from before the R2 migration still
-//     point here; safe for GET because UT URLs are user-uploaded but
-//     namespaced)
+// We allow only the live canonical R2 public bucket (+ configured override).
+// The dead legacy hosts are deliberately NOT trusted here — recognizing them
+// for rewrite is r2-public-url's job, not a reason to accept new input.
 //
 // Block everything else, including http://, file://, data:, javascript:,
 // and lan IPs.
 
-const ALLOWED_HOSTS = (() => {
-  const hosts = new Set<string>([
-    "pub-94495283df974cfea5e98d6a9e3fa462.r2.dev",
-    "yu2vz9gndp.ufs.sh",
-  ]);
-  const base = process.env.R2_PUBLIC_BASE;
-  if (base) {
-    try {
-      hosts.add(new URL(base).host);
-    } catch {
-      /* ignore malformed env */
-    }
-  }
-  return hosts;
-})();
+import { R2_TRUSTED_HOSTS } from "@/lib/r2-public-url";
+
+// R2_TRUSTED_HOSTS already includes the normalized R2_PUBLIC_BASE host, where
+// normalizeBase() has rewritten any legacy/workers override back to the
+// canonical host. We intentionally do NOT re-add the raw env host here: a
+// deployment with R2_PUBLIC_BASE pointing at a retired host must not re-enter
+// the trust set and start accepting new submissions/edits for a dead host.
+const ALLOWED_HOSTS = new Set<string>(R2_TRUSTED_HOSTS);
 
 export function isAllowedAssetUrl(raw: string | null | undefined): boolean {
   if (!raw) return false;

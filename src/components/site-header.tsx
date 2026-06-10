@@ -1,9 +1,9 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
-import { useUser } from "@clerk/nextjs";
 import {
   BookOpenIcon,
   CrownIcon,
@@ -16,19 +16,16 @@ import {
   UploadSimpleIcon,
   UsersThreeIcon,
 } from "@phosphor-icons/react";
-import { ExternalLink, Menu, X } from "lucide-react";
+import { Menu, X } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
-import { isAdminClientSafe } from "@/lib/admin";
 import { withLocale } from "@/lib/locale-routing";
 import { cn } from "@/lib/utils";
 
 import { AuthBadge } from "@/components/auth-badge";
 import { GithubStarsLink } from "@/components/github-stars-link";
-import { LocaleSwitcher } from "@/components/locale-switcher";
 import { PetdexLogo } from "@/components/petdex-logo";
 import { SubmitCTA } from "@/components/submit-cta";
-import { ThemeToggle } from "@/components/theme-toggle";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
   NavigationMenu,
@@ -40,6 +37,14 @@ import {
 } from "@/components/ui/navigation-menu";
 
 import { hasLocale, type Locale } from "@/i18n/config";
+
+const MobileHeaderMenu = dynamic(
+  () =>
+    import("@/components/mobile-header-menu").then(
+      (mod) => mod.MobileHeaderMenu,
+    ),
+  { loading: () => <MobileHeaderMenuLoading />, ssr: false },
+);
 
 type SiteHeaderProps = {
   hideSubmitCta?: boolean;
@@ -65,10 +70,7 @@ export function SiteHeader({ hideSubmitCta = false }: SiteHeaderProps) {
   const common = useTranslations("common");
 
   // /download is public now (post pre-launch).
-  const { user } = useUser();
-  void user;
   const showDownload = true;
-  void isAdminClientSafe;
 
   function href(pathname: string) {
     return withLocale(pathname, currentLocale);
@@ -153,10 +155,13 @@ export function SiteHeader({ hideSubmitCta = false }: SiteHeaderProps) {
       : []),
   ];
 
+  const scrolled = useScrolled(64);
+  const closeMenu = useCallback(() => setOpen(false), []);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") closeMenu();
     };
     window.addEventListener("keydown", onKey);
     document.body.style.overflow = "hidden";
@@ -164,9 +169,7 @@ export function SiteHeader({ hideSubmitCta = false }: SiteHeaderProps) {
       window.removeEventListener("keydown", onKey);
       document.body.style.overflow = "";
     };
-  }, [open]);
-
-  const scrolled = useScrolled(64);
+  }, [closeMenu, open]);
 
   return (
     <>
@@ -292,130 +295,7 @@ export function SiteHeader({ hideSubmitCta = false }: SiteHeaderProps) {
       </header>
 
       {open ? (
-        <div className="fixed inset-0 z-40 flex flex-col bg-background/95 backdrop-blur lg:hidden">
-          <button
-            type="button"
-            aria-label={t("closeMenu")}
-            onClick={() => setOpen(false)}
-            className="absolute inset-0"
-          />
-          <div className="flex items-center justify-between gap-3 px-5 pt-5 pb-3">
-            <PetdexLogo href={href("/")} ariaLabel={common("petdexHome")} />
-            <Button
-              type="button"
-              variant="petdex-pill"
-              size="petdex-icon"
-              aria-label={t("closeMenu")}
-              onClick={() => setOpen(false)}
-            >
-              <X className="size-4" />
-            </Button>
-          </div>
-          <nav className="mt-4 flex flex-col gap-1 px-5 text-lg">
-            <MobileLink href={href("/create")} onClick={() => setOpen(false)}>
-              {t("create")}
-            </MobileLink>
-            <MobileLink href={href("/docs")} onClick={() => setOpen(false)}>
-              {t("docs")}
-            </MobileLink>
-            {showDownload ? (
-              <MobileLink
-                href={href("/download")}
-                onClick={() => setOpen(false)}
-              >
-                <span className="inline-flex items-center gap-2">
-                  {t("download")}
-                  <span className="rounded-full bg-brand-tint px-1.5 py-0.5 font-mono text-[9px] font-semibold tracking-[0.12em] text-brand uppercase ring-1 ring-brand/30 dark:bg-brand-tint-dark">
-                    new
-                  </span>
-                </span>
-              </MobileLink>
-            ) : null}
-            <MobileLink
-              href={href("/collections")}
-              onClick={() => setOpen(false)}
-            >
-              {t("collections")}
-            </MobileLink>
-            <MobileLink
-              href={href("/leaderboard")}
-              onClick={() => setOpen(false)}
-            >
-              {t("creators")}
-            </MobileLink>
-            <MobileLink href={href("/requests")} onClick={() => setOpen(false)}>
-              {t("requests")}
-            </MobileLink>
-            <MobileLink
-              href={href("/advertise")}
-              onClick={() => setOpen(false)}
-            >
-              {t("advertise")}
-            </MobileLink>
-            <MobileLink
-              href={href("/built-with")}
-              onClick={() => setOpen(false)}
-            >
-              <span className="inline-flex items-center gap-2">
-                {t("builtWith")}
-                <span className="rounded-full bg-brand-tint px-1.5 py-0.5 font-mono text-[9px] font-semibold tracking-[0.12em] text-brand uppercase ring-1 ring-brand/30 dark:bg-brand-tint-dark">
-                  new
-                </span>
-              </span>
-            </MobileLink>
-            {process.env.NEXT_PUBLIC_DISCORD_INVITE_URL ? (
-              <MobileLink
-                href={href("/community")}
-                onClick={() => setOpen(false)}
-              >
-                {t("community")}
-              </MobileLink>
-            ) : null}
-            <MobileLink href={href("/about")} onClick={() => setOpen(false)}>
-              {t("about")}
-            </MobileLink>
-            <a
-              href="https://x.com/raillyhugo"
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={() => setOpen(false)}
-              className="flex items-center justify-between gap-2 rounded-2xl px-4 py-3 text-foreground transition hover:bg-white dark:hover:bg-stone-800"
-            >
-              <span className="inline-flex items-center gap-2">
-                <XLogo className="size-4 text-muted-3" />
-                {t("followOnX")}
-              </span>
-              <ExternalLink className="size-4 text-muted-4" />
-            </a>
-            <GithubStarsLink
-              size="mobile"
-              className="rounded-2xl px-4 py-3 hover:bg-surface-muted"
-            />
-          </nav>
-          <div className="mx-5 mt-5 rounded-2xl border border-border-base bg-surface/70 p-3">
-            <p className="px-1 pb-2 font-mono text-[10px] tracking-[0.18em] text-muted-3 uppercase">
-              {t("settings")}
-            </p>
-            <div className="flex items-center gap-2">
-              <ThemeToggle />
-              <LocaleSwitcher />
-            </div>
-          </div>
-
-          {!hideSubmitCta ? (
-            <div className="mt-auto p-5">
-              <SubmitCTA
-                href={href("/submit")}
-                className={cn(
-                  buttonVariants({ variant: "petdex-cta" }),
-                  "inline-flex h-12 w-full items-center justify-center px-6 text-base font-medium",
-                )}
-              >
-                {t("submitCta")}
-              </SubmitCTA>
-            </div>
-          ) : null}
-        </div>
+        <MobileHeaderMenu hideSubmitCta={hideSubmitCta} onClose={closeMenu} />
       ) : null}
     </>
   );
@@ -433,6 +313,15 @@ function NewDot() {
   );
 }
 
+function MobileHeaderMenuLoading() {
+  return (
+    <div
+      aria-hidden
+      className="fixed inset-0 z-30 bg-background/95 backdrop-blur lg:hidden"
+    />
+  );
+}
+
 function NavGrid({ items }: { items: NavItem[] }) {
   return (
     <ul className="grid w-[min(400px,calc(100vw-2rem))] auto-rows-min gap-1 p-2">
@@ -441,7 +330,7 @@ function NavGrid({ items }: { items: NavItem[] }) {
         return (
           <li key={item.href}>
             <NavigationMenuLink
-              render={<Link href={item.href} />}
+              render={<Link href={item.href} prefetch={false} />}
               closeOnClick
               className="group/item flex items-center gap-3 rounded-2xl p-2 pr-4 transition hover:bg-surface-muted focus:bg-surface-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
             >
@@ -466,39 +355,6 @@ function NavGrid({ items }: { items: NavItem[] }) {
         );
       })}
     </ul>
-  );
-}
-
-function XLogo({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-      className={className}
-      fill="currentColor"
-    >
-      <path d="M18.244 2H21l-6.55 7.49L22 22h-6.93l-4.83-6.31L4.6 22H1.84l7.01-8.02L1 2h7.07l4.36 5.78L18.244 2zm-2.43 18h1.91L7.27 4H5.27l10.544 16z" />
-    </svg>
-  );
-}
-
-function MobileLink({
-  href,
-  children,
-  onClick,
-}: {
-  href: string;
-  children: React.ReactNode;
-  onClick: () => void;
-}) {
-  return (
-    <Link
-      href={href}
-      onClick={onClick}
-      className="rounded-2xl px-4 py-3 text-foreground transition hover:bg-white dark:hover:bg-stone-800"
-    >
-      {children}
-    </Link>
   );
 }
 

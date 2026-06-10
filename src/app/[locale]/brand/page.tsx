@@ -10,7 +10,7 @@ import { SiteHeader } from "@/components/site-header";
 
 import { hasLocale } from "@/i18n/config";
 
-const SITE_URL = "https://petdex.crafter.run";
+const SITE_URL = "https://petdex.dev";
 const PREVIEW_BACKGROUND = {
   light: "bg-[#f7f8ff]",
   dark: "bg-[#12141f]",

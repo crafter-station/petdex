@@ -1,5 +1,5 @@
 {
-  "$schema": "https://petdex.crafter.run/discord/server-template.schema.json",
+  "$schema": "https://petdex.dev/discord/server-template.schema.json",
   "_comment": "Source of truth for the Petdex Community Discord server. Apply via the discord-mcp tools using docs/discord/apply-template.md as the prompt. Categories render top-to-bottom in the order listed; channels in each category render top-to-bottom in the order listed.",
 
   "guild": {
@@ -152,7 +152,7 @@
         {
           "name": "ideas",
           "type": "text",
-          "topic": "Pet ideas the community wants to see. Synced with petdex.crafter.run/requests.",
+          "topic": "Pet ideas the community wants to see. Synced with petdex.dev/requests.",
           "slowmode": 60
         },
         {
@@ -235,7 +235,7 @@
         {
           "name": "bot-logs",
           "type": "text",
-          "topic": "Webhook events from petdex.crafter.run + bot action audit trail.",
+          "topic": "Webhook events from petdex.dev + bot action audit trail.",
           "lockedToBot": true
         }
       ]
@@ -246,7 +246,7 @@
     {
       "id": "auto_role_creator",
       "trigger": "petdex_pet_approved",
-      "_comment": "Bot listens to a webhook from petdex.crafter.run/api/discord/webhook (we'll wire that). Looks up the submitter's linked Discord account and grants @Creator if not already.",
+      "_comment": "Bot listens to a webhook from petdex.dev/api/discord/webhook (we'll wire that). Looks up the submitter's linked Discord account and grants @Creator if not already.",
       "action": "assign_role",
       "role": "Creator"
     },

@@ -9,7 +9,7 @@ import { Resend } from "resend";
 
 import { invalidatePetCaches } from "../src/lib/db/cached-aggregates";
 
-const PROD_URL = "https://petdex.crafter.run";
+const PROD_URL = "https://petdex.dev";
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
   throw new Error("DATABASE_URL is not set");

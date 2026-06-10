@@ -2,7 +2,6 @@
 
 import { Fragment, useState } from "react";
 
-import { track } from "@vercel/analytics";
 import { Check, CircleAlert, Copy } from "lucide-react";
 import { useTranslations } from "next-intl";
 
@@ -12,7 +11,6 @@ type CommandLineProps = {
   command: string;
   /** Lighter prefix prepended without being copied (eg. "$ "). Visual only. */
   prefix?: string;
-  /** Tracking event payload key. */
   source?: string;
   className?: string;
   /**
@@ -130,7 +128,6 @@ function tokenize(command: string): React.ReactNode {
 export function CommandLine({
   command,
   prefix = "$ ",
-  source,
   className = "",
   codexPrompt,
   wrap = false,
@@ -149,16 +146,11 @@ export function CommandLine({
   async function handleCopy() {
     // Display the natural `npx petdex` form, but copy the
     // version-pinned `petdex@latest` so every paste resolves to
-    // the most recent release. Tracking still uses the visual
-    // form so dashboards stay readable.
+    // the most recent release.
     const toCopy = pinToLatest(command);
     try {
       await writeClipboard(toCopy);
       setCopyState("copied");
-      track("command_line_copied", {
-        command: command.slice(0, 80),
-        source: source ?? "unknown",
-      });
       window.setTimeout(() => setCopyState("idle"), 1500);
     } catch {
       setCopyState("failed");
@@ -200,12 +192,6 @@ export function CommandLine({
         <a
           href={`codex://new?prompt=${encodeURIComponent(`Install this Petdex pet by running: ${pinToLatest(command)}`)}`}
           aria-label={t("openInCodexAria")}
-          onClick={() =>
-            track("command_line_codex_clicked", {
-              command: command.slice(0, 80),
-              source: source ?? "unknown",
-            })
-          }
           className="grid size-6 shrink-0 place-items-center rounded-md text-muted-3 transition hover:bg-brand-tint"
         >
           <CodexLogo className="size-3.5" />

@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef } from "react";
 
-import { track } from "@vercel/analytics";
 import { useLocale } from "next-intl";
 
 import type { PublicFeedAd } from "@/lib/ads/queries";
@@ -53,7 +52,6 @@ export function FeedAdSlot({ ad }: { ad: PublicFeedAd }) {
         timerRef.current = window.setTimeout(() => {
           sentRef.current = true;
           observer.disconnect();
-          track("ad_viewable_impression", { campaign_id: ad.id });
           sendImpression({
             campaignId: ad.id,
             sessionId,
@@ -116,8 +114,6 @@ export function FeedAdSlot({ ad }: { ad: PublicFeedAd }) {
 
   function sendInteraction(kind: "hover" | "click") {
     const timeInViewMs = totalVisibleTime();
-    const eventName = kind === "hover" ? "ad_hover" : "ad_click";
-    track(eventName, { campaign_id: ad.id, time_in_view_ms: timeInViewMs });
     sendAdEvent({
       campaignId: ad.id,
       kind,

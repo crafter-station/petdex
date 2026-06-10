@@ -2,31 +2,65 @@
 
 import { useEffect, useState } from "react";
 
-import { esES, zhCN } from "@clerk/localizations";
 import { ClerkProvider } from "@clerk/nextjs";
-import { dark } from "@clerk/themes";
 import { useLocale } from "next-intl";
 import { ThemeProvider, useTheme } from "next-themes";
 
-// Wraps next-themes around the app and syncs Clerk's appearance with
-// the resolved theme so the SignIn modal, UserButton dropdown and
-// hosted account pages all respect the toggle. ClerkProvider lives
-// inside ThemeProvider because we need useTheme() to drive its
-// appearance prop.
+type ClerkProviderProps = React.ComponentProps<typeof ClerkProvider>;
+type ClerkAppearance = NonNullable<ClerkProviderProps["appearance"]>;
+
 function ClerkWithTheme({ children }: { children: React.ReactNode }) {
   const { resolvedTheme } = useTheme();
   const locale = useLocale();
   const [mounted, setMounted] = useState(false);
+  const [baseTheme, setBaseTheme] =
+    useState<ClerkAppearance["baseTheme"]>(undefined);
+  const [localization, setLocalization] =
+    useState<ClerkProviderProps["localization"]>(undefined);
+
   useEffect(() => setMounted(true), []);
 
-  // Avoid hydration mismatch: until next-themes has resolved the
-  // client-side theme we render Clerk with no baseTheme (light), then
-  // upgrade to dark on the next paint when applicable. Mirrors the
-  // standard next-themes guard.
-  const baseTheme = mounted && resolvedTheme === "dark" ? dark : undefined;
+  useEffect(() => {
+    let cancelled = false;
+    if (mounted && resolvedTheme === "dark") {
+      void import("@clerk/themes").then((mod) => {
+        if (!cancelled) setBaseTheme(mod.dark);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+    setBaseTheme(undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [mounted, resolvedTheme]);
 
-  const localization =
-    locale === "es" ? esES : locale === "zh" ? zhCN : undefined;
+  useEffect(() => {
+    let cancelled = false;
+    if (locale === "es") {
+      void import("@clerk/localizations/es-ES").then((mod) => {
+        if (cancelled) return;
+        setLocalization(mod.esES);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+    if (locale === "zh") {
+      void import("@clerk/localizations/zh-CN").then((mod) => {
+        if (cancelled) return;
+        setLocalization(mod.zhCN);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+    setLocalization(undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [locale]);
 
   return (
     <ClerkProvider appearance={{ baseTheme }} localization={localization}>

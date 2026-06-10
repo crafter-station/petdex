@@ -79,8 +79,8 @@ export function InstallCommand({ slug, displayName }: InstallCommandProps) {
   const isWin = platform === "windows";
   const cliCmd = `npx petdex install ${slug}`;
   const shellCmd = isWin
-    ? `irm https://petdex.crafter.run/install/${slug}?platform=ps1 | iex`
-    : `curl -sSf https://petdex.crafter.run/install/${slug} | sh`;
+    ? `irm https://petdex.dev/install/${slug}?platform=ps1 | iex`
+    : `curl -sSf https://petdex.dev/install/${slug} | sh`;
   const command = tab === "cli" ? cliCmd : shellCmd;
   const shellLabel = isWin ? "PowerShell" : "Curl";
 

@@ -56,7 +56,7 @@ const MAX_PET_JSON_BYTES = 1024 * 1024;
 const MAX_ZIP_BYTES = 20 * 1024 * 1024;
 const MAX_ZIP_PET_JSON_SCAN_ENTRIES = 16;
 const MAX_ZIP_PET_JSON_TOTAL_BYTES = MAX_PET_JSON_BYTES;
-const PUBLIC_MANIFEST_URL = "https://petdex.crafter.run/api/manifest";
+const PUBLIC_MANIFEST_URL = "https://petdex.dev/api/manifest";
 
 const args = parseArgs();
 const results: AuditResult[] = [];

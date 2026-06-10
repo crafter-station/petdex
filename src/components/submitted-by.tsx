@@ -62,6 +62,7 @@ export function SubmittedBy({ credit }: SubmittedByProps) {
     <div className="group rounded-2xl border border-border-base bg-surface/76 p-4 backdrop-blur transition hover:border-border-strong hover:bg-surface">
       <Link
         href={profileHref}
+        prefetch={false}
         aria-label={t("viewProfile", { name: displayCredit.name })}
         className="flex items-center gap-3 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
       >

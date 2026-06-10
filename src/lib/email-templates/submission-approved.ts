@@ -20,7 +20,7 @@ export function renderSubmissionApprovedEmail(
   const current = normalizeLocale(locale);
   const pageUrl = petdexUrl(current, `/pets/${vars.petSlug}`);
   const homeUrl = petdexUrl(current, "/");
-  const installCmd = `curl -sSf https://petdex.crafter.run/install/${vars.petSlug} | sh`;
+  const installCmd = `curl -sSf https://petdex.dev/install/${vars.petSlug} | sh`;
   const copy =
     current === "es"
       ? {

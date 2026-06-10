@@ -304,7 +304,7 @@ async function seed(client: PGlite): Promise<void> {
       ? `${assetBase}/spritesheet.webp`
       : fallbackSpritesheet;
     // Non-curated mocks have no real pet.json or zip on R2. Point at a
-    // recognizable mock:// URI so dev:mock testers see an honest 404 if
+    // recognizable mock:// URI so mock-backed checks see an honest 404 if
     // they try install/download instead of receiving the SVG markup.
     // pet_json_url and zip_url are NOT NULL in schema so we cannot null.
     const petJsonUrl = isCurated

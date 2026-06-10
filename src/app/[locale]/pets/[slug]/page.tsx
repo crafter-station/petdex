@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { Layers, Shuffle, Sparkles } from "lucide-react";
-import { getTranslations } from "next-intl/server";
+import { getTranslations, setRequestLocale } from "next-intl/server";
 
 import { getCollectionsContainingPet } from "@/lib/collections";
 import { formatDexNumber, getDexEntryMap } from "@/lib/dex";
@@ -12,23 +12,21 @@ import { getPet, getStaticPetSlugs } from "@/lib/pets";
 import { getVariantsFor } from "@/lib/variants";
 
 import { ClaimCTA } from "@/components/claim-cta";
-import { InstallCommand } from "@/components/install-command";
 import { InstallCommandCompact } from "@/components/install-command-compact";
+import { InstallCommandLazy } from "@/components/install-command-lazy";
 import { JsonLd } from "@/components/json-ld";
 import { LikeButton } from "@/components/like-button";
 import { OpenInPetdexButton } from "@/components/open-in-petdex-button";
 import { OwnerPetControls } from "@/components/owner-pet-controls";
-import {
-  PetActionMenu,
-  PetTakedownReportButton,
-} from "@/components/pet-action-menu";
+import { PetActionMenu } from "@/components/pet-action-menu";
 import { PetCountersBar } from "@/components/pet-counters-bar";
 import { PetFloater } from "@/components/pet-floater";
 import { PetKeyboardNav } from "@/components/pet-keyboard-nav";
 import { PetRadarClient } from "@/components/pet-radar-client";
 import { PetSoundButton } from "@/components/pet-sound-button";
 import { PetSprite } from "@/components/pet-sprite";
-import { PetStateViewer } from "@/components/pet-state-viewer";
+import { PetStateViewerLazy } from "@/components/pet-state-viewer-lazy";
+import { PetTakedownReportButton } from "@/components/pet-takedown-report-button";
 import { ReducedMotionHint } from "@/components/reduced-motion-hint";
 import { SaveAsSticker } from "@/components/save-as-sticker";
 import { SiteFooter } from "@/components/site-footer";
@@ -36,9 +34,9 @@ import { SiteHeader } from "@/components/site-header";
 import { StaticPetSprite } from "@/components/static-pet-sprite";
 import { SubmittedBy } from "@/components/submitted-by";
 
-import { hasLocale } from "@/i18n/config";
+import { defaultLocale, hasLocale } from "@/i18n/config";
 
-const SITE_URL = "https://petdex.crafter.run";
+const SITE_URL = "https://petdex.dev";
 
 type PageProps = {
   params: Promise<{
@@ -48,6 +46,7 @@ type PageProps = {
 };
 
 export const dynamicParams = true;
+export const dynamic = "force-static";
 // Long ISR window — the shell is byte-stable (metrics fetched
 // client-side), so the page only needs to regenerate when its
 // editorial fields change. Write paths call revalidateTag('pet:${slug}')
@@ -123,9 +122,11 @@ export async function generateMetadata({ params }: PageProps) {
 }
 
 export default async function PetPage({ params }: PageProps) {
-  const { slug } = await params;
+  const { slug, locale } = await params;
+  const localeValue = hasLocale(locale) ? locale : defaultLocale;
+  setRequestLocale(localeValue);
   const pet = await getPet(slug);
-  const tPet = await getTranslations("pet");
+  const tPet = await getTranslations({ locale: localeValue, namespace: "pet" });
 
   if (!pet) {
     notFound();
@@ -251,6 +252,7 @@ export default async function PetPage({ params }: PageProps) {
             <DexNavPill pet={prevPet} direction="prev" />
             <Link
               href={shuffleHref}
+              prefetch={false}
               className="inline-flex h-10 items-center gap-2 rounded-full border border-border-base bg-surface/80 px-4 text-sm font-medium text-foreground backdrop-blur transition hover:border-border-strong"
               title={tPet("navigation.shuffleTitle")}
             >
@@ -400,6 +402,7 @@ export default async function PetPage({ params }: PageProps) {
                     <Link
                       key={col.slug}
                       href={`/collections/${col.slug}`}
+                      prefetch={false}
                       className="rounded-full border border-border-base bg-surface px-2.5 py-1 text-xs font-medium text-muted-2 transition hover:border-border-strong hover:text-foreground"
                     >
                       {col.title}
@@ -444,7 +447,10 @@ export default async function PetPage({ params }: PageProps) {
             the hero so its internal 2-column layout has the full content
             width to breathe. The hero idle preview keeps users grounded
             while they scroll into the state grid. */}
-        <PetStateViewer src={pet.spritesheetPath} petName={pet.displayName} />
+        <PetStateViewerLazy
+          src={pet.spritesheetPath}
+          petName={pet.displayName}
+        />
 
         {/* Full install guide. CLI + Curl tabs, platform-specific
             terminal instructions, "Activate in Codex" steps. Lives
@@ -452,7 +458,7 @@ export default async function PetPage({ params }: PageProps) {
             the primary CTA (Open in Petdex Desktop) plus a compact
             one-line npx command already cover the common path. */}
         <div id="install" className="scroll-mt-24">
-          <InstallCommand slug={pet.slug} displayName={pet.displayName} />
+          <InstallCommandLazy slug={pet.slug} displayName={pet.displayName} />
         </div>
 
         {/* Owner credit + claim CTA. Compact row that wraps cleanly on
@@ -514,6 +520,7 @@ export default async function PetPage({ params }: PageProps) {
                   <Link
                     key={variant.slug}
                     href={`/pets/${variant.slug}`}
+                    prefetch={false}
                     className="group flex items-center gap-3 rounded-2xl border border-border-base bg-background/70 p-3 transition hover:-translate-y-0.5 hover:border-brand/35 hover:bg-background"
                   >
                     <div className="shrink-0 rounded-2xl border border-border-base bg-surface p-2">
@@ -563,6 +570,7 @@ function DexNavPill({
   return (
     <Link
       href={`/pets/${pet.slug}`}
+      prefetch={false}
       className={`inline-flex min-h-10 items-center gap-2 rounded-full border border-border-base bg-surface px-4 py-2 text-sm text-foreground transition hover:border-border-strong ${direction === "next" ? "ml-auto" : ""}`}
     >
       {direction === "prev" ? <span aria-hidden="true">←</span> : null}

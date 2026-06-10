@@ -6,14 +6,13 @@
 //   2. Even if it were public, sending the browser to an external host
 //      requires whitelisting it in CSP img-src, leaks visit data to
 //      Tencent / Aliyun, and depends on Henry never flipping the ACL.
-//   3. With a proxy the browser only ever talks to petdex.crafter.run,
+//   3. With a proxy the browser only ever talks to petdex.dev,
 //      and we serve the bytes signed via the RAM user that already has
 //      oss:GetObject scope.
 //
 // We sign a short-lived URL via ali-oss and stream the response. Cached
 // at the edge for 5 minutes so a hot homepage doesn't translate into
-// thousands of upstream OSS reads — fresh enough that a rotation via
-// /collaborator/wechat-qr propagates within minutes.
+// thousands of upstream OSS reads while still allowing quick QR rotation.
 
 import { NextResponse } from "next/server";
 
