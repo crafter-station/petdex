@@ -12,24 +12,24 @@ import {
   Sparkles,
   Zap,
 } from "lucide-react";
-import { getLocale, getTranslations } from "next-intl/server";
+import { getLocale, getMessages, getTranslations } from "next-intl/server";
 
 import { buildLocaleAlternates } from "@/lib/locale-routing";
 import { getPet } from "@/lib/pets";
 
-import { CommandLine } from "@/components/command-line";
-import { DownloadCTA } from "@/components/download-cta";
+import {
+  DownloadHeroActions,
+  DownloadSetupSteps,
+} from "@/components/download-activation-islands";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { StaticPetSprite } from "@/components/static-pet-sprite";
 
 import { hasLocale } from "@/i18n/config";
-import { buildSetupSteps, parsePendingInstallSlugs } from "./setup-steps";
 
 const SITE_URL = "https://petdex.dev";
 const DEFAULT_PREVIEW_PET_SLUG = "boba";
 const DEFAULT_PREVIEW_PET = {
-  displayName: "Boba",
   spritesheetPath: "https://assets.petdex.dev/curated/boba/spritesheet.webp",
 };
 
@@ -75,44 +75,20 @@ export async function generateMetadata({
   };
 }
 
-// Force-dynamic so the latest-release fetch runs per request —
-// otherwise users see a cached release tag that drifts behind
-// what's actually on GitHub.
-export const dynamic = "force-dynamic";
+export const dynamic = "force-static";
+export const revalidate = 3600;
 
-type DownloadPageProps = {
-  searchParams: Promise<{ next?: string | string[] }>;
-};
-
-export default async function DownloadPage({
-  searchParams,
-}: DownloadPageProps) {
+export default async function DownloadPage() {
   const t = await getTranslations("download");
   const locale = await getLocale();
-  const params = await searchParams;
-  const pendingInstallSlugs = parsePendingInstallSlugs(params.next);
-  const activationCommand =
-    pendingInstallSlugs && pendingInstallSlugs.length > 0
-      ? `npx petdex init && npx petdex install ${pendingInstallSlugs.join(" ")}`
-      : "npx petdex init";
-  const pendingLabel =
-    pendingInstallSlugs && pendingInstallSlugs.length > 0
-      ? pendingInstallSlugs.length === 1
-        ? pendingInstallSlugs[0]
-        : pendingInstallSlugs.join(", ")
-      : null;
-  const previewIsPending = (pendingInstallSlugs?.length ?? 0) > 0;
-  const previewSlug = pendingInstallSlugs?.[0] ?? DEFAULT_PREVIEW_PET_SLUG;
-  const resolvedPreviewPet = await getPet(previewSlug);
-  const previewPet = resolvedPreviewPet
-    ? {
-        displayName: resolvedPreviewPet.displayName,
-        spritesheetPath: resolvedPreviewPet.spritesheetPath,
-      }
-    : previewSlug === DEFAULT_PREVIEW_PET_SLUG
-      ? DEFAULT_PREVIEW_PET
-      : null;
-  const previewPetName = previewPet?.displayName ?? pendingLabel;
+  const setupTemplates = getDownloadSetupTemplates(await getMessages());
+  const resolvedPreviewPet = await getPet(DEFAULT_PREVIEW_PET_SLUG);
+  const previewPet = {
+    displayName: t("preview.defaultPet"),
+    spritesheetPath:
+      resolvedPreviewPet?.spritesheetPath ??
+      DEFAULT_PREVIEW_PET.spritesheetPath,
+  };
 
   const features = [
     {
@@ -182,27 +158,17 @@ export default async function DownloadPage({
               {t("subtitle")}
             </p>
 
-            {pendingLabel ? (
-              <div className="mt-6 inline-flex max-w-full items-center gap-2 rounded-lg border border-brand/20 bg-brand-tint px-3 py-2 text-sm text-brand-deep dark:bg-brand-tint-dark dark:text-brand-light">
-                <Sparkles className="size-4 shrink-0" />
-                <span className="min-w-0">
-                  {t("pendingPet.messageBefore")}{" "}
-                  <code className="rounded bg-surface/80 px-1.5 py-0.5 font-mono text-xs">
-                    {pendingLabel}
-                  </code>{" "}
-                  {t("pendingPet.messageAfter")}
-                </span>
-              </div>
-            ) : null}
-
-            <DownloadCTA
-              primaryLabel={t("hero.primaryTitle")}
-              cliCommand={activationCommand}
-              cliSubtext={t("hero.cliSubtext")}
-              manualLabel={t("hero.manualLabel")}
-              manualSubtext={t("hero.manualSubtext")}
-              comingSoonLabel={t("hero.comingSoon")}
-              desktopOnlyLabel={t("hero.desktopOnly")}
+            <DownloadHeroActions
+              labels={{
+                primaryLabel: t("hero.primaryTitle"),
+                cliSubtext: t("hero.cliSubtext"),
+                manualLabel: t("hero.manualLabel"),
+                manualSubtext: t("hero.manualSubtext"),
+                comingSoonLabel: t("hero.comingSoon"),
+                desktopOnlyLabel: t("hero.desktopOnly"),
+                pendingBefore: t("pendingPet.messageBefore"),
+                pendingAfter: t("pendingPet.messageAfter"),
+              }}
             />
 
             <div className="mt-5 grid gap-2 sm:grid-cols-3">
@@ -222,19 +188,13 @@ export default async function DownloadPage({
           </div>
 
           <DesktopActivationPreview
-            pendingLabel={previewPetName}
+            pendingLabel={null}
             pendingPet={previewPet}
             title={t("preview.title")}
             status={t("preview.status")}
             terminalLabel={t("preview.terminalLabel")}
             agentLabel={t("preview.agentLabel")}
-            petLabel={
-              previewPetName
-                ? previewIsPending
-                  ? t("preview.pendingPet", { slug: previewPetName })
-                  : t("preview.demoPet", { slug: previewPetName })
-                : t("preview.defaultPet")
-            }
+            petLabel={t("preview.defaultPet")}
           />
         </div>
       </section>
@@ -289,32 +249,18 @@ export default async function DownloadPage({
             {t("setup.title")}
           </h2>
 
-          <ol className="mt-10 flex flex-col gap-8">
-            {buildSetupSteps(t, pendingInstallSlugs).map((step, idx) => {
-              const number = idx + 1;
-              const dotClass = step.dimmed
-                ? "mt-0.5 grid size-7 shrink-0 place-items-center rounded-full bg-surface font-mono text-xs font-semibold text-muted-2 ring-1 ring-border-base"
-                : "mt-0.5 grid size-7 shrink-0 place-items-center rounded-full bg-brand font-mono text-xs font-semibold text-on-inverse";
-              return (
-                <li key={step.key} className="flex gap-5">
-                  <span className={dotClass}>{number}</span>
-                  <div className="flex flex-col gap-2">
-                    <p className="font-semibold text-foreground">
-                      {step.title}
-                    </p>
-                    <CommandLine
-                      command={step.command}
-                      source={`download-${step.key}`}
-                      className="w-full max-w-sm"
-                    />
-                    {step.hint ? (
-                      <p className="text-xs text-muted-3">{step.hint}</p>
-                    ) : null}
-                  </div>
-                </li>
-              );
-            })}
-          </ol>
+          <DownloadSetupSteps
+            labels={{
+              step1Title: t("setup.step1.title"),
+              step1Hint: t("setup.step1.hint"),
+              installPetTitle: setupTemplates.installPetTitle,
+              installPetHint: t("setup.installPet.hint"),
+              installPetsTitle: setupTemplates.installPetsTitle,
+              installPetsHint: t("setup.installPets.hint"),
+              stayUpdatedTitle: t("setup.stayUpdated.title"),
+              stayUpdatedHint: t("setup.stayUpdated.hint"),
+            }}
+          />
         </div>
       </section>
 
@@ -371,6 +317,34 @@ export default async function DownloadPage({
       <SiteFooter />
     </main>
   );
+}
+
+function getDownloadSetupTemplates(
+  messages: Awaited<ReturnType<typeof getMessages>>,
+) {
+  return {
+    installPetTitle: getMessageString(
+      messages,
+      ["download", "setup", "installPet", "title"],
+      "Install {slug}",
+    ),
+    installPetsTitle: getMessageString(
+      messages,
+      ["download", "setup", "installPets", "title"],
+      "Install {count} pets",
+    ),
+  };
+}
+
+function getMessageString(messages: unknown, path: string[], fallback: string) {
+  let current = messages;
+  for (const part of path) {
+    if (!current || typeof current !== "object" || !(part in current)) {
+      return fallback;
+    }
+    current = (current as Record<string, unknown>)[part];
+  }
+  return typeof current === "string" ? current : fallback;
 }
 
 function DesktopActivationPreview({

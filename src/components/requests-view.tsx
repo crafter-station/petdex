@@ -24,6 +24,7 @@ import {
 import { useTranslations } from "next-intl";
 
 import { ClaimRequestButton } from "@/components/claim-request-button";
+import { useHeaderState } from "@/components/header-state-provider";
 
 type ClerkInfo = {
   handle: string;
@@ -59,14 +60,9 @@ const COLLECTION_PREFIX = "Collection:";
 type Sort = "top" | "new" | "fulfilled";
 type RequestKind = "pet" | "collection";
 
-export function RequestsView({
-  initial,
-  refreshOnMount,
-}: {
-  initial: RequestRow[];
-  refreshOnMount: boolean;
-}) {
+export function RequestsView({ initial }: { initial: RequestRow[] }) {
   const t = useTranslations("requests.view");
+  const { state } = useHeaderState();
   const [requests, setRequests] = useState<RequestRow[]>(initial);
   const [pending, setPending] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
@@ -92,7 +88,7 @@ export function RequestsView({
   // We always pull status=all so all three sort tabs work without
   // another roundtrip when the user toggles them.
   useEffect(() => {
-    if (!refreshOnMount) return;
+    if (!state.signedIn) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -108,7 +104,7 @@ export function RequestsView({
     return () => {
       cancelled = true;
     };
-  }, [refreshOnMount]);
+  }, [state.signedIn]);
 
   const counts = useMemo(() => {
     return {

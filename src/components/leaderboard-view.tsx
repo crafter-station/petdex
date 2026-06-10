@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
 
 import { Heart, Sparkles, TerminalSquare, Trophy, Users } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
@@ -78,35 +79,84 @@ export type LeaderboardPetThumb = {
 };
 
 type LeaderboardViewProps = {
-  active: LeaderboardMetric;
+  defaultActive: LeaderboardMetric;
   credits: CreditMap;
   petThumbs: Record<string, LeaderboardPetThumb[]>;
   rows: Record<LeaderboardMetric, LeaderboardRow[]>;
 };
 
-export function LeaderboardView({
-  active,
+const METRIC_VALUES = TABS.map((tab) => tab.id);
+
+export function LeaderboardView(props: LeaderboardViewProps) {
+  return (
+    <Suspense
+      fallback={
+        <LeaderboardTable
+          active={props.defaultActive}
+          credits={props.credits}
+          onSelect={() => {}}
+          petThumbs={props.petThumbs}
+          rows={props.rows}
+        />
+      }
+    >
+      <LeaderboardViewInner {...props} />
+    </Suspense>
+  );
+}
+
+function LeaderboardViewInner({
+  defaultActive,
   credits,
   petThumbs,
   rows,
 }: LeaderboardViewProps) {
-  const t = useTranslations("leaderboard");
-  const locale = useLocale();
-  const router = useRouter();
   const params = useSearchParams();
+  const [active, setActive] = useState(defaultActive);
 
-  const activeTab = TABS.find((t) => t.id === active) ?? TABS[0];
-  const data = rows[active];
+  useEffect(() => {
+    setActive(resolveTab(params?.get("tab")));
+  }, [params]);
 
   function selectTab(id: LeaderboardMetric) {
+    setActive(id);
     const next = new URLSearchParams(params?.toString() ?? "");
     if (id === "pets") next.delete("tab");
     else next.set("tab", id);
     const qs = next.toString();
-    router.replace(qs ? `/leaderboard?${qs}` : "/leaderboard", {
-      scroll: false,
-    });
+    const pathname = window.location.pathname || "/leaderboard";
+    window.history.replaceState(null, "", qs ? `${pathname}?${qs}` : pathname);
   }
+
+  return (
+    <LeaderboardTable
+      active={active}
+      credits={credits}
+      onSelect={selectTab}
+      petThumbs={petThumbs}
+      rows={rows}
+    />
+  );
+}
+
+function LeaderboardTable({
+  active,
+  credits,
+  onSelect,
+  petThumbs,
+  rows,
+}: {
+  active: LeaderboardMetric;
+  credits: CreditMap;
+  onSelect: (id: LeaderboardMetric) => void;
+  petThumbs: Record<string, LeaderboardPetThumb[]>;
+  rows: Record<LeaderboardMetric, LeaderboardRow[]>;
+}) {
+  const t = useTranslations("leaderboard");
+  const locale = useLocale();
+
+  const activeTab = TABS.find((t) => t.id === active) ?? TABS[0];
+  const data = rows[active];
 
   return (
     <div className="flex flex-col gap-5">
@@ -124,7 +174,7 @@ export function LeaderboardView({
               type="button"
               role="tab"
               aria-selected={isActive}
-              onClick={() => selectTab(tab.id)}
+              onClick={() => onSelect(tab.id)}
               className={`inline-flex h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition ${
                 isActive
                   ? "border-inverse bg-inverse text-on-inverse"
@@ -177,6 +227,12 @@ export function LeaderboardView({
       )}
     </div>
   );
+}
+
+function resolveTab(raw: string | null): LeaderboardMetric {
+  return METRIC_VALUES.includes(raw as LeaderboardMetric)
+    ? (raw as LeaderboardMetric)
+    : "pets";
 }
 
 function LeaderboardRowItem({

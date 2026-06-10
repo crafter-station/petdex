@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-import { auth, clerkClient } from "@clerk/nextjs/server";
+import { clerkClient } from "@clerk/nextjs/server";
 import { desc, inArray, sql } from "drizzle-orm";
 import { getTranslations } from "next-intl/server";
 
@@ -13,7 +13,8 @@ import { SiteHeader } from "@/components/site-header";
 
 import { hasLocale } from "@/i18n/config";
 
-export const dynamic = "force-dynamic";
+export const dynamic = "force-static";
+export const revalidate = 3600;
 
 const VISIBLE_VOTER_LIMIT = 3;
 
@@ -37,7 +38,6 @@ export async function generateMetadata({
 
 export default async function RequestsPage() {
   const t = await getTranslations("requests");
-  const { userId } = await auth();
 
   // Pull everything (open + fulfilled + dismissed) so the sort tabs in
   // RequestsView can switch instantly without a refetch. The list is
@@ -192,7 +192,7 @@ export default async function RequestsPage() {
           </Link>
         </header>
 
-        <RequestsView initial={initial} refreshOnMount={Boolean(userId)} />
+        <RequestsView initial={initial} />
       </section>
       <SiteFooter />
     </main>

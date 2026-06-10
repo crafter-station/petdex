@@ -144,8 +144,11 @@ const publicStaticHtmlPaths = [
   "/community",
   "/create",
   "/docs",
+  "/download",
+  "/leaderboard",
   "/legal/takedown",
   "/legal/telemetry",
+  "/requests",
 ];
 
 const publicHtmlCacheSources = [

@@ -3,7 +3,6 @@ import { getTranslations } from "next-intl/server";
 import {
   getLeaderboard,
   getLeaderboardPetThumbs,
-  type LeaderboardMetric,
   type LeaderboardRow,
 } from "@/lib/leaderboard";
 import { buildLocaleAlternates } from "@/lib/locale-routing";
@@ -15,7 +14,8 @@ import { SiteHeader } from "@/components/site-header";
 
 import { hasLocale } from "@/i18n/config";
 
-export const dynamic = "force-dynamic";
+export const dynamic = "force-static";
+export const revalidate = 3600;
 
 export async function generateMetadata({
   params,
@@ -38,28 +38,8 @@ export async function generateMetadata({
   };
 }
 
-const METRIC_VALUES: LeaderboardMetric[] = [
-  "pets",
-  "likes",
-  "installs",
-  "rising",
-  "collectors",
-];
-
-type SP = { tab?: string };
-
-export default async function LeaderboardPage({
-  searchParams,
-}: {
-  searchParams: Promise<SP>;
-}) {
+export default async function LeaderboardPage() {
   const t = await getTranslations("leaderboard");
-  const { tab } = await searchParams;
-  const active: LeaderboardMetric = METRIC_VALUES.includes(
-    tab as LeaderboardMetric,
-  )
-    ? (tab as LeaderboardMetric)
-    : "pets";
 
   // Fetch every variant in parallel so the tabs feel instant when the
   // user clicks between them — Next will serve cached HTML for the tab
@@ -118,7 +98,7 @@ export default async function LeaderboardPage({
 
       <section className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-5 py-10 md:px-8 md:py-14">
         <LeaderboardView
-          active={active}
+          defaultActive="pets"
           credits={serializeCredits(credits)}
           petThumbs={petThumbs}
           rows={{
