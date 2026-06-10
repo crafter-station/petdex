@@ -3,7 +3,6 @@
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState, useTransition } from "react";
 
-import { useAuth } from "@clerk/nextjs";
 import { Globe } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
@@ -16,8 +15,6 @@ import {
 } from "@/components/ui/popover";
 
 import { hasLocale, type Locale } from "@/i18n/config";
-
-const COOKIE_MAX_AGE = 60 * 60 * 24 * 30;
 
 const OPTIONS: Array<{ locale: Locale; code: string; label: string }> = [
   { locale: "en", code: "EN", label: "English" },
@@ -48,7 +45,6 @@ function LocaleSwitcherInner() {
   const currentLocale = hasLocale(locale) ? locale : "en";
   const current =
     OPTIONS.find((option) => option.locale === currentLocale) ?? OPTIONS[0];
-  const { isSignedIn } = useAuth();
   const pathname = usePathname() ?? "/";
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -62,36 +58,11 @@ function LocaleSwitcherInner() {
       return;
     }
 
-    const cookieStore = (
-      window as Window & {
-        cookieStore?: {
-          set(input: {
-            name: string;
-            value: string;
-            path: string;
-            expires: number;
-            sameSite: "lax";
-          }): Promise<void>;
-        };
-      }
-    ).cookieStore;
-    // biome-ignore lint/suspicious/noDocumentCookie: cookieStore is not available in every supported browser yet.
-    document.cookie = `NEXT_LOCALE=${nextLocale}; Path=/; Max-Age=${COOKIE_MAX_AGE}; SameSite=Lax`;
-    void cookieStore?.set({
-      name: "NEXT_LOCALE",
-      value: nextLocale,
-      path: "/",
-      expires: Date.now() + COOKIE_MAX_AGE * 1000,
-      sameSite: "lax",
+    void fetch("/api/profile", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ preferredLocale: nextLocale }),
     });
-
-    if (isSignedIn) {
-      void fetch("/api/profile", {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ preferredLocale: nextLocale }),
-      });
-    }
 
     const basePath = stripLocalePrefix(pathname);
     const query = searchParams.toString();

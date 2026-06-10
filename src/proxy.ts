@@ -63,6 +63,8 @@ const handleI18nRouting = createMiddleware({
   locales,
   defaultLocale,
   localePrefix: "as-needed",
+  localeDetection: false,
+  localeCookie: false,
 });
 
 // In mock auth mode the user is always signed in, so we skip
@@ -80,7 +82,9 @@ const baseMiddleware = async (req: NextRequest, event?: NextFetchEvent) => {
   if (new URL(req.url).pathname.startsWith("/api")) {
     return NextResponse.next();
   }
-  return handleI18nRouting(req as Parameters<typeof handleI18nRouting>[0]);
+  return handleI18nRoutingWithoutLocaleCookie(
+    req as Parameters<typeof handleI18nRouting>[0],
+  );
 };
 
 export default IS_MOCK_AUTH
@@ -102,7 +106,7 @@ export default IS_MOCK_AUTH
         return NextResponse.next();
       }
 
-      return handleI18nRouting(req);
+      return handleI18nRoutingWithoutLocaleCookie(req);
     });
 
 export const config = {
@@ -214,6 +218,16 @@ function normalizeBaseUrl(raw: string | null | undefined, fallback: string) {
 
 function normalizeHost(raw: string | null): string {
   return raw?.split(":")[0]?.toLowerCase() ?? "";
+}
+
+function handleI18nRoutingWithoutLocaleCookie(
+  req: Parameters<typeof handleI18nRouting>[0],
+) {
+  const response = handleI18nRouting(req);
+  if (req.cookies.has("NEXT_LOCALE")) {
+    response.cookies.delete("NEXT_LOCALE");
+  }
+  return response;
 }
 
 function scheduleRouteCostSample(req: NextRequest, event?: NextFetchEvent) {

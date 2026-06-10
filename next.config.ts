@@ -128,6 +128,43 @@ const versionJsonHeaders = [
   },
 ];
 
+const publicHtmlCacheHeaders = [
+  {
+    key: "Cloudflare-CDN-Cache-Control",
+    value:
+      "public, max-age=300, stale-while-revalidate=86400, stale-if-error=86400",
+  },
+];
+
+const publicStaticHtmlPaths = [
+  "/about",
+  "/brand",
+  "/built-with",
+  "/collections",
+  "/community",
+  "/create",
+  "/docs",
+  "/legal/takedown",
+  "/legal/telemetry",
+];
+
+const publicHtmlCacheSources = [
+  "/",
+  "/:locale(en|es|zh)",
+  ...publicStaticHtmlPaths.flatMap((source) => [
+    source,
+    `/:locale(en|es|zh)${source}`,
+  ]),
+  "/pets/:slug",
+  "/:locale(en|es|zh)/pets/:slug",
+  "/collections/:slug",
+  "/:locale(en|es|zh)/collections/:slug",
+  "/kind/:kind",
+  "/:locale(en|es|zh)/kind/:kind",
+  "/vibe/:vibe",
+  "/:locale(en|es|zh)/vibe/:vibe",
+];
+
 const mockRoot = path.resolve(__dirname, "src/lib/mock");
 
 const nextConfig: NextConfig = {
@@ -160,6 +197,10 @@ const nextConfig: NextConfig = {
         source: "/version.json",
         headers: versionJsonHeaders,
       },
+      ...publicHtmlCacheSources.map((source) => ({
+        source,
+        headers: publicHtmlCacheHeaders,
+      })),
       {
         source: "/:path*",
         headers: securityHeaders,
