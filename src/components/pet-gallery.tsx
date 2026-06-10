@@ -25,9 +25,8 @@ import { PET_KINDS, PET_VIBES, type PetKind, type PetVibe } from "@/lib/types";
 import { isAllowedAvatarUrl } from "@/lib/url-allowlist";
 import { cn } from "@/lib/utils";
 
-import { useHeaderState } from "@/components/header-state-provider";
 import { PetActionMenu } from "@/components/pet-action-menu";
-import type { PetCardFooterProps } from "@/components/pet-card-footer";
+import { PetCardFooter } from "@/components/pet-card-footer";
 import { PetSprite } from "@/components/pet-sprite";
 import { ProfilePinButton } from "@/components/profile-pin-button";
 import { Badge } from "@/components/ui/badge";
@@ -105,14 +104,6 @@ const FeedAdSlot = dynamic<{ ad: PublicFeedAd }>(
   },
 );
 
-const PetCardFooter = dynamic<PetCardFooterProps>(
-  () => import("@/components/pet-card-footer").then((mod) => mod.PetCardFooter),
-  {
-    loading: PetCardFooterLoading,
-    ssr: false,
-  },
-);
-
 const FAMILY_DOT: Record<ColorFamily, string> = {
   red: "#ef4444",
   orange: "#f97316",
@@ -145,8 +136,7 @@ export function PetGallery({
   const [activeBatches, setActiveBatches] = useState<Set<string>>(new Set());
   const [sort, setSort] = useState<SortKey>("alpha");
   const [sortTouched, setSortTouched] = useState(false);
-  const headerCaught = useHeaderState().state.caught;
-  const caughtSet = new Set(caughtSlugs ?? headerCaught);
+  const caughtSet = new Set(caughtSlugs ?? []);
 
   const [pets, setPets] = useState<SearchPet[]>(initial.pets);
   const [total, setTotal] = useState<number>(initial.total);
@@ -736,22 +726,6 @@ function FeedAdSlotLoading() {
       </div>
       <div className="mt-auto min-h-[52px] border-border-base border-t px-5 py-2" />
     </article>
-  );
-}
-
-function PetCardFooterLoading() {
-  return (
-    <div
-      aria-hidden="true"
-      className="flex min-h-[49px] items-center border-t border-black/[0.05] px-2 py-2 dark:border-white/[0.05]"
-    >
-      <div className="flex items-center gap-1">
-        <div className="h-8 w-14 rounded-full bg-surface-muted/70" />
-        <div className="h-8 w-16 rounded-full bg-surface-muted/70" />
-        <div className="size-8 rounded-full bg-surface-muted/70" />
-        <div className="size-8 rounded-full bg-surface-muted/70" />
-      </div>
-    </div>
   );
 }
 

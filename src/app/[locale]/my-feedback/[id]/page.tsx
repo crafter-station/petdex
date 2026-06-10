@@ -7,6 +7,7 @@ import { getTranslations } from "next-intl/server";
 
 import { db, schema } from "@/lib/db/client";
 
+import { FullAuthProviders } from "@/components/auth-providers";
 import { FeedbackThread } from "@/components/feedback-thread";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
@@ -60,7 +61,7 @@ export default async function MyFeedbackThreadPage({
     .where(eq(schema.feedback.id, id));
 
   return (
-    <>
+    <FullAuthProviders>
       <SiteHeader />
       <main className="min-h-dvh pb-20">
         <section className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-5 pt-10 pb-12 md:px-8 md:pt-14">
@@ -90,6 +91,6 @@ export default async function MyFeedbackThreadPage({
         </section>
       </main>
       <SiteFooter />
-    </>
+    </FullAuthProviders>
   );
 }

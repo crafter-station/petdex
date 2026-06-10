@@ -1,25 +1,34 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useState } from "react";
 
-import { useHeaderState } from "@/components/header-state-provider";
+import { useAuthIntent } from "@/components/auth-intent";
 
 type Props = {
   petSlugs: string[];
 };
 
-export function CollectionCaughtProgress({ petSlugs }: Props) {
-  const { state } = useHeaderState();
-  const caughtCount = useMemo(() => {
-    const caught = new Set(state.caught);
-    return petSlugs.filter((slug) => caught.has(slug)).length;
-  }, [petSlugs, state.caught]);
+type CollectionCaughtProgressComponent = React.ComponentType<Props>;
 
-  if (!state.signedIn) return null;
+export function CollectionCaughtProgress(props: Props) {
+  const { authActive } = useAuthIntent();
+  const [AuthCollectionCaughtProgress, setAuthCollectionCaughtProgress] =
+    useState<CollectionCaughtProgressComponent | null>(null);
 
-  return (
-    <span>
-      caught {caughtCount}/{petSlugs.length}
-    </span>
-  );
+  useEffect(() => {
+    if (!authActive || AuthCollectionCaughtProgress) return;
+    let cancelled = false;
+    void import("@/components/collection-caught-progress-auth").then((mod) => {
+      if (!cancelled) {
+        setAuthCollectionCaughtProgress(() => mod.CollectionCaughtProgress);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [AuthCollectionCaughtProgress, authActive]);
+
+  return authActive && AuthCollectionCaughtProgress ? (
+    <AuthCollectionCaughtProgress {...props} />
+  ) : null;
 }

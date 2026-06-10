@@ -23,8 +23,8 @@ import {
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 
+import { useAuthIntent } from "@/components/auth-intent";
 import { ClaimRequestButton } from "@/components/claim-request-button";
-import { useHeaderState } from "@/components/header-state-provider";
 
 type ClerkInfo = {
   handle: string;
@@ -60,10 +60,16 @@ const COLLECTION_PREFIX = "Collection:";
 type Sort = "top" | "new" | "fulfilled";
 type RequestKind = "pet" | "collection";
 
+type RequestsAuthRefreshComponent = React.ComponentType<{
+  onRefresh: (requests: RequestRow[]) => void;
+}>;
+
 export function RequestsView({ initial }: { initial: RequestRow[] }) {
   const t = useTranslations("requests.view");
-  const { state } = useHeaderState();
+  const { authActive } = useAuthIntent();
   const [requests, setRequests] = useState<RequestRow[]>(initial);
+  const [RequestsAuthRefresh, setRequestsAuthRefresh] =
+    useState<RequestsAuthRefreshComponent | null>(null);
   const [pending, setPending] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [sort, setSort] = useState<Sort>("top");
@@ -84,27 +90,16 @@ export function RequestsView({ initial }: { initial: RequestRow[] }) {
     count: number;
   } | null>(null);
 
-  // Re-fetch with credentials so the user's own votes light up.
-  // We always pull status=all so all three sort tabs work without
-  // another roundtrip when the user toggles them.
   useEffect(() => {
-    if (!state.signedIn) return;
+    if (!authActive || RequestsAuthRefresh) return;
     let cancelled = false;
-    void (async () => {
-      try {
-        const res = await fetch("/api/pet-requests?status=all&limit=80");
-        if (!res.ok) return;
-        const data = (await res.json()) as { requests: RequestRow[] };
-        if (cancelled) return;
-        setRequests(data.requests);
-      } catch {
-        /* ignore */
-      }
-    })();
+    void import("@/components/requests-auth-refresh").then((mod) => {
+      if (!cancelled) setRequestsAuthRefresh(() => mod.RequestsAuthRefresh);
+    });
     return () => {
       cancelled = true;
     };
-  }, [state.signedIn]);
+  }, [RequestsAuthRefresh, authActive]);
 
   const counts = useMemo(() => {
     return {
@@ -163,6 +158,14 @@ export function RequestsView({ initial }: { initial: RequestRow[] }) {
     });
     previousRects.current = next;
   }, []);
+
+  const handleAuthRefresh = useCallback(
+    (nextRequests: RequestRow[]) => {
+      capturePositions();
+      setRequests(nextRequests);
+    },
+    [capturePositions],
+  );
 
   useLayoutEffect(() => {
     const before = previousRects.current;
@@ -333,6 +336,10 @@ export function RequestsView({ initial }: { initial: RequestRow[] }) {
 
   return (
     <div className="space-y-6">
+      {authActive && RequestsAuthRefresh ? (
+        <RequestsAuthRefresh onRefresh={handleAuthRefresh} />
+      ) : null}
+
       {/* Always-visible request form */}
       <form
         onSubmit={submitForm}

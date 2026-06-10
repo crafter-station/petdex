@@ -22,6 +22,7 @@ import { buildLocaleAlternates } from "@/lib/locale-routing";
 import { type PetWithMetrics, rowToPet } from "@/lib/pets";
 import { toCurrentR2PublicUrl } from "@/lib/r2-public-url";
 
+import { FullAuthProviders } from "@/components/auth-providers";
 import { JsonLd } from "@/components/json-ld";
 import type { Submission } from "@/components/my-pets-view";
 import { ProfileExternalLink } from "@/components/profile-external-link";
@@ -273,181 +274,183 @@ export default async function UserProfilePage({ params }: PageProps) {
   };
 
   return (
-    <main className="min-h-dvh bg-background text-foreground">
-      <JsonLd data={jsonLd} />
+    <FullAuthProviders>
+      <main className="min-h-dvh bg-background text-foreground">
+        <JsonLd data={jsonLd} />
 
-      <SiteHeader />
-      <section className="petdex-cloud relative -mt-[84px] overflow-clip pt-[84px]">
-        <div className="relative mx-auto flex w-full max-w-[1440px] flex-col px-5 pb-10 md:px-8">
-          <header className="mt-10 grid gap-8 md:mt-14 lg:grid-cols-[auto_1fr_auto] lg:items-start">
-            {/* Avatar */}
-            <div className="flex justify-center lg:block">
-              {avatarUrl ? (
-                // biome-ignore lint/performance/noImgElement: Clerk-hosted avatar
-                <img
-                  src={avatarUrl}
-                  alt={displayName ?? `@${publicHandle}`}
-                  className="size-28 rounded-3xl object-cover ring-1 ring-black/10 md:size-32"
-                />
-              ) : (
-                <div className="grid size-28 place-items-center rounded-3xl bg-surface font-mono text-3xl font-semibold text-muted-2 ring-1 ring-black/10 md:size-32">
-                  {fallbackInitial}
+        <SiteHeader />
+        <section className="petdex-cloud relative -mt-[84px] overflow-clip pt-[84px]">
+          <div className="relative mx-auto flex w-full max-w-[1440px] flex-col px-5 pb-10 md:px-8">
+            <header className="mt-10 grid gap-8 md:mt-14 lg:grid-cols-[auto_1fr_auto] lg:items-start">
+              {/* Avatar */}
+              <div className="flex justify-center lg:block">
+                {avatarUrl ? (
+                  // biome-ignore lint/performance/noImgElement: Clerk-hosted avatar
+                  <img
+                    src={avatarUrl}
+                    alt={displayName ?? `@${publicHandle}`}
+                    className="size-28 rounded-3xl object-cover ring-1 ring-black/10 md:size-32"
+                  />
+                ) : (
+                  <div className="grid size-28 place-items-center rounded-3xl bg-surface font-mono text-3xl font-semibold text-muted-2 ring-1 ring-black/10 md:size-32">
+                    {fallbackInitial}
+                  </div>
+                )}
+              </div>
+
+              {/* Identity */}
+              <div className="text-center lg:text-left">
+                <div className="flex flex-wrap items-center justify-center gap-2 lg:justify-start">
+                  <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
+                    {t("creatorBadge")}
+                  </p>
+                  {catchProgress ? (
+                    <p className="font-mono text-xs tracking-[0.22em] text-muted-3 uppercase">
+                      {t("yourAlbum", {
+                        caught: catchProgress.caught,
+                        total: catchProgress.total,
+                        pct: catchProgress.pct,
+                      })}
+                    </p>
+                  ) : null}
+                  {isOwnerAdmin ? (
+                    <span
+                      className="inline-flex items-center gap-1 rounded-full bg-brand px-2 py-0.5 font-mono text-[10px] tracking-[0.15em] text-white uppercase"
+                      title="One of the people who built Petdex"
+                    >
+                      <Trophy className="size-3" />
+                      {t("creatorOfPetdex")}
+                    </span>
+                  ) : rank ? (
+                    <Link
+                      href="/leaderboard"
+                      className="inline-flex items-center gap-1 rounded-full bg-chip-warning-bg px-2 py-0.5 font-mono text-[10px] tracking-[0.15em] text-chip-warning-fg uppercase transition hover:opacity-80"
+                      title={`Ranked #${rank.rank} of ${rank.total} by approved pets. See the full leaderboard`}
+                    >
+                      <Trophy className="size-3" />#{rank.rank} most pets
+                    </Link>
+                  ) : null}
                 </div>
-              )}
-            </div>
-
-            {/* Identity */}
-            <div className="text-center lg:text-left">
-              <div className="flex flex-wrap items-center justify-center gap-2 lg:justify-start">
-                <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
-                  {t("creatorBadge")}
-                </p>
-                {catchProgress ? (
-                  <p className="font-mono text-xs tracking-[0.22em] text-muted-3 uppercase">
-                    {t("yourAlbum", {
-                      caught: catchProgress.caught,
-                      total: catchProgress.total,
-                      pct: catchProgress.pct,
-                    })}
+                <h1 className="mt-3 text-balance text-[40px] leading-[1] font-semibold tracking-tight md:text-[56px]">
+                  {displayName ?? `@${publicHandle}`}
+                </h1>
+                {displayName ? (
+                  <p className="mt-2 font-mono text-sm tracking-[0.08em] text-muted-3">
+                    @{publicHandle}
                   </p>
                 ) : null}
-                {isOwnerAdmin ? (
-                  <span
-                    className="inline-flex items-center gap-1 rounded-full bg-brand px-2 py-0.5 font-mono text-[10px] tracking-[0.15em] text-white uppercase"
-                    title="One of the people who built Petdex"
-                  >
-                    <Trophy className="size-3" />
-                    {t("creatorOfPetdex")}
-                  </span>
-                ) : rank ? (
-                  <Link
-                    href="/leaderboard"
-                    className="inline-flex items-center gap-1 rounded-full bg-chip-warning-bg px-2 py-0.5 font-mono text-[10px] tracking-[0.15em] text-chip-warning-fg uppercase transition hover:opacity-80"
-                    title={`Ranked #${rank.rank} of ${rank.total} by approved pets. See the full leaderboard`}
-                  >
-                    <Trophy className="size-3" />#{rank.rank} most pets
-                  </Link>
+                {bio ? (
+                  <p className="mt-4 max-w-xl text-balance text-base leading-7 text-muted-1 md:text-lg">
+                    {bio}
+                  </p>
                 ) : null}
-              </div>
-              <h1 className="mt-3 text-balance text-[40px] leading-[1] font-semibold tracking-tight md:text-[56px]">
-                {displayName ?? `@${publicHandle}`}
-              </h1>
-              {displayName ? (
-                <p className="mt-2 font-mono text-sm tracking-[0.08em] text-muted-3">
-                  @{publicHandle}
-                </p>
-              ) : null}
-              {bio ? (
-                <p className="mt-4 max-w-xl text-balance text-base leading-7 text-muted-1 md:text-lg">
-                  {bio}
-                </p>
-              ) : null}
 
-              {/* Stats row */}
-              <div className="mt-5 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 font-mono text-[11px] tracking-[0.18em] text-muted-3 uppercase lg:justify-start">
-                <span>{t("petsCount", { count: pets.length })}</span>
-                {totalLikes > 0 ? (
-                  <span className="inline-flex items-center gap-1.5">
-                    <Heart className="size-3" />
-                    {formatLocalizedNumber(totalLikes, locale)}
-                  </span>
-                ) : null}
-                {totalInstalls > 0 ? (
-                  <span className="inline-flex items-center gap-1.5">
-                    <TerminalSquare className="size-3" />
-                    {t("installs", {
-                      count: formatLocalizedNumber(totalInstalls, locale),
-                    })}
-                  </span>
-                ) : null}
-                {memberSince ? (
-                  <span>
-                    {t("joined", {
-                      date: new Date(memberSince).toLocaleDateString(
-                        locale === "zh"
-                          ? "zh-Hans-CN"
-                          : locale === "es"
-                            ? "es"
-                            : "en",
-                        { month: "long", year: "numeric" },
-                      ),
-                    })}
-                  </span>
-                ) : null}
-              </div>
-
-              {/* External links */}
-              {externalUrls.length > 0 ? (
-                <div className="mt-4 flex flex-wrap items-center justify-center gap-2 lg:justify-start">
-                  {externalUrls.map((e) => (
-                    <ProfileExternalLink
-                      key={e.url}
-                      handle={publicHandle}
-                      url={e.url}
-                      label={e.label}
-                    />
-                  ))}
+                {/* Stats row */}
+                <div className="mt-5 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 font-mono text-[11px] tracking-[0.18em] text-muted-3 uppercase lg:justify-start">
+                  <span>{t("petsCount", { count: pets.length })}</span>
+                  {totalLikes > 0 ? (
+                    <span className="inline-flex items-center gap-1.5">
+                      <Heart className="size-3" />
+                      {formatLocalizedNumber(totalLikes, locale)}
+                    </span>
+                  ) : null}
+                  {totalInstalls > 0 ? (
+                    <span className="inline-flex items-center gap-1.5">
+                      <TerminalSquare className="size-3" />
+                      {t("installs", {
+                        count: formatLocalizedNumber(totalInstalls, locale),
+                      })}
+                    </span>
+                  ) : null}
+                  {memberSince ? (
+                    <span>
+                      {t("joined", {
+                        date: new Date(memberSince).toLocaleDateString(
+                          locale === "zh"
+                            ? "zh-Hans-CN"
+                            : locale === "es"
+                              ? "es"
+                              : "en",
+                          { month: "long", year: "numeric" },
+                        ),
+                      })}
+                    </span>
+                  ) : null}
                 </div>
-              ) : null}
-            </div>
 
-            {/* Owner + visitor actions. Share is on for everyone so a
+                {/* External links */}
+                {externalUrls.length > 0 ? (
+                  <div className="mt-4 flex flex-wrap items-center justify-center gap-2 lg:justify-start">
+                    {externalUrls.map((e) => (
+                      <ProfileExternalLink
+                        key={e.url}
+                        handle={publicHandle}
+                        url={e.url}
+                        label={e.label}
+                      />
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+
+              {/* Owner + visitor actions. Share is on for everyone so a
                 fan can spread a profile they liked, the same growth
                 motion as the creator promoting their own page. */}
-            <div className="flex flex-wrap items-center justify-center gap-2 lg:justify-end">
-              <ProfileShareButton
-                handle={publicHandle}
-                displayName={displayName}
-              />
-              {isOwner ? (
-                <ProfileInlineEditor
+              <div className="flex flex-wrap items-center justify-center gap-2 lg:justify-end">
+                <ProfileShareButton
                   handle={publicHandle}
-                  initialDisplayName={displayName}
-                  initialBio={bio}
-                  initialFeaturedSlugs={featuredSlugs}
-                  approvedPets={pets.map((p) => ({
-                    slug: p.slug,
-                    displayName: p.displayName,
-                  }))}
+                  displayName={displayName}
                 />
-              ) : null}
-            </div>
-          </header>
-        </div>
-      </section>
+                {isOwner ? (
+                  <ProfileInlineEditor
+                    handle={publicHandle}
+                    initialDisplayName={displayName}
+                    initialBio={bio}
+                    initialFeaturedSlugs={featuredSlugs}
+                    approvedPets={pets.map((p) => ({
+                      slug: p.slug,
+                      displayName: p.displayName,
+                    }))}
+                  />
+                ) : null}
+              </div>
+            </header>
+          </div>
+        </section>
 
-      <section className="mx-auto flex w-full max-w-[1440px] flex-col gap-8 px-5 py-12 md:px-8 md:py-16">
-        <ProfilePinningSurface
-          isOwner={isOwner}
-          publicHandle={publicHandle}
-          pets={pets}
-          initialPinnedSlugs={featuredSlugs}
-          ownerSubmissions={ownerSubmissions}
-          likedPets={likedPets}
-          collection={
-            collection
-              ? {
-                  slug: collection.slug,
-                  title: collection.title,
-                  description: collection.description,
-                  externalUrl: collection.externalUrl,
-                  coverPetSlug: collection.coverPetSlug,
-                  petSlugs: collection.pets.map((pet) => pet.slug),
-                }
-              : null
-          }
-          canManageCollections={canManageOwnCollection}
-          collectionApprovedPets={pets.map((p) => ({
-            slug: p.slug,
-            displayName: p.displayName,
-            spritesheetUrl: p.spritesheetPath,
-          }))}
-          ownerCollections={ownerCollectionsForTabs}
-          maxOwnerCollections={MAX_OWNER_COLLECTIONS}
-        />
-      </section>
+        <section className="mx-auto flex w-full max-w-[1440px] flex-col gap-8 px-5 py-12 md:px-8 md:py-16">
+          <ProfilePinningSurface
+            isOwner={isOwner}
+            publicHandle={publicHandle}
+            pets={pets}
+            initialPinnedSlugs={featuredSlugs}
+            ownerSubmissions={ownerSubmissions}
+            likedPets={likedPets}
+            collection={
+              collection
+                ? {
+                    slug: collection.slug,
+                    title: collection.title,
+                    description: collection.description,
+                    externalUrl: collection.externalUrl,
+                    coverPetSlug: collection.coverPetSlug,
+                    petSlugs: collection.pets.map((pet) => pet.slug),
+                  }
+                : null
+            }
+            canManageCollections={canManageOwnCollection}
+            collectionApprovedPets={pets.map((p) => ({
+              slug: p.slug,
+              displayName: p.displayName,
+              spritesheetUrl: p.spritesheetPath,
+            }))}
+            ownerCollections={ownerCollectionsForTabs}
+            maxOwnerCollections={MAX_OWNER_COLLECTIONS}
+          />
+        </section>
 
-      <SiteFooter />
-    </main>
+        <SiteFooter />
+      </main>
+    </FullAuthProviders>
   );
 }

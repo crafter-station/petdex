@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 
-const petCardFooterSource = readFileSync(
-  new URL("./pet-card-footer.tsx", import.meta.url),
+const petCardFooterAuthSource = readFileSync(
+  new URL("./pet-card-footer-auth.tsx", import.meta.url),
   "utf8",
 );
 
@@ -33,10 +33,12 @@ const pinnedReorderGridSource = readFileSync(
 
 describe("optimistic lightweight actions", () => {
   it("keeps card favorites instant without a loading spinner", () => {
-    expect(petCardFooterSource).not.toContain("Loader2");
-    expect(petCardFooterSource).not.toContain("setBusy");
-    expect(petCardFooterSource).toContain("JSON.stringify({ liked: next })");
-    expect(petCardFooterSource).toContain("likeRequestSeq.current !== seq");
+    expect(petCardFooterAuthSource).not.toContain("Loader2");
+    expect(petCardFooterAuthSource).not.toContain("setBusy");
+    expect(petCardFooterAuthSource).toContain(
+      "JSON.stringify({ liked: next })",
+    );
+    expect(petCardFooterAuthSource).toContain("likeRequestSeq.current !== seq");
   });
 
   it("keeps profile pins instant without a loading spinner", () => {
@@ -103,6 +105,6 @@ describe("optimistic lightweight actions", () => {
     expect(petGallerySource).not.toContain("CheckCircle2");
     expect(petGallerySource).not.toContain("caughtTitle");
     expect(petGallerySource).toContain("initialLiked={caught}");
-    expect(petCardFooterSource).toContain("setLiked(initialLiked)");
+    expect(petCardFooterAuthSource).toContain("setLiked(initialLiked)");
   });
 });

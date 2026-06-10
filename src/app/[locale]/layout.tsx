@@ -9,8 +9,8 @@ import {
   setRequestLocale,
 } from "next-intl/server";
 
-import { FeedbackWidget } from "@/components/feedback-widget";
-import { HeaderStateProvider } from "@/components/header-state-provider";
+import { AuthFeedbackWidget } from "@/components/auth-feedback-widget";
+import { ConditionalAuthProviders } from "@/components/conditional-auth-providers";
 import { AppProviders } from "@/components/theme-providers";
 import { TopPromoStrip } from "@/components/zh/top-promo-strip";
 import { ZhLayoutSpacer } from "@/components/zh/zh-layout-spacer";
@@ -110,11 +110,11 @@ export default async function LocaleLayout({ children, params }: Props) {
       <body className="min-h-full flex flex-col bg-background text-foreground">
         <NextIntlClientProvider messages={clientMessages}>
           <AppProviders>
-            {isZh && <TopPromoStrip />}
-            <HeaderStateProvider>
+            <ConditionalAuthProviders>
+              {isZh && <TopPromoStrip />}
               {isZh ? <ZhLayoutSpacer>{children}</ZhLayoutSpacer> : children}
-              <FeedbackWidget />
-            </HeaderStateProvider>
+              <AuthFeedbackWidget />
+            </ConditionalAuthProviders>
           </AppProviders>
         </NextIntlClientProvider>
       </body>

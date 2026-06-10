@@ -7,7 +7,6 @@ import { useLocale } from "next-intl";
 import type { PetWithMetrics } from "@/lib/pets";
 import { cn } from "@/lib/utils";
 
-import { useHeaderState } from "@/components/header-state-provider";
 import { PetCard } from "@/components/pet-gallery";
 
 const PAGE_SIZE = 24;
@@ -20,13 +19,8 @@ type Props = {
 
 export function CollectionPetGrid({ pets, dexMap, caughtSlugs = [] }: Props) {
   const isZh = useLocale() === "zh";
-  const { state } = useHeaderState();
   const [pageCount, setPageCount] = useState(1);
-  const activeCaughtSlugs = state.signedIn ? state.caught : caughtSlugs;
-  const caughtSet = useMemo(
-    () => new Set(activeCaughtSlugs),
-    [activeCaughtSlugs],
-  );
+  const caughtSet = useMemo(() => new Set(caughtSlugs), [caughtSlugs]);
 
   const slice = useMemo(
     () => pets.slice(0, pageCount * PAGE_SIZE),

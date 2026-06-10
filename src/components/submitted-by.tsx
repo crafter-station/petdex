@@ -3,10 +3,9 @@
 import Image from "next/image";
 import Link from "next/link";
 
-import { useUser } from "@clerk/nextjs";
 import { useTranslations } from "next-intl";
 
-import type { OwnerCredit, OwnerExternal } from "@/lib/owner-credit";
+import type { OwnerCredit } from "@/lib/owner-credit";
 import { isAllowedAvatarUrl } from "@/lib/url-allowlist";
 
 type SubmittedByProps = {
@@ -46,8 +45,7 @@ function XIcon({ className }: { className?: string }) {
 
 export function SubmittedBy({ credit }: SubmittedByProps) {
   const t = useTranslations("submittedBy");
-  const { user } = useUser();
-  const displayCredit = mergeCurrentUserCredit(credit, user);
+  const displayCredit = credit;
   const showAvatar =
     displayCredit.imageUrl && isAllowedAvatarUrl(displayCredit.imageUrl);
   const avatarUrl = showAvatar ? displayCredit.imageUrl : null;
@@ -122,68 +120,4 @@ export function SubmittedBy({ credit }: SubmittedByProps) {
       ) : null}
     </div>
   );
-}
-
-function mergeCurrentUserCredit(
-  credit: OwnerCredit,
-  user:
-    | {
-        id: string;
-        imageUrl?: string;
-        username?: string | null;
-        fullName?: string | null;
-        primaryEmailAddress?: { emailAddress?: string | null } | null;
-        externalAccounts?: Array<{ provider?: string; username?: string }>;
-      }
-    | null
-    | undefined,
-): OwnerCredit {
-  if (!user || user.id !== credit.userId) return credit;
-
-  const externals = externalsFor(user.externalAccounts ?? []);
-
-  return {
-    ...credit,
-    name:
-      credit.name === "anonymous"
-        ? user.fullName ||
-          user.username ||
-          user.primaryEmailAddress?.emailAddress ||
-          credit.name
-        : credit.name,
-    username: user.username ?? credit.username,
-    externals: externals.length > 0 ? externals : credit.externals,
-    imageUrl: user.imageUrl ?? credit.imageUrl,
-  };
-}
-
-function externalsFor(
-  externalAccounts: Array<{ provider?: string; username?: string }>,
-): OwnerExternal[] {
-  let github: OwnerExternal | null = null;
-  let x: OwnerExternal | null = null;
-
-  for (const account of externalAccounts) {
-    if (!account.username) continue;
-    if (account.provider === "oauth_github" && !github) {
-      github = {
-        provider: "github",
-        username: account.username,
-        url: `https://github.com/${account.username}`,
-      };
-    }
-    if (
-      (account.provider === "oauth_x" ||
-        account.provider === "oauth_twitter") &&
-      !x
-    ) {
-      x = {
-        provider: "x",
-        username: account.username,
-        url: `https://x.com/${account.username}`,
-      };
-    }
-  }
-
-  return [github, x].filter((item): item is OwnerExternal => Boolean(item));
 }

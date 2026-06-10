@@ -2,8 +2,6 @@
 
 import Link from "next/link";
 
-import { SignInButton, useAuth } from "@clerk/nextjs";
-
 import { Button } from "@/components/ui/button";
 
 type SubmitCTAProps = {
@@ -20,27 +18,6 @@ export function SubmitCTA({
   children = "Submit a pet",
   href = "/submit",
 }: SubmitCTAProps) {
-  const { isLoaded, isSignedIn } = useAuth();
-
-  if (!isLoaded || !isSignedIn) {
-    return (
-      <SignInButton
-        mode="modal"
-        forceRedirectUrl={href}
-        signUpForceRedirectUrl={href}
-      >
-        <Button
-          variant="petdex-cta"
-          size="petdex-pill"
-          className={className}
-          render={<button type="button" />}
-        >
-          {children}
-        </Button>
-      </SignInButton>
-    );
-  }
-
   return (
     <Button
       variant="petdex-cta"
