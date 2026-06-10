@@ -97,25 +97,25 @@ describe("public traffic guard", () => {
     ).toBe("catalog");
     expect(
       publicTrafficGuardRule({ method: "GET", pathname: "/zh/pets/nukey" }),
-    ).toBe("page");
+    ).toBeNull();
     expect(
       publicTrafficGuardRule({
         method: "GET",
         pathname: "/kind/cat",
       }),
-    ).toBe("page");
+    ).toBeNull();
     expect(
       publicTrafficGuardRule({
         method: "GET",
         pathname: "/collections/cute-coders",
       }),
-    ).toBe("page");
+    ).toBeNull();
     expect(
       publicTrafficGuardRule({ method: "GET", pathname: "/zh/vibe/cozy" }),
-    ).toBe("page");
+    ).toBeNull();
     expect(
       publicTrafficGuardRule({ method: "GET", pathname: "/leaderboard" }),
-    ).toBe("page");
+    ).toBeNull();
   });
 
   it("does not target non-read methods or private surfaces", () => {

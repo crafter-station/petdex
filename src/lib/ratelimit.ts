@@ -93,12 +93,6 @@ export const publicStateRatelimit = createRatelimit({
   prefix: "petdex:public-state",
 });
 
-export const publicPageRatelimit = createRatelimit({
-  redis,
-  limiter: Ratelimit.slidingWindow(600, "1 h"),
-  prefix: "petdex:public-page",
-});
-
 export const publicMetadataRatelimit = createRatelimit({
   redis,
   limiter: Ratelimit.slidingWindow(120, "1 h"),

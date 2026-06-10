@@ -7,6 +7,7 @@ import {
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import createMiddleware from "next-intl/middleware";
 
+import { shouldBypassClerkMiddleware } from "@/lib/public-clerk-bypass";
 import {
   publicTrafficGuardKey,
   publicTrafficGuardRule,
@@ -16,7 +17,6 @@ import {
   packAssetRatelimit,
   publicCatalogRatelimit,
   publicMetadataRatelimit,
-  publicPageRatelimit,
   publicStateRatelimit,
   publicTrafficBurstRatelimit,
   stickerAssetRatelimit,
@@ -87,27 +87,38 @@ const baseMiddleware = async (req: NextRequest, event?: NextFetchEvent) => {
   );
 };
 
-export default IS_MOCK_AUTH
-  ? baseMiddleware
-  : clerkMiddleware(async (auth, req, event) => {
-      const legacyRedirect = legacyHostRedirect(req);
-      if (legacyRedirect) return legacyRedirect;
-      const adminSurface = adminSurfaceResponse(req);
-      if (adminSurface) return adminSurface;
-      scheduleRouteCostSample(req, event);
-      const guard = await guardPublicTraffic(req);
-      if (guard) return guard;
+const clerkBackedMiddleware = clerkMiddleware(async (auth, req, event) => {
+  const legacyRedirect = legacyHostRedirect(req);
+  if (legacyRedirect) return legacyRedirect;
+  const adminSurface = adminSurfaceResponse(req);
+  if (adminSurface) return adminSurface;
+  scheduleRouteCostSample(req, event);
+  const guard = await guardPublicTraffic(req);
+  if (guard) return guard;
 
-      if (isProtected(req)) {
-        await auth.protect();
-      }
+  if (isProtected(req)) {
+    await auth.protect();
+  }
 
-      if (req.nextUrl.pathname.startsWith("/api")) {
-        return NextResponse.next();
-      }
+  if (req.nextUrl.pathname.startsWith("/api")) {
+    return NextResponse.next();
+  }
 
-      return handleI18nRoutingWithoutLocaleCookie(req);
-    });
+  return handleI18nRoutingWithoutLocaleCookie(req);
+});
+
+export default function proxy(req: NextRequest, event: NextFetchEvent) {
+  if (
+    IS_MOCK_AUTH ||
+    shouldBypassClerkMiddleware({
+      method: req.method,
+      pathname: req.nextUrl.pathname,
+    })
+  ) {
+    return baseMiddleware(req, event);
+  }
+  return clerkBackedMiddleware(req, event);
+}
 
 export const config = {
   matcher: [
@@ -150,9 +161,7 @@ async function guardPublicTraffic(
           ? await publicMetadataRatelimit.limit(key)
           : rule === "state"
             ? await publicStateRatelimit.limit(key)
-            : rule === "page"
-              ? await publicPageRatelimit.limit(key)
-              : await publicCatalogRatelimit.limit(key);
+            : await publicCatalogRatelimit.limit(key);
   if (limit.success) return null;
 
   return rateLimitedResponse(limit.reset);

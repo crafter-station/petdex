@@ -9,7 +9,6 @@ export type PublicTrafficGuardRule =
   | "catalog"
   | "metadata"
   | "pack"
-  | "page"
   | "state"
   | "sticker";
 
@@ -52,7 +51,6 @@ export function publicTrafficGuardRule(input: {
   if (/^\/(?:en\/|es\/|zh\/)?install\/[^/]+\/?$/.test(pathname)) {
     return "catalog";
   }
-  if (isPublicPagePath(pathname)) return "page";
   return null;
 }
 
@@ -80,28 +78,4 @@ function readHeader(headers: HeaderBag | undefined, name: string): string {
   }
   const bag = headers as Record<string, string | null | undefined>;
   return bag[name] ?? bag[name.toLowerCase()] ?? bag[name.toUpperCase()] ?? "";
-}
-
-function isPublicPagePath(pathname: string): boolean {
-  const path = pathname.replace(/^\/(?:en|es|zh)(?=\/|$)/, "") || "/";
-  if (path === "/") return true;
-  if (/^\/pets\/[^/]+\/?$/.test(path)) return true;
-  if (/^\/collections\/[^/]+\/?$/.test(path)) return true;
-  if (/^\/kind\/[^/]+\/?$/.test(path)) return true;
-  if (/^\/u\/[^/]+\/?$/.test(path)) return true;
-  if (/^\/vibe\/[^/]+\/?$/.test(path)) return true;
-  return [
-    "/about",
-    "/advertise",
-    "/brand",
-    "/built-with",
-    "/collections",
-    "/community",
-    "/docs",
-    "/download",
-    "/leaderboard",
-    "/legal/takedown",
-    "/legal/telemetry",
-    "/requests",
-  ].includes(path);
 }
