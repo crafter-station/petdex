@@ -22,6 +22,7 @@ if (!ACCOUNT_ID || !ACCESS_KEY_ID || !SECRET_ACCESS_KEY) {
 export const r2 = new S3Client({
   region: "auto",
   endpoint: `https://${ACCOUNT_ID ?? "missing"}.r2.cloudflarestorage.com`,
+  requestChecksumCalculation: "WHEN_REQUIRED",
   credentials: {
     accessKeyId: ACCESS_KEY_ID ?? "",
     secretAccessKey: SECRET_ACCESS_KEY ?? "",
