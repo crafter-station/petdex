@@ -22,6 +22,15 @@ if (!ACCOUNT_ID || !ACCESS_KEY_ID || !SECRET_ACCESS_KEY) {
 export const r2 = new S3Client({
   region: "auto",
   endpoint: `https://${ACCOUNT_ID ?? "missing"}.r2.cloudflarestorage.com`,
+  // AWS SDK v3 defaults to adding flexible-checksum query params
+  // (x-amz-checksum-crc32, x-amz-sdk-checksum-algorithm) to presigned
+  // PutObject URLs. The presign runs with an empty body, so the signed
+  // checksum is for zero bytes (AAAAAA==); the browser then PUTs a real
+  // pet.json and R2 rejects the mismatch as an opaque CORS network error
+  // ("xhr network error"). WHEN_REQUIRED only adds checksums for operations
+  // that mandate them, keeping presigned PUTs on UNSIGNED-PAYLOAD as R2
+  // expects. See issue #465.
+  requestChecksumCalculation: "WHEN_REQUIRED",
   credentials: {
     accessKeyId: ACCESS_KEY_ID ?? "",
     secretAccessKey: SECRET_ACCESS_KEY ?? "",
