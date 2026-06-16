@@ -81,7 +81,8 @@
     "admin": "Admin",
     "collaborator": "Collaborator",
     "manageAccount": "Manage account",
-    "signOut": "Sign out"
+    "signOut": "Sign out",
+    "more": "More"
   },
   "theme": {
     "toggle": "Toggle theme",

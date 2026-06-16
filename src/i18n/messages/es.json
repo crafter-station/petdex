@@ -81,7 +81,8 @@
     "admin": "Admin",
     "collaborator": "Colaborador",
     "manageAccount": "Gestionar cuenta",
-    "signOut": "Cerrar sesión"
+    "signOut": "Cerrar sesión",
+    "more": "Más"
   },
   "theme": {
     "toggle": "Cambiar tema",

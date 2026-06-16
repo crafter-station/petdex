@@ -5,6 +5,7 @@ import { getLocale, getTranslations } from "next-intl/server";
 import { withLocale } from "@/lib/locale-routing";
 
 import { AuthBadge } from "@/components/auth-badge";
+import { GithubIcon } from "@/components/github-icon";
 import { MobileHeaderSettings } from "@/components/mobile-header-settings";
 import { PetdexLogo } from "@/components/petdex-logo";
 
@@ -27,25 +28,32 @@ export async function SiteHeader({ hideSubmitCta = false }: SiteHeaderProps) {
   const t = await getTranslations("header");
   const common = await getTranslations("common");
   const href = (pathname: string) => withLocale(pathname, currentLocale);
+  // Primary: the links a visitor reaches for first (browse, download, learn).
   const primary: NavItem[] = [
     { href: href("/collections"), label: t("collections") },
     { href: href("/leaderboard"), label: t("creators") },
     { href: href("/requests"), label: t("requests") },
     { href: href("/download"), label: t("download") },
     { href: href("/docs"), label: t("docs") },
+  ];
+  // Secondary: niche/occasional surfaces, tucked into a "More" dropdown so the
+  // bar stays short. Community only appears when Discord is configured.
+  const secondary: NavItem[] = [
     { href: href("/advertise"), label: t("advertise") },
     { href: href("/create"), label: t("create") },
     { href: href("/built-with"), label: t("builtWith") },
     ...(process.env.NEXT_PUBLIC_DISCORD_INVITE_URL
       ? [{ href: href("/community"), label: t("community") }]
       : []),
-    {
-      href: "https://github.com/crafter-station/petdex",
-      label: common("github"),
-      external: true,
-      ariaLabel: t("githubRepoAria"),
-    },
   ];
+  // Full list drives the mobile hamburger menu (no dropdown nesting there).
+  const allNav: NavItem[] = [...primary, ...secondary];
+  const githubItem: NavItem = {
+    href: "https://github.com/crafter-station/petdex",
+    label: common("github"),
+    external: true,
+    ariaLabel: t("githubRepoAria"),
+  };
 
   return (
     <header className="sticky top-0 z-40 w-full border-b border-foreground/[0.06] bg-background/88 backdrop-blur-md supports-[backdrop-filter]:bg-background/70">
@@ -66,10 +74,45 @@ export async function SiteHeader({ hideSubmitCta = false }: SiteHeaderProps) {
                 className="inline-flex h-9 items-center rounded-full px-2.5 text-sm font-medium text-muted-2 transition hover:bg-surface-muted hover:text-foreground"
               />
             ))}
+            {secondary.length > 0 ? (
+              <details className="group relative">
+                <summary className="inline-flex h-9 cursor-pointer list-none items-center gap-1 rounded-full px-2.5 text-sm font-medium text-muted-2 transition hover:bg-surface-muted hover:text-foreground [&::-webkit-details-marker]:hidden">
+                  {t("more")}
+                  <svg
+                    aria-hidden="true"
+                    viewBox="0 0 12 12"
+                    className="size-3 transition group-open:rotate-180"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                  >
+                    <path d="M3 4.5 6 7.5 9 4.5" strokeLinecap="round" />
+                  </svg>
+                </summary>
+                <div className="absolute top-11 left-0 z-50 w-56 rounded-2xl border border-border-base bg-surface p-2 shadow-xl shadow-blue-950/15">
+                  {secondary.map((item) => (
+                    <HeaderNavLink
+                      key={item.href}
+                      item={item}
+                      className="flex rounded-xl px-3 py-2.5 text-sm font-medium text-foreground transition hover:bg-surface-muted"
+                    />
+                  ))}
+                </div>
+              </details>
+            ) : null}
           </div>
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
+          <a
+            href={githubItem.href}
+            target="_blank"
+            rel="noreferrer"
+            aria-label={githubItem.ariaLabel}
+            className="hidden size-10 place-items-center rounded-full text-muted-2 transition hover:bg-surface-muted hover:text-foreground xl:grid"
+          >
+            <GithubIcon className="size-5" />
+          </a>
           {hideSubmitCta ? null : (
             <Link
               href={href("/submit")}
@@ -90,13 +133,17 @@ export async function SiteHeader({ hideSubmitCta = false }: SiteHeaderProps) {
               </span>
             </summary>
             <div className="absolute top-12 right-0 z-50 w-[min(280px,calc(100vw-2rem))] rounded-2xl border border-border-base bg-surface p-2 shadow-xl shadow-blue-950/15">
-              {primary.map((item) => (
+              {allNav.map((item) => (
                 <HeaderNavLink
                   key={item.href}
                   item={item}
                   className="flex rounded-xl px-3 py-2.5 text-sm font-medium text-foreground transition hover:bg-surface-muted"
                 />
               ))}
+              <HeaderNavLink
+                item={githubItem}
+                className="flex rounded-xl px-3 py-2.5 text-sm font-medium text-foreground transition hover:bg-surface-muted"
+              />
               {hideSubmitCta ? null : (
                 <Link
                   href={href("/submit")}

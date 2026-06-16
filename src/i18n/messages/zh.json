@@ -84,7 +84,8 @@
     "admin": "管理后台",
     "collaborator": "协作者",
     "manageAccount": "管理账号",
-    "signOut": "退出登录"
+    "signOut": "退出登录",
+    "more": "更多"
   },
   "theme": {
     "toggle": "切换主题",
