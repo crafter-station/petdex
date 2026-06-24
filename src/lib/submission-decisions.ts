@@ -33,6 +33,14 @@ export type SubmissionActionResult =
 
 type SubmissionActionDb = Awaited<typeof import("@/lib/db/client")>["db"];
 
+export function submissionOwnerNotificationHref(input: {
+  slug: string;
+  status: SubmittedPet["status"];
+}): string {
+  if (input.status === "approved") return `/pets/${input.slug}`;
+  return "/my-pets";
+}
+
 export async function applySubmissionAction(
   id: string,
   body: SubmissionActionInput,
@@ -303,7 +311,10 @@ async function notifySubmissionOwner(row: SubmittedPet): Promise<void> {
       petName: row.displayName,
       ...(row.rejectionReason ? { reason: row.rejectionReason } : {}),
     },
-    href: row.status === "approved" ? `/pets/${row.slug}` : "/my-pets",
+    href: submissionOwnerNotificationHref({
+      slug: row.slug,
+      status: row.status,
+    }),
   }).catch(() => {});
 
   if (!row.ownerEmail || !process.env.RESEND_API_KEY) return;
