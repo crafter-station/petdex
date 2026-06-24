@@ -8,6 +8,14 @@ import {
 import sharp from "sharp";
 
 import {
+  PET_PREVIEW_CACHE_HEADER,
+  PET_PREVIEW_FRAME_COUNT,
+  PET_PREVIEW_FRAME_HEIGHT,
+  PET_PREVIEW_FRAME_WIDTH,
+  PET_PREVIEW_QUALITY,
+  petPreviewKey,
+} from "@/lib/pet-preview";
+import {
   PET_STICKER_CACHE_HEADER,
   petStickerFilename,
   petStickerKey,
@@ -53,6 +61,7 @@ export async function publishPetPublicArtifacts(input: {
   };
   const refs = [
     { key: petThumbnailKey(input.slug), kind: "thumbnail" as const },
+    { key: petPreviewKey(input.slug), kind: "preview" as const },
     { key: petStickerKey(input.slug), kind: "sticker" as const },
   ];
   const pending = [];
@@ -73,7 +82,9 @@ export async function publishPetPublicArtifacts(input: {
       const artifact =
         ref.kind === "thumbnail"
           ? await buildThumbnailArtifact(input.slug, source)
-          : await buildStickerArtifact(input.slug, source);
+          : ref.kind === "preview"
+            ? await buildPreviewArtifact(input.slug, source)
+            : await buildStickerArtifact(input.slug, source);
       await r2.send(
         new PutObjectCommand({
           Bucket: R2_BUCKET,
@@ -97,6 +108,25 @@ export async function publishPetPublicArtifacts(input: {
   }
 
   return result;
+}
+
+async function buildPreviewArtifact(slug: string, source: Buffer) {
+  const body = await sharp(source)
+    .extract({
+      left: 0,
+      top: 0,
+      width: PET_PREVIEW_FRAME_WIDTH * PET_PREVIEW_FRAME_COUNT,
+      height: PET_PREVIEW_FRAME_HEIGHT,
+    })
+    .webp({ quality: PET_PREVIEW_QUALITY })
+    .toBuffer();
+  return {
+    body,
+    contentType: "image/webp",
+    cacheControl: PET_PREVIEW_CACHE_HEADER,
+    contentDisposition: `inline; filename="${slug}-preview.webp"`,
+    sha256: createHash("sha256").update(body).digest("hex"),
+  };
 }
 
 async function buildThumbnailArtifact(slug: string, source: Buffer) {
