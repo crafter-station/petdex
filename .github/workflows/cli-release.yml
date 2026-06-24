@@ -1,0 +1,71 @@
+name: cli-release
+
+on:
+  push:
+    tags:
+      - "cli-v*"
+  workflow_dispatch:
+    inputs:
+      dist-tag:
+        description: "npm dist-tag to publish under"
+        required: false
+        default: "latest"
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish petdex CLI to npm
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: npm-publish
+
+    defaults:
+      run:
+        working-directory: packages/petdex-cli
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Verify tag matches package.json version
+        if: startsWith(github.ref, 'refs/tags/cli-v')
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#cli-v}"
+          pkg="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$pkg" ]; then
+            echo "Tag cli-v$tag does not match package.json version $pkg" >&2
+            exit 1
+          fi
+          echo "Publishing petdex@$pkg"
+
+      - name: Build CLI
+        run: bun run build
+
+      - name: Typecheck CLI
+        run: bun run typecheck
+
+      - name: Run CLI tests
+        run: bun test
+
+      - name: Verify built binary
+        run: node dist/petdex.js --version
+
+      - name: Publish to npm
+        run: npm publish --access public --tag "${{ github.event.inputs.dist-tag || 'latest' }}"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

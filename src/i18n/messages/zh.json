@@ -1415,7 +1415,14 @@
     }
   },
   "collectionDetail": {
-    "backToCollections": "← 返回全部合集"
+    "backToCollections": "← 返回全部合集",
+    "searchPlaceholder": "在此合集中搜索宠物",
+    "searchAria": "在此合集中搜索宠物",
+    "clearSearchAria": "清除搜索",
+    "noResults": "此合集中没有匹配 \"{query}\" 的宠物。",
+    "empty": "此合集还没有已通过审核的宠物。",
+    "loadingMore": "正在加载更多宠物…",
+    "endOfCollection": "已到合集末尾 · 共 {count} 个宠物"
   },
   "download": {
     "eyebrow": "终端优先安装",

@@ -1223,7 +1223,14 @@
     }
   },
   "collectionDetail": {
-    "backToCollections": "← All collections"
+    "backToCollections": "← All collections",
+    "searchPlaceholder": "Search pets in this collection",
+    "searchAria": "Search pets in this collection",
+    "clearSearchAria": "Clear search",
+    "noResults": "No pets match \"{query}\" in this collection.",
+    "empty": "This collection has no approved pets yet.",
+    "loadingMore": "Loading more pets…",
+    "endOfCollection": "End of collection · {count} pets"
   },
   "download": {
     "eyebrow": "Terminal-first setup",

@@ -256,7 +256,7 @@ export function PetGallery({
       (entries) => {
         if (entries[0]?.isIntersecting) loadMore();
       },
-      { rootMargin: "400px" },
+      { rootMargin: "100px" },
     );
     obs.observe(el);
     return () => obs.disconnect();

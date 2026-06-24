@@ -410,7 +410,10 @@ function submissionToPet(submission: Submission): PetWithMetrics {
   return {
     id: submission.id,
     slug: submission.slug,
-    displayName: submission.displayName,
+    // A queued name edit lives in pending.displayName until an admin
+    // approves it. Surface it here so the owner sees their rename in
+    // flight instead of the stale live name (e.g. "Untitled pet").
+    displayName: submission.pending?.displayName ?? submission.displayName,
     description: submission.description,
     spritesheetPath: submission.spritesheetUrl,
     petJsonPath: "",

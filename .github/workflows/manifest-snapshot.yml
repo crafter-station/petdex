@@ -1,0 +1,63 @@
+name: manifest-snapshot
+
+# Republishes the static CLI manifest snapshots to R2. The CLI reads pets
+# from manifests/petdex-v1.json (and v2), which are built from the DB but
+# only ever written by `manifest:snapshot:apply`. Without this, a pet that
+# gets approved never appears in `petdex list`/`install` until someone runs
+# the script by hand (see #482). Runs daily and on demand.
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "check (dry-run, no upload) or apply (write to R2)"
+        type: choice
+        required: false
+        default: "apply"
+        options:
+          - apply
+          - check
+
+permissions:
+  contents: read
+
+concurrency:
+  group: manifest-snapshot
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish manifest snapshots
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: manifest-snapshot
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          # Always run reviewed code from the default branch. A manual
+          # dispatch can target any ref, and this job holds prod R2 write
+          # credentials, so we never run a non-main branch here.
+          ref: main
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Publish snapshots
+        # MODE is validated to check|apply by the script; the choice input
+        # already constrains it, and passing via env (not interpolation)
+        # avoids any shell-injection surface.
+        run: bun --conditions react-server scripts/publish-manifest-snapshots.ts "$MODE"
+        env:
+          MODE: ${{ github.event.inputs.mode || 'apply' }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}

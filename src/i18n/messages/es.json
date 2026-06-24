@@ -1223,7 +1223,14 @@
     }
   },
   "collectionDetail": {
-    "backToCollections": "← Ver todas las colecciones"
+    "backToCollections": "← Ver todas las colecciones",
+    "searchPlaceholder": "Busca mascotas en esta colección",
+    "searchAria": "Busca mascotas en esta colección",
+    "clearSearchAria": "Limpiar búsqueda",
+    "noResults": "Ninguna mascota coincide con \"{query}\" en esta colección.",
+    "empty": "Esta colección aún no tiene mascotas aprobadas.",
+    "loadingMore": "Cargando más mascotas…",
+    "endOfCollection": "Fin de la colección · {count} mascotas"
   },
   "download": {
     "eyebrow": "Setup desde la terminal",

@@ -6,6 +6,7 @@ export const CLIENT_MESSAGE_PATHS = [
   "advertise.form",
   "claim",
   "collectionActionMenu",
+  "collectionDetail",
   "collectionEditor",
   "commandLine",
   "common",
