@@ -12,5 +12,5 @@
     "allowImportingTsExtensions": true,
     "types": ["node", "bun-types"]
   },
-  "include": ["bin/**/*.ts", "src/**/*.ts"]
+  "include": ["bin/**/*.ts", "src/**/*.ts", "src/**/*.d.ts"]
 }
