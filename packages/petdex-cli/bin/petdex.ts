@@ -1747,8 +1747,17 @@ async function cmdDesktop(args: string[]) {
   }
   switch (sub) {
     case "start":
-      await cmdDesktopStart();
-      emit("cli_desktop_start_success", { cli_version: VERSION });
+      {
+        const startArgs = args.slice(1);
+        await cmdDesktopStart(startArgs);
+        if (
+          !startArgs.some((arg) =>
+            ["--help", "-h", "help"].includes(arg),
+          )
+        ) {
+          emit("cli_desktop_start_success", { cli_version: VERSION });
+        }
+      }
       break;
     case "stop":
       await cmdDesktopStop();
@@ -1779,8 +1788,12 @@ function printDesktopHelp() {
       `    ${pc.bold("stop")}      Terminate the running petdex-desktop process`,
       `    ${pc.bold("status")}    Show whether petdex-desktop is running`,
       "",
+      `  ${c("Start options")}`,
+      `    ${pc.bold("--direct")}  Launch the executable directly instead of the macOS app bundle`,
+      "",
       `  ${c("Examples")}`,
       `    ${dim("$")} petdex desktop start`,
+      `    ${dim("$")} petdex desktop start --direct`,
       `    ${dim("$")} petdex desktop status`,
       `    ${dim("$")} petdex desktop stop`,
       "",

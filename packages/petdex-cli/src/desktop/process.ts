@@ -5,7 +5,7 @@
  * detect a previous instance and avoid spawning duplicates.
  */
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import { existsSync, openSync, readFileSync, unlinkSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -190,42 +190,81 @@ export type StartResult =
   | { ok: true; pid: number; alreadyRunning: boolean }
   | { ok: false; reason: string };
 
-export async function startDesktop(): Promise<StartResult> {
-  const status = desktopStatus();
+type StartDesktopDeps = {
+  desktopStatus: typeof desktopStatus;
+  clearPidFile: () => void;
+  desktopBinPath: typeof desktopBinPath;
+  existsSync: typeof existsSync;
+  mkdir: typeof mkdir;
+  openSync: typeof openSync;
+  spawn: typeof spawn;
+  writeFile: typeof writeFile;
+  logFile: () => string;
+  recordLstart: typeof recordLstart;
+  pgrepPetdexDesktop: typeof pgrepPetdexDesktop;
+};
+
+const defaultStartDesktopDeps: StartDesktopDeps = {
+  desktopStatus,
+  clearPidFile,
+  desktopBinPath,
+  existsSync,
+  mkdir,
+  openSync,
+  spawn,
+  writeFile,
+  logFile,
+  recordLstart,
+  pgrepPetdexDesktop,
+};
+
+export type StartDesktopOptions = {
+  direct?: boolean;
+};
+
+export async function startDesktop(
+  options: StartDesktopOptions = {},
+): Promise<StartResult> {
+  return startDesktopImpl(defaultStartDesktopDeps, options);
+}
+
+export async function _startDesktopForTest(
+  deps: Partial<StartDesktopDeps>,
+  options: StartDesktopOptions = {},
+): Promise<StartResult> {
+  return startDesktopImpl({ ...defaultStartDesktopDeps, ...deps }, options);
+}
+
+async function startDesktopImpl(
+  deps: StartDesktopDeps,
+  options: StartDesktopOptions,
+): Promise<StartResult> {
+  const status = deps.desktopStatus();
   if (status.state === "running") {
     return { ok: true, pid: status.pid, alreadyRunning: true };
   }
-  if (status.state === "stale") clearPidFile();
+  if (status.state === "stale") deps.clearPidFile();
 
-  const bin = desktopBinPath();
-  if (!existsSync(bin)) {
+  const bin = deps.desktopBinPath();
+  if (!deps.existsSync(bin)) {
     return {
       ok: false,
       reason: `petdex-desktop binary not found at ${bin}. Run \`petdex install desktop\` first.`,
     };
   }
 
-  await mkdir(path.dirname(logFile()), { recursive: true });
+  await deps.mkdir(path.dirname(deps.logFile()), { recursive: true });
 
-  const out = await import("node:fs").then((fs) => fs.openSync(logFile(), "a"));
-  const err = await import("node:fs").then((fs) => fs.openSync(logFile(), "a"));
+  const logPath = deps.logFile();
+  const out = deps.openSync(logPath, "a");
+  const err = deps.openSync(logPath, "a");
 
-  // If the binary is inside an .app bundle, launch via `open -a` so
-  // macOS treats it as a proper application (Dock icon, LaunchServices
-  // registration, correct menubar title from CFBundleName, app
-  // activation policy). Spawning the bare executable directly skips
-  // all of that and the user sees an unstyled raw process.
-  //
-  // Trade-off: `open` returns immediately and doesn't give us the
-  // child's pid. We grep for it via pgrep right after launch. A few
-  // ms of delay is fine because petdex-desktop binds :7777 quickly
-  // anyway and pgrep is cheap.
   const appBundle = findEnclosingAppBundle(bin);
-  if (appBundle) {
-    return startViaOpen(appBundle);
+  if (!options.direct && appBundle) {
+    return startViaOpen(appBundle, deps);
   }
 
-  const child = spawn(bin, [], {
+  const child = deps.spawn(bin, [], {
     detached: true,
     stdio: ["ignore", out, err],
   });
@@ -238,8 +277,11 @@ export async function startDesktop(): Promise<StartResult> {
   // Capture the start-time so a future `petdex desktop stop` can
   // verify identity before signalling. recordLstart() handles the
   // POSIX (ps) and Windows (sentinel) cases.
-  const record: PidRecord = { pid: child.pid, lstart: recordLstart(child.pid) };
-  await writeFile(pidFile(), JSON.stringify(record));
+  const record: PidRecord = {
+    pid: child.pid,
+    lstart: deps.recordLstart(child.pid),
+  };
+  await deps.writeFile(pidFile(), JSON.stringify(record));
   return { ok: true, pid: child.pid, alreadyRunning: false };
 }
 
@@ -257,37 +299,36 @@ function findEnclosingAppBundle(binPath: string): string | null {
   return bundle;
 }
 
-async function startViaOpen(appBundle: string): Promise<StartResult> {
-  // `open -gj` keeps Petdex from stealing focus from the user's
-  // terminal/agent. -W would wait for the app to exit, which we
-  // don't want; we want fire-and-forget. -n forces a new instance
-  // (we already verified state was stopped above, so this is just
-  // belt-and-braces).
-  const result = spawn("open", ["-gj", appBundle], {
+async function startViaOpen(
+  appBundle: string,
+  deps: StartDesktopDeps,
+): Promise<StartResult> {
+  // Default path: let LaunchServices start the app bundle so macOS
+  // preserves the normal application semantics. Use --direct only as
+  // a workaround for machines where that path crashes.
+  const result = deps.spawn("open", ["-gj", appBundle], {
     stdio: "ignore",
     detached: true,
   });
   result.unref();
 
-  // Poll for the child process — open returns immediately so we
-  // need to discover the pid LaunchServices spawned. Cap at 3s so
-  // a misconfigured bundle doesn't hang the CLI.
+  // Poll for the child process because `open` returns immediately.
   const deadline = Date.now() + 3_000;
   let pid: number | null = null;
   while (Date.now() < deadline) {
-    pid = pgrepPetdexDesktop();
+    pid = deps.pgrepPetdexDesktop();
     if (pid) break;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   if (!pid) {
     return {
       ok: false,
-      reason: `Launched ${appBundle} but couldn't find the resulting process. Check ${logFile()}.`,
+      reason: `Launched ${appBundle} but couldn't find the resulting process. Check ${deps.logFile()}.`,
     };
   }
 
-  const record: PidRecord = { pid, lstart: recordLstart(pid) };
-  await writeFile(pidFile(), JSON.stringify(record));
+  const record: PidRecord = { pid, lstart: deps.recordLstart(pid) };
+  await deps.writeFile(pidFile(), JSON.stringify(record));
   return { ok: true, pid, alreadyRunning: false };
 }
 
@@ -412,8 +453,29 @@ export async function stopDesktop(
   return { ok: true, pid, portReleased };
 }
 
-export async function cmdDesktopStart(): Promise<void> {
-  const result = await startDesktop();
+export async function cmdDesktopStart(args: string[] = []): Promise<void> {
+  if (args.includes("--help") || args.includes("-h") || args.includes("help")) {
+    console.log(
+      [
+        "",
+        "  petdex desktop start [--direct]",
+        "",
+        "  Options",
+        "    --direct   Launch the petdex-desktop executable directly instead of the macOS app bundle",
+        "",
+      ].join("\n"),
+    );
+    return;
+  }
+
+  const unknown = args.filter((arg) => arg !== "--direct");
+  if (unknown.length > 0) {
+    console.error(`${pc.red("✗")} Unknown option: ${unknown[0]}`);
+    console.error(pc.dim("  Usage: petdex desktop start [--direct]"));
+    process.exit(1);
+  }
+
+  const result = await startDesktop({ direct: args.includes("--direct") });
   if (!result.ok) {
     console.error(`${pc.red("✗")} ${result.reason}`);
     process.exit(1);
