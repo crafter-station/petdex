@@ -201,6 +201,7 @@ type StartDesktopDeps = {
   writeFile: typeof writeFile;
   logFile: () => string;
   recordLstart: typeof recordLstart;
+  pgrepPetdexDesktop: typeof pgrepPetdexDesktop;
 };
 
 const defaultStartDesktopDeps: StartDesktopDeps = {
@@ -214,19 +215,30 @@ const defaultStartDesktopDeps: StartDesktopDeps = {
   writeFile,
   logFile,
   recordLstart,
+  pgrepPetdexDesktop,
 };
 
-export async function startDesktop(): Promise<StartResult> {
-  return startDesktopImpl(defaultStartDesktopDeps);
+export type StartDesktopOptions = {
+  direct?: boolean;
+};
+
+export async function startDesktop(
+  options: StartDesktopOptions = {},
+): Promise<StartResult> {
+  return startDesktopImpl(defaultStartDesktopDeps, options);
 }
 
 export async function _startDesktopForTest(
   deps: Partial<StartDesktopDeps>,
+  options: StartDesktopOptions = {},
 ): Promise<StartResult> {
-  return startDesktopImpl({ ...defaultStartDesktopDeps, ...deps });
+  return startDesktopImpl({ ...defaultStartDesktopDeps, ...deps }, options);
 }
 
-async function startDesktopImpl(deps: StartDesktopDeps): Promise<StartResult> {
+async function startDesktopImpl(
+  deps: StartDesktopDeps,
+  options: StartDesktopOptions,
+): Promise<StartResult> {
   const status = deps.desktopStatus();
   if (status.state === "running") {
     return { ok: true, pid: status.pid, alreadyRunning: true };
@@ -247,10 +259,11 @@ async function startDesktopImpl(deps: StartDesktopDeps): Promise<StartResult> {
   const out = deps.openSync(logPath, "a");
   const err = deps.openSync(logPath, "a");
 
-  // Launch the resolved executable directly.
-  // This avoids the macOS `open`/LaunchServices path, which proved
-  // unstable for the bundle install and crashed before the window
-  // could finish creating.
+  const appBundle = findEnclosingAppBundle(bin);
+  if (!options.direct && appBundle) {
+    return startViaOpen(appBundle, deps);
+  }
+
   const child = deps.spawn(bin, [], {
     detached: true,
     stdio: ["ignore", out, err],
@@ -270,6 +283,71 @@ async function startDesktopImpl(deps: StartDesktopDeps): Promise<StartResult> {
   };
   await deps.writeFile(pidFile(), JSON.stringify(record));
   return { ok: true, pid: child.pid, alreadyRunning: false };
+}
+
+// Walks up from /…/Petdex.app/Contents/MacOS/petdex-desktop and returns
+// the .app path if found. Returns null for bare-binary installs (e.g.
+// ~/.petdex/bin/petdex-desktop).
+function findEnclosingAppBundle(binPath: string): string | null {
+  // The binary always lives at <bundle>/Contents/MacOS/<name>.
+  const macosDir = path.dirname(binPath);
+  if (path.basename(macosDir) !== "MacOS") return null;
+  const contentsDir = path.dirname(macosDir);
+  if (path.basename(contentsDir) !== "Contents") return null;
+  const bundle = path.dirname(contentsDir);
+  if (!bundle.endsWith(".app")) return null;
+  return bundle;
+}
+
+async function startViaOpen(
+  appBundle: string,
+  deps: StartDesktopDeps,
+): Promise<StartResult> {
+  // Default path: let LaunchServices start the app bundle so macOS
+  // preserves the normal application semantics. Use --direct only as
+  // a workaround for machines where that path crashes.
+  const result = deps.spawn("open", ["-gj", appBundle], {
+    stdio: "ignore",
+    detached: true,
+  });
+  result.unref();
+
+  // Poll for the child process because `open` returns immediately.
+  const deadline = Date.now() + 3_000;
+  let pid: number | null = null;
+  while (Date.now() < deadline) {
+    pid = deps.pgrepPetdexDesktop();
+    if (pid) break;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  if (!pid) {
+    return {
+      ok: false,
+      reason: `Launched ${appBundle} but couldn't find the resulting process. Check ${deps.logFile()}.`,
+    };
+  }
+
+  const record: PidRecord = { pid, lstart: deps.recordLstart(pid) };
+  await deps.writeFile(pidFile(), JSON.stringify(record));
+  return { ok: true, pid, alreadyRunning: false };
+}
+
+function pgrepPetdexDesktop(): number | null {
+  try {
+    // Match the executable name inside the bundle (Contents/MacOS/petdex-desktop).
+    // -f matches against the full command line so the path inside the bundle counts.
+    const out = execFileSync("pgrep", ["-f", "petdex-desktop"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    if (!out) return null;
+    // pgrep returns one pid per line; take the most recent (last).
+    const lines = out.split("\n").filter((l) => l.length > 0);
+    const pid = Number(lines[lines.length - 1]);
+    return Number.isFinite(pid) && pid > 0 ? pid : null;
+  } catch {
+    return null;
+  }
 }
 
 export type StopResult =
@@ -375,8 +453,29 @@ export async function stopDesktop(
   return { ok: true, pid, portReleased };
 }
 
-export async function cmdDesktopStart(): Promise<void> {
-  const result = await startDesktop();
+export async function cmdDesktopStart(args: string[] = []): Promise<void> {
+  if (args.includes("--help") || args.includes("-h") || args.includes("help")) {
+    console.log(
+      [
+        "",
+        "  petdex desktop start [--direct]",
+        "",
+        "  Options",
+        "    --direct   Launch the petdex-desktop executable directly instead of the macOS app bundle",
+        "",
+      ].join("\n"),
+    );
+    return;
+  }
+
+  const unknown = args.filter((arg) => arg !== "--direct");
+  if (unknown.length > 0) {
+    console.error(`${pc.red("✗")} Unknown option: ${unknown[0]}`);
+    console.error(pc.dim("  Usage: petdex desktop start [--direct]"));
+    process.exit(1);
+  }
+
+  const result = await startDesktop({ direct: args.includes("--direct") });
   if (!result.ok) {
     console.error(`${pc.red("✗")} ${result.reason}`);
     process.exit(1);
