@@ -1,11 +1,22 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  openSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { desktopStatus, stopDesktop, waitForPortRelease } from "./process";
+import {
+  _startDesktopForTest,
+  desktopStatus,
+  stopDesktop,
+  waitForPortRelease,
+} from "./process";
 
 // Pick high ports so we don't fight the real sidecar at :7777 if a
 // dev happens to have it running. These tests open a TCP listener,
@@ -91,6 +102,144 @@ describe("waitForPortRelease", () => {
     // shorter (otherwise update.ts would race the sidecar even
     // when it shouldn't).
     expect(elapsed).toBeGreaterThanOrEqual(350);
+  });
+});
+
+describe("startDesktop", () => {
+  let realHome: string | undefined;
+  let tmpHome: string;
+
+  beforeEach(() => {
+    realHome = process.env.HOME;
+    tmpHome = join(
+      tmpdir(),
+      `petdex-start-test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
+    mkdirSync(join(tmpHome, ".petdex"), { recursive: true });
+    process.env.HOME = tmpHome;
+  });
+
+  afterEach(() => {
+    if (realHome !== undefined) process.env.HOME = realHome;
+    if (existsSync(tmpHome)) rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  test("launches app bundles through open by default", async () => {
+    const spawnCalls: Array<{
+      command: string;
+      args: string[];
+      detached: boolean;
+      stdio: unknown;
+    }> = [];
+    const openCalls: string[] = [];
+    const writes: Array<{ path: string; contents: string }> = [];
+
+    const result = await _startDesktopForTest({
+      desktopStatus: () => ({ state: "stopped" }),
+      desktopBinPath: () =>
+        "/Applications/Petdex.app/Contents/MacOS/petdex-desktop",
+      existsSync: () => true,
+      mkdir: async () => {},
+      openSync: ((filePath: unknown) => {
+        openCalls.push(String(filePath));
+        return 42;
+      }) as typeof openSync,
+      spawn: ((command: string, args: string[], options: any) => {
+        spawnCalls.push({
+          command,
+          args,
+          detached: Boolean(options.detached),
+          stdio: options.stdio,
+        });
+        return {
+          pid: 2468,
+          unref() {},
+        } as ReturnType<typeof spawn>;
+      }) as typeof spawn,
+      pgrepPetdexDesktop: () => 2468,
+      writeFile: (async (filePath: unknown, contents: unknown) => {
+        writes.push({ path: String(filePath), contents: String(contents) });
+      }) as typeof import("node:fs/promises").writeFile,
+      logFile: () => join(tmpHome, ".petdex", "desktop.log"),
+      recordLstart: () => "Mon Jan  1 00:00:00 2026",
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      pid: 2468,
+      alreadyRunning: false,
+    });
+    expect(spawnCalls).toEqual([
+      {
+        command: "open",
+        args: ["-gj", "/Applications/Petdex.app"],
+        detached: true,
+        stdio: "ignore",
+      },
+    ]);
+    expect(openCalls).toEqual([
+      join(tmpHome, ".petdex", "desktop.log"),
+      join(tmpHome, ".petdex", "desktop.log"),
+    ]);
+    expect(writes).toEqual([
+      {
+        path: join(tmpHome, ".petdex", "desktop.pid"),
+        contents: JSON.stringify({
+          pid: 2468,
+          lstart: "Mon Jan  1 00:00:00 2026",
+        }),
+      },
+    ]);
+  });
+
+  test("spawns app bundle executables directly with --direct", async () => {
+    const spawnCalls: Array<{
+      command: string;
+      args: string[];
+      detached: boolean;
+      stdio: unknown;
+    }> = [];
+
+    const result = await _startDesktopForTest(
+      {
+        desktopStatus: () => ({ state: "stopped" }),
+        desktopBinPath: () =>
+          "/Applications/Petdex.app/Contents/MacOS/petdex-desktop",
+        existsSync: () => true,
+        mkdir: async () => {},
+        openSync: (() => 42) as typeof openSync,
+        spawn: ((command: string, args: string[], options: any) => {
+          spawnCalls.push({
+            command,
+            args,
+            detached: Boolean(options.detached),
+            stdio: options.stdio,
+          });
+          return {
+            pid: 2468,
+            unref() {},
+          } as ReturnType<typeof spawn>;
+        }) as typeof spawn,
+        writeFile:
+          (async () => {}) as typeof import("node:fs/promises").writeFile,
+        recordLstart: () => "Mon Jan  1 00:00:00 2026",
+      },
+      { direct: true },
+    );
+
+    expect(result).toEqual({
+      ok: true,
+      pid: 2468,
+      alreadyRunning: false,
+    });
+    expect(spawnCalls).toEqual([
+      {
+        command: "/Applications/Petdex.app/Contents/MacOS/petdex-desktop",
+        args: [],
+        detached: true,
+        stdio: ["ignore", 42, 42],
+      },
+    ]);
   });
 });
 
