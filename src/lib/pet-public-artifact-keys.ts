@@ -1,3 +1,4 @@
+import { petPreviewKey } from "@/lib/pet-preview";
 import {
   PET_STICKER_FORMATS,
   PET_STICKER_STATES,
@@ -9,6 +10,7 @@ import { petThumbnailKey } from "@/lib/pet-thumbnail";
 export function petPublicArtifactKeys(slug: string): string[] {
   return [
     petThumbnailKey(slug),
+    petPreviewKey(slug),
     ...PET_STICKER_STATES.flatMap((state) =>
       PET_STICKER_FORMATS.map((format) => petStickerKey(slug, state, format)),
     ),

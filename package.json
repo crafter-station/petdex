@@ -18,6 +18,8 @@
     "manifest:snapshot:apply": "bun --env-file=.env.local --env-file=.env.production.local --conditions react-server scripts/publish-manifest-snapshots.ts apply",
     "thumbs:snapshot:check": "bun --env-file=.env.local --env-file=.env.production.local --conditions react-server scripts/publish-pet-thumbnails.ts check",
     "thumbs:snapshot:apply": "bun --env-file=.env.local --env-file=.env.production.local --conditions react-server scripts/publish-pet-thumbnails.ts apply",
+    "previews:snapshot:check": "bun --env-file=.env.local --env-file=.env.production.local --conditions react-server scripts/publish-pet-previews.ts check",
+    "previews:snapshot:apply": "bun --env-file=.env.local --env-file=.env.production.local --conditions react-server scripts/publish-pet-previews.ts apply",
     "stickers:snapshot:check": "bun --env-file=.env.local --env-file=.env.production.local --conditions react-server scripts/publish-pet-sticker-artifacts.ts check",
     "stickers:snapshot:apply": "bun --env-file=.env.local --env-file=.env.production.local --conditions react-server scripts/publish-pet-sticker-artifacts.ts apply",
     "cost:report": "bun scripts/vercel-cost-report.ts --project petdex",

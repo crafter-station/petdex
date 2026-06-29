@@ -482,13 +482,15 @@ input {
   --sprite-row: 0;
   --sprite-frames: 6;
   --sprite-duration: 1100ms;
+  --sprite-sheet-width: 1536px;
+  --sprite-sheet-height: 1872px;
   --sprite-y: calc(var(--sprite-row) * -208px);
   --sprite-end-x: calc(var(--sprite-frames) * -192px);
   width: 192px;
   height: 208px;
   background-image: var(--sprite-url);
   background-repeat: no-repeat;
-  background-size: 1536px 1872px;
+  background-size: var(--sprite-sheet-width) var(--sprite-sheet-height);
   image-rendering: pixelated;
   /* translateZ(0) forces a GPU-composited layer so background-image
      decode + animation stay on the compositor thread instead of being

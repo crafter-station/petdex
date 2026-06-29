@@ -19,6 +19,7 @@ import type { PublicFeedAd } from "@/lib/ads/queries";
 import { COLOR_FAMILIES, type ColorFamily } from "@/lib/color-families";
 import { formatBatchLabel, getBatchKey } from "@/lib/dex-batch";
 import { formatLocalizedNumber } from "@/lib/format-number";
+import { petPreviewUrlForSource } from "@/lib/pet-preview";
 import type { SearchPet } from "@/lib/pet-search";
 import { petStates } from "@/lib/pet-states";
 import { PET_KINDS, PET_VIBES, type PetKind, type PetVibe } from "@/lib/types";
@@ -863,6 +864,7 @@ function PetCardImpl({
   const isDiscovered = pet.source === "discover";
   const href = `/pets/${pet.slug}`;
   const formattedInstallCount = formatLocalizedNumber(installCount, locale);
+  const previewSrc = petPreviewUrlForSource(pet.slug, pet.spritesheetPath);
   const batchLabel = pet.approvedAt
     ? formatBatchLabel(getBatchKey(new Date(pet.approvedAt)))
     : null;
@@ -932,8 +934,10 @@ function PetCardImpl({
           }
         >
           <PetSprite
-            src={pet.spritesheetPath}
-            cycleStates
+            src={previewSrc ?? pet.spritesheetPath}
+            layout={previewSrc ? "row" : "atlas"}
+            state="idle"
+            cycleStates={!previewSrc}
             scale={0.7}
             label={`${pet.displayName} animated`}
           />
