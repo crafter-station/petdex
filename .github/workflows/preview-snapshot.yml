@@ -1,0 +1,64 @@
+name: preview-snapshot
+
+# Backfills the lightweight animated card previews (pets/<slug>/preview.webp)
+# to R2. Each preview is the first animation row cropped from the canonical
+# spritesheet, ~39x smaller than animating the full atlas on gallery cards
+# (see #490). publishPetPublicArtifacts already emits previews for newly
+# approved pets; this job reconciles older pets and anything that was missed.
+# The script skips pets that already have a preview, so re-runs are cheap.
+
+on:
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "check (dry-run, no upload) or apply (write to R2)"
+        type: choice
+        required: false
+        default: "apply"
+        options:
+          - apply
+          - check
+
+permissions:
+  contents: read
+
+concurrency:
+  group: preview-snapshot
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish pet previews
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: manifest-snapshot
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          # Always run reviewed code from the default branch. A manual
+          # dispatch can target any ref, and this job holds prod R2 write
+          # credentials, so we never run a non-main branch here.
+          ref: main
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Publish previews
+        # MODE is validated to check|apply by the script; the choice input
+        # already constrains it, and passing via env (not interpolation)
+        # avoids any shell-injection surface.
+        run: bun --conditions react-server scripts/publish-pet-previews.ts "$MODE"
+        env:
+          MODE: ${{ github.event.inputs.mode || 'apply' }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
