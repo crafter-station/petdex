@@ -111,15 +111,7 @@ export async function publishPetPublicArtifacts(input: {
 }
 
 async function buildPreviewArtifact(slug: string, source: Buffer) {
-  const body = await sharp(source)
-    .extract({
-      left: 0,
-      top: 0,
-      width: PET_PREVIEW_FRAME_WIDTH * PET_PREVIEW_FRAME_COUNT,
-      height: PET_PREVIEW_FRAME_HEIGHT,
-    })
-    .webp({ quality: PET_PREVIEW_QUALITY })
-    .toBuffer();
+  const body = await renderPreviewStrip(source);
   return {
     body,
     contentType: "image/webp",
@@ -127,6 +119,53 @@ async function buildPreviewArtifact(slug: string, source: Buffer) {
     contentDisposition: `inline; filename="${slug}-preview.webp"`,
     sha256: createHash("sha256").update(body).digest("hex"),
   };
+}
+
+export async function renderPreviewStrip(source: Buffer): Promise<Buffer> {
+  const stripWidth = PET_PREVIEW_FRAME_WIDTH * PET_PREVIEW_FRAME_COUNT;
+  try {
+    return await sharp(source)
+      .extract({
+        left: 0,
+        top: 0,
+        width: stripWidth,
+        height: PET_PREVIEW_FRAME_HEIGHT,
+      })
+      .webp({ quality: PET_PREVIEW_QUALITY })
+      .toBuffer();
+  } catch (error) {
+    if (!isExtractAreaError(error)) throw error;
+    // Non-standard spritesheet (not the canonical 192x208 grid): there is no
+    // animation row to crop. Build a strip that repeats one static frame
+    // across all cells so the card's steps() animation lands on the same
+    // image every step, so it reads as a still preview with no flicker.
+    // Every approved pet still gets a preview.webp and the flag stays safe.
+    const frame = await sharp(source)
+      .resize(PET_PREVIEW_FRAME_WIDTH, PET_PREVIEW_FRAME_HEIGHT, {
+        fit: "contain",
+        kernel: "nearest",
+        background: { r: 0, g: 0, b: 0, alpha: 0 },
+      })
+      .png()
+      .toBuffer();
+    return sharp({
+      create: {
+        width: stripWidth,
+        height: PET_PREVIEW_FRAME_HEIGHT,
+        channels: 4,
+        background: { r: 0, g: 0, b: 0, alpha: 0 },
+      },
+    })
+      .composite(
+        Array.from({ length: PET_PREVIEW_FRAME_COUNT }, (_, i) => ({
+          input: frame,
+          left: i * PET_PREVIEW_FRAME_WIDTH,
+          top: 0,
+        })),
+      )
+      .webp({ quality: PET_PREVIEW_QUALITY })
+      .toBuffer();
+  }
 }
 
 async function buildThumbnailArtifact(slug: string, source: Buffer) {

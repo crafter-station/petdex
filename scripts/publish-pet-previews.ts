@@ -5,17 +5,13 @@ import {
   HeadObjectCommand,
   PutObjectCommand,
 } from "@aws-sdk/client-s3";
-import sharp from "sharp";
 
 import {
   PET_PREVIEW_CACHE_HEADER,
-  PET_PREVIEW_FRAME_COUNT,
-  PET_PREVIEW_FRAME_HEIGHT,
-  PET_PREVIEW_FRAME_WIDTH,
-  PET_PREVIEW_QUALITY,
   petPreviewKey,
   petPreviewUrl,
 } from "@/lib/pet-preview";
+import { renderPreviewStrip } from "@/lib/pet-public-artifacts";
 import { getAllApprovedPets } from "@/lib/pets";
 import { R2_BUCKET, r2 } from "@/lib/r2";
 import { keyFromR2PublicUrl } from "@/lib/r2-public-url";
@@ -146,15 +142,7 @@ if (mode === "apply") {
 async function publishPreview(task: PreviewTask): Promise<PublishResult> {
   try {
     const source = await getR2ObjectBuffer(task.spritesheetKey);
-    const body = await sharp(source)
-      .extract({
-        left: 0,
-        top: 0,
-        width: PET_PREVIEW_FRAME_WIDTH * PET_PREVIEW_FRAME_COUNT,
-        height: PET_PREVIEW_FRAME_HEIGHT,
-      })
-      .webp({ quality: PET_PREVIEW_QUALITY })
-      .toBuffer();
+    const body = await renderPreviewStrip(source);
     const sha256 = createHash("sha256").update(body).digest("hex");
 
     await r2.send(
