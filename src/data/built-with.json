@@ -228,6 +228,24 @@
       "screenshot": "/built-with/omniget.png"
     },
     {
+      "slug": "open-design",
+      "name": "Open Design",
+      "tagline": "Local-first agentic design workspace whose daemon lists Codex/Petdex-style pet packages from ~/.codex/pets and bundled community pets.",
+      "category": "bundled",
+      "repo": "nexu-io/open-design",
+      "homepage": "https://open-design.ai",
+      "stars": 73126,
+      "language": "TypeScript",
+      "platforms": ["macOS", "Windows", "Web"],
+      "addedAt": "2026-06-30",
+      "evidence": {
+        "type": "code",
+        "quote": "Lists pets that the upstream `hatch-pet` skill packages under `${CODEX_HOME:-$HOME/.codex}/pets/<id>/` and the curated set bundled with this repo under `assets/community-pets/<id>/`.",
+        "url": "https://github.com/nexu-io/open-design/blob/main/apps/daemon/src/codex-pets.ts#L1-L4"
+      },
+      "screenshot": "/built-with/open-design.png"
+    },
+    {
       "slug": "petdex-cute",
       "name": "Petdex Cute",
       "tagline": "Original pet pack (Aka Pilot, Homelander) distributed through the Petdex gallery.",
