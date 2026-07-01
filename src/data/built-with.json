@@ -243,7 +243,7 @@
         "quote": "Lists pets that the upstream `hatch-pet` skill packages under `${CODEX_HOME:-$HOME/.codex}/pets/<id>/` and the curated set bundled with this repo under `assets/community-pets/<id>/`.",
         "url": "https://github.com/nexu-io/open-design/blob/main/apps/daemon/src/codex-pets.ts#L1-L4"
       },
-      "screenshot": "/built-with/open-design.png"
+      "screenshot": "/built-with/open-design.webp"
     },
     {
       "slug": "petdex-cute",
