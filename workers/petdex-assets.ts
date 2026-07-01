@@ -44,6 +44,18 @@ function corsHeaders(request: Request): Headers {
   return headers;
 }
 
+// Error responses must never be cached at the edge. The origin objects are
+// backfilled asynchronously (thumbnails, previews, stickers), so a request
+// that arrives a moment before the object lands would otherwise poison the
+// cache with a 404 that outlives the missing object. no-store keeps every
+// retry hitting the origin until the artifact actually exists.
+function errorResponse(body: string, status: number): Response {
+  return new Response(body, {
+    status,
+    headers: { "Cache-Control": "no-store" },
+  });
+}
+
 function objectKey(request: Request): string | null {
   const url = new URL(request.url);
   const raw = url.pathname.replace(/^\/+/, "");
@@ -62,21 +74,21 @@ export default {
     }
 
     if (request.method !== "GET" && request.method !== "HEAD") {
-      return new Response("method not allowed", { status: 405 });
+      return errorResponse("method not allowed", 405);
     }
 
     if (!isAllowedReferer(request)) {
-      return new Response("forbidden", { status: 403 });
+      return errorResponse("forbidden", 403);
     }
 
     const key = objectKey(request);
     if (!key) {
-      return new Response("not found", { status: 404 });
+      return errorResponse("not found", 404);
     }
 
     const object = await env.PETDEX_PETS.get(key);
     if (!object) {
-      return new Response("not found", { status: 404 });
+      return errorResponse("not found", 404);
     }
 
     const headers = corsHeaders(request);
