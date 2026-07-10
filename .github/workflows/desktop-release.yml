@@ -15,12 +15,15 @@ jobs:
     name: build ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - target: darwin-arm64
             runner: macos-14
+            zig_target: ""
           - target: darwin-x64
-            runner: macos-13
+            runner: macos-14
+            zig_target: x86_64-macos
 
     steps:
       - name: Checkout petdex
@@ -55,14 +58,18 @@ jobs:
           echo "ZERO_NATIVE_PATH=$GITHUB_WORKSPACE/zero-native/" >> "$GITHUB_ENV"
 
       - name: Install Zig 0.16.0
-        uses: mlugg/setup-zig@v1
+        uses: mlugg/setup-zig@v2
         with:
           version: "0.16.0"
 
       - name: Build petdex-desktop
         working-directory: packages/petdex-desktop
         run: |
-          zig build -Doptimize=ReleaseSafe -Dzero-native-path="$ZERO_NATIVE_PATH"
+          zig_target_arg=""
+          if [ -n "${{ matrix.zig_target }}" ]; then
+            zig_target_arg="-Dtarget=${{ matrix.zig_target }}"
+          fi
+          zig build -Doptimize=ReleaseSafe $zig_target_arg -Dzero-native-path="$ZERO_NATIVE_PATH"
           mv zig-out/bin/petdex-desktop "petdex-desktop-${{ matrix.target }}"
           ls -lh "petdex-desktop-${{ matrix.target }}"
 
@@ -182,6 +189,7 @@ jobs:
           # is null on tag pushes.
           tag_name: ${{ inputs.tag || github.ref_name }}
           files: release/*
+          overwrite_files: true
           generate_release_notes: true
           fail_on_unmatched_files: true
           prerelease: ${{ contains(inputs.tag || github.ref_name, '-rc') }}
