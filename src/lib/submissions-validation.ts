@@ -71,18 +71,22 @@ export function validateSubmission(
       got: { width: body.spritesheetWidth, height: body.spritesheetHeight },
     };
   }
-  // The viewer (pet-sprite.tsx) force-renders every sheet at 1536x1872
-  // (8 columns x 9 rows), so any other aspect gets squashed and every
-  // frame crop lands mid-sprite. A sheet with extra rows passed the
-  // min-dim check and shipped visibly broken (pixie, 1536x2288 = 11
-  // rows), so enforce the canonical grid shape, allowing clean scales
-  // of it (768x936, 3072x3744, ...).
-  if (body.spritesheetWidth * 1872 !== body.spritesheetHeight * 1536) {
+  // The viewer walks 192x208 cells on an 8-column grid, so only two
+  // atlas shapes render correctly: the classic 8x9 (1536x1872) and the
+  // hatch-pet v2 8x11 (1536x2288, rows 9-10 hold the 16 look
+  // directions). Clean scales of either are fine (768x936, 3072x4576).
+  // Anything else gets squashed with every frame crop landing
+  // mid-sprite, which is how an early v2 sheet shipped visibly broken.
+  const isClassicGrid =
+    body.spritesheetWidth * 1872 === body.spritesheetHeight * 1536;
+  const isV2Grid =
+    body.spritesheetWidth * 2288 === body.spritesheetHeight * 1536;
+  if (!isClassicGrid && !isV2Grid) {
     return {
       ok: false,
       status: 400,
       error: "invalid_spritesheet",
-      message: `Spritesheet must be an 8x9 grid with a 1536:1872 aspect (ideal 1536x1872). Got ${body.spritesheetWidth}x${body.spritesheetHeight}, which the pet viewer would squash and misalign.`,
+      message: `Spritesheet must be an 8x9 grid (1536x1872) or a v2 8x11 grid (1536x2288). Got ${body.spritesheetWidth}x${body.spritesheetHeight}, which the pet viewer would squash and misalign.`,
       got: { width: body.spritesheetWidth, height: body.spritesheetHeight },
     };
   }

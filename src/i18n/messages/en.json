@@ -318,7 +318,8 @@
         "zipMissingSpritesheet": "Missing spritesheet.webp (or .png) at zip root. Found: {present}",
         "invalidJson": "pet.json is not valid JSON.",
         "unreadableSpritesheet": "Spritesheet image is unreadable.",
-        "tooSmall": "Spritesheet seems too small ({width}×{height}). Use an 8×9 frame grid (recommended {recommendedWidth}×{recommendedHeight})."
+        "tooSmall": "Spritesheet seems too small ({width}×{height}). Use an 8×9 frame grid (recommended {recommendedWidth}×{recommendedHeight}).",
+        "badGrid": "Spritesheet grid is {width}×{height}, which doesn't match the 8×9 (1536×1872) or v2 8×11 (1536×2288) frame grid, so frames would render misaligned."
       }
     }
   },

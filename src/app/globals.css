@@ -483,14 +483,18 @@ input {
   --sprite-frames: 6;
   --sprite-duration: 1100ms;
   --sprite-sheet-width: 1536px;
-  --sprite-sheet-height: 1872px;
   --sprite-y: calc(var(--sprite-row) * -208px);
   --sprite-end-x: calc(var(--sprite-frames) * -192px);
   width: 192px;
   height: 208px;
   background-image: var(--sprite-url);
   background-repeat: no-repeat;
-  background-size: var(--sprite-sheet-width) var(--sprite-sheet-height);
+  /* Width-only sizing: forcing both dimensions squashed any sheet whose
+     row count differs from the classic 9. v2 hatch atlases are 8x11
+     (rows 9-10 hold the 16 look directions); auto height preserves the
+     sheet's aspect so every 208px row lands on its true offset no
+     matter how many rows exist below the ones we animate. */
+  background-size: var(--sprite-sheet-width) auto;
   image-rendering: pixelated;
   /* translateZ(0) forces a GPU-composited layer so background-image
      decode + animation stay on the compositor thread instead of being
@@ -530,7 +534,9 @@ input {
   height: 208px;
   background-image: var(--sprite-url);
   background-repeat: no-repeat;
-  background-size: 1536px 1872px;
+  /* Width-only for the same reason as .pet-sprite: v2 sheets have 11
+     rows and a forced 1872px height would squash them. */
+  background-size: 1536px auto;
   background-position: 0 var(--sprite-y);
   image-rendering: pixelated;
   transform: scale(var(--pet-scale, 1));

@@ -34,7 +34,6 @@ type PetSpriteProps = {
 };
 
 const ATLAS_SHEET_WIDTH = 1536;
-const ATLAS_SHEET_HEIGHT = 1872;
 
 function PetSpriteImpl({
   src,
@@ -52,11 +51,12 @@ function PetSpriteImpl({
     : fixedAnimation;
 
   // A row strip only carries a single animation row, so it always plays
-  // row 0 and the sheet is exactly one frame strip wide/tall.
+  // row 0 and the sheet is exactly one frame strip wide/tall. Height is
+  // never forced — the CSS sizes the background by width only so both
+  // classic 8x9 and v2 8x11 atlases keep their row offsets intact.
   const isRow = layout === "row";
   const spriteRow = isRow ? 0 : animation.row;
   const sheetWidth = isRow ? animation.frames * 192 : ATLAS_SHEET_WIDTH;
-  const sheetHeight = isRow ? 208 : ATLAS_SHEET_HEIGHT;
 
   return (
     <div
@@ -78,7 +78,6 @@ function PetSpriteImpl({
             "--sprite-frames": animation.frames,
             "--sprite-duration": `${animation.durationMs}ms`,
             "--sprite-sheet-width": `${sheetWidth}px`,
-            "--sprite-sheet-height": `${sheetHeight}px`,
           } as CSSProperties
         }
       />

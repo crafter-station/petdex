@@ -318,7 +318,8 @@
         "zipMissingSpritesheet": "Falta spritesheet.webp (o .png) en la raíz del zip. Encontrado: {present}",
         "invalidJson": "pet.json no es JSON válido.",
         "unreadableSpritesheet": "No se puede leer la imagen del spritesheet.",
-        "tooSmall": "El spritesheet parece muy pequeño ({width}×{height}). Usa una grilla de 8×9 frames (recomendado {recommendedWidth}×{recommendedHeight})."
+        "tooSmall": "El spritesheet parece muy pequeño ({width}×{height}). Usa una grilla de 8×9 frames (recomendado {recommendedWidth}×{recommendedHeight}).",
+        "badGrid": "La grilla del spritesheet es {width}×{height}, que no coincide con la grilla 8×9 (1536×1872) ni la v2 8×11 (1536×2288), así que los frames se verían desalineados."
       }
     }
   },

@@ -234,6 +234,8 @@ export function PetSubmitForm() {
       let height = 0;
       if (spritesheetUrl) {
         ({ width, height } = await measureImage(spritesheetUrl));
+        const isClassicGrid = width * 1872 === height * 1536;
+        const isV2Grid = width * 2288 === height * 1536;
         if (width === 0 || height === 0) {
           issues.push(t("issues.unreadableSpritesheet"));
         } else if (width < 256 || height < 256) {
@@ -245,6 +247,10 @@ export function PetSubmitForm() {
               recommendedHeight: REQUIRED.height,
             }),
           );
+        } else if (!isClassicGrid && !isV2Grid) {
+          // Mirror the server-side grid check so the preview never says
+          // "ready" for a sheet /api/submit will reject.
+          issues.push(t("issues.badGrid", { width, height }));
         }
       }
 

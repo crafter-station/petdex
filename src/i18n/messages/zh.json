@@ -339,7 +339,8 @@
         "zipMissingSpritesheet": "zip 根目录缺少精灵图集文件 spritesheet.webp（或 .png）。找到的文件：{present}",
         "invalidJson": "pet.json 不是有效的 JSON。",
         "unreadableSpritesheet": "无法读取精灵图集 Spritesheet 图片。",
-        "tooSmall": "精灵图集 Spritesheet 看起来太小（{width}×{height}）。请使用 8×9 帧网格（推荐 {recommendedWidth}×{recommendedHeight}）。"
+        "tooSmall": "精灵图集 Spritesheet 看起来太小（{width}×{height}）。请使用 8×9 帧网格（推荐 {recommendedWidth}×{recommendedHeight}）。",
+        "badGrid": "精灵图集 Spritesheet 网格为 {width}×{height}，不符合 8×9（1536×1872）或 v2 8×11（1536×2288）帧网格，帧会错位显示。"
       }
     }
   },

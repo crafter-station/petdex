@@ -167,19 +167,17 @@ describe("validateSubmission", () => {
     }
   });
 
-  it("rejects a sheet with extra rows (11-row 1536x2288)", () => {
-    const r = validateSubmission({
-      ...BASE_INPUT,
-      spritesheetWidth: 1536,
-      spritesheetHeight: 2288,
-    });
-    expect(r?.ok).toBe(false);
-    if (r && r.ok === false) {
-      expect(r.error).toBe("invalid_spritesheet");
-    }
+  it("accepts a v2 8x11 atlas (1536x2288)", () => {
+    expect(
+      validateSubmission({
+        ...BASE_INPUT,
+        spritesheetWidth: 1536,
+        spritesheetHeight: 2288,
+      }),
+    ).toBeNull();
   });
 
-  it("accepts a clean scale of the canonical grid (768x936)", () => {
+  it("accepts a clean scale of the classic grid (768x936)", () => {
     expect(
       validateSubmission({
         ...BASE_INPUT,
@@ -187,6 +185,18 @@ describe("validateSubmission", () => {
         spritesheetHeight: 936,
       }),
     ).toBeNull();
+  });
+
+  it("rejects an off-grid sheet (1536x2000)", () => {
+    const r = validateSubmission({
+      ...BASE_INPUT,
+      spritesheetWidth: 1536,
+      spritesheetHeight: 2000,
+    });
+    expect(r?.ok).toBe(false);
+    if (r && r.ok === false) {
+      expect(r.error).toBe("invalid_spritesheet");
+    }
   });
 });
 
