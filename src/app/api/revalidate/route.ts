@@ -7,6 +7,8 @@ import {
   revalidatePetTags,
 } from "@/lib/db/cached-aggregates";
 
+import { locales } from "@/i18n/config";
+
 // Cross-app cache flush. revalidateTag only reaches the Next data cache
 // of the app that calls it, so external writers that share the DB and
 // Upstash (admin.petdex.dev approving submissions) still leave this
@@ -51,6 +53,11 @@ export async function POST(req: Request): Promise<Response> {
 
   if (slugs && slugs.length > 0) {
     await revalidatePetTags(...slugs);
+    // Tag flushes clear the data cache, but a pre-approval notFound()
+    // render leaves a full-route 404 entry that isn't linked to the
+    // pet's cache tags, so it survives revalidateTag for the page's
+    // whole 24h ISR window. Purge the route cache entries directly.
+    await revalidatePetPaths(slugs);
   }
   if (tags && tags.length > 0) {
     await expireNextCacheTags(...tags);
@@ -59,6 +66,22 @@ export async function POST(req: Request): Promise<Response> {
   return NextResponse.json({
     revalidated: { slugs: slugs ?? [], tags: tags ?? [] },
   });
+}
+
+async function revalidatePetPaths(slugs: string[]): Promise<void> {
+  try {
+    const { revalidatePath } = await import("next/cache");
+    for (const slug of slugs) {
+      // localePrefix="as-needed": the default locale serves at /pets/x
+      // while the rest serve prefixed. Purge every public shape.
+      revalidatePath(`/pets/${slug}`);
+      for (const locale of locales) {
+        revalidatePath(`/${locale}/pets/${slug}`);
+      }
+    }
+  } catch {
+    /* next/cache unavailable in some runtime contexts (tests, scripts) */
+  }
 }
 
 function readStringArray(body: unknown, field: string): string[] | null {
