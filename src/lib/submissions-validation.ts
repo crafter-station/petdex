@@ -71,6 +71,21 @@ export function validateSubmission(
       got: { width: body.spritesheetWidth, height: body.spritesheetHeight },
     };
   }
+  // The viewer (pet-sprite.tsx) force-renders every sheet at 1536x1872
+  // (8 columns x 9 rows), so any other aspect gets squashed and every
+  // frame crop lands mid-sprite. A sheet with extra rows passed the
+  // min-dim check and shipped visibly broken (pixie, 1536x2288 = 11
+  // rows), so enforce the canonical grid shape, allowing clean scales
+  // of it (768x936, 3072x3744, ...).
+  if (body.spritesheetWidth * 1872 !== body.spritesheetHeight * 1536) {
+    return {
+      ok: false,
+      status: 400,
+      error: "invalid_spritesheet",
+      message: `Spritesheet must be an 8x9 grid with a 1536:1872 aspect (ideal 1536x1872). Got ${body.spritesheetWidth}x${body.spritesheetHeight}, which the pet viewer would squash and misalign.`,
+      got: { width: body.spritesheetWidth, height: body.spritesheetHeight },
+    };
+  }
   // Reject any URL outside the allowlist. Without this, a malicious
   // submission could land javascript:, attacker.com, or LAN IPs into the
   // pet detail page (XSS) and the install script (RCE on every viewer who

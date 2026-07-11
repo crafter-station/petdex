@@ -58,6 +58,11 @@ export async function POST(req: Request): Promise<Response> {
     // pet's cache tags, so it survives revalidateTag for the page's
     // whole 24h ISR window. Purge the route cache entries directly.
     await revalidatePetPaths(slugs);
+    // Cloudflare sits in front of Vercel with a cache-everything rule
+    // that also caches 404/500 HTML at the edge for ~1h, so a fixed
+    // origin can keep serving the broken page until the edge TTL
+    // expires. Purge the pet URLs there too when zone creds exist.
+    await purgeCloudflarePetUrls(slugs);
   }
   if (tags && tags.length > 0) {
     await expireNextCacheTags(...tags);
@@ -81,6 +86,41 @@ async function revalidatePetPaths(slugs: string[]): Promise<void> {
     }
   } catch {
     /* next/cache unavailable in some runtime contexts (tests, scripts) */
+  }
+}
+
+async function purgeCloudflarePetUrls(slugs: string[]): Promise<void> {
+  const zoneId = process.env.CLOUDFLARE_ZONE_ID;
+  const token = process.env.CLOUDFLARE_PURGE_TOKEN;
+  if (!zoneId || !token) return;
+
+  const files = slugs.flatMap((slug) => [
+    `https://petdex.dev/pets/${slug}`,
+    ...locales.map((locale) => `https://petdex.dev/${locale}/pets/${slug}`),
+  ]);
+
+  try {
+    // The purge endpoint accepts up to 30 files per call.
+    for (let i = 0; i < files.length; i += 30) {
+      const res = await fetch(
+        `https://api.cloudflare.com/client/v4/zones/${zoneId}/purge_cache`,
+        {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${token}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ files: files.slice(i, i + 30) }),
+          signal: AbortSignal.timeout(5000),
+        },
+      );
+      if (!res.ok) {
+        console.error(`[revalidate] cloudflare purge failed: ${res.status}`);
+        return;
+      }
+    }
+  } catch (error) {
+    console.error("[revalidate] cloudflare purge failed", error);
   }
 }
 

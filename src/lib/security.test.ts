@@ -166,6 +166,28 @@ describe("validateSubmission", () => {
       expect(r.field).toBe("petJsonUrl");
     }
   });
+
+  it("rejects a sheet with extra rows (11-row 1536x2288)", () => {
+    const r = validateSubmission({
+      ...BASE_INPUT,
+      spritesheetWidth: 1536,
+      spritesheetHeight: 2288,
+    });
+    expect(r?.ok).toBe(false);
+    if (r && r.ok === false) {
+      expect(r.error).toBe("invalid_spritesheet");
+    }
+  });
+
+  it("accepts a clean scale of the canonical grid (768x936)", () => {
+    expect(
+      validateSubmission({
+        ...BASE_INPUT,
+        spritesheetWidth: 768,
+        spritesheetHeight: 936,
+      }),
+    ).toBeNull();
+  });
 });
 
 describe("posixInstallScript shell-injection", () => {
