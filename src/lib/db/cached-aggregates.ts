@@ -213,7 +213,7 @@ export async function invalidateAggregates(...keys: string[]): Promise<void> {
   await expireNextCacheTags(...tags);
 }
 
-async function expireNextCacheTags(...tags: string[]): Promise<void> {
+export async function expireNextCacheTags(...tags: string[]): Promise<void> {
   const cleanTags = tags.filter(Boolean);
   if (cleanTags.length === 0) return;
 

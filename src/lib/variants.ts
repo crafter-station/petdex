@@ -68,8 +68,13 @@ export const getVariantsFor = cache(
     const rows = await getVariantIndex();
     const currentPet = rows.find((row) => row.slug === slug);
 
+    // The index snapshot can lag behind the pets table (it's cached with
+    // its own TTL and tag, and cross-app writers can't flush this app's
+    // data cache). A freshly approved pet may exist while missing from
+    // the snapshot, so an index miss means "no variants yet", never an
+    // error — callers that need existence checks use getPet.
     if (!currentPet) {
-      throw new Error("PET_NOT_FOUND");
+      return [];
     }
 
     if (!currentPet.dhash) {
