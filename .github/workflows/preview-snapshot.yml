@@ -9,7 +9,12 @@ name: preview-snapshot
 
 on:
   schedule:
-    - cron: "0 7 * * *"
+    # Every 6 hours: approvals happen around 08:00 UTC (China review) and a
+    # missing preview lets Cloudflare cache a 404 until the next backfill,
+    # so a daily run left the Newest tab imageless for up to a day (#553).
+    # Re-runs are cheap because the script skips pets that already have a
+    # preview.
+    - cron: "0 */6 * * *"
   workflow_dispatch:
     inputs:
       mode:
@@ -62,3 +67,5 @@ jobs:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          CLOUDFLARE_PURGE_TOKEN: ${{ secrets.CLOUDFLARE_PURGE_TOKEN }}

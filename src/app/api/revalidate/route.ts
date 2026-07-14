@@ -6,6 +6,9 @@ import {
   expireNextCacheTags,
   revalidatePetTags,
 } from "@/lib/db/cached-aggregates";
+import { petPreviewUrl } from "@/lib/pet-preview";
+import { petStickerUrl } from "@/lib/pet-sticker-artifacts";
+import { petThumbnailUrl } from "@/lib/pet-thumbnail";
 
 import { locales } from "@/i18n/config";
 
@@ -97,6 +100,14 @@ async function purgeCloudflarePetUrls(slugs: string[]): Promise<void> {
   const files = slugs.flatMap((slug) => [
     `https://petdex.dev/pets/${slug}`,
     ...locales.map((locale) => `https://petdex.dev/${locale}/pets/${slug}`),
+    // assets.petdex.dev sits behind the same zone with a cache-everything
+    // rule that also caches 404s for a year. Gallery cards request these
+    // artifact URLs the moment a pet becomes visible, which can be before
+    // the artifacts finish uploading, so the poisoned 404 outlives the
+    // upload forever unless we purge it here (issue #553).
+    petPreviewUrl(slug),
+    petThumbnailUrl(slug),
+    petStickerUrl(slug),
   ]);
 
   try {

@@ -136,7 +136,48 @@ if (mode === "apply") {
     console.log(`failed ${result.slug} ${result.reason}`);
   }
 
+  await purgeCdnUrls(uploaded.map((result) => petPreviewUrl(result.slug)));
+
   if (failed.length > 0) process.exit(1);
+}
+
+// The upload above writes straight to R2 over the S3 API, which does NOT
+// touch the Cloudflare cache in front of assets.petdex.dev. Any gallery
+// request that raced the upload has already cached a 404 for the preview
+// URL with a one year TTL, and R2 custom domains do not auto-purge on
+// overwrite, so a freshly backfilled preview stays invisible forever
+// unless we purge its URL explicitly (issue #553).
+async function purgeCdnUrls(urls: string[]): Promise<void> {
+  if (urls.length === 0) return;
+  const zoneId = process.env.CLOUDFLARE_ZONE_ID;
+  const token = process.env.CLOUDFLARE_PURGE_TOKEN;
+  if (!zoneId || !token) {
+    console.log(`cloudflare purge skipped (no creds) for ${urls.length} urls`);
+    return;
+  }
+  let purged = 0;
+  // The purge endpoint accepts up to 30 files per call.
+  for (let i = 0; i < urls.length; i += 30) {
+    const batch = urls.slice(i, i + 30);
+    const res = await fetch(
+      `https://api.cloudflare.com/client/v4/zones/${zoneId}/purge_cache`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ files: batch }),
+        signal: AbortSignal.timeout(10_000),
+      },
+    );
+    if (!res.ok) {
+      console.log(`cloudflare purge failed ${res.status}`);
+      return;
+    }
+    purged += batch.length;
+  }
+  console.log(`cloudflare purged ${purged}`);
 }
 
 async function publishPreview(task: PreviewTask): Promise<PublishResult> {
