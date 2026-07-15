@@ -142,7 +142,7 @@ Every pet is two files:
 ```text
 my-pet/
 ├── pet.json                Metadata: name, slug, tags, vibes, kind, frame size, animation states
-└── spritesheet.webp        8 rows × 9 cols = 72 frames of 192×208 px each (or .png)
+└── spritesheet.webp        9 rows × 8 cols = 72 frames of 192×208 px each (or .png)
 ```
 
 Animation states are the rows: `idle`, `wave`, `run`, `failed`, `review`, `jump`, `extra1`, `extra2`. Codex maps these to its agent activity hooks. Loop timing defaults to 1100ms at 6 frames per state.
