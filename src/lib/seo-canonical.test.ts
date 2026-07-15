@@ -27,7 +27,7 @@ const SEO_SOURCE_FILES = [
   "src/app/robots.ts",
   "src/app/layout.tsx",
   "src/app/[locale]/layout.tsx",
-  "src/components/json-ld.tsx",
+  "src/components/layout/json-ld.tsx",
   "src/app/[locale]/page.tsx",
   "src/app/[locale]/about/page.tsx",
   "src/app/[locale]/brand/page.tsx",
@@ -44,9 +44,9 @@ const SEO_SOURCE_FILES = [
   "src/app/[locale]/download/opengraph-image.tsx",
   "src/app/[locale]/pets/[slug]/opengraph-image.tsx",
   "src/app/[locale]/u/[handle]/opengraph-image.tsx",
-  "src/components/collection-action-menu.tsx",
-  "src/components/pet-action-menu.tsx",
-  "src/components/profile-share-button.tsx",
+  "src/components/collections/collection-action-menu.tsx",
+  "src/components/pets/pet-action-menu.tsx",
+  "src/components/profile/profile-share-button.tsx",
 ];
 
 describe("SEO canonical domain", () => {
