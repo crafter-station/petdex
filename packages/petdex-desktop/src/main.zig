@@ -1393,7 +1393,7 @@ const Pet = struct {
     root: []u8,
 };
 
-fn spawnSidecar(allocator: std.mem.Allocator, io: std.Io, sidecar_dir: []const u8, env_map: *std.process.Environ.Map) !void {
+fn spawnSidecar(allocator: std.mem.Allocator, io: std.Io, sidecar_dir: []const u8, env_map: *std.process.Environ.Map) !?std.process.Child {
     // The HTTP sidecar runs on Node (≥ 18). We assume Node is available
     // because devs of coding agents almost universally have it installed —
     // a much safer assumption than requiring Bun. The pre-built
@@ -1401,7 +1401,7 @@ fn spawnSidecar(allocator: std.mem.Allocator, io: std.Io, sidecar_dir: []const u
     // bundler at runtime either.
     const node_path = findExecutableOnPath(allocator, io, env_map, "node") catch {
         std.debug.print("petdex: `node` not found on PATH; HTTP sidecar disabled. Hooks won't reach the mascot. Install Node.js (>= 18) and relaunch.\n", .{});
-        return;
+        return null;
     };
     defer allocator.free(node_path);
 
@@ -1414,7 +1414,7 @@ fn spawnSidecar(allocator: std.mem.Allocator, io: std.Io, sidecar_dir: []const u
     // gracefully so hooks fail loudly instead of POSTing to a dead port.
     var probe = std.Io.Dir.openFileAbsolute(io, server_path, .{}) catch {
         std.debug.print("petdex: sidecar not found at {s}. Run `petdex install desktop` (or `petdex update`) to fetch it. Hooks won't reach the mascot.\n", .{server_path});
-        return;
+        return null;
     };
     probe.close(io);
 
@@ -1427,7 +1427,7 @@ fn spawnSidecar(allocator: std.mem.Allocator, io: std.Io, sidecar_dir: []const u
     try env_map.put("PETDEX_PARENT_PID", pid_str);
 
     const argv = &[_][]const u8{ node_path, server_path };
-    _ = std.process.spawn(io, .{
+    const child = std.process.spawn(io, .{
         .argv = argv,
         .environ_map = env_map,
         .stdin = .ignore,
@@ -1435,11 +1435,15 @@ fn spawnSidecar(allocator: std.mem.Allocator, io: std.Io, sidecar_dir: []const u
         .stderr = .ignore,
     }) catch |err| {
         std.debug.print("petdex: failed to spawn sidecar: {s}\n", .{@errorName(err)});
-        return;
+        return null;
     };
-    // Detach: we never wait on the child explicitly. The sidecar's parent
-    // watchdog handles cleanup when we exit; in-band it listens for SIGTERM.
+    // Detach: we never wait on the child synchronously here. The sidecar's
+    // parent watchdog handles cleanup when we exit; in-band it listens for
+    // SIGTERM. We do hold onto the handle so a later respawn_sidecar can
+    // kill+reap this child instead of leaking a zombie (see
+    // respawnSidecarCmd).
     std.debug.print("petdex: sidecar spawned (node {s})\n", .{server_path});
+    return child;
 }
 
 fn findExecutableOnPath(allocator: std.mem.Allocator, io: std.Io, env_map: *std.process.Environ.Map, name: []const u8) ![]u8 {
@@ -1568,6 +1572,10 @@ const PetdexState = struct {
     // having to re-resolve sidecar_dir or rebuild the env map.
     sidecar_dir: []u8,
     env_map: *std.process.Environ.Map,
+    // The currently-running sidecar child, held so respawn_sidecar can
+    // kill+reap it before spawning a replacement (see respawnSidecarCmd).
+    // null if the initial spawn bailed out gracefully.
+    sidecar_child: ?std.process.Child = null,
     bridge_handlers: [14]zero_native.BridgeHandler = undefined,
 
     fn deinit(self: *PetdexState) void {
@@ -1601,14 +1609,25 @@ const PetdexState = struct {
         };
     }
 
-    // Called by the WebView JS when /health fails repeatedly. The
-    // old sidecar's parent watchdog handles cleanup if it's alive,
-    // so this is fire-and-forget. We don't track the new pid; the
-    // next health probe is the success/failure signal.
+    // Called by the WebView JS when /health fails repeatedly. Before
+    // spawning a replacement we kill+reap the old child: it's either
+    // already dead (the common case — a zombie left by the sidecar's own
+    // exit) or wedged (3 consecutive failed health probes). Child.kill()
+    // uses SIGKILL and blocks until the process is reaped, so this can't
+    // stall on a wedged sidecar's graceful-shutdown path (which can take
+    // up to 60s) the way SIGTERM + wait could. Killing the old child
+    // first also frees port 7777 so the replacement doesn't lose the
+    // EADDRINUSE fight with a wedged incumbent. kill() is idempotent and
+    // ignores errors internally, so this is safe even if the child is
+    // already gone.
     fn respawnSidecarCmd(context: *anyopaque, invocation: zero_native.bridge.Invocation, output: []u8) anyerror![]const u8 {
         _ = invocation;
         const self: *PetdexState = @ptrCast(@alignCast(context));
-        spawnSidecar(self.allocator, self.io, self.sidecar_dir, self.env_map) catch |err| {
+        if (self.sidecar_child) |*child| {
+            child.kill(self.io);
+            self.sidecar_child = null;
+        }
+        self.sidecar_child = spawnSidecar(self.allocator, self.io, self.sidecar_dir, self.env_map) catch |err| {
             return std.fmt.bufPrint(output, "{{\"ok\":false,\"error\":\"{s}\"}}", .{@errorName(err)});
         };
         return std.fmt.bufPrint(output, "{{\"ok\":true}}", .{});
@@ -3269,7 +3288,7 @@ pub fn main(init: std.process.Init) !void {
     // server.js to ~/.petdex/sidecar/server.js alongside the binary.
     const sidecar_dir = try resolveSidecarDir(allocator, init.environ_map);
     defer allocator.free(sidecar_dir);
-    try spawnSidecar(allocator, init.io, sidecar_dir, init.environ_map);
+    const sidecar_child = try spawnSidecar(allocator, init.io, sidecar_dir, init.environ_map);
 
     // Duplicate pets_roots into a state-owned slice so PetdexState's
     // deinit can free it independently of the local lifetime of
@@ -3295,6 +3314,7 @@ pub fn main(init: std.process.Init) !void {
         .asset_root = try allocator.dupe(u8, asset_root),
         .sidecar_dir = try allocator.dupe(u8, sidecar_dir),
         .env_map = init.environ_map,
+        .sidecar_child = sidecar_child,
     };
     defer state.deinit();
 
