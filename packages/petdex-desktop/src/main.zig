@@ -1612,18 +1612,20 @@ const PetdexState = struct {
     // Called by the WebView JS when /health fails repeatedly. Before
     // spawning a replacement we kill+reap the old child: it's either
     // already dead (the common case — a zombie left by the sidecar's own
-    // exit) or wedged (3 consecutive failed health probes). Child.kill()
-    // uses SIGKILL and blocks until the process is reaped, so this can't
-    // stall on a wedged sidecar's graceful-shutdown path (which can take
-    // up to 60s) the way SIGTERM + wait could. Killing the old child
-    // first also frees port 7777 so the replacement doesn't lose the
-    // EADDRINUSE fight with a wedged incumbent. kill() is idempotent and
-    // ignores errors internally, so this is safe even if the child is
-    // already gone.
+    // exit) or wedged (3 consecutive failed health probes). We SIGKILL
+    // explicitly first: Child.kill() sends SIGTERM and then blocks until
+    // the child is reaped, and a wedged sidecar's graceful-shutdown
+    // handler can absorb SIGTERM for up to 60s — which would stall this
+    // bridge handler that long. SIGKILL can't be caught, so the reap
+    // below returns promptly. Errors are ignored (a zombie can't be
+    // ProcessNotFound while we hold the unreaped handle, but tolerate
+    // anything); Child.kill() then reaps and frees port 7777 so the
+    // replacement doesn't lose the EADDRINUSE fight with the incumbent.
     fn respawnSidecarCmd(context: *anyopaque, invocation: zero_native.bridge.Invocation, output: []u8) anyerror![]const u8 {
         _ = invocation;
         const self: *PetdexState = @ptrCast(@alignCast(context));
         if (self.sidecar_child) |*child| {
+            if (child.id) |pid| std.posix.kill(pid, .KILL) catch {};
             child.kill(self.io);
             self.sidecar_child = null;
         }
