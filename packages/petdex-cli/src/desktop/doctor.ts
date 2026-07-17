@@ -325,30 +325,34 @@ function checkCodexFeatureFlag(): CheckResult {
   if (!existsSync(tomlPath)) {
     return {
       status: "info",
-      label: "Codex codex_hooks flag",
+      label: "Codex hooks flag",
       detail: "config.toml absent (Codex not installed?)",
     };
   }
   try {
     const text = readFileSync(tomlPath, "utf8");
     // Naive but matches `petdex hooks install`'s own inspectFeaturesCodexHooks.
-    if (/\[features\][\s\S]*?codex_hooks\s*=\s*true/.test(text)) {
+    // hooks is the canonical key; codex_hooks is deprecated but still counts
+    // as enabled when a previous install left it set (#558).
+    if (
+      /\[features\][\s\S]*?(?:^|\n)\s*(?:codex_)?hooks\s*=\s*true/.test(text)
+    ) {
       return {
         status: "ok",
-        label: "Codex codex_hooks flag",
-        detail: "[features] codex_hooks = true",
+        label: "Codex hooks flag",
+        detail: "[features] hooks = true",
       };
     }
     return {
       status: "warn",
-      label: "Codex codex_hooks flag",
+      label: "Codex hooks flag",
       detail: "missing or set to non-true",
       hint: "Re-run `petdex hooks install` and accept the auto-fix prompt.",
     };
   } catch {
     return {
       status: "warn",
-      label: "Codex codex_hooks flag",
+      label: "Codex hooks flag",
       detail: "config.toml unreadable",
     };
   }

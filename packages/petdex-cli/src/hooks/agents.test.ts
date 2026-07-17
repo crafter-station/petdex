@@ -7,6 +7,8 @@ import { dirname, join } from "node:path";
 import {
   AGENTS,
   antigravityMcpConfigPath,
+  applyCodexHooksFix,
+  inspectFeaturesCodexHooks,
   resolveOpenCodeConfigDir,
   SIDECAR_URL,
 } from "./agents";
@@ -362,5 +364,60 @@ describe("OpenCode config path resolution", () => {
     expect(resolveOpenCodeConfigDir({}, "/home/example")).toBe(
       "/home/example/.config/opencode",
     );
+  });
+});
+
+describe("codex [features] hooks flag (#558)", () => {
+  test("hooks = true is enabled", () => {
+    expect(inspectFeaturesCodexHooks("[features]\nhooks = true\n").state).toBe(
+      "enabled",
+    );
+  });
+
+  test("legacy codex_hooks = true still counts as enabled", () => {
+    expect(
+      inspectFeaturesCodexHooks("[features]\ncodex_hooks = true\n").state,
+    ).toBe("enabled");
+  });
+
+  test("hooks key wins over legacy key when both are present", () => {
+    const inspection = inspectFeaturesCodexHooks(
+      "[features]\ncodex_hooks = true\nhooks = false\n",
+    );
+    expect(inspection).toEqual({ state: "wrong-value", replaceLine: 2 });
+  });
+
+  test("keys outside [features] do not count", () => {
+    expect(inspectFeaturesCodexHooks("[other]\nhooks = true\n").state).toBe(
+      "no-features-section",
+    );
+  });
+
+  test("fix rewrites a false hooks value in place, keeping comments", () => {
+    const text = "[features]\nhooks = false # keep me\n";
+    const next = applyCodexHooksFix(text, inspectFeaturesCodexHooks(text));
+    expect(next).toBe("[features]\nhooks = true # keep me\n");
+  });
+
+  test("fix inserts the canonical key and never writes codex_hooks", () => {
+    const text = "[features]\nother = 1\n";
+    const next = applyCodexHooksFix(text, inspectFeaturesCodexHooks(text));
+    expect(next).toContain("hooks = true");
+    expect(next).not.toContain("codex_hooks");
+  });
+
+  test("fix leaves an existing legacy codex_hooks = false line untouched", () => {
+    const text = "[features]\ncodex_hooks = false\n";
+    const next = applyCodexHooksFix(text, inspectFeaturesCodexHooks(text));
+    expect(next).toContain("codex_hooks = false");
+    expect(next).toContain("hooks = true");
+  });
+
+  test("fix appends a [features] block when the section is missing", () => {
+    const next = applyCodexHooksFix(
+      'model = "gpt-5.4"',
+      inspectFeaturesCodexHooks('model = "gpt-5.4"'),
+    );
+    expect(next).toBe('model = "gpt-5.4"\n\n[features]\nhooks = true\n');
   });
 });
