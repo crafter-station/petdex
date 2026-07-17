@@ -1,7 +1,7 @@
 {
   "$schema": "./built-with.schema.json",
   "version": 1,
-  "lastUpdated": "2026-07-01",
+  "lastUpdated": "2026-07-17",
   "categories": {
     "desktop-companion": {
       "label": "Desktop companions",
@@ -38,7 +38,10 @@
       "homepage": "https://pawpause.vercel.app",
       "stars": 42,
       "language": "TypeScript",
-      "platforms": ["macOS", "Windows"],
+      "platforms": [
+        "macOS",
+        "Windows"
+      ],
       "addedAt": "2026-05-10",
       "evidence": {
         "type": "readme",
@@ -56,7 +59,9 @@
       "homepage": null,
       "stars": 2,
       "language": "Swift",
-      "platforms": ["macOS"],
+      "platforms": [
+        "macOS"
+      ],
       "addedAt": "2026-05-10",
       "evidence": {
         "type": "readme",
@@ -74,7 +79,11 @@
       "homepage": null,
       "stars": 1,
       "language": "TypeScript",
-      "platforms": ["macOS", "Windows", "Linux"],
+      "platforms": [
+        "macOS",
+        "Windows",
+        "Linux"
+      ],
       "addedAt": "2026-05-10",
       "evidence": {
         "type": "readme",
@@ -92,7 +101,11 @@
       "homepage": "https://www.npmjs.com/package/petdex-cc",
       "stars": 15,
       "language": "TypeScript",
-      "platforms": ["macOS", "Windows", "Linux"],
+      "platforms": [
+        "macOS",
+        "Windows",
+        "Linux"
+      ],
       "addedAt": "2026-05-10",
       "evidence": {
         "type": "readme",
@@ -110,7 +123,9 @@
       "homepage": null,
       "stars": 111,
       "language": "Swift",
-      "platforms": ["macOS"],
+      "platforms": [
+        "macOS"
+      ],
       "addedAt": "2026-05-10",
       "evidence": {
         "type": "code",
@@ -128,7 +143,11 @@
       "homepage": null,
       "stars": 1265,
       "language": "Rust",
-      "platforms": ["macOS", "Windows", "Linux"],
+      "platforms": [
+        "macOS",
+        "Windows",
+        "Linux"
+      ],
       "addedAt": "2026-05-10",
       "evidence": {
         "type": "code",
@@ -146,7 +165,10 @@
       "homepage": null,
       "stars": 2,
       "language": "Swift",
-      "platforms": ["iOS", "watchOS"],
+      "platforms": [
+        "iOS",
+        "watchOS"
+      ],
       "addedAt": "2026-05-10",
       "evidence": {
         "type": "readme",
@@ -164,7 +186,9 @@
       "homepage": null,
       "stars": 0,
       "language": "Python",
-      "platforms": ["Garmin"],
+      "platforms": [
+        "Garmin"
+      ],
       "addedAt": "2026-05-10",
       "evidence": {
         "type": "code",
@@ -182,7 +206,10 @@
       "homepage": null,
       "stars": 3,
       "language": "Swift",
-      "platforms": ["iOS", "macOS"],
+      "platforms": [
+        "iOS",
+        "macOS"
+      ],
       "addedAt": "2026-05-10",
       "evidence": {
         "type": "readme",
@@ -200,7 +227,11 @@
       "homepage": null,
       "stars": 51,
       "language": "TypeScript",
-      "platforms": ["macOS", "Windows", "Linux"],
+      "platforms": [
+        "macOS",
+        "Windows",
+        "Linux"
+      ],
       "addedAt": "2026-05-10",
       "evidence": {
         "type": "readme",
@@ -218,7 +249,11 @@
       "homepage": null,
       "stars": 6097,
       "language": "Svelte",
-      "platforms": ["macOS", "Windows", "Linux"],
+      "platforms": [
+        "macOS",
+        "Windows",
+        "Linux"
+      ],
       "addedAt": "2026-05-10",
       "evidence": {
         "type": "code",
@@ -236,7 +271,11 @@
       "homepage": "https://open-design.ai",
       "stars": 73126,
       "language": "TypeScript",
-      "platforms": ["macOS", "Windows", "Web"],
+      "platforms": [
+        "macOS",
+        "Windows",
+        "Web"
+      ],
       "addedAt": "2026-06-30",
       "evidence": {
         "type": "code",
@@ -290,7 +329,10 @@
       "homepage": "https://github.com/dylan-labs/nom-pet/releases/latest",
       "stars": 72,
       "language": "TypeScript",
-      "platforms": ["macOS", "Windows"],
+      "platforms": [
+        "macOS",
+        "Windows"
+      ],
       "addedAt": "2026-05-11",
       "evidence": {
         "type": "readme",
@@ -308,7 +350,9 @@
       "homepage": "https://github.com/bleeeet/TermiPet/releases/latest",
       "stars": 76,
       "language": "Swift",
-      "platforms": ["macOS"],
+      "platforms": [
+        "macOS"
+      ],
       "addedAt": "2026-05-20",
       "evidence": {
         "type": "readme",
@@ -326,7 +370,9 @@
       "homepage": null,
       "stars": 38,
       "language": "Python",
-      "platforms": ["Windows"],
+      "platforms": [
+        "Windows"
+      ],
       "addedAt": "2026-05-20",
       "evidence": {
         "type": "readme",
@@ -344,7 +390,10 @@
       "homepage": "http://aicodingbox.com/",
       "stars": 54,
       "language": "C++",
-      "platforms": ["Windows", "Linux"],
+      "platforms": [
+        "Windows",
+        "Linux"
+      ],
       "addedAt": "2026-05-30",
       "evidence": {
         "type": "code",
@@ -362,7 +411,10 @@
       "homepage": "https://github.com/Jedeiah/agent-critter/releases/latest",
       "stars": 2,
       "language": "Rust",
-      "platforms": ["macOS", "Windows"],
+      "platforms": [
+        "macOS",
+        "Windows"
+      ],
       "addedAt": "2026-06-03",
       "evidence": {
         "type": "code",
@@ -380,7 +432,10 @@
       "homepage": "https://codexpet.xyz/nest/",
       "stars": 13,
       "language": "Swift",
-      "platforms": ["macOS", "Web"],
+      "platforms": [
+        "macOS",
+        "Web"
+      ],
       "addedAt": "2026-06-03",
       "evidence": {
         "type": "code",
@@ -398,7 +453,11 @@
       "homepage": "https://github.com/yr2b/code-dog",
       "stars": 2,
       "language": "JavaScript",
-      "platforms": ["macOS", "Windows", "Linux"],
+      "platforms": [
+        "macOS",
+        "Windows",
+        "Linux"
+      ],
       "addedAt": "2026-06-29",
       "evidence": {
         "type": "readme",
@@ -416,7 +475,11 @@
       "homepage": "https://skales.app",
       "stars": 1101,
       "language": "TypeScript",
-      "platforms": ["macOS", "Windows", "Linux"],
+      "platforms": [
+        "macOS",
+        "Windows",
+        "Linux"
+      ],
       "addedAt": "2026-06-29",
       "evidence": {
         "type": "readme",
@@ -434,7 +497,11 @@
       "homepage": null,
       "stars": 2,
       "language": "TypeScript",
-      "platforms": ["macOS", "Windows", "Linux"],
+      "platforms": [
+        "macOS",
+        "Windows",
+        "Linux"
+      ],
       "addedAt": "2026-06-04",
       "evidence": {
         "type": "readme",
@@ -452,7 +519,9 @@
       "homepage": "https://shmulik-ai-superhero.netlify.app",
       "stars": 0,
       "language": "JavaScript",
-      "platforms": ["Web"],
+      "platforms": [
+        "Web"
+      ],
       "addedAt": "2026-06-04",
       "evidence": {
         "type": "code",
@@ -470,7 +539,11 @@
       "homepage": "https://hermes-agent.nousresearch.com",
       "stars": 206496,
       "language": "Python",
-      "platforms": ["macOS", "Windows", "Linux"],
+      "platforms": [
+        "macOS",
+        "Windows",
+        "Linux"
+      ],
       "addedAt": "2026-07-01",
       "evidence": {
         "type": "code",
@@ -478,6 +551,48 @@
         "url": "https://github.com/NousResearch/hermes-agent/blob/main/agent/pet/manifest.py"
       },
       "screenshot": "/built-with/hermes-agent.webp"
+    },
+    {
+      "slug": "petphrase",
+      "name": "PetPhrase",
+      "tagline": "Windows desktop companion: a Petdex pet sits on your desktop, click it to pop a quick-phrase panel and copy snippets in one click.",
+      "category": "desktop-companion",
+      "repo": "chengbuilds/PetPhrase",
+      "homepage": "https://chengbuilds.github.io/PetPhrase/",
+      "stars": 9,
+      "language": "Rust",
+      "platforms": [
+        "Windows"
+      ],
+      "addedAt": "2026-07-17",
+      "evidence": {
+        "type": "readme",
+        "quote": "PetPhrase 兼容 petdex 桌宠格式——那个在 X 上火过的 Codex 桌宠生态。",
+        "url": "https://github.com/chengbuilds/PetPhrase#readme"
+      },
+      "screenshot": "/built-with/petphrase.png"
+    },
+    {
+      "slug": "vibe-pet",
+      "name": "Vibe Pet",
+      "tagline": "Seeed Studio's AI coding companion: agent token and task monitoring with Petdex avatars on desktop and ESP32/Wio Terminal hardware.",
+      "category": "desktop-companion",
+      "repo": "Seeed-Solution/vibe-pet",
+      "homepage": "https://github.com/Seeed-Solution/vibe-pet",
+      "stars": 38,
+      "language": "C",
+      "platforms": [
+        "Windows",
+        "macOS",
+        "Linux"
+      ],
+      "addedAt": "2026-07-17",
+      "evidence": {
+        "type": "readme",
+        "quote": "Character switching: choose a character from Petdex by default or use a custom character you made.",
+        "url": "https://github.com/Seeed-Solution/vibe-pet#readme"
+      },
+      "screenshot": "/built-with/vibe-pet.png"
     }
   ]
 }
