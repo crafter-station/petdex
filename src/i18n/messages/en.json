@@ -229,7 +229,7 @@
     "title": "Add your pet to Petdex",
     "body": "Share a Codex-compatible animated pet package. Petdex checks the files locally, previews the sprite, and prepares the submission.",
     "createCta": "Don't have a pet yet? Hatch one in Codex",
-    "legalPrefix": "By submitting, you confirm you have rights to the artwork or are creating fan content. Rights holders can request removal via our",
+    "legalPrefix": "By submitting, you confirm you have rights to the artwork or are creating fan content. Content that glorifies war, hate, or militarist symbols is not allowed and will be removed. Rights holders can request removal via our",
     "legalLink": "takedown notice",
     "legalSuffix": ".",
     "form": {

@@ -28,6 +28,13 @@ export const REVIEW_POLICY_CATEGORIES = [
     holdAboveConfidence: 0.35,
   },
   {
+    id: "war_militarism_glorification",
+    label: "War or militarism glorification",
+    description:
+      "Imagery glorifying wars, war crimes, or militarist movements: WWII Axis symbols such as kamikaze (神風) headbands, rising-sun war flags or roundels on wartime military hardware, swastikas or SS runes, or heroic framing of forces tied to invasions or atrocities. Use this category, not self_harm, for kamikaze imagery.",
+    holdAboveConfidence: 0.3,
+  },
+  {
     id: "graphic_violence_gore",
     label: "Graphic violence or gore",
     description: "Graphic injury, gore, torture, mutilation, or shock imagery.",

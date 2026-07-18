@@ -229,7 +229,7 @@
     "title": "Agrega tu mascota a Petdex",
     "body": "Comparte un paquete de mascota animada compatible con Codex. Petdex revisa los archivos localmente, previsualiza el sprite y prepara el envío.",
     "createCta": "¿Todavía no tienes una mascota? Créala en Codex",
-    "legalPrefix": "Al enviar, confirmas que tienes derechos sobre la ilustración o que estás creando fan content. Los titulares pueden pedir la eliminación mediante nuestro",
+    "legalPrefix": "Al enviar, confirmas que tienes derechos sobre la ilustración o que estás creando fan content. No se permite contenido que glorifique la guerra, el odio o símbolos militaristas; será eliminado. Los titulares pueden pedir la eliminación mediante nuestro",
     "legalLink": "aviso de retiro",
     "legalSuffix": ".",
     "form": {

@@ -249,7 +249,7 @@
     "body__fixme": true,
     "createCta": "还没有宠物？去 Codex 里孵化一只",
     "createCta__fixme": true,
-    "legalPrefix": "提交即表示你确认自己拥有该作品的权利，或这是你创作的同人内容。权利人可以通过我们的",
+    "legalPrefix": "提交即表示你确认自己拥有该作品的权利，或这是你创作的同人内容。不允许美化战争、仇恨或军国主义符号的内容，此类内容将被移除。权利人可以通过我们的",
     "legalPrefix__fixme": true,
     "legalLink": "下架通知",
     "legalSuffix": "。",
