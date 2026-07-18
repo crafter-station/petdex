@@ -5,6 +5,7 @@ import {
   petPreviewUrl,
   petPreviewUrlForSource,
 } from "@/lib/pet-preview";
+import { R2_PUBLIC_BASE } from "@/lib/r2-public-url";
 
 const originalFlag = process.env.NEXT_PUBLIC_PETDEX_PET_PREVIEWS_ENABLED;
 
@@ -20,7 +21,7 @@ describe("pet preview artifact helpers", () => {
   it("builds the public preview key and URL", () => {
     expect(petPreviewKey("cai-chao")).toBe("pets/cai-chao/preview.webp");
     expect(petPreviewUrl("cai-chao")).toBe(
-      "https://assets.petdex.dev/pets/cai-chao/preview.webp",
+      `${R2_PUBLIC_BASE}/pets/cai-chao/preview.webp`,
     );
   });
 
@@ -32,7 +33,7 @@ describe("pet preview artifact helpers", () => {
         "cai-chao",
         "https://assets.petdex.dev/pets/cai-chao/spritesheet.webp",
       ),
-    ).toBe("https://assets.petdex.dev/pets/cai-chao/preview.webp");
+    ).toBe(`${R2_PUBLIC_BASE}/pets/cai-chao/preview.webp`);
     expect(
       petPreviewUrlForSource(
         "cai-chao",

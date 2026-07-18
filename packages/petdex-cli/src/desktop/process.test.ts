@@ -3,7 +3,7 @@ import { execFileSync, spawn } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
-  openSync,
+  type openSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -144,7 +144,11 @@ describe("startDesktop", () => {
         openCalls.push(String(filePath));
         return 42;
       }) as typeof openSync,
-      spawn: ((command: string, args: string[], options: any) => {
+      spawn: ((
+        command: string,
+        args: string[],
+        options: { detached?: boolean; stdio?: unknown },
+      ) => {
         spawnCalls.push({
           command,
           args,
@@ -208,7 +212,11 @@ describe("startDesktop", () => {
         existsSync: () => true,
         mkdir: async () => {},
         openSync: (() => 42) as typeof openSync,
-        spawn: ((command: string, args: string[], options: any) => {
+        spawn: ((
+          command: string,
+          args: string[],
+          options: { detached?: boolean; stdio?: unknown },
+        ) => {
           spawnCalls.push({
             command,
             args,
