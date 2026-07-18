@@ -36,6 +36,7 @@ import {
   toggleKillswitch,
 } from "../src/hooks/killswitch.js";
 import { runUninstall as runHooksUninstall } from "../src/hooks/uninstall.js";
+import pkg from "../package.json";
 import {
   emit,
   getStatus,
@@ -114,7 +115,7 @@ async function getAuth(): Promise<ClerkCliAuth> {
   return _auth;
 }
 
-const VERSION = "0.4.2";
+const VERSION = pkg.version;
 
 // ─── entrypoint ────────────────────────────────────────────────────────────
 main().catch((err) => {
