@@ -665,15 +665,15 @@ async function cmdSubmit(args: string[]) {
   let skipped = 0;
   if (ownedSlugs.size > 0) {
     const dupes = candidates.filter((c) =>
-      ownedSlugs.has(slugify(c.petIdHint)),
+      ownedSlugs.has(deriveSlug(c.petIdHint)),
     );
     const fresh = candidates.filter(
-      (c) => !ownedSlugs.has(slugify(c.petIdHint)),
+      (c) => !ownedSlugs.has(deriveSlug(c.petIdHint)),
     );
     p.note(
       dupes
         .map((c) => {
-          const owned = ownedSlugs.get(slugify(c.petIdHint));
+          const owned = ownedSlugs.get(deriveSlug(c.petIdHint));
           const status = owned?.status ?? "unknown";
           return `${pc.yellow("•")} ${pc.bold(c.label)} ${pc.dim(`(${status})`)}`;
         })
@@ -1084,7 +1084,7 @@ async function submitOne(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      slugHint: slugify(cand.petIdHint),
+      slugHint: deriveSlug(cand.petIdHint),
       petId: cand.petIdHint,
       spritesheetExt: cand.spritesheetExt,
     }),
@@ -1228,7 +1228,7 @@ async function fetchOwnedSlugs(
       body: JSON.stringify({
         candidates: cands.map((c) => ({
           petId: c.petIdHint,
-          slugHint: slugify(c.petIdHint),
+          slugHint: deriveSlug(c.petIdHint),
         })),
       }),
       signal: AbortSignal.timeout(8000),
@@ -1335,6 +1335,22 @@ function slugify(value: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 40);
+}
+
+/** Mirrors deriveSlug in the web app's src/lib/slug.ts: a non-Latin pet id
+ *  falls back to a deterministic pet-<hash> slug instead of "", so dedup
+ *  and slugHint agree with what the server derives. Keep in sync. */
+function deriveSlug(petId: string): string {
+  const direct = slugify(petId);
+  if (direct) return direct;
+  const seed = petId.trim();
+  if (!seed) return "";
+  let hash = 0x811c9dc5;
+  for (const byte of new TextEncoder().encode(seed)) {
+    hash ^= byte;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return `pet-${hash.toString(36).padStart(7, "0")}`;
 }
 
 function parseImageDims(buf: Buffer): { width: number; height: number } {

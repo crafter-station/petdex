@@ -17,6 +17,7 @@ import {
 import { useTranslations } from "next-intl";
 
 import { petStates } from "@/lib/pet-states";
+import { deriveSlug } from "@/lib/slug";
 
 type ParsedPet = {
   petId: string;
@@ -300,12 +301,12 @@ export function PetSubmitForm() {
       parsed.spritesheetExt === "png" ? "image/png" : "image/webp";
     const spriteFile = new File(
       [parsed.spritesheetBlob],
-      `${slugify(parsed.petId)}-spritesheet.${parsed.spritesheetExt}`,
+      `${deriveSlug(parsed.petId, parsed.displayName)}-spritesheet.${parsed.spritesheetExt}`,
       { type: spriteMime },
     );
     const petJsonFile = new File(
       [parsed.petJsonString],
-      `${slugify(parsed.petId)}-pet.json`,
+      `${deriveSlug(parsed.petId, parsed.displayName)}-pet.json`,
       { type: "application/json" },
     );
 
@@ -323,7 +324,7 @@ export function PetSubmitForm() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          slugHint: slugify(parsed.petId),
+          slugHint: deriveSlug(parsed.petId, parsed.displayName),
           files: [
             {
               role: "zip",
@@ -899,15 +900,6 @@ function xhrPut(
     xhr.onabort = () => reject(new Error("xhr aborted"));
     xhr.send(body);
   });
-}
-
-function slugify(value: string): string {
-  return value
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 40);
 }
 
 function buildIssueUrl(

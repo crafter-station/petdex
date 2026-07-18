@@ -13,7 +13,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { verifyCliBearer } from "@/lib/cli-auth";
 import { db, schema } from "@/lib/db/client";
 import { cliVerifyRatelimit } from "@/lib/ratelimit";
-import { slugify } from "@/lib/submissions";
+import { deriveSlug } from "@/lib/submissions";
 
 export const runtime = "nodejs";
 
@@ -59,7 +59,7 @@ export async function POST(req: Request): Promise<Response> {
   const slugSet = new Set<string>();
   for (const c of candidates) {
     const raw = (c.petId ?? c.slugHint ?? "").toString();
-    const s = slugify(raw);
+    const s = deriveSlug(raw);
     if (s) slugSet.add(s);
   }
   const slugs = Array.from(slugSet);

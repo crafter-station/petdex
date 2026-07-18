@@ -14,6 +14,7 @@ import type { SubmissionReview, SubmittedPet } from "@/lib/db/schema";
 import { renderNewSubmissionEmail } from "@/lib/email-templates/new-submission";
 import { fallbackHandle, handleForUser } from "@/lib/handles";
 import {
+  deriveSlug,
   type SubmissionInput,
   slugify as slugifySubmission,
 } from "@/lib/submissions-validation";
@@ -21,6 +22,7 @@ import { getPreferredLocaleForUser } from "@/lib/user-locale";
 
 export type { SubmissionInput } from "@/lib/submissions-validation";
 export {
+  deriveSlug,
   MIN_SPRITE_DIM,
   REQUIRED_FIELDS,
   validateSubmission,
@@ -75,7 +77,7 @@ export async function persistSubmission(
   body: SubmissionInput,
   principal: SubmissionPrincipal,
 ): Promise<SubmissionResult> {
-  const requestedSlug = slugify(body.petId || body.displayName);
+  const requestedSlug = deriveSlug(body.petId, body.displayName);
   if (!requestedSlug) {
     return { ok: false, status: 400, error: "invalid_slug" };
   }

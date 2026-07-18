@@ -9,6 +9,7 @@ import { NextResponse } from "next/server";
 import { isAdmin } from "@/lib/admin";
 import { verifyCliBearer } from "@/lib/cli-auth";
 import { presignPut } from "@/lib/r2";
+import { deriveSlug } from "@/lib/slug";
 import { cliVerifyRatelimit, submitRatelimit } from "@/lib/ratelimit";
 
 export const runtime = "nodejs";
@@ -63,10 +64,10 @@ export async function POST(req: Request): Promise<Response> {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
 
-  const slugHint = sanitizeSlug(body.slugHint ?? body.petId ?? "pet");
-  if (!slugHint) {
-    return NextResponse.json({ error: "invalid_slug_hint" }, { status: 400 });
-  }
+  const slugHint =
+    sanitizeSlug(body.slugHint || body.petId || "") ||
+    deriveSlug(body.petId || body.slugHint || "") ||
+    "pet";
   const ext: "webp" | "png" = body.spritesheetExt === "png" ? "png" : "webp";
   const spriteCT = ext === "png" ? "image/png" : "image/webp";
 
