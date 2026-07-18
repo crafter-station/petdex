@@ -1,10 +1,11 @@
-//! Petdex on Native SDK — V1: a runtime-loaded pet animating its real
+//! Petdex on Native SDK, slice 1: a runtime-loaded pet animating its real
 //! atlas in a chromeless window. No WebView, no Node sidecar.
 //!
-//! The atlas is registered ONCE as a full texture; animation flips
-//! `widget.image_src` (the engine's source-rect, widgets.zig) per frame.
-//! The state table is the canonical map ported from the WebView
-//! renderer (petdex-desktop/src/main.zig STATES): 9 states, 8 columns,
+//! The atlas decodes app-side and each state's frames register into
+//! slots 1..8, replaced in place on state switch (see Sheet for why
+//! the full texture cannot ride registerImageBytes). The state table
+//! is the canonical map ported from the WebView renderer
+//! (petdex-desktop/src/main.zig STATES): 9 states, 8 columns,
 //! per-frame durations with idle's irregular blink timing.
 //!
 //! V1 demo affordance: Space cycles states (replaced by the :7777 hook
@@ -157,6 +158,7 @@ var sheet: Sheet = .{};
 
 fn parseTga(allocator: std.mem.Allocator, bytes: []const u8) !Sheet {
     if (bytes.len < 18) return error.BadTga;
+    if (bytes[1] != 0) return error.UnsupportedTga;
     const image_type = bytes[2];
     if (image_type != 2 and image_type != 10) return error.UnsupportedTga;
     const id_len: usize = bytes[0];
@@ -291,7 +293,11 @@ fn loadSheetPixels(io: std.Io, allocator: std.mem.Allocator, environ_map: *std.p
     defer allocator.free(pet.sheet_path);
 
     const tmp = environ_map.get("TMPDIR") orelse "/tmp";
-    const tga_path = try std.fs.path.join(allocator, &.{ tmp, "petdex-native-sheet.tga" });
+    // Pet-scoped temp name so two instances (or two pets) never race
+    // on the same conversion output.
+    const tga_name = try std.fmt.allocPrint(allocator, "petdex-native-{s}.tga", .{pet.name});
+    defer allocator.free(tga_name);
+    const tga_path = try std.fs.path.join(allocator, &.{ tmp, tga_name });
     defer allocator.free(tga_path);
 
     const argv = [_][]const u8{ "/usr/bin/sips", "-s", "format", "tga", pet.sheet_path, "--out", tga_path };

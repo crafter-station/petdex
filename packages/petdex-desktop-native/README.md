@@ -1,7 +1,7 @@
 # petdex-desktop-native
 
 Petdex on Native SDK (vercel-labs/native): no WebView, no Node sidecar.
-Rewrite branch — see `hunter-brain/04_Projects/_shaping/petdex-native-rewrite/`.
+Rewrite slice 1; strategy: upstream-first on latest Native SDK, no maintained fork.
 
 ## V1 (this package)
 
