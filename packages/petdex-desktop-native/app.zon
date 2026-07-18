@@ -1,0 +1,35 @@
+.{
+    .id = "dev.petdex.desktop-native",
+    .name = "petdex-desktop-native",
+    .display_name = "Petdex",
+    .description = "Petdex desktop pet on Native SDK: no WebView, no Node.",
+    .version = "0.3.0",
+    .icons = .{"assets/icon.png"},
+    .platforms = .{ "macos", "windows", "linux" },
+    .permissions = .{ "view", "command" },
+    .capabilities = .{ "native_views", "gpu_surfaces" },
+    .shell = .{
+        .windows = .{
+            .{
+                .label = "main",
+                .title = "Petdex",
+                .width = 192,
+                .height = 208,
+                .resizable = false,
+                .titlebar = "chromeless",
+                .restore_state = false,
+                .restore_policy = "center_on_primary",
+                .views = .{
+                    .{ .label = "pet-canvas", .kind = "gpu_surface", .fill = true, .role = "Pet canvas", .accessibility_label = "Petdex pet", .gpu_backend = "metal", .gpu_pixel_format = "bgra8_unorm", .gpu_present_mode = "timer", .gpu_alpha_mode = "opaque", .gpu_color_space = "srgb", .gpu_vsync = true },
+                },
+            },
+        },
+    },
+    .security = .{
+        .navigation = .{
+            .allowed_origins = .{ "zero://app", "zero://inline" },
+            .external_links = .{ .action = "deny" },
+        },
+    },
+    .web_engine = "system",
+}

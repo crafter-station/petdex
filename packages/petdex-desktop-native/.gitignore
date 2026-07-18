@@ -1,0 +1,3 @@
+.native/
+zig-out/
+.zig-cache/
