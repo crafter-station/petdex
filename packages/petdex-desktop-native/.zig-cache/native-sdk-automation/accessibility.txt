@@ -1,4 +1,0 @@
-a11y root=@w1 nodes=3
-@w1 role=window name="Petdex" bounds=(660,555 192x208)
-@w1/pet-canvas role=Pet canvas name="Petdex pet" bounds=(0,0 192x208)
-@w1/pet-canvas#16176238304766054921 role=image name="Petdex pet" bounds=(0,0 192x208)
