@@ -11,10 +11,15 @@ import {
   petPreviewKey,
   petPreviewUrl,
 } from "@/lib/pet-preview";
-import { renderPreviewStrip } from "@/lib/pet-public-artifacts";
+import {
+  publishPetPublicArtifacts,
+  renderPreviewStrip,
+} from "@/lib/pet-public-artifacts";
+import { petStickerKey } from "@/lib/pet-sticker-artifacts";
+import { petThumbnailKey } from "@/lib/pet-thumbnail";
 import { getAllApprovedPets } from "@/lib/pets";
 import { R2_BUCKET, r2 } from "@/lib/r2";
-import { keyFromR2PublicUrl } from "@/lib/r2-public-url";
+import { keyFromR2PublicUrl, R2_PUBLIC_BASE } from "@/lib/r2-public-url";
 import { isAllowedAssetUrl } from "@/lib/url-allowlist";
 
 type Mode = "check" | "apply";
@@ -139,6 +144,60 @@ if (mode === "apply") {
   await purgeCdnUrls(uploaded.map((result) => petPreviewUrl(result.slug)));
 
   if (failed.length > 0) process.exit(1);
+}
+
+// Thumbs and stickers are emitted at approval time by
+// publishPetPublicArtifacts but had no backfill: a pet from a failing
+// batch permanently lacked them until someone reran publish (issue #563).
+// Reconcile them here with the same skip-if-present semantics. Two HEADs
+// per pet act as the sentinel; publishPetPublicArtifacts re-checks each
+// key itself before rendering.
+const missingArtifacts = (
+  await mapLimit(validTasks, headConcurrency, async (task) => {
+    const [thumb, sticker] = await Promise.all([
+      previewExists(petThumbnailKey(task.slug)),
+      previewExists(petStickerKey(task.slug)),
+    ]);
+    return thumb && sticker ? null : task;
+  })
+).filter((task): task is PreviewTask => Boolean(task));
+
+console.log(`thumbs/stickers missing ${missingArtifacts.length}`);
+if (missingArtifacts.length > 0) {
+  console.log(
+    `thumbs/stickers sample ${missingArtifacts
+      .slice(0, 20)
+      .map((task) => task.slug)
+      .join(", ")}`,
+  );
+}
+
+if (mode === "apply" && missingArtifacts.length > 0) {
+  const publishedKeys: string[] = [];
+  const artifactFailures: Array<{ slug: string; key: string; reason: string }> =
+    [];
+  await mapLimit(missingArtifacts, publishConcurrency, async (task) => {
+    const result = await publishPetPublicArtifacts({
+      slug: task.slug,
+      spritesheetUrl: task.spritesheetPath,
+    });
+    publishedKeys.push(...result.published);
+    for (const failure of result.failed) {
+      artifactFailures.push({ slug: task.slug, ...failure });
+    }
+  });
+
+  console.log(`artifacts published ${publishedKeys.length}`);
+  console.log(`artifacts failed ${artifactFailures.length}`);
+  for (const failure of artifactFailures.slice(0, 20)) {
+    console.log(
+      `artifacts failed ${failure.slug} ${failure.key} ${failure.reason}`,
+    );
+  }
+
+  await purgeCdnUrls(publishedKeys.map((key) => `${R2_PUBLIC_BASE}/${key}`));
+
+  if (artifactFailures.length > 0) process.exit(1);
 }
 
 // The upload above writes straight to R2 over the S3 API, which does NOT

@@ -280,6 +280,12 @@ async function publishApprovedPublicArtifacts(
         slug: row.slug,
         failed: artifacts.failed,
       });
+    } else {
+      console.log(`[${actor}] public artifacts published`, {
+        slug: row.slug,
+        published: artifacts.published,
+        skipped: artifacts.skipped,
+      });
     }
   } catch (e) {
     console.error(`[${actor}] public artifact publish failed`, e);
