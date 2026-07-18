@@ -1,1 +1,1 @@
-window @w1 "Petdex" focused=false
+window @w1 "Petdex" focused=true

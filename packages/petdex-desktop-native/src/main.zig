@@ -14,6 +14,7 @@
 const std = @import("std");
 const runner = @import("runner");
 const native_sdk = @import("native_sdk");
+const hook_server = @import("hook_server.zig");
 
 pub const panic = std.debug.FullPanic(native_sdk.debug.capturePanic);
 
@@ -105,9 +106,10 @@ fn stateDef(state: State) StateDef {
 
 pub const Msg = union(enum) {
     frame_tick: native_sdk.EffectTimer,
+    poll_tick: native_sdk.EffectTimer,
     cycle_state,
 
-    pub const view_unbound = .{ "frame_tick", "cycle_state" };
+    pub const view_unbound = .{ "frame_tick", "poll_tick", "cycle_state" };
 };
 
 pub const Model = struct {
@@ -116,6 +118,12 @@ pub const Model = struct {
     pet_name_len: usize = 0,
     state: State = .idle,
     frame_index: usize = 0,
+    // Sidecar dwell semantics (state-queue.ts): the displayed state
+    // holds for its dwell before the next queued event applies, so
+    // running/idle pinball under heavy tool calls never thrashes.
+    shown_at_ms: i64 = 0,
+    shown_dwell_ms: u32 = 0,
+    bubble: hook_server.Bubble = .{},
 };
 
 pub const Effects = native_sdk.Effects(Msg);
@@ -343,7 +351,48 @@ fn registerStateFrames(state: State, fx: *Effects) void {
     }
 }
 
+const poll_timer_key: u64 = 2;
+const poll_interval_ms: u32 = 100;
+const min_dwell_ms: u32 = 250;
+
+/// Transient states whose duration is intrinsic to the animation;
+/// they revert to idle when their dwell expires and nothing is queued
+/// (steady states persist until the hooks send the next event).
+fn isDurationState(state: State) bool {
+    return switch (state) {
+        .waving, .failed, .review, .jumping => true,
+        else => false,
+    };
+}
+
+/// Port of state-queue.ts dwellFor.
+fn dwellFor(state: State, duration_ms: u32) u32 {
+    if (isDurationState(state) and duration_ms > 0) return @max(duration_ms, min_dwell_ms);
+    if (duration_ms > min_dwell_ms) return duration_ms;
+    return min_dwell_ms;
+}
+
+fn applyState(model: *Model, state: State, duration_ms: u32, fx: *Effects) void {
+    model.state = state;
+    model.frame_index = 0;
+    model.shown_at_ms = fx.wallMs();
+    model.shown_dwell_ms = dwellFor(state, duration_ms);
+    registerStateFrames(state, fx);
+    armFrameTimer(model, fx);
+}
+
 pub fn boot(model: *Model, fx: *Effects) void {
+    if (env_home) |home| {
+        hook_server.start(boot_allocator, home) catch |err| {
+            std.debug.print("petdex: hook server failed to start ({s})\n", .{@errorName(err)});
+        };
+    }
+    fx.startTimer(.{
+        .key = poll_timer_key,
+        .interval_ms = poll_interval_ms,
+        .mode = .repeating,
+        .on_fire = Effects.timerMsg(.poll_tick),
+    });
     if (sheet.pixels.len == 0) return;
     registerStateFrames(model.state, fx);
     model.sheet_loaded = true;
@@ -363,10 +412,26 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             armFrameTimer(model, fx);
         },
         .cycle_state => {
-            model.state = model.state.next();
-            model.frame_index = 0;
-            registerStateFrames(model.state, fx);
-            armFrameTimer(model, fx);
+            applyState(model, model.state.next(), 0, fx);
+        },
+        .poll_tick => |timer| {
+            if (timer.outcome != .fired) return;
+            if (!model.sheet_loaded) return;
+            _ = hook_server.mailbox.takeBubble(&model.bubble);
+            const now = fx.wallMs();
+            const dwell_over = now - model.shown_at_ms >= model.shown_dwell_ms;
+            if (!dwell_over) return;
+            if (hook_server.mailbox.pop()) |event| {
+                const next_state = std.meta.stringToEnum(State, event.slice()) orelse return;
+                if (next_state != model.state or isDurationState(next_state)) {
+                    applyState(model, next_state, event.duration_ms, fx);
+                } else {
+                    model.shown_at_ms = now;
+                    model.shown_dwell_ms = dwellFor(next_state, event.duration_ms);
+                }
+            } else if (isDurationState(model.state)) {
+                applyState(model, .idle, 0, fx);
+            }
         },
     }
 }
