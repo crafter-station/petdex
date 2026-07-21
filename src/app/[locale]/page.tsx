@@ -152,23 +152,24 @@ export default async function Home({
                 brand: (chunks) => <strong>{chunks}</strong>,
               })}
             </p>
-            <div className="mt-5 flex w-full flex-col items-stretch justify-center gap-2 sm:flex-row sm:items-center">
-              <StaticCommandLine
-                command="npx petdex install boba"
-                className="w-full sm:w-auto"
-              />
-              <DownloadDesktopCTA
-                href={`/${locale}/download`}
-                source="hero_primary"
-                className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-inverse px-5 text-sm font-medium text-on-inverse transition hover:bg-inverse-hover"
-              >
-                {t("downloadCta")}
-                <ArrowRight className="size-4" />
-              </DownloadDesktopCTA>
-            </div>
           </div>
 
           <HeroPetParade pets={heroPets} isZh={isZh} />
+
+          <div className="mt-8 flex w-full flex-col items-stretch justify-center gap-2 sm:flex-row sm:items-center">
+            <StaticCommandLine
+              command="npx petdex install boba"
+              className="w-full sm:w-auto"
+            />
+            <DownloadDesktopCTA
+              href={`/${locale}/download`}
+              source="hero_primary"
+              className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-inverse px-5 text-sm font-medium text-on-inverse transition hover:bg-inverse-hover"
+            >
+              {t("downloadCta")}
+              <ArrowRight className="size-4" />
+            </DownloadDesktopCTA>
+          </div>
         </div>
       </section>
 
@@ -290,7 +291,7 @@ async function HeroPetParade({ pets, isZh }: HeroPetParadeProps) {
             href={`/pets/${pet.slug}`}
             prefetch={false}
             aria-label={t("openPet", { name: pet.displayName })}
-            className={`group relative flex flex-col items-center rounded-2xl border border-border-base bg-surface/60 px-3 pt-3 pb-2 shadow-lg shadow-blue-900/10 backdrop-blur-md transition hover:-translate-y-1 hover:bg-surface ${tilt} ${lift}`}
+            className={`group relative flex flex-col items-center transition hover:-translate-y-1 ${tilt} ${lift}`}
           >
             <PetSprite
               src={pet.spritesheetPath}
