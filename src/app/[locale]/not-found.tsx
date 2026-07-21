@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-import { ArrowRight, Search, Sparkles } from "lucide-react";
+import { Search } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 
 import { StaticCommandLine } from "@/components/download/static-command-line";
@@ -51,20 +51,6 @@ export default async function NotFound() {
             >
               <Search className="size-4" />
               {t("browseGallery")}
-            </Link>
-            <Link
-              href="/about"
-              className="inline-flex h-12 items-center justify-center gap-2 rounded-full border border-border-base bg-surface/70 px-6 text-sm font-medium text-foreground backdrop-blur transition hover:bg-white dark:hover:bg-stone-800"
-            >
-              <Sparkles className="size-4" />
-              {t("about")}
-            </Link>
-            <Link
-              href="/submit"
-              className="inline-flex h-12 items-center justify-center gap-2 rounded-full border border-border-base bg-surface/70 px-6 text-sm font-medium text-foreground backdrop-blur transition hover:bg-white dark:hover:bg-stone-800"
-            >
-              {t("submit")}
-              <ArrowRight className="size-4" />
             </Link>
           </div>
         </div>
