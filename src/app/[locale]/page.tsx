@@ -23,7 +23,6 @@ import { JsonLd } from "@/components/layout/json-ld";
 import { PetSprite } from "@/components/pets/pet-sprite";
 import { SurprisePetCard } from "@/components/pets/surprise-pet-card";
 import { SiteFooter } from "@/components/site-footer";
-import { SiteHeader } from "@/components/site-header";
 import {
   Card,
   CardContent,
@@ -133,8 +132,7 @@ export default async function Home({
     <main className="min-h-dvh bg-background text-foreground">
       <JsonLd data={jsonLd} />
       <SurprisePetCard initialPet={surprisePet} />
-      <SiteHeader />
-      <section className="petdex-cloud relative -mt-[84px] overflow-clip pt-[84px]">
+      <section className="petdex-cloud relative overflow-clip">
         <div className="relative mx-auto flex w-full max-w-[1440px] flex-col px-5 pb-10 md:px-8">
           <div className="mt-12 flex flex-col items-center text-center md:mt-16">
             <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
