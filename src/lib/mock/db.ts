@@ -241,10 +241,13 @@ async function seed(client: PGlite): Promise<void> {
     const id = `pet_mock_${i.toString().padStart(3, "0")}`;
     const assetBase = `${MOCK_R2_PUBLIC_BASE}/curated/${slug}`;
     const isCurated = MOCK_CURATED_ASSET_SLUGS.has(slug);
-    const fallbackSpritesheet = mockSpritesheetDataUri(idea.name, slug);
-    const spritesheetUrl = isCurated
-      ? `${assetBase}/spritesheet.webp`
-      : fallbackSpritesheet;
+    // Always use the generated data-URI sprite, even for "curated" slugs.
+    // MOCK_R2_PUBLIC_BASE points at the legacy pub-*.r2.dev host, which
+    // next.config.ts documents as dead and which isn't on the CSP
+    // img-src/media-src allowlist anyway — pointing PetSprite at it just
+    // renders a blank card. The generated SVG has zero network/CSP
+    // dependency, which is the whole point of mock mode.
+    const spritesheetUrl = mockSpritesheetDataUri(idea.name, slug);
     // Non-curated mocks have no real pet.json or zip on R2. Point at a
     // recognizable mock:// URI so mock-backed checks see an honest 404 if
     // they try install/download instead of receiving the SVG markup.
