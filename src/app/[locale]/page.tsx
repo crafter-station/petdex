@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-import { ArrowRight } from "lucide-react";
+import { Download } from "lucide-react";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 
 import {
@@ -18,7 +18,6 @@ import { cn } from "@/lib/utils";
 import { CollectionActionMenu } from "@/components/collections/collection-action-menu";
 import { CollectionCover } from "@/components/collections/collection-cover";
 import { DownloadDesktopCTA } from "@/components/download/download-desktop-cta";
-import { StaticCommandLine } from "@/components/download/static-command-line";
 import { JsonLd } from "@/components/layout/json-ld";
 import { PetSprite } from "@/components/pets/pet-sprite";
 import { SurprisePetCard } from "@/components/pets/surprise-pet-card";
@@ -147,28 +146,31 @@ export default async function Home({
               </p>
             )}
             <p className="mt-5 max-w-xl text-balance text-base leading-7 text-muted-1 md:text-lg">
-              {t.rich("tagline", {
-                totalPets,
-                brand: (chunks) => <strong>{chunks}</strong>,
-              })}
+              A public gallery of animated pets for Codex.
+              <br />
+              <span className="text-muted-3">
+                9 states each. Drop in, animate, ship.
+              </span>
             </p>
           </div>
 
           <HeroPetParade pets={heroPets} isZh={isZh} />
 
           <div className="mt-8 flex w-full flex-col items-stretch justify-center gap-2 sm:flex-row sm:items-center">
-            <StaticCommandLine
-              command="npx petdex install boba"
-              className="w-full sm:w-auto"
-            />
             <DownloadDesktopCTA
               href={`/${locale}/download`}
               source="hero_primary"
               className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-inverse px-5 text-sm font-medium text-on-inverse transition hover:bg-inverse-hover"
             >
-              {t("downloadCta")}
-              <ArrowRight className="size-4" />
+              <Download className="size-4" />
+              Download all pets
             </DownloadDesktopCTA>
+            <Link
+              href="#gallery"
+              className="inline-flex h-12 items-center justify-center gap-2 rounded-full border border-border-base bg-surface/70 px-6 text-sm font-medium text-foreground backdrop-blur transition hover:bg-surface"
+            >
+              Browse gallery
+            </Link>
           </div>
         </div>
       </section>
