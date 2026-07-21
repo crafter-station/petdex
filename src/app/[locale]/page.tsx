@@ -17,18 +17,13 @@ import { cn } from "@/lib/utils";
 
 import { CollectionActionMenu } from "@/components/collections/collection-action-menu";
 import { CollectionCover } from "@/components/collections/collection-cover";
-import { DiscordLink } from "@/components/community/discord-link";
-import { WechatCommunityDialog } from "@/components/community/wechat-community-dialog";
 import { DownloadDesktopCTA } from "@/components/download/download-desktop-cta";
 import { StaticCommandLine } from "@/components/download/static-command-line";
-import { DiscordIcon } from "@/components/icons/wechat-icon";
 import { JsonLd } from "@/components/layout/json-ld";
-import { PetGallery } from "@/components/pets/pet-gallery";
 import { PetSprite } from "@/components/pets/pet-sprite";
 import { SurprisePetCard } from "@/components/pets/surprise-pet-card";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
-import { SubmitCTA } from "@/components/submit/submit-cta";
 import {
   Card,
   CardContent,
@@ -96,7 +91,6 @@ export default async function Home({
   ]);
   const totalPets = initialSearch.total;
   const formattedTotalPets = formatLocalizedNumber(totalPets, locale);
-  const showWechatCommunity = isZh;
   const surprisePet = randomPet ? toSurprisePet(randomPet) : null;
 
   const jsonLd = [
@@ -177,49 +171,10 @@ export default async function Home({
           </div>
 
           <HeroPetParade pets={heroPets} isZh={isZh} />
-
-          <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
-            <SubmitCTA className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-inverse px-6 text-sm font-medium text-on-inverse transition hover:bg-inverse-hover">
-              {t("submitCta")}
-            </SubmitCTA>
-            {showWechatCommunity ? (
-              <WechatCommunityDialog
-                source="hero_secondary"
-                className="h-12 bg-[#07C160]/10 px-6 text-[#07C160] hover:bg-[#07C160]/16"
-              >
-                {t("joinWeChat")}
-              </WechatCommunityDialog>
-            ) : process.env.NEXT_PUBLIC_DISCORD_INVITE_URL && !isZh ? (
-              <DiscordLink
-                href={process.env.NEXT_PUBLIC_DISCORD_INVITE_URL}
-                source="hero_secondary"
-                className="inline-flex h-12 items-center justify-center gap-2 rounded-full border border-[#5865F2]/25 bg-[#5865F2]/10 px-6 text-sm font-medium text-[#5865F2] backdrop-blur transition hover:bg-[#5865F2]/16"
-              >
-                <DiscordIcon className="size-4" />
-                {t("joinDiscord")}
-              </DiscordLink>
-            ) : (
-              <Link
-                href="#gallery"
-                className="inline-flex h-12 items-center justify-center gap-2 rounded-full border border-border-base bg-surface/70 px-6 text-sm font-medium text-foreground backdrop-blur transition hover:bg-surface"
-              >
-                {t("browseGallery")}
-              </Link>
-            )}
-          </div>
         </div>
       </section>
 
       <FeaturedCollections collections={collections} isZh={isZh} />
-
-      <section
-        id="gallery"
-        className="mx-auto flex w-full max-w-[1440px] flex-col gap-8 px-5 py-12 md:px-8 md:py-16"
-      >
-        {totalPets > 0 ? (
-          <PetGallery initial={initialSearch} totalPets={totalPets} />
-        ) : null}
-      </section>
 
       <SiteFooter />
     </main>
