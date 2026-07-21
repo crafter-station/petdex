@@ -255,17 +255,22 @@ async function seed(client: PGlite): Promise<void> {
     const zipUrl = isCurated
       ? `${assetBase}/${slug}.zip`
       : `mock://no-asset/${slug}/${slug}.zip`;
+    // First 6 are marked featured so the homepage hero (which pulls
+    // getFeaturedPetsWithMetrics(6), filtered on featured = true) has
+    // pets to show — the column otherwise defaults to false and the
+    // hero silently renders nothing under mock mode.
+    const featured = i < 6;
     await client.query(
       `INSERT INTO submitted_pets (
         id, slug, display_name, description, spritesheet_url,
         pet_json_url, zip_url, kind, vibes, tags,
         status, source, owner_id, owner_email, credit_name,
-        approved_at
+        approved_at, featured
       ) VALUES (
         $1, $2, $3, $4, $5,
         $6, $7, 'creature', '[]'::jsonb, $8::jsonb,
         'approved', 'submit', $9, $10, $11,
-        now()
+        now(), $12
       )
       ON CONFLICT (slug) DO NOTHING`,
       [
@@ -280,6 +285,7 @@ async function seed(client: PGlite): Promise<void> {
         MOCK_USER.userId,
         MOCK_USER.email,
         MOCK_USER.username,
+        featured,
       ],
     );
   }
