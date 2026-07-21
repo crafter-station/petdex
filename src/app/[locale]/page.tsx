@@ -82,7 +82,7 @@ export default async function Home({
   ];
 
   const [heroPets, initialSearch, collections, randomPet] = await Promise.all([
-    getFeaturedPetsWithMetrics(6),
+    getFeaturedPetsWithMetrics(5),
     searchPets({ sort: "installed", limit: HOME_INITIAL_GALLERY_LIMIT }),
     getCollectionsBySlugs(LANDING_COLLECTION_ORDER, 6),
     getRandomPet(),
@@ -132,7 +132,7 @@ export default async function Home({
       <JsonLd data={jsonLd} />
       <SurprisePetCard initialPet={surprisePet} />
       <section className="petdex-cloud relative overflow-clip">
-        <div className="relative mx-auto flex w-full max-w-[1440px] flex-col px-5 pb-10 md:px-8">
+        <div className="relative mx-auto flex w-full max-w-[1440px] flex-col px-5 pb-4 md:px-8">
           <div className="mt-12 flex flex-col items-center text-center md:mt-16">
             <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
               {t("eyebrow")}

@@ -259,7 +259,7 @@ async function seed(client: PGlite): Promise<void> {
       ? `${assetBase}/${slug}.zip`
       : `mock://no-asset/${slug}/${slug}.zip`;
     // First 6 are marked featured so the homepage hero (which pulls
-    // getFeaturedPetsWithMetrics(6), filtered on featured = true) has
+    // getFeaturedPetsWithMetrics(N), filtered on featured = true) has
     // pets to show — the column otherwise defaults to false and the
     // hero silently renders nothing under mock mode.
     const featured = i < 6;
@@ -323,7 +323,6 @@ function mockSpritesheetDataUri(name: string, slug: string): string {
       const y = row * 208;
       const bob = col % 2 === 0 ? 0 : -5;
       return `<g transform="translate(${x} ${y})">
-        <rect width="192" height="208" fill="#f8fafc"/>
         <ellipse cx="96" cy="${157 - bob}" rx="54" ry="12" fill="#d9e2f0"/>
         <circle cx="96" cy="${92 + bob}" r="42" fill="${accent}"/>
         <circle cx="80" cy="${82 + bob}" r="5" fill="#111827"/>
