@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, utimesSync, writeFileSync } from "node:fs";
+import { PassThrough } from "node:stream";
 
 import {
   clipPreview,
@@ -7,10 +8,39 @@ import {
   eventFromArgs,
   lastAssistantText,
   pruneSessions,
+  readStdin,
   rememberSessionTitle,
   sessionTitle,
   stateForEvent,
 } from "./bubble-runner";
+
+describe("readStdin", () => {
+  test("returns after EOF with the complete payload", async () => {
+    const input = new PassThrough();
+    const reading = readStdin(input);
+    input.end('{"tool_name":"Read"}');
+    await expect(reading).resolves.toBe('{"tool_name":"Read"}');
+  });
+
+  test("returns within the deadline when stdin stays open", async () => {
+    const input = new PassThrough();
+    const start = performance.now();
+    const reading = readStdin(input);
+    input.write('{"tool_name":"Read"}');
+    await expect(reading).resolves.toBe('{"tool_name":"Read"}');
+    expect(performance.now() - start).toBeLessThan(500);
+    input.destroy();
+  });
+
+  test("keeps the first 64KB while continuing to drain oversized input", async () => {
+    const input = new PassThrough();
+    const payload = "x".repeat(96 * 1024);
+    const reading = readStdin(input);
+    input.end(payload);
+    const result = await reading;
+    expect(result).toHaveLength(64 * 1024);
+  });
+});
 
 describe("eventFromArgs - session-level", () => {
   test("stop returns session.end", () => {
