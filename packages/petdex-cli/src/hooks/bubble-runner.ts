@@ -179,6 +179,35 @@ function safeSessionId(raw: unknown): string | null {
 
 type HookStdin = Readable & { isTTY?: boolean };
 
+function requiredUtf8ContinuationBytes(byte: number): number | null {
+  if (byte <= 0x7f) return 0;
+  if (byte >= 0xc2 && byte <= 0xdf) return 1;
+  if (byte >= 0xe0 && byte <= 0xef) return 2;
+  if (byte >= 0xf0 && byte <= 0xf4) return 3;
+  return null;
+}
+
+function completeUtf8PrefixLength(prefix: Buffer): number {
+  let leadIndex = prefix.length - 1;
+  while (leadIndex >= 0 && (prefix[leadIndex] & 0b1100_0000) === 0b1000_0000) {
+    leadIndex -= 1;
+  }
+
+  if (leadIndex < 0) return prefix.length;
+
+  const requiredContinuations = requiredUtf8ContinuationBytes(
+    prefix[leadIndex],
+  );
+  const actualContinuations = prefix.length - leadIndex - 1;
+  if (
+    requiredContinuations !== null &&
+    actualContinuations < requiredContinuations
+  ) {
+    return leadIndex;
+  }
+  return prefix.length;
+}
+
 /**
  * Map a hook phase + tool to the sprite state we want.
  * Mirrors the matchers in agents.ts so the hook command is a single
@@ -226,7 +255,8 @@ export async function readStdin(
       input.off("data", onData);
       input.off("end", finish);
       input.off("error", finish);
-      resolve(Buffer.concat(prefix, prefixBytes).toString("utf8"));
+      const retained = Buffer.concat(prefix, prefixBytes);
+      resolve(retained.toString("utf8", 0, completeUtf8PrefixLength(retained)));
     };
 
     const onData = (chunk: Buffer | string) => {

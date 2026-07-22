@@ -159,6 +159,19 @@ describe("readStdin", () => {
     await expect(reading).resolves.toBe(retained);
   });
 
+  test("drops a partial UTF-8 code point at the retained byte boundary", async () => {
+    const input = new PassThrough();
+    const retained = "a".repeat(64 * 1024 - 1);
+    const multibyteCharacter = String.fromCodePoint(0x591a);
+    const reading = readStdin(input);
+
+    input.end(`${retained}${multibyteCharacter}${"x".repeat(64 * 1024)}`);
+
+    const result = await reading;
+    expect(result).toBe(retained);
+    expect(result).not.toContain("\uFFFD");
+  });
+
   test("keeps the hook pipe open when disabled while a host finishes a delayed large payload", async () => {
     const fakeHome = mkdtempSync(join(tmpdir(), "petdex-hook-stdin-"));
     const runtimeDir = join(fakeHome, ".petdex", "runtime");
