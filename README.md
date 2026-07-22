@@ -2,171 +2,70 @@
 
 <img src="public/brand/petdex-desktop-icon.png" alt="Petdex" width="120" />
 
-<h1>Petdex</h1>
+<h1>Petdex (homepage-only, mock mode)</h1>
 
 <p>
-  The public gallery of animated companions for Codex.
-  <br />
-  Browse, install, and submit pets with one command.
-</p>
-
-<p>
-  <a href="https://petdex.dev"><strong>petdex.dev</strong></a>
-  &nbsp;·&nbsp;
-  <a href="https://petdex.dev/built-with">Built with Petdex</a>
-  &nbsp;·&nbsp;
-  <a href="https://discord.gg/byhubdyBTe">Discord</a>
-  &nbsp;·&nbsp;
-  <a href="https://www.npmjs.com/package/petdex">npm</a>
-</p>
-
-<p>
-  <a href="https://www.npmjs.com/package/petdex"><img src="https://img.shields.io/npm/v/petdex?style=flat-square&label=cli&color=000000" alt="npm version" /></a>
-  <a href="https://github.com/crafter-station/petdex/stargazers"><img src="https://img.shields.io/github/stars/crafter-station/petdex?style=flat-square&color=000000" alt="GitHub stars" /></a>
-  <a href="https://github.com/crafter-station/petdex/blob/main/LICENSE"><img src="https://img.shields.io/github/license/crafter-station/petdex?style=flat-square&color=000000" alt="MIT license" /></a>
-  <a href="https://github.com/crafter-station/petdex/issues"><img src="https://img.shields.io/github/issues/crafter-station/petdex?style=flat-square&color=000000" alt="GitHub issues" /></a>
+  A trimmed-down copy of the Petdex homepage — the hero, the pet
+  cards, and the footer — running against an in-memory mock database.
+  No CLI, no desktop app, no other pages.
 </p>
 
 </div>
 
 ---
 
-## What is Petdex
+## What's actually in this repo
 
-Petdex is three things working together:
+This is a stripped-down slice of the original [Petdex](https://petdex.dev) project, kept to
+just what's needed to build and run the homepage:
 
-1. **A web gallery** at [petdex.dev](https://petdex.dev) where the community submits, reviews, and showcases animated pets in the Codex sprite format.
-2. **A CLI** that installs any pet on your machine with one command and ships them straight into Codex.
-3. **A desktop app** that floats a pet on your screen and reacts to your coding agent's activity in real time.
+- **One route**: `src/app/[locale]/page.tsx`. There's no gallery page, no
+  `/pets/<slug>`, no submit flow, no admin, no CLI, no desktop app —
+  those all lived elsewhere in the original project and aren't part of
+  this copy.
+- **Mock data only**: `pets/ideas.json` seeds an in-memory Postgres
+  instance ([PGlite](https://pglite.dev/)) at startup via
+  `src/lib/mock/db.ts`. There's no real Postgres, Redis, Clerk, or R2
+  behind this — every external service is stubbed out when
+  `PETDEX_MOCK=1` is set.
+- **A handful of supporting API routes** the homepage's header/footer
+  actually call (profile locale switching, feedback, notifications,
+  OG image, the surprise-pet shuffle button) — everything else was
+  removed as dead code.
 
-Every pet is a folder. Every folder is a Pokédex entry. Every entry is one `npx petdex install` away.
-
-## Quick start
-
-Follow this checklist to get a pet installed, visible in Codex, and connected to the desktop app.
-
-1. Install a known pet:
-
-```sh
-npx petdex install boba
-```
-
-You should see `~/.codex/pets/boba/` with `pet.json` and a spritesheet.
-
-2. Initialize Petdex Desktop and agent hooks:
+## Run it
 
 ```sh
-npx petdex init
-```
-
-This downloads the desktop app, starts it, and wires supported agents for `/petdex`.
-
-3. Open Codex, go to **Settings → Appearance → Pets**, choose **Boba**, and click **Select**. Use `/pet` inside Codex to wake the pet or tuck it away.
-
-4. Verify the setup:
-
-```sh
-npx petdex doctor
-```
-
-If hooks are installed, you can also type `/petdex status` inside a supported agent.
-
-## For users
-
-| You want to... | Do this |
-| --- | --- |
-| Browse pets | Visit [petdex.dev](https://petdex.dev) |
-| Install a pet | `npx petdex install <slug>` |
-| Switch active mascot | `npx petdex select` (interactive picker) or `npx petdex select <slug>` |
-| Run the desktop floater | `npx petdex init` (downloads the `.dmg` and wires Codex/Claude Code hooks) |
-| Make a pet | Use the `hatch-pet` skill inside Codex, or build one with the [Petdex creator tools](https://petdex.dev/create) |
-| Submit a pet | `npx petdex submit ./my-pet/` or drop it through the web submitter |
-| Join the community | [Discord](https://discord.gg/byhubdyBTe) |
-
-Full CLI reference: [`packages/petdex-cli/README.md`](./packages/petdex-cli/README.md).
-
-## For builders
-
-If you want to build on top of Petdex (a desktop client, a wearable, an SDK, a Discord bot, anything), you have two stable surfaces:
-
-- **The HTTP API.** `petdex.dev/api/manifest` returns every approved pet with its slug, spritesheet URL, animation states, and metadata.
-- **The pet package format.** Every pet is a `pet.json` plus a `spritesheet.{webp,png}` rendered as an 8×9 grid of 192×208 frames.
-
-21 open-source and source-available projects already build on these. See [petdex.dev/built-with](https://petdex.dev/built-with) for the catalog, then [submit yours via the issue template](https://github.com/crafter-station/petdex/issues/new?template=built-with.yml).
-
-## Architecture
-
-```text
-crafter-station/petdex
-├── src/
-│   ├── app/[locale]/          Public site: gallery, /pets/<slug>, /collections, /built-with, /community, /create, /download, /submit, /u/<handle>, ...
-│   ├── app/api/cli/           CLI endpoints: OAuth config, submit (zip → presigned R2), dedup check, register
-│   ├── app/api/manifest/      Public manifest: every approved pet with its spritesheet URL
-│   ├── app/api/admin/         Admin review surface for submissions, edits, collection requests
-│   └── lib/db/schema.ts       Drizzle schema (Postgres)
-├── packages/
-│   ├── petdex-cli/            npm `petdex` (auth, list, install, select, submit, hooks, init)
-│   ├── petdex-desktop/        Zig + WebKit floating mascot for macOS
-│   └── discord-bot/           Discord.js bot for the Petdex server
-├── public/built-with/         Screenshots for the community page
-├── public/brand/              Logos, OS icons, Discord icon
-└── drizzle/                   SQL migrations (Postgres schema history)
-```
-
-**Web stack**: Next.js 16, React 19, Tailwind, Drizzle, Postgres, Redis, Clerk, R2.<br />
-**CLI**: Bun + TypeScript, ships as a single npm binary. Auth via Clerk OAuth + PKCE.<br />
-**Desktop**: Zig on a fork of [`vercel-labs/zero-native`](https://github.com/vercel-labs/zero-native), HTTP sidecar in Node for agent hooks.
-
-## Develop locally
-
-Two paths are supported.
-
-| Goal | Command | Setup |
-| --- | --- | --- |
-| Local full stack | `bun run dev:docker` | Docker or Podman, ~30s warm-up. |
-| Run against real services | `bun run dev` | `.env.local` filled (maintainers only). |
-
-```sh
-git clone https://github.com/crafter-station/petdex.git
-cd petdex
 bun install
-bun run dev:docker
 ```
 
-Open [localhost:3000](http://localhost:3000). Full guide in [`CONTRIBUTING.md`](./CONTRIBUTING.md).
+Mock mode needs a couple of placeholder env vars so nothing crashes
+reaching for a real database or API key — `.env.mock` already has
+them, along with `PETDEX_MOCK=1`.
 
-## Pet package format
+**Dev server** (live reload):
 
-Every pet is two files:
-
-```text
-my-pet/
-├── pet.json                Metadata: name, slug, tags, vibes, kind, frame size, animation states
-└── spritesheet.webp        9 rows × 8 cols = 72 frames of 192×208 px each (or .png)
+```sh
+set -a && source .env.mock && set +a
+bunx next dev
 ```
 
-Animation states are the rows: `idle`, `wave`, `run`, `failed`, `review`, `jump`, `extra1`, `extra2`. Codex maps these to its agent activity hooks. Loop timing defaults to 1100ms at 6 frames per state.
+**Production-style build + run**:
 
-## Contribute
+```sh
+bun --env-file=.env.mock run build
+bun --env-file=.env.mock run start
+```
 
-- **Submit a pet:** [petdex.dev/submit](https://petdex.dev/submit) or `npx petdex submit <path>`.
-- **List your project:** open a [Built with Petdex issue](https://github.com/crafter-station/petdex/issues/new?template=built-with.yml).
-- **Fix a bug or add a feature:** read [`CONTRIBUTING.md`](./CONTRIBUTING.md), then open a PR.
-- **Hang out:** [Discord](https://discord.gg/byhubdyBTe) has channels for shipping (`#wip`, `#ship-or-sink`), feedback (`#cli-feedback`), and showcases (`#showcase`).
+Either way, open `http://localhost:3000`.
 
-## Pet IP and takedowns
+## Tests
 
-Pets are user-submitted fan art. Petdex does not claim rights to any underlying IP. If you hold rights to a character and want a pet removed, file a [takedown request](https://github.com/crafter-station/petdex/issues/new?template=takedown.yml) and we review within 48 hours.
+```sh
+bun test --env-file=.env.mock
+```
 
 ## License
 
-The source code is [MIT](./LICENSE). Pet assets are owned by their submitters under whatever license they choose to declare.
-
----
-
-<div align="center">
-
-Made by <a href="https://crafter.run">Crafter Station</a>.
-Lead: <a href="https://x.com/RaillyHugo">@RaillyHugo</a>.
-
-</div>
+The source code is [MIT](./LICENSE). Pet assets in `pets/ideas.json` are
+placeholder mock data, not real submissions.
