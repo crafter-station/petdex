@@ -1,27 +1,13 @@
 import { NextResponse } from "next/server";
 
 import { auth } from "@clerk/nextjs/server";
-import { Ratelimit } from "@upstash/ratelimit";
-import { Redis } from "@upstash/redis";
 
+import { feedbackRatelimit } from "@/lib/ratelimit";
 import { requireSameOrigin } from "@/lib/same-origin";
 
 export const runtime = "nodejs";
 
 const MAX_LEN = 4000;
-
-const redis =
-  process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
-    ? Redis.fromEnv()
-    : null;
-
-const ratelimit = redis
-  ? new Ratelimit({
-      redis,
-      limiter: Ratelimit.fixedWindow(5, "1 h"),
-      prefix: "rl:feedback",
-    })
-  : null;
 
 export async function POST(req: Request): Promise<Response> {
   const csrf = requireSameOrigin(req);
@@ -29,18 +15,16 @@ export async function POST(req: Request): Promise<Response> {
   const { userId } = await auth();
 
   // 5 submissions per hour per IP / per user.
-  if (ratelimit) {
-    const ipHeader =
-      req.headers.get("x-forwarded-for") ?? req.headers.get("x-real-ip") ?? "";
-    const ip = ipHeader.split(",")[0]?.trim() || "anon";
-    const key = userId ?? ip;
-    const { success } = await ratelimit.limit(key);
-    if (!success) {
-      return NextResponse.json(
-        { error: "rate_limited", message: "Try again in an hour." },
-        { status: 429 },
-      );
-    }
+  const ipHeader =
+    req.headers.get("x-forwarded-for") ?? req.headers.get("x-real-ip") ?? "";
+  const ip = ipHeader.split(",")[0]?.trim() || "anon";
+  const key = userId ?? ip;
+  const { success } = await feedbackRatelimit.limit(key);
+  if (!success) {
+    return NextResponse.json(
+      { error: "rate_limited", message: "Try again in an hour." },
+      { status: 429 },
+    );
   }
 
   let body: { message?: string; email?: string };

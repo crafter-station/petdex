@@ -202,3 +202,11 @@ export const wechatQrUploadRatelimit = createRatelimit({
   limiter: Ratelimit.slidingWindow(5, "1 h"),
   prefix: "petdex:wechat-qr-upload",
 });
+
+// Feedback submissions — 5/hour per IP or user, generous enough for a
+// real bug report + a couple follow-ups without opening a spam vector.
+export const feedbackRatelimit = createRatelimit({
+  redis,
+  limiter: Ratelimit.fixedWindow(5, "1 h"),
+  prefix: "rl:feedback",
+});
