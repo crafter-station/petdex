@@ -1,37 +1,21 @@
-<div align="center">
+# Kekka Marketing
 
-<img src="public/brand/petdex-desktop-icon.png" alt="Petdex" width="120" />
+Kekka Marketing's homepage — hero section, service highlights, and 
+footer, built on Next.js and Tailwind CSS.
 
-<h1>Petdex (homepage-only, mock mode)</h1>
+## What's in this repo
 
-<p>
-  A trimmed-down copy of the Petdex homepage — the hero, the pet
-  cards, and the footer — running against an in-memory mock database.
-  No CLI, no desktop app, no other pages.
-</p>
+- One route: `src/app/[locale]/page.tsx` — the homepage. No other 
+  pages, no admin panel, no CLI.
+- Static data: content is hardcoded directly in the codebase 
+  (`src/lib/static-pets.ts` and related files) — no external database, 
+  no Postgres, no Redis required to run this locally.
+- A small set of supporting API routes for header/footer functionality 
+  (locale switching, feedback, notifications, OG image generation).
 
-</div>
-
----
-
-## What's actually in this repo
-
-This is a stripped-down slice of the original [Petdex](https://petdex.dev) project, kept to
-just what's needed to build and run the homepage:
-
-- **One route**: `src/app/[locale]/page.tsx`. There's no gallery page, no
-  `/pets/<slug>`, no submit flow, no admin, no CLI, no desktop app —
-  those all lived elsewhere in the original project and aren't part of
-  this copy.
-- **Mock data only**: `pets/ideas.json` seeds an in-memory Postgres
-  instance ([PGlite](https://pglite.dev/)) at startup via
-  `src/lib/mock/db.ts`. There's no real Postgres, Redis, Clerk, or R2
-  behind this — every external service is stubbed out when
-  `PETDEX_MOCK=1` is set.
-- **A handful of supporting API routes** the homepage's header/footer
-  actually call (profile locale switching, feedback, notifications,
-  OG image, the surprise-pet shuffle button) — everything else was
-  removed as dead code.
+This project was originally adapted from an open-source starting point 
+and has since been trimmed and restructured for Kekka Marketing's own 
+use.
 
 ## Run it
 
@@ -39,18 +23,17 @@ just what's needed to build and run the homepage:
 bun install
 ```
 
-Mock mode needs a couple of placeholder env vars so nothing crashes
-reaching for a real database or API key — `.env.mock` already has
-them, along with `PETDEX_MOCK=1`.
+Mock mode needs a couple of placeholder env vars so nothing crashes 
+reaching for external services — `.env.mock` already has them.
 
-**Dev server** (live reload):
+Dev server (live reload):
 
 ```sh
 set -a && source .env.mock && set +a
 bunx next dev
 ```
 
-**Production-style build + run**:
+Production-style build + run:
 
 ```sh
 bun --env-file=.env.mock run build
@@ -67,5 +50,4 @@ bun test --env-file=.env.mock
 
 ## License
 
-The source code is [MIT](./LICENSE). Pet assets in `pets/ideas.json` are
-placeholder mock data, not real submissions.
+The source code is [MIT](./LICENSE).
