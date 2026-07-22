@@ -1,6 +1,17 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, utimesSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PassThrough } from "node:stream";
+import { fileURLToPath } from "node:url";
 
 import {
   clipPreview,
@@ -14,6 +25,82 @@ import {
   stateForEvent,
 } from "./bubble-runner";
 
+const CLI_PACKAGE_DIR = fileURLToPath(new URL("../..", import.meta.url));
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function waitForClose(child: ReturnType<typeof spawn>): Promise<number | null> {
+  if (child.exitCode !== null) return Promise.resolve(child.exitCode);
+  return new Promise((resolve) => child.once("close", resolve));
+}
+
+function waitForReady(child: ReturnType<typeof spawn>): Promise<void> {
+  const output = child.stdout;
+  if (!output) {
+    return Promise.reject(new Error("hook child stdout is unavailable"));
+  }
+
+  return new Promise((resolve, reject) => {
+    let text = "";
+    const failOnClose = (code: number | null) => {
+      cleanup();
+      reject(new Error(`hook child exited before reading stdin: ${code}`));
+    };
+    const onError = (error: Error) => {
+      cleanup();
+      reject(error);
+    };
+    const onData = (chunk: string) => {
+      text += chunk;
+      if (!text.includes("ready\n")) return;
+      cleanup();
+      resolve();
+    };
+    const cleanup = () => {
+      output.off("data", onData);
+      child.off("close", failOnClose);
+      child.off("error", onError);
+    };
+
+    output.setEncoding("utf8");
+    output.on("data", onData);
+    child.once("close", failOnClose);
+    child.once("error", onError);
+  });
+}
+
+async function writeDelayedInput(
+  child: ReturnType<typeof spawn>,
+  first: string,
+  rest: string,
+): Promise<void> {
+  const input = child.stdin;
+  if (!input) throw new Error("hook child stdin is unavailable");
+
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const finish = (error?: Error | null) => {
+      if (settled) return;
+      settled = true;
+      input.off("error", onError);
+      if (error) reject(error);
+      else resolve();
+    };
+    const onError = (error: Error) => finish(error);
+
+    input.once("error", onError);
+    input.write(first, (error) => {
+      if (error) {
+        finish(error);
+        return;
+      }
+      setTimeout(() => input.end(rest, () => finish()), 180);
+    });
+  });
+}
+
 describe("readStdin", () => {
   test("returns after EOF with the complete payload", async () => {
     const input = new PassThrough();
@@ -22,14 +109,22 @@ describe("readStdin", () => {
     await expect(reading).resolves.toBe('{"tool_name":"Read"}');
   });
 
-  test("returns within the deadline when stdin stays open", async () => {
+  test("keeps reading until a delayed hook payload reaches EOF", async () => {
     const input = new PassThrough();
-    const start = performance.now();
-    const reading = readStdin(input);
-    input.write('{"tool_name":"Read"}');
-    await expect(reading).resolves.toBe('{"tool_name":"Read"}');
-    expect(performance.now() - start).toBeLessThan(500);
-    input.destroy();
+    let settled = false;
+    const reading = readStdin(input).then((value) => {
+      settled = true;
+      return value;
+    });
+
+    input.write('{"tool_name":"Read","tool_input":"');
+    await delay(180);
+    expect(settled).toBeFalse();
+
+    input.end('continued"}');
+    await expect(reading).resolves.toBe(
+      '{"tool_name":"Read","tool_input":"continued"}',
+    );
   });
 
   test("keeps the first 64KB while continuing to drain oversized input", async () => {
@@ -39,6 +134,68 @@ describe("readStdin", () => {
     input.end(payload);
     const result = await reading;
     expect(result).toHaveLength(64 * 1024);
+  });
+
+  test("copies the retained prefix out of an oversized source chunk", async () => {
+    const input = new PassThrough();
+    const source = Buffer.alloc(128 * 1024, "a");
+    const reading = readStdin(input);
+
+    input.write(source);
+    source.fill("b", 0, 64 * 1024);
+    input.end();
+
+    await expect(reading).resolves.toBe("a".repeat(64 * 1024));
+  });
+
+  test("caps retained input by bytes when the payload contains UTF-8", async () => {
+    const input = new PassThrough();
+    const retained = `${"\u591a".repeat(21_845)}a`;
+    expect(Buffer.byteLength(retained, "utf8")).toBe(64 * 1024);
+
+    const reading = readStdin(input);
+    input.end(`${retained}${"x".repeat(64 * 1024)}`);
+
+    await expect(reading).resolves.toBe(retained);
+  });
+
+  test("keeps the hook pipe open when disabled while a host finishes a delayed large payload", async () => {
+    const fakeHome = mkdtempSync(join(tmpdir(), "petdex-hook-stdin-"));
+    const runtimeDir = join(fakeHome, ".petdex", "runtime");
+    mkdirSync(runtimeDir, { recursive: true });
+    writeFileSync(join(runtimeDir, "hooks-disabled"), "");
+    const child = spawn(
+      process.execPath,
+      [
+        "-e",
+        'import("./src/hooks/bubble-runner.ts").then(async ({ runBubble }) => { const task = runBubble(["post", "codex"]); process.stdout.write("ready\\n"); await task; })',
+      ],
+      {
+        cwd: CLI_PACKAGE_DIR,
+        stdio: ["pipe", "pipe", "pipe"],
+        env: { ...process.env, HOME: fakeHome },
+      },
+    );
+    let stderr = "";
+    child.stderr?.setEncoding("utf8");
+    child.stderr?.on("data", (chunk) => {
+      stderr += chunk;
+    });
+
+    try {
+      await waitForReady(child);
+      await writeDelayedInput(
+        child,
+        '{"tool_name":"Read","tool_input":"',
+        `${"x".repeat(8 * 1024 * 1024)}"}`,
+      );
+
+      expect(await waitForClose(child)).toBe(0);
+      expect(stderr).toBe("");
+    } finally {
+      if (child.exitCode === null && !child.killed) child.kill();
+      rmSync(fakeHome, { recursive: true, force: true });
+    }
   });
 });
 

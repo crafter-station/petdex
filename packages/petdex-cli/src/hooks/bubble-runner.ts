@@ -4,8 +4,8 @@
  * a human bubble via templates, POSTs to the sidecar.
  *
  * Hot path: this runs 20-50× per active session. We:
- *   - bound stdin reads so a hook host that keeps stdin open cannot stall
- *     the agent indefinitely
+ *   - retain a bounded stdin prefix while draining the rest, so oversized
+ *     payloads cannot OOM us or make their writer hit a broken pipe
  *   - swallow ALL errors silently (a noisy hook stains the agent UI)
  *   - cap stdin reads at 64KB (hooks don't need bigger payloads, and
  *     a runaway upstream shouldn't OOM us)
@@ -176,7 +176,6 @@ function safeSessionId(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
   return /^[a-zA-Z0-9_-]{1,64}$/.test(raw) ? raw : null;
 }
-const STDIN_TIMEOUT_MS = 120;
 
 type HookStdin = Readable & { isTTY?: boolean };
 
@@ -212,35 +211,38 @@ export async function readStdin(
   input: HookStdin = process.stdin,
 ): Promise<string> {
   // Hooks pipe a single JSON payload. Preserve at most STDIN_CAP bytes for
-  // parsing, but keep draining oversized input until EOF or the deadline so
-  // a writer never sees a broken pipe from our early return.
+  // parsing, but keep draining until EOF or an input error. Returning early
+  // closes the read end of the pipe and can make a host that is still writing
+  // report EPIPE. The generated agent hook timeout bounds the process itself.
   if (input.isTTY) return Promise.resolve("");
   return await new Promise((resolve) => {
-    let buf = "";
+    const prefix: Buffer[] = [];
+    let prefixBytes = 0;
     let settled = false;
 
     const finish = () => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
       input.off("data", onData);
       input.off("end", finish);
       input.off("error", finish);
-      input.pause();
-      resolve(buf);
+      resolve(Buffer.concat(prefix, prefixBytes).toString("utf8"));
     };
 
-    const onData = (chunk: string) => {
-      if (settled || buf.length >= STDIN_CAP) return;
-      const remaining = STDIN_CAP - buf.length;
-      buf += chunk.slice(0, remaining);
+    const onData = (chunk: Buffer | string) => {
+      if (settled) return;
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      const remaining = STDIN_CAP - prefixBytes;
+      if (remaining <= 0) return;
+      const retained = Buffer.from(bytes.subarray(0, remaining));
+      prefix.push(retained);
+      prefixBytes += retained.length;
     };
 
-    const timer = setTimeout(finish, STDIN_TIMEOUT_MS);
-    input.setEncoding("utf8");
     input.on("data", onData);
     input.on("end", finish);
     input.on("error", finish);
+    input.resume();
   });
 }
 
