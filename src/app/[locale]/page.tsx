@@ -82,7 +82,7 @@ export default async function Home({
   ];
 
   const [heroPets, initialSearch, collections, randomPet] = await Promise.all([
-    getFeaturedPetsWithMetrics(5),
+    getFeaturedPetsWithMetrics(6),
     searchPets({ sort: "installed", limit: HOME_INITIAL_GALLERY_LIMIT }),
     getCollectionsBySlugs(LANDING_COLLECTION_ORDER, 6),
     getRandomPet(),

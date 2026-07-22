@@ -15,28 +15,28 @@
   },
   {
     "id": "boxcat",
-    "name": "Boxcat",
+    "name": "Crafternauta",
     "description": "A tiny cat tucked inside a cardboard box for cozy coding sessions.",
     "tags": ["cat", "box", "cozy"],
     "status": "planned"
   },
   {
     "id": "captain-quack",
-    "name": "Captain Quack",
+    "name": "Kebo",
     "description": "A tiny pirate duck companion with a jaunty hat.",
     "tags": ["duck", "pirate", "hat"],
     "status": "planned"
   },
   {
     "id": "corsair-cat",
-    "name": "Corsair Cat",
+    "name": "Noir Webling",
     "description": "A compact chibi cat wearing a pirate hat, ready as a Codex digital pet.",
     "tags": ["cat", "pirate", "chibi"],
     "status": "planned"
   },
   {
     "id": "ice-cream-cat",
-    "name": "Ice Cream Cat",
+    "name": "Scoop",
     "description": "A cheerful cat carrying an ice cream cone.",
     "tags": ["cat", "sweet", "summer"],
     "status": "planned"
