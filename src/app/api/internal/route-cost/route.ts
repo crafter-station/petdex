@@ -1,8 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-import { sql } from "drizzle-orm";
-
-import { db, schema } from "@/lib/db/client";
 import {
   type RouteCostKind,
   type RouteCostReferrerSource,
@@ -97,72 +94,7 @@ export async function POST(req: Request): Promise<Response> {
     return Response.json({ error: parsed.error }, { status: 400 });
   }
 
-  try {
-    await db
-      .insert(schema.routeCostBuckets)
-      .values({
-        bucketStart: parsed.data.bucketStart,
-        method: parsed.data.method,
-        route: parsed.data.route,
-        routeKind: parsed.data.routeKind,
-        sampleCount: 1,
-        estimatedRequests: parsed.data.sampleWeight,
-      })
-      .onConflictDoUpdate({
-        target: [
-          schema.routeCostBuckets.bucketStart,
-          schema.routeCostBuckets.method,
-          schema.routeCostBuckets.routeKind,
-          schema.routeCostBuckets.route,
-        ],
-        set: {
-          sampleCount: sql`${schema.routeCostBuckets.sampleCount} + 1`,
-          estimatedRequests: sql`${schema.routeCostBuckets.estimatedRequests} + ${parsed.data.sampleWeight}`,
-          updatedAt: new Date(),
-        },
-      });
-  } catch (err) {
-    console.error(
-      "[route-cost] upsert failed:",
-      err instanceof Error ? err.message : "unknown error",
-    );
-  }
-
-  try {
-    await db
-      .insert(schema.routeCostSourceBuckets)
-      .values({
-        bucketStart: parsed.data.bucketStart,
-        method: parsed.data.method,
-        referrerSource: parsed.data.referrerSource,
-        route: parsed.data.route,
-        routeKind: parsed.data.routeKind,
-        trafficSource: parsed.data.trafficSource,
-        sampleCount: 1,
-        estimatedRequests: parsed.data.sampleWeight,
-      })
-      .onConflictDoUpdate({
-        target: [
-          schema.routeCostSourceBuckets.bucketStart,
-          schema.routeCostSourceBuckets.method,
-          schema.routeCostSourceBuckets.routeKind,
-          schema.routeCostSourceBuckets.route,
-          schema.routeCostSourceBuckets.trafficSource,
-          schema.routeCostSourceBuckets.referrerSource,
-        ],
-        set: {
-          sampleCount: sql`${schema.routeCostSourceBuckets.sampleCount} + 1`,
-          estimatedRequests: sql`${schema.routeCostSourceBuckets.estimatedRequests} + ${parsed.data.sampleWeight}`,
-          updatedAt: new Date(),
-        },
-      });
-  } catch (err) {
-    console.error(
-      "[route-cost-source] upsert failed:",
-      err instanceof Error ? err.message : "unknown error",
-    );
-  }
-
+  // No database in this repo — samples are validated but not recorded.
   return new Response(null, { status: 204 });
 }
 

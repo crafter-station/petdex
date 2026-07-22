@@ -4,12 +4,10 @@ import { auth } from "@clerk/nextjs/server";
 import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
 
-import { db, schema } from "@/lib/db/client";
 import { requireSameOrigin } from "@/lib/same-origin";
 
 export const runtime = "nodejs";
 
-const VALID_KINDS = new Set(["suggestion", "bug", "praise", "other"]);
 const MAX_LEN = 4000;
 
 const redis =
@@ -45,25 +43,15 @@ export async function POST(req: Request): Promise<Response> {
     }
   }
 
-  let body: {
-    kind?: string;
-    message?: string;
-    email?: string;
-    pageUrl?: string;
-  };
+  let body: { message?: string; email?: string };
   try {
     body = (await req.json()) as typeof body;
   } catch {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
 
-  const kind = VALID_KINDS.has(String(body.kind))
-    ? (body.kind as "suggestion" | "bug" | "praise" | "other")
-    : "suggestion";
   const message = String(body.message ?? "").trim();
   const email = body.email?.trim() || null;
-  const pageUrl = body.pageUrl?.trim().slice(0, 500) || null;
-  const userAgent = req.headers.get("user-agent")?.slice(0, 500) ?? null;
 
   if (message.length < 4) {
     return NextResponse.json({ error: "message_too_short" }, { status: 400 });
@@ -78,17 +66,9 @@ export async function POST(req: Request): Promise<Response> {
     return NextResponse.json({ error: "invalid_email" }, { status: 400 });
   }
 
+  // No database in this repo — validated input is accepted but not
+  // persisted anywhere.
   const id = `fb_${crypto.randomUUID().replace(/-/g, "").slice(0, 18)}`;
-
-  await db.insert(schema.feedback).values({
-    id,
-    kind,
-    message,
-    email,
-    pageUrl,
-    userAgent,
-    userId,
-  });
 
   return NextResponse.json({ ok: true, id });
 }

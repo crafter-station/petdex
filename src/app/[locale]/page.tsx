@@ -9,9 +9,9 @@ import {
 } from "@/lib/collections";
 import { formatLocalizedNumber } from "@/lib/format-number";
 import { buildLocaleAlternates } from "@/lib/locale-routing";
-import { searchPets } from "@/lib/pet-search";
 import { getFeaturedPetsWithMetrics, type PetWithMetrics } from "@/lib/pets";
 import { getRandomPet } from "@/lib/random-pet-pool";
+import { TOTAL_PET_COUNT } from "@/lib/static-pets";
 import { toSurprisePet } from "@/lib/surprise-pets";
 import { cn } from "@/lib/utils";
 
@@ -54,7 +54,6 @@ export async function generateMetadata({
   };
 }
 const SITE_URL = "https://petdex.dev";
-const HOME_INITIAL_GALLERY_LIMIT = 10;
 
 export function generateStaticParams() {
   return locales.map((locale) => ({ locale }));
@@ -81,13 +80,12 @@ export default async function Home({
     "franchise-jojos-bizarre-adventure",
   ];
 
-  const [heroPets, initialSearch, collections, randomPet] = await Promise.all([
+  const [heroPets, collections, randomPet] = await Promise.all([
     getFeaturedPetsWithMetrics(6),
-    searchPets({ sort: "installed", limit: HOME_INITIAL_GALLERY_LIMIT }),
     getCollectionsBySlugs(LANDING_COLLECTION_ORDER, 6),
     getRandomPet(),
   ]);
-  const totalPets = initialSearch.total;
+  const totalPets = TOTAL_PET_COUNT;
   const formattedTotalPets = formatLocalizedNumber(totalPets, locale);
   const surprisePet = randomPet ? toSurprisePet(randomPet) : null;
 

@@ -1,46 +1,20 @@
 import "server-only";
 
-import { and, eq, ne } from "drizzle-orm";
-
-import { AGGREGATE_KEYS, cachedAggregate } from "@/lib/db/cached-aggregates";
-import { db, schema } from "@/lib/db/client";
-import { toCurrentR2PublicUrl } from "@/lib/r2-public-url";
+import { STATIC_PETS, staticSpriteDataUri } from "@/lib/static-pets";
 import {
   pickRandomPet,
   type RandomPetCandidate,
 } from "@/lib/random-pet-selection";
 
-const RANDOM_POOL_TTL_SECONDS = 300;
-
 export type RandomPet = RandomPetCandidate;
 
 export async function getRandomPetPool(): Promise<RandomPet[]> {
-  return cachedAggregate(
-    {
-      key: AGGREGATE_KEYS.randomPetPool,
-      ttlSeconds: RANDOM_POOL_TTL_SECONDS,
-    },
-    async () => {
-      const rows = await db
-        .select({
-          slug: schema.submittedPets.slug,
-          displayName: schema.submittedPets.displayName,
-          description: schema.submittedPets.description,
-          spritesheetPath: schema.submittedPets.spritesheetUrl,
-        })
-        .from(schema.submittedPets)
-        .where(
-          and(
-            eq(schema.submittedPets.status, "approved"),
-            ne(schema.submittedPets.source, "discover"),
-          ),
-        );
-      return rows.map((row) => ({
-        ...row,
-        spritesheetPath: toCurrentR2PublicUrl(row.spritesheetPath),
-      }));
-    },
-  );
+  return STATIC_PETS.map((pet) => ({
+    slug: pet.slug,
+    displayName: pet.displayName,
+    description: pet.description,
+    spritesheetPath: staticSpriteDataUri(pet.slug),
+  }));
 }
 
 export async function getRandomPet(): Promise<RandomPet | null> {

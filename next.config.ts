@@ -184,16 +184,13 @@ const nextConfig: NextConfig = {
       { protocol: "https", hostname: "storage.googleapis.com" },
     ],
   },
-  // Server-only modules that don't survive Turbopack/webpack bundling:
-  // - @electric-sql/pglite (mock mode) — native wasm + workers
-  // - ali-oss — uses urllib's dynamic require('proxy-agent') for an
-  //   optional dependency that the bundler can't resolve and treats
-  //   as fatal. Marking ali-oss external lets the server runtime do
-  //   the require() lazily, where the missing optional is harmless.
-  serverExternalPackages: [
-    "ali-oss",
-    ...(IS_MOCK ? ["@electric-sql/pglite"] : []),
-  ],
+  // ali-oss uses urllib's dynamic require('proxy-agent') for an optional
+  // dependency the bundler can't resolve and treats as fatal. Marking it
+  // external lets the server runtime do the require() lazily, where the
+  // missing optional is harmless. (No longer actually installed — this
+  // repo has no code left that imports ali-oss — but harmless to leave
+  // as a defensive external-package hint.)
+  serverExternalPackages: ["ali-oss"],
   async headers() {
     return [
       {

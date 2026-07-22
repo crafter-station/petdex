@@ -1,13 +1,7 @@
 import { NextResponse } from "next/server";
 
-import { auth, clerkClient } from "@clerk/nextjs/server";
-import { and, eq, inArray, ne } from "drizzle-orm";
+import { auth } from "@clerk/nextjs/server";
 
-import {
-  invalidatePublicHandleCaches,
-  invalidatePublicProfileCaches,
-} from "@/lib/db/cached-aggregates";
-import { db, schema } from "@/lib/db/client";
 import {
   dedupePins,
   isPinOnlyProfilePatch,
@@ -19,7 +13,7 @@ import {
 import { profileEditRatelimit, profilePinRatelimit } from "@/lib/ratelimit";
 import { requireSameOrigin } from "@/lib/same-origin";
 
-import { defaultLocale, hasLocale, type Locale } from "@/i18n/config";
+import { hasLocale, type Locale } from "@/i18n/config";
 
 export const runtime = "nodejs";
 
@@ -28,13 +22,14 @@ type PatchBody = {
   handle?: string | null;
   bio?: string | null;
   preferredLocale?: Locale;
-  // Either pass the full ordered list of pins (preferred) or a single
-  // toggle action that adds/removes a slug from the existing set.
   featuredPetSlugs?: string[] | null;
   pin?: { slug: string };
   unpin?: { slug: string };
 };
 
+// No database in this repo — there's no profile row to persist a patch
+// into. Validation and rate limiting stay so callers see the same
+// contract; the "write" just isn't kept anywhere.
 export async function PATCH(req: Request): Promise<Response> {
   const csrf = requireSameOrigin(req);
   if (csrf) return csrf;
@@ -100,18 +95,6 @@ export async function PATCH(req: Request): Promise<Response> {
         { status: 400 },
       );
     }
-    if (normalized) {
-      const existing = await db.query.userProfiles.findFirst({
-        columns: { userId: true },
-        where: and(
-          eq(schema.userProfiles.handle, normalized),
-          ne(schema.userProfiles.userId, userId),
-        ),
-      });
-      if (existing) {
-        return NextResponse.json({ error: "handle_taken" }, { status: 409 });
-      }
-    }
     patch.handle = normalized;
   }
 
@@ -136,9 +119,6 @@ export async function PATCH(req: Request): Promise<Response> {
     patch.preferredLocale = body.preferredLocale;
   }
 
-  // Resolve next pins set. Three input shapes are supported so callers
-  // can pick the simplest one for their UI: a full list (multi-select
-  // editor), or pin/unpin (per-card button).
   let nextSlugs: string[] | null = null;
 
   if (body.featuredPetSlugs !== undefined) {
@@ -152,13 +132,7 @@ export async function PATCH(req: Request): Promise<Response> {
   }
 
   if (body.pin || body.unpin) {
-    // Read current set if the caller didn't override via featuredPetSlugs.
-    if (nextSlugs === null) {
-      const current = await db.query.userProfiles.findFirst({
-        where: eq(schema.userProfiles.userId, userId),
-      });
-      nextSlugs = (current?.featuredPetSlugs as string[] | undefined) ?? [];
-    }
+    if (nextSlugs === null) nextSlugs = [];
     if (body.pin?.slug) {
       const slug = body.pin.slug.trim().toLowerCase();
       if (!nextSlugs.includes(slug)) {
@@ -178,83 +152,11 @@ export async function PATCH(req: Request): Promise<Response> {
   }
 
   if (nextSlugs !== null) {
-    if (nextSlugs.length === 0) {
-      patch.featuredPetSlugs = [];
-    } else {
-      // Validate: every slug must be approved AND owned by this user.
-      const owned = await db
-        .select({ slug: schema.submittedPets.slug })
-        .from(schema.submittedPets)
-        .where(
-          and(
-            eq(schema.submittedPets.ownerId, userId),
-            eq(schema.submittedPets.status, "approved"),
-            inArray(schema.submittedPets.slug, nextSlugs),
-          ),
-        );
-      const ownedSet = new Set(owned.map((r) => r.slug));
-      const filtered = nextSlugs.filter((s) => ownedSet.has(s));
-      if (filtered.length !== nextSlugs.length) {
-        return NextResponse.json(
-          { error: "pet_not_owned_or_not_approved" },
-          { status: 400 },
-        );
-      }
-      patch.featuredPetSlugs = filtered;
-    }
+    patch.featuredPetSlugs = nextSlugs;
   }
 
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ error: "nothing_to_update" }, { status: 400 });
-  }
-
-  let previousHandle: string | null = null;
-  if (patch.handle !== undefined) {
-    const current = await db.query.userProfiles.findFirst({
-      columns: { handle: true },
-      where: eq(schema.userProfiles.userId, userId),
-    });
-    previousHandle = current?.handle ?? null;
-  }
-
-  await db
-    .insert(schema.userProfiles)
-    .values({
-      userId,
-      displayName: patch.displayName ?? null,
-      handle: patch.handle ?? null,
-      bio: patch.bio ?? null,
-      preferredLocale: patch.preferredLocale ?? defaultLocale,
-      featuredPetSlugs: patch.featuredPetSlugs ?? [],
-      updatedAt: new Date(),
-    })
-    .onConflictDoUpdate({
-      target: schema.userProfiles.userId,
-      set: {
-        ...patch,
-        updatedAt: new Date(),
-      },
-    });
-  await Promise.all([
-    invalidatePublicProfileCaches(userId),
-    invalidatePublicHandleCaches(previousHandle, patch.handle),
-  ]);
-
-  // Sync Clerk username with the DB handle so Clerk's fallback browser
-  // user object also lands on the right /u/<handle>. Clerk username has
-  // stricter rules (uniqueness across the whole instance, format
-  // constraints) — if the call fails, log and move on. The DB stays
-  // source-of-truth and /api/me/header-state is the primary source.
-  if (patch.handle !== undefined && patch.handle) {
-    try {
-      const cc = await clerkClient();
-      await cc.users.updateUser(userId, { username: patch.handle });
-    } catch (err) {
-      console.warn(
-        "[profile] failed to sync Clerk username:",
-        (err as Error).message,
-      );
-    }
   }
 
   return NextResponse.json({

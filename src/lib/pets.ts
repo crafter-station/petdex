@@ -1,388 +1,67 @@
-// All pets — curated and community — live in Postgres after the curated
-// backfill (scripts/backfill-curated-to-db.ts). The old `pets.generated.ts`
-// JSON dump is only consulted by that backfill script; the rest of the app
-// reads from the DB.
-
-import { cache } from "react";
-
-import { and, desc, eq, sql } from "drizzle-orm";
+// No database in this repo — every pet is static data (see static-pets.ts).
 
 import {
-  AGGREGATE_KEYS,
-  cachedAggregate,
-  petCacheKey,
-} from "@/lib/db/cached-aggregates";
-import { db, schema } from "@/lib/db/client";
-import {
-  getMetricsBySlugs,
-  getMetricsForSlug,
-  type Metrics,
-} from "@/lib/db/metrics";
-import { withNextDataCache } from "@/lib/next-data-cache";
-import { toCurrentR2PublicUrl } from "@/lib/r2-public-url";
-import type { PetdexPet, PetKind, PetVibe } from "@/lib/types";
+  FEATURED_PET_SLUGS,
+  STATIC_PETS,
+  STATIC_PETS_BY_SLUG,
+  staticSpriteDataUri,
+} from "@/lib/static-pets";
 
-export type PetWithMetrics = PetdexPet & {
-  dexNumber?: number | null;
-  metrics: Metrics;
+export type PetMetrics = {
+  installCount: number;
+  zipDownloadCount: number;
+  likeCount: number;
 };
 
-export type PetSitemapEntry = {
+export type PetWithMetrics = {
   slug: string;
-  importedAt: string;
-  featured: boolean;
+  displayName: string;
+  description: string;
+  spritesheetPath: string;
+  metrics: PetMetrics;
 };
 
-const EMPTY_METRICS: Metrics = {
+const EMPTY_METRICS: PetMetrics = {
   installCount: 0,
   zipDownloadCount: 0,
   likeCount: 0,
 };
 
-const PET_CACHE_TTL_SECONDS = 300;
-const APPROVED_CATALOG_TTL_SECONDS = 300;
-const FEATURED_PETS_TTL_SECONDS = 300;
-const LATEST_APPROVED_PETS_TTL_SECONDS = 300;
-
-type PetRow = Pick<
-  typeof schema.submittedPets.$inferSelect,
-  | "id"
-  | "slug"
-  | "displayName"
-  | "description"
-  | "spritesheetUrl"
-  | "petJsonUrl"
-  | "zipUrl"
-  | "soundUrl"
-  | "featured"
-  | "kind"
-  | "vibes"
-  | "tags"
-  | "dominantColor"
-  | "colorFamily"
-  | "creditName"
-  | "creditUrl"
-  | "creditImage"
-  | "source"
-  | "approvedAt"
-  | "createdAt"
->;
-
-const petColumns = {
-  id: true,
-  slug: true,
-  displayName: true,
-  description: true,
-  spritesheetUrl: true,
-  petJsonUrl: true,
-  zipUrl: true,
-  soundUrl: true,
-  featured: true,
-  kind: true,
-  vibes: true,
-  tags: true,
-  dominantColor: true,
-  colorFamily: true,
-  creditName: true,
-  creditUrl: true,
-  creditImage: true,
-  source: true,
-  approvedAt: true,
-  createdAt: true,
-} as const;
-
-// Two-layer cache: Upstash (cross-instance, 5min TTL, invalidated by
-// invalidatePetCaches) wrapped in Next's data cache so write paths can
-// also call revalidateTag('pet:${slug}', 'max') and flush the page-
-// level ISR copy without waiting on the 24h ceiling.
-export const getPet = cache(
-  async (slug: string): Promise<PetdexPet | undefined> => {
-    return withNextDataCache(
-      async () => {
-        const pet = await cachedAggregate<PetdexPet | null>(
-          { key: petCacheKey(slug), ttlSeconds: PET_CACHE_TTL_SECONDS },
-          async () => {
-            const row = await db.query.submittedPets.findFirst({
-              columns: petColumns,
-              where: and(
-                eq(schema.submittedPets.slug, slug),
-                eq(schema.submittedPets.status, "approved"),
-              ),
-            });
-            return row ? rowToPet(row) : null;
-          },
-        );
-        return pet ? normalizePetAssetUrls(pet) : undefined;
-      },
-      ["petdex-pet", slug],
-      { tags: [`pet:${slug}`, "pet:list"], revalidate: 86400 },
-    )();
-  },
-);
-
-export async function getPetWithMetrics(
-  slug: string,
-): Promise<PetWithMetrics | undefined> {
-  const pet = await getPet(slug);
-  if (!pet) return undefined;
-  const metrics = await getMetricsForSlug(slug);
-  return { ...pet, metrics };
-}
-
-/** Returns curated/featured slugs for `generateStaticParams`. We only
- *  pre-render featured pets at build time; everything else is rendered
- *  on-demand and revalidated. */
-export async function getStaticPetSlugs(): Promise<string[]> {
-  const rows = await db
-    .select({ slug: schema.submittedPets.slug })
-    .from(schema.submittedPets)
-    .where(
-      and(
-        eq(schema.submittedPets.status, "approved"),
-        eq(schema.submittedPets.featured, true),
-      ),
-    );
-  return rows.map((r) => r.slug);
+function toPetWithMetrics(slug: string): PetWithMetrics | null {
+  const pet = STATIC_PETS_BY_SLUG.get(slug);
+  if (!pet) return null;
+  return {
+    slug: pet.slug,
+    displayName: pet.displayName,
+    description: pet.description,
+    spritesheetPath: staticSpriteDataUri(pet.slug),
+    metrics: EMPTY_METRICS,
+  };
 }
 
 export async function getFeaturedPetsWithMetrics(
   limit = 6,
 ): Promise<PetWithMetrics[]> {
-  return withNextDataCache(
-    async () => {
-      const pets = (await getFeaturedPets()).slice(0, limit);
-      if (pets.length === 0) return [];
-      const metrics = await getMetricsBySlugs(pets.map((pet) => pet.slug));
-      return pets.map((pet) => ({
-        ...pet,
-        metrics: metrics.get(pet.slug) ?? EMPTY_METRICS,
-      }));
-    },
-    ["petdex-featured-pets-with-metrics", String(limit)],
-    { tags: ["pet:list"], revalidate: 86400 },
-  )();
+  return FEATURED_PET_SLUGS.slice(0, limit)
+    .map(toPetWithMetrics)
+    .filter((pet): pet is PetWithMetrics => pet !== null);
 }
 
-async function getFeaturedPets(): Promise<PetdexPet[]> {
-  const pets = await cachedAggregate(
-    {
-      key: AGGREGATE_KEYS.featuredPets,
-      ttlSeconds: FEATURED_PETS_TTL_SECONDS,
-    },
-    async () => {
-      const rows = await db
-        .select()
-        .from(schema.submittedPets)
-        .where(
-          and(
-            eq(schema.submittedPets.status, "approved"),
-            eq(schema.submittedPets.featured, true),
-          ),
-        );
-      return rows.map(rowToPet);
-    },
-  );
-  return pets.map(normalizePetAssetUrls);
-}
-
-export async function getAllApprovedPets(): Promise<PetdexPet[]> {
-  return withNextDataCache(
-    async () => {
-      const pets = await cachedAggregate(
-        {
-          key: AGGREGATE_KEYS.approvedCatalog,
-          ttlSeconds: APPROVED_CATALOG_TTL_SECONDS,
-        },
-        async () => {
-          const rows = await db
-            .select()
-            .from(schema.submittedPets)
-            .where(eq(schema.submittedPets.status, "approved"));
-          return rows.map(rowToPet);
-        },
-      );
-      return pets.map(normalizePetAssetUrls);
-    },
-    ["petdex-all-approved-pets"],
-    { tags: ["pet:list"], revalidate: 86400 },
-  )();
-}
-
-export async function getPetSitemapEntries(): Promise<PetSitemapEntry[]> {
-  return withNextDataCache(
-    async () => {
-      const rows = await db
-        .select({
-          slug: schema.submittedPets.slug,
-          featured: schema.submittedPets.featured,
-          approvedAt: schema.submittedPets.approvedAt,
-          createdAt: schema.submittedPets.createdAt,
-        })
-        .from(schema.submittedPets)
-        .where(eq(schema.submittedPets.status, "approved"))
-        .orderBy(schema.submittedPets.slug);
-
-      return rows.map((row) => ({
-        slug: row.slug,
-        featured: row.featured,
-        importedAt:
-          row.approvedAt?.toISOString() ?? row.createdAt.toISOString(),
-      }));
-    },
-    ["petdex-pet-sitemap-entries"],
-    { tags: ["pet:list"], revalidate: 86400 },
-  )();
-}
-
-export type ApprovedPetSlim = {
+export type LatestApprovedPet = {
   slug: string;
   displayName: string;
-  kind: PetKind;
-  spritesheetUrl: string;
-  petJsonUrl: string;
-  zipUrl: string | null;
-  creditName: string | null;
+  approvedAt: string | null;
 };
 
-// Slim projection for `/api/manifest` (and any CLI consumer that only
-// reads the install metadata). The full-fat row is ~700 bytes serialized;
-// this shape is ~200 bytes, which compounds across the CLI traffic that
-// hits the slim manifest on every `petdex list` / `petdex install`.
-export async function getApprovedPetsForManifest(): Promise<ApprovedPetSlim[]> {
-  const pets = await cachedAggregate(
-    { key: AGGREGATE_KEYS.slimManifest, ttlSeconds: 300 },
-    async () => {
-      const rows = await db
-        .select({
-          slug: schema.submittedPets.slug,
-          displayName: schema.submittedPets.displayName,
-          kind: schema.submittedPets.kind,
-          spritesheetUrl: schema.submittedPets.spritesheetUrl,
-          petJsonUrl: schema.submittedPets.petJsonUrl,
-          zipUrl: schema.submittedPets.zipUrl,
-          creditName: schema.submittedPets.creditName,
-        })
-        .from(schema.submittedPets)
-        .where(eq(schema.submittedPets.status, "approved"));
-      return rows.map((row) => ({
-        slug: row.slug,
-        displayName: row.displayName,
-        kind: row.kind as PetKind,
-        spritesheetUrl: toCurrentR2PublicUrl(row.spritesheetUrl),
-        petJsonUrl: toCurrentR2PublicUrl(row.petJsonUrl),
-        zipUrl: toCurrentR2PublicUrl(row.zipUrl),
-        creditName: row.creditName,
-      }));
-    },
-  );
-  return pets.map(normalizeSlimPetAssetUrls);
-}
-
-export async function getLatestApprovedPets(limit = 5): Promise<PetdexPet[]> {
-  if (limit === 5) {
-    return cachedAggregate(
-      {
-        key: AGGREGATE_KEYS.latestApprovedPets,
-        ttlSeconds: LATEST_APPROVED_PETS_TTL_SECONDS,
-      },
-      async () => queryLatestApprovedPets(limit),
-    );
-  }
-  return queryLatestApprovedPets(limit);
-}
-
-async function queryLatestApprovedPets(limit: number): Promise<PetdexPet[]> {
-  // approved_at is nullable (older curated rows have NULL). NULLS LAST so
-  // freshly approved pets surface first; coalesce-on-tie via created_at.
-  const rows = await db
-    .select()
-    .from(schema.submittedPets)
-    .where(eq(schema.submittedPets.status, "approved"))
-    .orderBy(
-      sql`${schema.submittedPets.approvedAt} DESC NULLS LAST`,
-      desc(schema.submittedPets.createdAt),
-    )
-    .limit(limit);
-  return rows.map(rowToPet);
-}
-
-export async function getApprovedPetsWithMetrics(): Promise<PetWithMetrics[]> {
-  return withNextDataCache(
-    async () => {
-      const pets = await getAllApprovedPets();
-      if (pets.length === 0) return [];
-      const metrics = await getMetricsBySlugs(pets.map((p) => p.slug));
-      return pets.map((p) => ({
-        ...p,
-        metrics: metrics.get(p.slug) ?? EMPTY_METRICS,
-      }));
-    },
-    ["petdex-approved-pets-with-metrics"],
-    { tags: ["pet:list"], revalidate: 86400 },
-  )();
-}
-
-export async function getApprovedPetCount(): Promise<number> {
-  return cachedAggregate(
-    { key: AGGREGATE_KEYS.approvedCount, ttlSeconds: 60 },
-    async () => {
-      const row = await db
-        .select({ n: sql<number>`count(*)::int` })
-        .from(schema.submittedPets)
-        .where(eq(schema.submittedPets.status, "approved"));
-      return row[0]?.n ?? 0;
-    },
-  );
-}
-
-export function rowToPet(row: PetRow): PetdexPet {
-  const submittedBy = row.creditName
-    ? {
-        name: row.creditName,
-        url: row.creditUrl ?? undefined,
-        imageUrl: row.creditImage ?? undefined,
-      }
-    : undefined;
-
-  return {
-    id: row.id,
-    slug: row.slug,
-    displayName: row.displayName,
-    description: row.description,
-    spritesheetPath: toCurrentR2PublicUrl(row.spritesheetUrl),
-    petJsonPath: toCurrentR2PublicUrl(row.petJsonUrl),
-    zipUrl: toCurrentR2PublicUrl(row.zipUrl),
-    soundUrl: toCurrentR2PublicUrl(row.soundUrl),
-    approvalState: "approved",
-    featured: row.featured,
-    kind: row.kind as PetKind,
-    vibes: (row.vibes as PetVibe[]) ?? [],
-    tags: (row.tags as string[]) ?? [],
-    dominantColor: row.dominantColor,
-    colorFamily: row.colorFamily as PetdexPet["colorFamily"],
-    submittedBy,
-    source: row.source,
-    approvedAt: row.approvedAt?.toISOString() ?? null,
-    importedAt: row.approvedAt?.toISOString() ?? row.createdAt.toISOString(),
-    qa: {},
-  };
-}
-
-function normalizePetAssetUrls(pet: PetdexPet): PetdexPet {
-  return {
-    ...pet,
-    spritesheetPath: toCurrentR2PublicUrl(pet.spritesheetPath),
-    petJsonPath: toCurrentR2PublicUrl(pet.petJsonPath),
-    zipUrl: pet.zipUrl ? toCurrentR2PublicUrl(pet.zipUrl) : pet.zipUrl,
-    soundUrl: toCurrentR2PublicUrl(pet.soundUrl),
-  };
-}
-
-function normalizeSlimPetAssetUrls(pet: ApprovedPetSlim): ApprovedPetSlim {
-  return {
-    ...pet,
-    spritesheetUrl: toCurrentR2PublicUrl(pet.spritesheetUrl),
-    petJsonUrl: toCurrentR2PublicUrl(pet.petJsonUrl),
-    zipUrl: toCurrentR2PublicUrl(pet.zipUrl),
-  };
+export async function getLatestApprovedPets(
+  limit = 5,
+): Promise<LatestApprovedPet[]> {
+  return STATIC_PETS.slice()
+    .sort((a, b) => (a.approvedAt < b.approvedAt ? 1 : -1))
+    .slice(0, limit)
+    .map((pet) => ({
+      slug: pet.slug,
+      displayName: pet.displayName,
+      approvedAt: pet.approvedAt,
+    }));
 }

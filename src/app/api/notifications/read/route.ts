@@ -1,18 +1,16 @@
 import { NextResponse } from "next/server";
 
 import { auth } from "@clerk/nextjs/server";
-import { and, eq, inArray, isNull } from "drizzle-orm";
 
-import { db, schema } from "@/lib/db/client";
 import { requireSameOrigin } from "@/lib/same-origin";
 
 export const runtime = "nodejs";
 
 type Body = { all: true } | { ids: string[] };
 
-// POST /api/notifications/read body { all: true } -> mark every unread
-// notification of the current user as read. body { ids: [...] } ->
-// mark a specific subset (used when the user clicks a notification).
+// No database in this repo — there's nothing to mark read. Keep the
+// same auth/CSRF/body validation contract so the notifications bell's
+// fetch still succeeds the same way it always did.
 export async function POST(req: Request): Promise<Response> {
   const csrf = requireSameOrigin(req);
   if (csrf) return csrf;
@@ -29,18 +27,7 @@ export async function POST(req: Request): Promise<Response> {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
 
-  const now = new Date();
-
   if ("all" in body && body.all === true) {
-    await db
-      .update(schema.notifications)
-      .set({ readAt: now })
-      .where(
-        and(
-          eq(schema.notifications.userId, userId),
-          isNull(schema.notifications.readAt),
-        ),
-      );
     return NextResponse.json({ ok: true });
   }
 
@@ -49,15 +36,6 @@ export async function POST(req: Request): Promise<Response> {
     if (ids.length === 0) {
       return NextResponse.json({ error: "invalid_ids" }, { status: 400 });
     }
-    await db
-      .update(schema.notifications)
-      .set({ readAt: now })
-      .where(
-        and(
-          eq(schema.notifications.userId, userId),
-          inArray(schema.notifications.id, ids),
-        ),
-      );
     return NextResponse.json({ ok: true });
   }
 
