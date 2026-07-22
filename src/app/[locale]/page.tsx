@@ -132,7 +132,7 @@ export default async function Home({
       <JsonLd data={jsonLd} />
       <SurprisePetCard initialPet={surprisePet} />
       <section className="petdex-cloud relative overflow-clip">
-        <div className="relative mx-auto flex w-full max-w-[1440px] flex-col px-5 pb-24 md:px-8">
+        <div className="relative mx-auto flex w-full max-w-[1440px] flex-col px-5 pb-40 md:px-8">
           <div className="mt-12 flex flex-col items-center text-center md:mt-16">
             <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
               {t("eyebrow")}
@@ -293,7 +293,7 @@ async function HeroPetParade({ pets, isZh }: HeroPetParadeProps) {
             href={`/pets/${pet.slug}`}
             prefetch={false}
             aria-label={t("openPet", { name: pet.displayName })}
-            className={`group relative flex flex-col items-center bg-surface/60 transition hover:-translate-y-1 ${tilt} ${lift}`}
+            className={`group relative flex flex-col items-center rounded-2xl bg-surface/60 transition hover:-translate-y-1 ${tilt} ${lift}`}
           >
             <PetSprite
               src={pet.spritesheetPath}

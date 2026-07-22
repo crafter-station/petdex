@@ -307,16 +307,8 @@ async function seed(client: PGlite): Promise<void> {
   );
 }
 
-function mockSpritesheetDataUri(name: string, slug: string): string {
+function mockSpritesheetDataUri(_name: string, slug: string): string {
   const accent = colorFromSlug(slug);
-  const initials = name
-    .split(/\s+/)
-    .map((part) => part[0])
-    .join("")
-    .slice(0, 3)
-    .toUpperCase();
-  const safeName = escapeSvgText(name);
-  const safeInitials = escapeSvgText(initials);
   const frames = Array.from({ length: 9 }, (_, row) =>
     Array.from({ length: 8 }, (_, col) => {
       const x = col * 192;
@@ -328,9 +320,6 @@ function mockSpritesheetDataUri(name: string, slug: string): string {
         <circle cx="80" cy="${82 + bob}" r="5" fill="#111827"/>
         <circle cx="112" cy="${82 + bob}" r="5" fill="#111827"/>
         <path d="M82 ${104 + bob} Q96 ${118 + bob} 110 ${104 + bob}" fill="none" stroke="#111827" stroke-width="6" stroke-linecap="round"/>
-        <rect x="42" y="${138 + bob}" width="108" height="24" rx="12" fill="#111827" opacity="0.9"/>
-        <text x="96" y="${155 + bob}" fill="#ffffff" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" font-weight="700">${safeInitials}</text>
-        <text x="96" y="190" fill="#475569" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14">${safeName}</text>
       </g>`;
     }).join(""),
   ).join("");
@@ -348,13 +337,6 @@ function colorFromSlug(slug: string): string {
   }
   const hue = hash % 360;
   return `hsl(${hue} 78% 62%)`;
-}
-
-function escapeSvgText(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
 }
 
 // Bootstrap+seed are run synchronously at module load via top-level
