@@ -9,6 +9,7 @@ import {
   antigravityMcpConfigPath,
   applyCodexHooksFix,
   inspectFeaturesCodexHooks,
+  resolveClaudeConfigDir,
   resolveOpenCodeConfigDir,
   SIDECAR_URL,
 } from "./agents";
@@ -334,6 +335,23 @@ describe("OpenCode hook plugin", () => {
     );
     expect(source).toContain(
       `notify({ state: "failed", duration: 2500, text: "OpenCode hit an error." })`,
+    );
+  });
+});
+
+describe("Claude Code config path resolution", () => {
+  test("prefers CLAUDE_CONFIG_DIR", () => {
+    expect(
+      resolveClaudeConfigDir(
+        { CLAUDE_CONFIG_DIR: "/tmp/claude-work" },
+        "/home/example",
+      ),
+    ).toBe("/tmp/claude-work");
+  });
+
+  test("falls back to ~/.claude", () => {
+    expect(resolveClaudeConfigDir({}, "/home/example")).toBe(
+      "/home/example/.claude",
     );
   });
 });

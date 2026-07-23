@@ -95,7 +95,26 @@ export type Agent = {
 };
 
 const HOME = homedir();
+const CLAUDE_CONFIG_DIR = resolveClaudeConfigDir();
 const OPENCODE_CONFIG_DIR = resolveOpenCodeConfigDir();
+
+/**
+ * Claude Code keeps everything under ~/.claude unless CLAUDE_CONFIG_DIR
+ * points elsewhere — that env var is how people run several fully
+ * isolated Claude Code installs (separate settings, separate accounts)
+ * on one machine. Honoring it here means
+ * `CLAUDE_CONFIG_DIR=~/.claude-work petdex hooks install` wires the
+ * instance the user actually launches instead of always the default
+ * one; detection, refresh, and uninstall all flow through the same
+ * resolved dir.
+ */
+export function resolveClaudeConfigDir(
+  env: NodeJS.ProcessEnv = process.env,
+  home = HOME,
+): string {
+  if (env.CLAUDE_CONFIG_DIR) return env.CLAUDE_CONFIG_DIR;
+  return path.join(home, ".claude");
+}
 
 export function resolveOpenCodeConfigDir(
   env: NodeJS.ProcessEnv = process.env,
@@ -180,9 +199,9 @@ export const AGENTS: Agent[] = [
   {
     id: "claude-code",
     displayName: "Claude Code",
-    configDir: path.join(HOME, ".claude"),
-    configFile: path.join(HOME, ".claude", "settings.json"),
-    slashCommandPath: path.join(HOME, ".claude", "commands", "petdex.md"),
+    configDir: CLAUDE_CONFIG_DIR,
+    configFile: path.join(CLAUDE_CONFIG_DIR, "settings.json"),
+    slashCommandPath: path.join(CLAUDE_CONFIG_DIR, "commands", "petdex.md"),
     docsUrl: "https://docs.anthropic.com/en/docs/claude-code/hooks",
     hookEntries: [
       { event: "UserPromptSubmit", kind: "user.prompt" },
