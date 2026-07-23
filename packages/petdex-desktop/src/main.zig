@@ -305,6 +305,13 @@ const html_tail =
     \\          </div>
     \\          <input class="settings-toggle" id="settings-bubbles" type="checkbox" aria-label="Activity bubble">
     \\        </div>
+    \\        <div class="settings-row">
+    \\          <div class="settings-label">
+    \\            <span>Waiting sound</span>
+    \\            <span class="settings-muted">Play a chime when your agent is waiting for your input.</span>
+    \\          </div>
+    \\          <input class="settings-toggle" id="settings-sound" type="checkbox" aria-label="Waiting sound">
+    \\        </div>
     \\        <div class="settings-status" id="settings-save-status"></div>
     \\      </section>
     \\      <section class="settings-section">
@@ -328,6 +335,7 @@ const html_tail =
     \\    const versionEl = document.getElementById('settings-version');
     \\    const autoEl = document.getElementById('settings-auto');
     \\    const bubblesEl = document.getElementById('settings-bubbles');
+    \\    const soundEl = document.getElementById('settings-sound');
     \\    const saveEl = document.getElementById('settings-save-status');
     \\    const updateEl = document.getElementById('settings-update-status');
     \\    const installEl = document.getElementById('settings-install');
@@ -340,6 +348,9 @@ const html_tail =
     \\      // Missing field (settings written by an older build) means
     \\      // bubbles were never turned off — treat as enabled.
     \\      bubblesEl.checked = settings.showBubbles !== false;
+    \\      // Opposite default for sound: it's opt-in, so a missing
+    \\      // field means off.
+    \\      soundEl.checked = settings.waitingSound === true;
     \\      versionEl.textContent = settings.version || 'No version file';
     \\      updateEl.textContent = updateSummary(update);
     \\      const canInstall = update && update.installable !== false && (update.available || update.status === 'error');
@@ -356,7 +367,7 @@ const html_tail =
     \\    async function saveToggles() {
     \\      saveEl.textContent = 'Saving...';
     \\      try {
-    \\        await window.zero.invoke('petdex.write_desktop_settings', { autoInstallUpdates: autoEl.checked, showBubbles: bubblesEl.checked });
+    \\        await window.zero.invoke('petdex.write_desktop_settings', { autoInstallUpdates: autoEl.checked, showBubbles: bubblesEl.checked, waitingSound: soundEl.checked });
     \\        saveEl.textContent = 'Saved.';
     \\      } catch (err) {
     \\        saveEl.textContent = 'Could not save settings.';
@@ -364,6 +375,7 @@ const html_tail =
     \\    }
     \\    autoEl.addEventListener('change', saveToggles);
     \\    bubblesEl.addEventListener('change', saveToggles);
+    \\    soundEl.addEventListener('change', saveToggles);
     \\    installEl.addEventListener('click', async () => {
     \\      installEl.disabled = true;
     \\      updateEl.textContent = 'Starting update...';
@@ -1972,8 +1984,9 @@ const PetdexState = struct {
         // a caller flipping one toggle can't silently reset the other.
         const auto_updates = jsonBoolField(invocation.request.payload, "autoInstallUpdates") orelse self.readDesktopAutoInstallUpdates();
         const show_bubbles = jsonBoolField(invocation.request.payload, "showBubbles") orelse self.readDesktopShowBubbles();
-        var text_buf: [96]u8 = undefined;
-        const text = try std.fmt.bufPrint(&text_buf, "{{\"autoInstallUpdates\":{},\"showBubbles\":{}}}\n", .{ auto_updates, show_bubbles });
+        const waiting_sound = jsonBoolField(invocation.request.payload, "waitingSound") orelse self.readDesktopWaitingSound();
+        var text_buf: [128]u8 = undefined;
+        const text = try std.fmt.bufPrint(&text_buf, "{{\"autoInstallUpdates\":{},\"showBubbles\":{},\"waitingSound\":{}}}\n", .{ auto_updates, show_bubbles, waiting_sound });
         var dir = try std.Io.Dir.openDirAbsolute(self.io, self.config_dir, .{});
         defer dir.close(self.io);
         try writeFileAll(self.io, dir, "preferences.json", text);
@@ -1981,23 +1994,29 @@ const PetdexState = struct {
     }
 
     fn readDesktopAutoInstallUpdates(self: *PetdexState) bool {
-        return self.readDesktopBoolPreference("autoInstallUpdates");
+        return self.readDesktopBoolPreference("autoInstallUpdates", true);
     }
 
     fn readDesktopShowBubbles(self: *PetdexState) bool {
-        return self.readDesktopBoolPreference("showBubbles");
+        return self.readDesktopBoolPreference("showBubbles", true);
     }
 
-    // Both preferences default to true when the file or the key is
-    // missing — a fresh install auto-updates and shows bubbles.
-    fn readDesktopBoolPreference(self: *PetdexState, key: []const u8) bool {
-        const path = std.fs.path.join(self.allocator, &.{ self.config_dir, "preferences.json" }) catch return true;
+    fn readDesktopWaitingSound(self: *PetdexState) bool {
+        // Opt-in, unlike the two above: sound is intrusive, so a
+        // missing key must stay silent.
+        return self.readDesktopBoolPreference("waitingSound", false);
+    }
+
+    // The default applies when the file or the key is missing — a
+    // fresh install auto-updates and shows bubbles but never chimes.
+    fn readDesktopBoolPreference(self: *PetdexState, key: []const u8, default_value: bool) bool {
+        const path = std.fs.path.join(self.allocator, &.{ self.config_dir, "preferences.json" }) catch return default_value;
         defer self.allocator.free(path);
-        var file = std.Io.Dir.openFileAbsolute(self.io, path, .{}) catch return true;
+        var file = std.Io.Dir.openFileAbsolute(self.io, path, .{}) catch return default_value;
         defer file.close(self.io);
         var buf: [4096]u8 = undefined;
-        const read = file.readPositionalAll(self.io, &buf, 0) catch return true;
-        return jsonBoolField(buf[0..read], key) orelse true;
+        const read = file.readPositionalAll(self.io, &buf, 0) catch return default_value;
+        return jsonBoolField(buf[0..read], key) orelse default_value;
     }
 
     fn formatDesktopSettingsJson(self: *PetdexState, output: []u8) ![]const u8 {
@@ -2008,6 +2027,8 @@ const PetdexState = struct {
         try buf.appendSlice(self.allocator, if (self.readDesktopAutoInstallUpdates()) "true" else "false");
         try buf.appendSlice(self.allocator, ",\"showBubbles\":");
         try buf.appendSlice(self.allocator, if (self.readDesktopShowBubbles()) "true" else "false");
+        try buf.appendSlice(self.allocator, ",\"waitingSound\":");
+        try buf.appendSlice(self.allocator, if (self.readDesktopWaitingSound()) "true" else "false");
         try buf.appendSlice(self.allocator, ",\"version\":");
 
         const version_path = try std.fs.path.join(self.allocator, &.{ self.config_dir, "version" });

@@ -6,6 +6,7 @@ import { finished } from "node:stream/promises";
 export type DesktopPreferences = {
   autoInstallUpdates: boolean;
   showBubbles: boolean;
+  waitingSound: boolean;
 };
 
 export type ReleaseAsset = {
@@ -23,6 +24,9 @@ export type DesktopRelease = {
 export const DEFAULT_DESKTOP_PREFERENCES: DesktopPreferences = {
   autoInstallUpdates: true,
   showBubbles: true,
+  // Off by default, unlike the toggles above: sound is intrusive in a
+  // way passive UI never is, so it has to be an explicit opt-in.
+  waitingSound: false,
 };
 
 export function parseDesktopPreferences(text: string): DesktopPreferences {
@@ -30,6 +34,7 @@ export function parseDesktopPreferences(text: string): DesktopPreferences {
     const parsed = JSON.parse(text) as {
       autoInstallUpdates?: unknown;
       showBubbles?: unknown;
+      waitingSound?: unknown;
     };
     return {
       autoInstallUpdates:
@@ -40,6 +45,10 @@ export function parseDesktopPreferences(text: string): DesktopPreferences {
         typeof parsed.showBubbles === "boolean"
           ? parsed.showBubbles
           : DEFAULT_DESKTOP_PREFERENCES.showBubbles,
+      waitingSound:
+        typeof parsed.waitingSound === "boolean"
+          ? parsed.waitingSound
+          : DEFAULT_DESKTOP_PREFERENCES.waitingSound,
     };
   } catch {
     return DEFAULT_DESKTOP_PREFERENCES;

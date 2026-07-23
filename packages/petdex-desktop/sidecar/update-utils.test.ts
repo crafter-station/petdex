@@ -34,6 +34,7 @@ describe("desktop update utils", () => {
     expect(parseDesktopPreferences('{"autoInstallUpdates":false}')).toEqual({
       autoInstallUpdates: false,
       showBubbles: true,
+      waitingSound: false,
     });
     expect(parseDesktopPreferences('{"autoInstallUpdates":"no"}')).toEqual(
       DEFAULT_DESKTOP_PREFERENCES,
@@ -47,14 +48,33 @@ describe("desktop update utils", () => {
     expect(parseDesktopPreferences('{"showBubbles":false}')).toEqual({
       autoInstallUpdates: true,
       showBubbles: false,
+      waitingSound: false,
     });
     expect(
       parseDesktopPreferences(
         '{"autoInstallUpdates":false,"showBubbles":false}',
       ),
-    ).toEqual({ autoInstallUpdates: false, showBubbles: false });
+    ).toEqual({
+      autoInstallUpdates: false,
+      showBubbles: false,
+      waitingSound: false,
+    });
     // Anything non-boolean falls back to visible bubbles.
     expect(parseDesktopPreferences('{"showBubbles":"off"}')).toEqual(
+      DEFAULT_DESKTOP_PREFERENCES,
+    );
+  });
+
+  test("parses the waitingSound preference, opt-in by default", () => {
+    expect(parseDesktopPreferences("{}")).toEqual(DEFAULT_DESKTOP_PREFERENCES);
+    expect(DEFAULT_DESKTOP_PREFERENCES.waitingSound).toBe(false);
+    expect(parseDesktopPreferences('{"waitingSound":true}')).toEqual({
+      autoInstallUpdates: true,
+      showBubbles: true,
+      waitingSound: true,
+    });
+    // Anything non-boolean stays silent.
+    expect(parseDesktopPreferences('{"waitingSound":"loud"}')).toEqual(
       DEFAULT_DESKTOP_PREFERENCES,
     );
   });

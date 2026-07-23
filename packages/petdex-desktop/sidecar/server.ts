@@ -43,6 +43,7 @@ import {
   parseDesktopPreferences,
   parseHdiutilMount,
 } from "./update-utils";
+import { playWaitingChime, shouldChime } from "./waiting-chime";
 
 const PORT = Number(process.env.PETDEX_PORT ?? 7777);
 const RUNTIME_DIR = join(homedir(), ".petdex", "runtime");
@@ -241,6 +242,7 @@ function log(line: string) {
 
 let resetTimer: NodeJS.Timeout | null = null;
 let counter = 0;
+let lastAppliedState: string | null = null;
 
 function writeState(state: string, duration?: number) {
   counter += 1;
@@ -251,6 +253,19 @@ function writeState(state: string, duration?: number) {
     counter,
   };
   writeFileSync(STATE_PATH, JSON.stringify(payload));
+  // writeState is the single point where a state is actually applied
+  // (queue drain, timed reset, boot), so this is the one place the
+  // waiting-edge detection can't be fooled by coalescing or re-posts.
+  // The preferences read is gated behind the edge check: it only
+  // happens when a session actually starts waiting, not on the
+  // per-tool-call state churn.
+  if (
+    shouldChime(lastAppliedState, state) &&
+    readDesktopPreferences().waitingSound
+  ) {
+    if (playWaitingChime()) log("waiting chime");
+  }
+  lastAppliedState = state;
   if (resetTimer) {
     clearTimeout(resetTimer);
     resetTimer = null;
