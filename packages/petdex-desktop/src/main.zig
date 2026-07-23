@@ -298,6 +298,13 @@ const html_tail =
     \\          </div>
     \\          <input class="settings-toggle" id="settings-auto" type="checkbox" aria-label="Automatic updates">
     \\        </div>
+    \\        <div class="settings-row">
+    \\          <div class="settings-label">
+    \\            <span>Activity bubble</span>
+    \\            <span class="settings-muted">Show what your agent is doing in a speech bubble above the pet.</span>
+    \\          </div>
+    \\          <input class="settings-toggle" id="settings-bubbles" type="checkbox" aria-label="Activity bubble">
+    \\        </div>
     \\        <div class="settings-status" id="settings-save-status"></div>
     \\      </section>
     \\      <section class="settings-section">
@@ -320,6 +327,7 @@ const html_tail =
     \\    </main>`;
     \\    const versionEl = document.getElementById('settings-version');
     \\    const autoEl = document.getElementById('settings-auto');
+    \\    const bubblesEl = document.getElementById('settings-bubbles');
     \\    const saveEl = document.getElementById('settings-save-status');
     \\    const updateEl = document.getElementById('settings-update-status');
     \\    const installEl = document.getElementById('settings-install');
@@ -329,6 +337,9 @@ const html_tail =
     \\      const settings = await window.zero.invoke('petdex.read_desktop_settings', {});
     \\      const update = await window.zero.invoke('petdex.read_update_info', {});
     \\      autoEl.checked = !!settings.autoInstallUpdates;
+    \\      // Missing field (settings written by an older build) means
+    \\      // bubbles were never turned off — treat as enabled.
+    \\      bubblesEl.checked = settings.showBubbles !== false;
     \\      versionEl.textContent = settings.version || 'No version file';
     \\      updateEl.textContent = updateSummary(update);
     \\      const canInstall = update && update.installable !== false && (update.available || update.status === 'error');
@@ -342,15 +353,17 @@ const html_tail =
     \\        pathsEl.appendChild(item);
     \\      }
     \\    }
-    \\    autoEl.addEventListener('change', async () => {
+    \\    async function saveToggles() {
     \\      saveEl.textContent = 'Saving...';
     \\      try {
-    \\        await window.zero.invoke('petdex.write_desktop_settings', { autoInstallUpdates: autoEl.checked });
+    \\        await window.zero.invoke('petdex.write_desktop_settings', { autoInstallUpdates: autoEl.checked, showBubbles: bubblesEl.checked });
     \\        saveEl.textContent = 'Saved.';
     \\      } catch (err) {
     \\        saveEl.textContent = 'Could not save settings.';
     \\      }
-    \\    });
+    \\    }
+    \\    autoEl.addEventListener('change', saveToggles);
+    \\    bubblesEl.addEventListener('change', saveToggles);
     \\    installEl.addEventListener('click', async () => {
     \\      installEl.disabled = true;
     \\      updateEl.textContent = 'Starting update...';
@@ -1691,6 +1704,16 @@ const PetdexState = struct {
     fn readRuntimeBubbleCmd(context: *anyopaque, invocation: zero_native.bridge.Invocation, output: []u8) anyerror![]const u8 {
         _ = invocation;
         const self: *PetdexState = @ptrCast(@alignCast(context));
+        // Bubbles disabled in settings: pretend there is no bubble at
+        // all. Serving the empty payload here (instead of only gating
+        // the sidecar writes) hides an already-visible bubble on the
+        // next 200ms poll, so the toggle feels immediate. counter:0
+        // never matches a real counter (writeBubble starts at 1), so
+        // the WebView treats it as "bubble cleared" and the real
+        // counter re-triggers the current text if the user re-enables.
+        if (!self.readDesktopShowBubbles()) {
+            return std.fmt.bufPrint(output, "{{\"text\":\"\",\"counter\":0}}", .{});
+        }
         const path = try std.fs.path.join(self.allocator, &.{ self.config_dir, "runtime", "bubble.json" });
         defer self.allocator.free(path);
         var file = std.Io.Dir.openFileAbsolute(self.io, path, .{}) catch {
@@ -1945,8 +1968,12 @@ const PetdexState = struct {
 
     fn writeDesktopSettingsCmd(context: *anyopaque, invocation: zero_native.bridge.Invocation, output: []u8) anyerror![]const u8 {
         const self: *PetdexState = @ptrCast(@alignCast(context));
-        const auto_updates = jsonBoolField(invocation.request.payload, "autoInstallUpdates") orelse return error.MissingAutoInstallUpdates;
-        const text = if (auto_updates) "{\"autoInstallUpdates\":true}\n" else "{\"autoInstallUpdates\":false}\n";
+        // Fields absent from the payload keep their current value, so
+        // a caller flipping one toggle can't silently reset the other.
+        const auto_updates = jsonBoolField(invocation.request.payload, "autoInstallUpdates") orelse self.readDesktopAutoInstallUpdates();
+        const show_bubbles = jsonBoolField(invocation.request.payload, "showBubbles") orelse self.readDesktopShowBubbles();
+        var text_buf: [96]u8 = undefined;
+        const text = try std.fmt.bufPrint(&text_buf, "{{\"autoInstallUpdates\":{},\"showBubbles\":{}}}\n", .{ auto_updates, show_bubbles });
         var dir = try std.Io.Dir.openDirAbsolute(self.io, self.config_dir, .{});
         defer dir.close(self.io);
         try writeFileAll(self.io, dir, "preferences.json", text);
@@ -1954,13 +1981,23 @@ const PetdexState = struct {
     }
 
     fn readDesktopAutoInstallUpdates(self: *PetdexState) bool {
+        return self.readDesktopBoolPreference("autoInstallUpdates");
+    }
+
+    fn readDesktopShowBubbles(self: *PetdexState) bool {
+        return self.readDesktopBoolPreference("showBubbles");
+    }
+
+    // Both preferences default to true when the file or the key is
+    // missing — a fresh install auto-updates and shows bubbles.
+    fn readDesktopBoolPreference(self: *PetdexState, key: []const u8) bool {
         const path = std.fs.path.join(self.allocator, &.{ self.config_dir, "preferences.json" }) catch return true;
         defer self.allocator.free(path);
         var file = std.Io.Dir.openFileAbsolute(self.io, path, .{}) catch return true;
         defer file.close(self.io);
         var buf: [4096]u8 = undefined;
         const read = file.readPositionalAll(self.io, &buf, 0) catch return true;
-        return jsonBoolField(buf[0..read], "autoInstallUpdates") orelse true;
+        return jsonBoolField(buf[0..read], key) orelse true;
     }
 
     fn formatDesktopSettingsJson(self: *PetdexState, output: []u8) ![]const u8 {
@@ -1969,6 +2006,8 @@ const PetdexState = struct {
 
         try buf.appendSlice(self.allocator, "{\"autoInstallUpdates\":");
         try buf.appendSlice(self.allocator, if (self.readDesktopAutoInstallUpdates()) "true" else "false");
+        try buf.appendSlice(self.allocator, ",\"showBubbles\":");
+        try buf.appendSlice(self.allocator, if (self.readDesktopShowBubbles()) "true" else "false");
         try buf.appendSlice(self.allocator, ",\"version\":");
 
         const version_path = try std.fs.path.join(self.allocator, &.{ self.config_dir, "version" });

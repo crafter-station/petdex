@@ -33,11 +33,28 @@ describe("desktop update utils", () => {
   test("parses desktop preferences with safe defaults", () => {
     expect(parseDesktopPreferences('{"autoInstallUpdates":false}')).toEqual({
       autoInstallUpdates: false,
+      showBubbles: true,
     });
     expect(parseDesktopPreferences('{"autoInstallUpdates":"no"}')).toEqual(
       DEFAULT_DESKTOP_PREFERENCES,
     );
     expect(parseDesktopPreferences("not json")).toEqual(
+      DEFAULT_DESKTOP_PREFERENCES,
+    );
+  });
+
+  test("parses the showBubbles preference", () => {
+    expect(parseDesktopPreferences('{"showBubbles":false}')).toEqual({
+      autoInstallUpdates: true,
+      showBubbles: false,
+    });
+    expect(
+      parseDesktopPreferences(
+        '{"autoInstallUpdates":false,"showBubbles":false}',
+      ),
+    ).toEqual({ autoInstallUpdates: false, showBubbles: false });
+    // Anything non-boolean falls back to visible bubbles.
+    expect(parseDesktopPreferences('{"showBubbles":"off"}')).toEqual(
       DEFAULT_DESKTOP_PREFERENCES,
     );
   });

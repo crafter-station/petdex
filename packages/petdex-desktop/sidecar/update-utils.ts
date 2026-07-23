@@ -5,6 +5,7 @@ import { finished } from "node:stream/promises";
 
 export type DesktopPreferences = {
   autoInstallUpdates: boolean;
+  showBubbles: boolean;
 };
 
 export type ReleaseAsset = {
@@ -21,16 +22,24 @@ export type DesktopRelease = {
 
 export const DEFAULT_DESKTOP_PREFERENCES: DesktopPreferences = {
   autoInstallUpdates: true,
+  showBubbles: true,
 };
 
 export function parseDesktopPreferences(text: string): DesktopPreferences {
   try {
-    const parsed = JSON.parse(text) as { autoInstallUpdates?: unknown };
+    const parsed = JSON.parse(text) as {
+      autoInstallUpdates?: unknown;
+      showBubbles?: unknown;
+    };
     return {
       autoInstallUpdates:
         typeof parsed.autoInstallUpdates === "boolean"
           ? parsed.autoInstallUpdates
           : DEFAULT_DESKTOP_PREFERENCES.autoInstallUpdates,
+      showBubbles:
+        typeof parsed.showBubbles === "boolean"
+          ? parsed.showBubbles
+          : DEFAULT_DESKTOP_PREFERENCES.showBubbles,
     };
   } catch {
     return DEFAULT_DESKTOP_PREFERENCES;

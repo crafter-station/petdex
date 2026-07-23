@@ -1134,6 +1134,16 @@ const server = http.createServer(async (req, res) => {
         typeof data.agent_source === "string"
           ? data.agent_source.slice(0, 64)
           : null;
+      // Users can turn bubbles off from the desktop settings window
+      // (showBubbles in ~/.petdex/preferences.json). We still accept
+      // the request (hooks are fire-and-forget, a 4xx would just be
+      // noise in their logs) but skip the write so nothing new lands
+      // in bubble.json. We keep writeInitStatus: a suppressed bubble
+      // is still proof the hooks are wired up correctly.
+      if (!readDesktopPreferences().showBubbles) {
+        writeInitStatus();
+        return jsonResponse(res, 200, { ok: true, suppressed: true });
+      }
       writeBubble(text, agentSource);
       writeInitStatus();
       log(`bubble="${text.slice(0, 60)}" source=${agentSource ?? "-"}`);
