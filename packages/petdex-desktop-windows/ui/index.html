@@ -73,11 +73,11 @@
       transform: translateX(-50%);
       background: rgba(255, 255, 255, 0.93);
       color: #111;
-      font: 600 10.5px system-ui, -apple-system, sans-serif;
-      line-height: 1.15;
-      padding: 4px 7px;
+      font: 600 11px system-ui, -apple-system, sans-serif;
+      line-height: 1.2;
+      padding: 4px 8px;
       border-radius: 10px;
-      max-width: 186px;
+      max-width: 190px;
       word-break: keep-all;
       overflow-wrap: break-word;
       box-shadow: 0 2px 6px rgba(0, 0, 0, 0.30);
@@ -211,13 +211,23 @@ async function pollBubble() {
 
 function showBubble(text) {
   const el = document.getElementById("bubble");
+  const rootEl = document.getElementById("root");
   if (!text) {
     el.textContent = "";
     el.classList.remove("visible");
+    rootEl.style.transform = "translateY(0px)";
     return;
   }
   el.textContent = text;
   el.classList.add("visible");
+  const bh = el.offsetHeight || 22;
+  const neededSpace = bh + 4;
+  if (neededSpace > 76) {
+    const shift = neededSpace - 76;
+    rootEl.style.transform = `translateY(${shift}px)`;
+  } else {
+    rootEl.style.transform = "translateY(0px)";
+  }
 }
 
 document.getElementById("root").addEventListener("mousedown", async () => {
