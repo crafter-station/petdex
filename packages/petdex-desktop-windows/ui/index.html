@@ -30,11 +30,10 @@
        data URI injected at runtime via read_file_as_base64. */
     .pet-sprite-frame {
       --pet-scale: 1;
+      position: relative;
       width: calc(192px * var(--pet-scale));
       height: calc(208px * var(--pet-scale));
       overflow: hidden;
-      /* Promote to its own paint layer so the browser does not evict the
-         WebP decode buffer when the window is off-screen. */
       contain: layout paint;
     }
 
@@ -48,7 +47,7 @@
       height: 208px;
       background-image: var(--sprite-url);
       background-repeat: no-repeat;
-      background-size: 1536px 1872px;
+      background-size: 1536px auto;
       image-rendering: pixelated;
       /* translateZ(0) forces GPU-composited layer so animation stays
          on the compositor thread instead of being re-rasterized. */
@@ -69,21 +68,23 @@
 
     #bubble {
       position: absolute;
-      bottom: calc(100% + 8px);
+      bottom: calc(100% + 4px);
       left: 50%;
       transform: translateX(-50%);
       background: rgba(255, 255, 255, 0.93);
       color: #111;
-      font: 11px/1.4 system-ui, sans-serif;
-      padding: 6px 10px;
-      border-radius: 8px;
-      max-width: 180px;
-      word-wrap: break-word;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+      font: 600 10.5px system-ui, -apple-system, sans-serif;
+      line-height: 1.15;
+      padding: 4px 7px;
+      border-radius: 10px;
+      max-width: 186px;
+      word-break: keep-all;
+      overflow-wrap: break-word;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.30);
       opacity: 0;
-      transition: opacity 0.25s ease;
+      transition: opacity 180ms ease;
       pointer-events: none;
-      white-space: pre-wrap;
+      white-space: normal;
     }
     #bubble.visible { opacity: 1; }
 
@@ -150,10 +151,11 @@ async function boot() {
     const b64 = await invoke("read_file_as_base64", { path: pet.sprite_path })
       .catch((err) => { throw new Error(`spritesheet load failed: ${err}`); });
     const ext = pet.sprite_path.endsWith(".png") ? "png" : "webp";
-    document.getElementById("sprite").style.setProperty(
-      "--sprite-url",
-      `url("data:image/${ext};base64,${b64}")`
-    );
+    const dataUrl = `url("data:image/${ext};base64,${b64}")`;
+    const spriteEl = document.getElementById("sprite");
+    spriteEl.style.backgroundImage = dataUrl;
+    spriteEl.style.backgroundRepeat = "no-repeat";
+    spriteEl.style.setProperty("--sprite-url", dataUrl);
     applyState(DEFAULT_STATE);
     dbg(pet.name);
 
@@ -210,13 +212,11 @@ async function pollBubble() {
 function showBubble(text) {
   const el = document.getElementById("bubble");
   if (!text) {
-    // Empty text is the sidecar's explicit clear signal (written on boot).
     el.textContent = "";
     el.classList.remove("visible");
     return;
   }
   el.textContent = text;
-  // Bubble persists until next update — no auto-hide timeout.
   el.classList.add("visible");
 }
 
