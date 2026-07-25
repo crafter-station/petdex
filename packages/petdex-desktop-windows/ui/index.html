@@ -7,35 +7,37 @@
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
     html, body {
+      margin: 0;
+      padding: 0;
       background: transparent;
-      width: 192px;
-      height: 288px;
       overflow: hidden;
+      width: 100%;
+      height: 100%;
+      font-family: -apple-system, system-ui, sans-serif;
       user-select: none;
       -webkit-user-select: none;
     }
 
+    body { pointer-events: none; }
+
     #root {
       position: fixed;
-      bottom: 0;
-      left: 0;
-      width: 192px;
-      height: 208px;
-      cursor: grab;
+      left: 8px;
+      top: 34px;
+      pointer-events: none;
     }
-    #root:active { cursor: grabbing; }
 
-    /* Verbatim from src/app/globals.css — .pet-sprite-frame and .pet-sprite.
-       background-image uses var(--sprite-url) which we set to the base64
-       data URI injected at runtime via read_file_as_base64. */
+    /* Scale 0.55 matches macOS 51% window width ratio (105px in 192px window) */
     .pet-sprite-frame {
-      --pet-scale: 1;
+      --pet-scale: 0.55;
       position: relative;
       width: calc(192px * var(--pet-scale));
       height: calc(208px * var(--pet-scale));
       overflow: hidden;
-      contain: layout paint;
+      pointer-events: auto;
+      cursor: grab;
     }
+    .pet-sprite-frame:active { cursor: grabbing; }
 
     .pet-sprite {
       --sprite-row: 0;
@@ -49,8 +51,6 @@
       background-repeat: no-repeat;
       background-size: 1536px auto;
       image-rendering: pixelated;
-      /* translateZ(0) forces GPU-composited layer so animation stays
-         on the compositor thread instead of being re-rasterized. */
       transform: scale(var(--pet-scale)) translateZ(0);
       transform-origin: top left;
       will-change: background-position;
@@ -66,52 +66,41 @@
       .pet-sprite { animation: none; }
     }
 
+    /* Verbatim from macOS main.zig — bubbleEl with avatar support */
     #bubble {
-      position: absolute;
-      bottom: calc(100% + 4px);
-      left: 50%;
-      transform: translateX(-50%);
-      background: rgba(255, 255, 255, 0.93);
+      position: fixed;
+      padding: 4px 8px;
+      border-radius: 10px;
+      background: #ffffff;
       color: #111;
       font: 600 11px system-ui, -apple-system, sans-serif;
       line-height: 1.2;
-      padding: 4px 8px;
-      border-radius: 10px;
-      max-width: 190px;
-      word-break: keep-all;
-      overflow-wrap: break-word;
       box-shadow: 0 2px 6px rgba(0, 0, 0, 0.30);
+      text-align: left;
+      white-space: normal;
+      max-width: 190px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
       opacity: 0;
       transition: opacity 180ms ease;
       pointer-events: none;
-      white-space: normal;
-    }
-    #bubble.visible { opacity: 1; }
-
-    #debug {
-      position: fixed;
-      top: 2px;
-      left: 2px;
-      font: 9px monospace;
-      color: rgba(255, 255, 255, 0.45);
-      pointer-events: none;
+      z-index: 5;
     }
   </style>
 </head>
 <body>
   <div id="root">
-    <div id="bubble"></div>
     <div
       class="pet-sprite-frame"
       id="sprite-frame"
       role="img"
       aria-label="Petdex pet"
-      style="--pet-scale: 1"
     >
       <div class="pet-sprite" id="sprite"></div>
     </div>
   </div>
-  <div id="debug">loading...</div>
+  <div id="bubble"></div>
 
 <script type="module">
 const { invoke } = window.__TAURI__.core;
@@ -134,6 +123,20 @@ const DEFAULT_STATE = "idle";
 
 let lastStateCounter = 0;
 let lastBubbleCounter = 0;
+let bubbleAvatarEl = null;
+let bubbleTextEl = null;
+
+// Verbatim from macOS main.zig L445-L454
+const AGENT_AVATARS = {
+  'claude-code': 'agents/claude-code.svg',
+  'codex': 'agents/codex.svg',
+  'gemini': 'agents/gemini.svg',
+  'opencode': 'agents/opencode.svg',
+  'antigravity': 'agents/antigravity.svg',
+};
+function agentAvatarSrc(source) {
+  return AGENT_AVATARS[source] || 'agents/fallback.svg';
+}
 
 function applyState(stateId) {
   const s = PET_STATES[stateId] ?? PET_STATES[DEFAULT_STATE];
@@ -146,7 +149,7 @@ function applyState(stateId) {
 async function boot() {
   try {
     const pet = await invoke("get_active_pet");
-    if (!pet) { dbg("no pet found"); return; }
+    if (!pet) return;
 
     const b64 = await invoke("read_file_as_base64", { path: pet.sprite_path })
       .catch((err) => { throw new Error(`spritesheet load failed: ${err}`); });
@@ -157,29 +160,19 @@ async function boot() {
     spriteEl.style.backgroundRepeat = "no-repeat";
     spriteEl.style.setProperty("--sprite-url", dataUrl);
     applyState(DEFAULT_STATE);
-    dbg(pet.name);
 
     await bootSidecar();
   } catch (e) {
-    dbg(`err: ${String(e).slice(0, 40)}`);
     console.error(e);
   }
 }
 
-// Polling reads runtime files written by the sidecar to ~/.petdex/runtime/.
-// File-based reads are CORS-free: the sidecar's HTTP server does not set
-// CORS headers, so Chromium (WebView2) blocks all cross-origin fetch() from
-// the WebView. Using Tauri invoke() calls instead sidesteps this entirely.
 function startPolling() {
-  // 200ms matches the trusted Zig desktop cadence.
-  // 3s / 2s intervals would miss short-lived states (waving 700ms, running 820ms).
   setInterval(pollState, 200);
   setInterval(pollBubble, 200);
 }
 
 async function bootSidecar() {
-  // Start polling immediately — file reads work whenever the sidecar has
-  // written its files, even from a previous session that left them on disk.
   startPolling();
   try {
     await invoke("spawn_sidecar");
@@ -199,38 +192,96 @@ async function pollState() {
 }
 
 async function pollBubble() {
+  // Hide bubble if picker menu is open (verbatim macOS main.zig L563-L570)
+  if (document.querySelector('.menu')) {
+    const el = document.getElementById("bubble");
+    if (el) el.style.opacity = '0';
+    return;
+  }
   try {
     const data = await invoke("read_runtime_bubble");
     if (!data) return;
     if (data.counter === lastBubbleCounter) return;
     lastBubbleCounter = data.counter;
-    // Pass text directly — showBubble treats empty as the clear signal.
-    showBubble(data.text ?? "");
+
+    // Reset pet to default top:34 before measuring new bubble (verbatim macOS main.zig L589-L597)
+    const stageEl = document.getElementById("root");
+    if (stageEl && stageEl.style.top !== '34px') {
+      stageEl.style.top = '34px';
+    }
+
+    showBubble(data.text ?? "", data.agent_source ?? "");
   } catch {}
 }
 
-function showBubble(text) {
+function ensureBubble() {
   const el = document.getElementById("bubble");
-  const rootEl = document.getElementById("root");
-  if (!text) {
-    el.textContent = "";
-    el.classList.remove("visible");
-    rootEl.style.transform = "translateY(0px)";
-    return;
-  }
-  el.textContent = text;
-  el.classList.add("visible");
-  const bh = el.offsetHeight || 22;
-  const neededSpace = bh + 4;
-  if (neededSpace > 76) {
-    const shift = neededSpace - 76;
-    rootEl.style.transform = `translateY(${shift}px)`;
-  } else {
-    rootEl.style.transform = "translateY(0px)";
-  }
+  if (bubbleTextEl) return el;
+  el.innerHTML = "";
+  bubbleAvatarEl = document.createElement("img");
+  bubbleAvatarEl.alt = "Agent avatar";
+  bubbleAvatarEl.decoding = "async";
+  bubbleAvatarEl.style.cssText = "width:20px;height:20px;flex:0 0 auto;object-fit:cover;display:block;";
+  
+  bubbleTextEl = document.createElement("span");
+  bubbleTextEl.style.cssText = "display:block;min-width:0;word-break:keep-all;overflow-wrap:break-word;";
+  
+  el.appendChild(bubbleAvatarEl);
+  el.appendChild(bubbleTextEl);
+  return el;
 }
 
-document.getElementById("root").addEventListener("mousedown", async () => {
+function showBubble(text, agentSource) {
+  const el = document.getElementById("bubble");
+  if (!text) {
+    el.style.opacity = "0";
+    // Restore pet to default position (verbatim macOS main.zig L604-L607)
+    const stageEl = document.getElementById("root");
+    if (stageEl && stageEl.style.top !== '34px') {
+      stageEl.style.top = '34px';
+    }
+    return;
+  }
+  ensureBubble();
+  const source = typeof agentSource === 'string' ? agentSource : '';
+  bubbleAvatarEl.src = agentAvatarSrc(source);
+  bubbleAvatarEl.alt = source ? source + ' avatar' : 'Agent avatar';
+  bubbleTextEl.textContent = text;
+  positionBubbleNearPet(el);
+  el.style.opacity = "1";
+}
+
+/* Verbatim from macOS main.zig — positionBubbleNearPet */
+function positionBubbleNearPet(el) {
+  const pet = document.getElementById("sprite-frame");
+  const rect = pet.getBoundingClientRect();
+  const bh = el.offsetHeight || 22;
+  const ww = window.innerWidth;
+  const gap = 14; // Official macOS gap (main.zig L514)
+  const petCenterX = rect.left + rect.width / 2;
+  const realBw = el.offsetWidth;
+  const desiredLeft = petCenterX - realBw / 2;
+  const left = Math.max(4, Math.min(ww - realBw - 4, desiredLeft));
+
+  const stageEl = document.getElementById("root");
+  const currentPetTop = parseInt(stageEl.style.top || '34', 10);
+  let top = rect.top - bh - gap;
+  if (top < 2) {
+    const newPetTop = bh + gap + 4;
+    if (newPetTop > currentPetTop) {
+      stageEl.style.top = newPetTop + 'px';
+      const rect2 = pet.getBoundingClientRect();
+      top = Math.max(2, rect2.top - bh - gap);
+    } else {
+      top = Math.max(2, top);
+    }
+  }
+
+  el.style.left = left + 'px';
+  el.style.top = top + 'px';
+}
+
+document.getElementById("sprite-frame").addEventListener("mousedown", async () => {
   try { await getCurrentWindow().startDragging(); } catch {}
 });
 
@@ -239,10 +290,6 @@ window.addEventListener("contextmenu", async (e) => {
   await invoke("stop_sidecar");
   await invoke("quit_app");
 });
-
-function dbg(msg) {
-  document.getElementById("debug").textContent = msg;
-}
 
 boot();
 </script>
