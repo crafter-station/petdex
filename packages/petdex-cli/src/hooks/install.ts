@@ -63,7 +63,9 @@ export type HooksInstallResult = {
   installedAgents: string[];
 };
 
-export async function runInstall(): Promise<HooksInstallResult> {
+export async function runInstall(
+  opts: { agents?: string[] } = {},
+): Promise<HooksInstallResult> {
   p.intro(pc.bgMagenta(pc.white(" petdex hooks install ")));
 
   // Snapshot the running petdex binary to a known path so hooks can
@@ -99,16 +101,34 @@ export async function runInstall(): Promise<HooksInstallResult> {
     console.log(`   ${badge} ${pc.bold(agent.displayName)}  ${label}`);
   }
 
-  const selected = await p.multiselect<string>({
-    message: "Which agents should drive the mascot?",
-    options: detections.map(({ agent, installed }) => ({
-      value: agent.id,
-      label: agent.displayName,
-      hint: installed ? "installed" : "not installed yet",
-    })),
-    initialValues: detections.filter((d) => d.installed).map((d) => d.agent.id),
-    required: false,
-  });
+  // Non-interactive path: when caller passes an explicit agent list
+  // (e.g. `petdex hooks install --agents claude-code`), skip the
+  // multiselect entirely. Required on Windows/CI where there is no TTY
+  // and @clack/prompts would block on EOF. Unknown ids are dropped with
+  // a warning rather than failing the whole run.
+  let selected: string[] | symbol;
+  if (opts.agents && opts.agents.length > 0) {
+    const known = new Set<string>(AGENTS.map((a) => a.id));
+    const valid = opts.agents.filter((id) => known.has(id));
+    const unknown = opts.agents.filter((id) => !known.has(id));
+    if (unknown.length > 0) {
+      p.log.warn(`Ignoring unknown agent id(s): ${unknown.join(", ")}`);
+    }
+    selected = valid;
+  } else {
+    selected = await p.multiselect<string>({
+      message: "Which agents should drive the mascot?",
+      options: detections.map(({ agent, installed }) => ({
+        value: agent.id,
+        label: agent.displayName,
+        hint: installed ? "installed" : "not installed yet",
+      })),
+      initialValues: detections
+        .filter((d) => d.installed)
+        .map((d) => d.agent.id),
+      required: false,
+    });
+  }
 
   if (p.isCancel(selected) || selected.length === 0) {
     p.cancel("No agents selected. Bye.");

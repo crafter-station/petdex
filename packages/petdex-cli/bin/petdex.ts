@@ -1411,7 +1411,30 @@ async function cmdHooks(args: string[]) {
   }
   switch (sub) {
     case "install": {
-      const { installedAgents } = await runHooksInstall();
+      // Non-interactive selection: `--agents claude-code,codex` or
+      // repeated `--agent <id>`. Lets Windows/CI wire hooks without a
+      // TTY (the interactive multiselect blocks on EOF there).
+      const agentFlag = args.find((a) => a.startsWith("--agents="));
+      let agents: string[] | undefined;
+      if (agentFlag) {
+        agents = agentFlag
+          .slice("--agents=".length)
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+      } else {
+        const idx = args.indexOf("--agents");
+        const idx2 = idx === -1 ? args.indexOf("--agent") : idx;
+        if (idx2 !== -1 && args[idx2 + 1]) {
+          agents = args[idx2 + 1]
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean);
+        }
+      }
+      const { installedAgents } = await runHooksInstall(
+        agents ? { agents } : {},
+      );
       // Only emit success when at least one agent was actually written.
       // Cancelled/no-op runs return an empty array; counting those as
       // success makes the dashboard "agents wired up" funnel lie.

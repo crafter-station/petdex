@@ -202,15 +202,7 @@ export const AGENTS: Agent[] = [
           UserPromptSubmit: [
             {
               hooks: [
-                {
-                  type: "command",
-                  command: bubbleHookCommand(
-                    "claude-code",
-                    "user-prompt",
-                    "jumping",
-                    800,
-                  ),
-                },
+                bubbleHookAction("claude-code", "user-prompt", "jumping", 800),
               ],
             },
           ],
@@ -221,51 +213,24 @@ export const AGENTS: Agent[] = [
             // file compact and removes a maintenance trap (matcher
             // drift between agents.ts and bubble-runner.ts).
             {
-              hooks: [
-                {
-                  type: "command",
-                  command: bubbleHookCommand("claude-code", "pre", "running"),
-                },
-              ],
+              hooks: [bubbleHookAction("claude-code", "pre", "running")],
             },
           ],
           PostToolUse: [
             {
-              hooks: [
-                {
-                  type: "command",
-                  command: bubbleHookCommand("claude-code", "post", "idle"),
-                },
-              ],
+              hooks: [bubbleHookAction("claude-code", "post", "idle")],
             },
           ],
           Notification: [
             {
               hooks: [
-                {
-                  type: "command",
-                  command: bubbleHookCommand(
-                    "claude-code",
-                    "notification",
-                    "waiting",
-                  ),
-                },
+                bubbleHookAction("claude-code", "notification", "waiting"),
               ],
             },
           ],
           Stop: [
             {
-              hooks: [
-                {
-                  type: "command",
-                  command: bubbleHookCommand(
-                    "claude-code",
-                    "stop",
-                    "waving",
-                    1500,
-                  ),
-                },
-              ],
+              hooks: [bubbleHookAction("claude-code", "stop", "waving", 1500)],
             },
           ],
         },
@@ -573,6 +538,48 @@ export const AGENTS: Agent[] = [
  * Both branches share the killswitch + token-gate envelope of the
  * original curlCommand, so agent UIs stay clean.
  */
+/**
+ * Build a single hook action object for one phase.
+ *
+ * POSIX (macOS/Linux): emit the shell snippet from bubbleHookCommand —
+ * the shell checks the killswitch, prefers the persisted node binary,
+ * and falls back to raw curl when that binary is missing.
+ *
+ * Windows: there is no guaranteed POSIX shell. Claude Code runs hooks
+ * through Git Bash when it is installed but PowerShell otherwise, and the
+ * POSIX snippet ("[ -f ... ]; if [ -x ... ]; then ...; fi", "$HOME") is
+ * not portable across both. Instead we use Claude Code's "exec form"
+ * ({ command, args }), which runs node directly with NO shell involved.
+ * stdin is still piped, so runBubble drains the hook payload exactly as on
+ * POSIX, and the killswitch is honored inside runBubble itself
+ * (bubble-runner.ts checks hooks-disabled before doing any work). The only
+ * behavior dropped on Windows is the curl fallback for a missing persisted
+ * binary, which cannot happen right after `init` persists it.
+ */
+function bubbleHookAction(
+  agentId: Agent["id"],
+  phase: string,
+  fallbackState: PetState,
+  fallbackDuration?: number,
+): Record<string, unknown> {
+  if (process.platform === "win32") {
+    return {
+      type: "command",
+      command: "node",
+      args: [
+        path.join(HOME, ".petdex", "bin", "petdex.js"),
+        "bubble",
+        phase,
+        agentId,
+      ],
+    };
+  }
+  return {
+    type: "command",
+    command: bubbleHookCommand(agentId, phase, fallbackState, fallbackDuration),
+  };
+}
+
 function bubbleHookCommand(
   agentId: Agent["id"],
   phase: string,
