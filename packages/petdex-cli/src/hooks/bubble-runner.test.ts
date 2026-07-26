@@ -186,7 +186,11 @@ describe("readStdin", () => {
       {
         cwd: CLI_PACKAGE_DIR,
         stdio: ["pipe", "pipe", "pipe"],
-        env: { ...process.env, HOME: fakeHome },
+        env: {
+          ...process.env,
+          HOME: fakeHome,
+          USERPROFILE: fakeHome,
+        },
       },
     );
     let stderr = "";
