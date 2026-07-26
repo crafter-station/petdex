@@ -88,12 +88,13 @@ const claude_events = [_]HookEvent{
     .{ .event = "Stop", .phase = "stop" },
 };
 
-/// Canonical hook command: killswitch first, then the stable symlink;
-/// silent exit when the app (and its symlink) is not installed.
+/// Canonical hook command: pass live payloads to the stable symlink. The
+/// disabled and missing-runner paths still drain stdin before exiting so an
+/// agent host never sees EPIPE while it is writing a hook payload.
 pub fn canonicalCommand(buf: []u8, phase: []const u8, agent: []const u8) ?[]const u8 {
     return std.fmt.bufPrint(
         buf,
-        "[ -f \"$HOME/.petdex/runtime/hooks-disabled\" ] && exit 0; [ -x \"$HOME/.petdex/bin/petdex-hook\" ] && exec \"$HOME/.petdex/bin/petdex-hook\" bubble {s} {s}; exit 0",
+        "if [ -f \"$HOME/.petdex/runtime/hooks-disabled\" ]; then [ -t 0 ] || cat >/dev/null; exit 0; fi; if [ -x \"$HOME/.petdex/bin/petdex-hook\" ]; then exec \"$HOME/.petdex/bin/petdex-hook\" bubble {s} {s}; fi; [ -t 0 ] || cat >/dev/null; exit 0",
         .{ phase, agent },
     ) catch null;
 }
@@ -176,7 +177,7 @@ const HookEvent = struct { event: []const u8, phase: []const u8 };
 pub fn installClaude(allocator: std.mem.Allocator, home: []const u8) bool {
     var path_buf: [512]u8 = undefined;
     const path = claudeSettingsPath(&path_buf, home) orelse return false;
-    return installJsonHooks(allocator, path, &claude_events, "claude-code");
+    return installJsonHooks(allocator, path, &claude_events, "claude-code", 2, false);
 }
 
 /// Gemini rides the exact same settings.json hook shape as Claude,
@@ -190,7 +191,7 @@ const gemini_events = [_]HookEvent{
 pub fn installGemini(allocator: std.mem.Allocator, home: []const u8) bool {
     var path_buf: [512]u8 = undefined;
     const path = std.fmt.bufPrint(&path_buf, "{s}/.gemini/settings.json", .{home}) catch return false;
-    return installJsonHooks(allocator, path, &gemini_events, "gemini");
+    return installJsonHooks(allocator, path, &gemini_events, "gemini", 2000, true);
 }
 
 /// opencode has no hooks: it loads a self-contained JS plugin that
@@ -210,7 +211,14 @@ pub fn installOpencode(allocator: std.mem.Allocator, home: []const u8) bool {
 /// JSON-hook agents (Claude Code, Gemini): std.json Value roundtrip of
 /// settings.json that filters existing petdex entries per event and
 /// appends the canonical one, touching nothing else.
-fn installJsonHooks(allocator: std.mem.Allocator, path: []const u8, events: []const HookEvent, agent: []const u8) bool {
+fn installJsonHooks(
+    allocator: std.mem.Allocator,
+    path: []const u8,
+    events: []const HookEvent,
+    agent: []const u8,
+    timeout: i64,
+    enable_hooks_config: bool,
+) bool {
     const existing = readFileAlloc(allocator, path, 1024 * 1024);
     defer if (existing) |e| allocator.free(e);
     backupOnce(allocator, path);
@@ -226,6 +234,8 @@ fn installJsonHooks(allocator: std.mem.Allocator, path: []const u8, events: []co
         }
         break :blk emptyObject(a);
     };
+
+    if (enable_hooks_config and !ensureHooksConfigEnabled(&root, a)) return false;
 
     const hooks_entry = root.object.getOrPut(a, "hooks") catch return false;
     if (!hooks_entry.found_existing or hooks_entry.value_ptr.* != .object) {
@@ -253,6 +263,7 @@ fn installJsonHooks(allocator: std.mem.Allocator, path: []const u8, events: []co
         var hook_obj = std.json.ObjectMap.init(a, &.{}, &.{}) catch return false;
         hook_obj.put(a, "type", .{ .string = "command" }) catch return false;
         hook_obj.put(a, "command", .{ .string = a.dupe(u8, cmd) catch return false }) catch return false;
+        hook_obj.put(a, "timeout", .{ .integer = timeout }) catch return false;
         var inner = std.json.Array.init(a);
         inner.append(.{ .object = hook_obj }) catch return false;
         var entry_obj = std.json.ObjectMap.init(a, &.{}, &.{}) catch return false;
@@ -262,6 +273,15 @@ fn installJsonHooks(allocator: std.mem.Allocator, path: []const u8, events: []co
 
     const serialized = std.json.Stringify.valueAlloc(a, root, .{ .whitespace = .indent_2 }) catch return false;
     return writeFile(path, serialized);
+}
+
+fn ensureHooksConfigEnabled(root: *std.json.Value, allocator: std.mem.Allocator) bool {
+    const config_entry = root.object.getOrPut(allocator, "hooksConfig") catch return false;
+    if (!config_entry.found_existing or config_entry.value_ptr.* != .object) {
+        config_entry.value_ptr.* = .{ .object = std.json.ObjectMap.init(allocator, &.{}, &.{}) catch return false };
+    }
+    config_entry.value_ptr.object.put(allocator, "enabled", .{ .bool = true }) catch return false;
+    return true;
 }
 
 fn entryIsPetdex(entry: std.json.Value) bool {
@@ -306,7 +326,7 @@ pub fn installCodex(allocator: std.mem.Allocator, home: []const u8) bool {
             esc.append(c) catch return false;
         }
         var line_buf: [1024]u8 = undefined;
-        const line = std.fmt.bufPrint(&line_buf, "    \"{s}\": [{{ \"hooks\": [{{ \"type\": \"command\", \"command\": \"{s}\" }}] }}]{s}\n", .{ ev.event, esc.items, if (idx + 1 < codex_events.len) "," else "" }) catch return false;
+        const line = std.fmt.bufPrint(&line_buf, "    \"{s}\": [{{ \"hooks\": [{{ \"type\": \"command\", \"command\": \"{s}\", \"timeout\": 2 }}] }}]{s}\n", .{ ev.event, esc.items, if (idx + 1 < codex_events.len) "," else "" }) catch return false;
         out.appendSlice(line) catch return false;
     }
     out.appendSlice("  }\n}\n") catch return false;
@@ -473,6 +493,7 @@ test "installCodex writes hooks.json and feature flag" {
     defer t.allocator.free(hooks);
     try t.expect(std.mem.indexOf(u8, hooks, "bubble stop codex") != null);
     try t.expect(std.mem.indexOf(u8, hooks, "PermissionRequest") != null);
+    try t.expect(std.mem.indexOf(u8, hooks, "\"timeout\": 2") != null);
     const toml_after = readFileAlloc(t.allocator, toml, 64 * 1024).?;
     defer t.allocator.free(toml_after);
     try t.expect(std.mem.indexOf(u8, toml_after, "hooks = true") != null);
@@ -530,6 +551,21 @@ test "canonical command carries killswitch, symlink, phase and agent" {
     const cmd = canonicalCommand(&buf, "pre", "claude-code").?;
     try t.expect(std.mem.indexOf(u8, cmd, "hooks-disabled") != null);
     try t.expect(std.mem.indexOf(u8, cmd, "petdex-hook\" bubble pre claude-code") != null);
+    try t.expectEqual(@as(usize, 2), std.mem.count(u8, cmd, "cat >/dev/null"));
+}
+
+test "installGemini enables hooks and uses a millisecond timeout" {
+    const home = "/tmp/petdex-agenthooks-gemini-fixture";
+    plat.makeDir(home ++ "/.gemini");
+    var path_buf: [512]u8 = undefined;
+    const config = std.fmt.bufPrint(&path_buf, "{s}/.gemini/settings.json", .{home}) catch unreachable;
+    try t.expect(writeFile(config, "{\"hooksConfig\":{\"keep\":true}}"));
+    try t.expect(installGemini(t.allocator, home));
+    const written = readFileAlloc(t.allocator, config, 64 * 1024).?;
+    defer t.allocator.free(written);
+    try t.expect(std.mem.indexOf(u8, written, "\"timeout\": 2000") != null);
+    try t.expect(std.mem.indexOf(u8, written, "\"enabled\": true") != null);
+    try t.expect(std.mem.indexOf(u8, written, "\"keep\": true") != null);
 }
 
 test "toml feature detection" {

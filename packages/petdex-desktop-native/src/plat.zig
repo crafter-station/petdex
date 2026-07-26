@@ -197,13 +197,43 @@ pub fn readStdin(buf: []u8) []const u8 {
     const io = scope.io();
     var read_buf: [4096]u8 = undefined;
     var reader = std.Io.File.stdin().reader(io, &read_buf);
+    return readCappedAndDrain(&reader.interface, buf);
+}
+
+/// Keep the first `buf.len` bytes but drain the rest of the pipe. Hook
+/// hosts can still be writing a large payload after the useful prefix; an
+/// early close makes their writer see EPIPE/Broken pipe.
+fn readCappedAndDrain(reader: anytype, buf: []u8) []const u8 {
     var total: usize = 0;
-    while (total < buf.len) {
-        const n = reader.interface.readSliceShort(buf[total..]) catch break;
+    var discard: [4096]u8 = undefined;
+    while (true) {
+        const target = if (total < buf.len) buf[total..] else &discard;
+        const n = reader.readSliceShort(target) catch break;
         if (n == 0) break;
-        total += n;
+        if (total < buf.len) total += n;
     }
     return buf[0..total];
+}
+
+test "readCappedAndDrain keeps the cap and consumes the source" {
+    const Source = struct {
+        bytes: []const u8,
+        offset: usize = 0,
+
+        fn readSliceShort(self: *@This(), out: []u8) !usize {
+            if (self.offset >= self.bytes.len) return 0;
+            const n = @min(out.len, self.bytes.len - self.offset);
+            @memcpy(out[0..n], self.bytes[self.offset .. self.offset + n]);
+            self.offset += n;
+            return n;
+        }
+    };
+
+    var source = Source{ .bytes = "0123456789" };
+    var kept: [4]u8 = undefined;
+    const captured = readCappedAndDrain(&source, &kept);
+    try std.testing.expectEqualStrings("0123", captured);
+    try std.testing.expectEqual(source.bytes.len, source.offset);
 }
 
 // ------------------------------------------------------------------ clock

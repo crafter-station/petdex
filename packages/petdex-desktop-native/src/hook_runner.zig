@@ -22,22 +22,27 @@ const title_max = 60;
 const preview_max = 110;
 const transcript_tail_cap = 64 * 1024;
 const session_ttl_secs: i64 = 24 * 60 * 60;
+const post_timeout_ms: u64 = 300;
+const post_poll_ms: u64 = 5;
 
 // ------------------------------------------------------------- entry
 
 /// argv tail after "bubble": [phase, agent?]. Reads stdin, formats,
 /// POSTs bubble + state to the sidecar. Never fails outward.
 pub fn run(phase: []const u8, arg_agent: ?[]const u8, home: []const u8) void {
+    // Always finish consuming the host's payload before any early return.
+    // The host may still be writing after the useful 64 KiB prefix, and
+    // closing the read end early propagates EPIPE/Broken pipe to the agent.
+    var stdin_buf: [stdin_cap]u8 = undefined;
+    const payload = readStdin(&stdin_buf);
+
     var path_buf: [512]u8 = undefined;
     var probe: [1]u8 = undefined;
 
-    // Killswitch first: one stat, minimal cost when disabled.
+    // Killswitch remains a cheap no-op after the mandatory stdin drain.
     if (std.fmt.bufPrint(&path_buf, "{s}/.petdex/runtime/hooks-disabled", .{home})) |ks| {
         if (cReadFile(ks, &probe) != null) return;
     } else |_| {}
-
-    var stdin_buf: [stdin_cap]u8 = undefined;
-    const payload = readStdin(&stdin_buf);
 
     var token_buf: [128]u8 = undefined;
     const token_raw = blk: {
@@ -85,18 +90,31 @@ pub fn run(phase: []const u8, arg_agent: ?[]const u8, home: []const u8) void {
     const busy = isPromptPhase(phase) or std.mem.eql(u8, phase, "pre") or std.mem.eql(u8, phase, "post");
     const state = stateForEvent(phase, jsonString(payload, "tool_name"));
 
+    var posts: [2]PostJob = undefined;
+    var post_count: usize = 0;
     var body_buf: [1024]u8 = undefined;
     if (text.len > 0) {
         const body = if (title.len > 0)
             std.fmt.bufPrint(&body_buf, "{{\"text\":\"{s}\",\"title\":\"{s}\",\"busy\":{},\"agent_source\":\"{s}\"}}", .{ text, title, busy, agent }) catch null
         else
             std.fmt.bufPrint(&body_buf, "{{\"text\":\"{s}\",\"busy\":{},\"agent_source\":\"{s}\"}}", .{ text, busy, agent }) catch null;
-        if (body) |b| postLocalhost("/bubble", b, token);
+        if (body) |b| {
+            if (startPost("/bubble", b, token)) |post| {
+                posts[post_count] = post;
+                post_count += 1;
+            }
+        }
     }
     if (state) |s| {
         const body = std.fmt.bufPrint(&body_buf, "{{\"state\":\"{s}\",\"agent_source\":\"{s}\"}}", .{ s, agent }) catch null;
-        if (body) |b| postLocalhost("/state", b, token);
+        if (body) |b| {
+            if (startPost("/state", b, token)) |post| {
+                posts[post_count] = post;
+                post_count += 1;
+            }
+        }
     }
+    waitForPosts(posts[0..post_count]);
 }
 
 fn isPromptPhase(phase: []const u8) bool {
@@ -414,9 +432,82 @@ fn cWriteFile(path: []const u8, bytes: []const u8) void {
     _ = plat.writeFile(path, bytes);
 }
 
-/// Minimal HTTP POST to the sidecar. Fire, read a token of response,
-/// close. A dead sidecar is connection refused — silent, like today.
-fn postLocalhost(path: []const u8, body: []const u8, token: []const u8) void {
+const PostTask = struct {
+    done: std.atomic.Value(bool) = .init(false),
+    path: [16]u8 = undefined,
+    path_len: usize = 0,
+    body: [1024]u8 = undefined,
+    body_len: usize = 0,
+    token: [128]u8 = undefined,
+    token_len: usize = 0,
+
+    fn run(self: *PostTask) void {
+        postLocalhostBlocking(
+            self.path[0..self.path_len],
+            self.body[0..self.body_len],
+            self.token[0..self.token_len],
+        );
+        self.done.store(true, .release);
+    }
+};
+
+const PostJob = struct {
+    task: *PostTask,
+    thread: std.Thread,
+};
+
+/// Start a localhost POST on a private worker. Every byte is copied into the
+/// task so the worker remains valid even when the hook's stack frame returns.
+fn startPost(path: []const u8, body: []const u8, token: []const u8) ?PostJob {
+    if (path.len > 16 or body.len > 1024 or token.len > 128) return null;
+    const task = std.heap.page_allocator.create(PostTask) catch return null;
+    task.* = .{};
+    @memcpy(task.path[0..path.len], path);
+    task.path_len = path.len;
+    @memcpy(task.body[0..body.len], body);
+    task.body_len = body.len;
+    @memcpy(task.token[0..token.len], token);
+    task.token_len = token.len;
+    const thread = std.Thread.spawn(.{}, PostTask.run, .{task}) catch {
+        std.heap.page_allocator.destroy(task);
+        return null;
+    };
+    return .{ .task = task, .thread = thread };
+}
+
+/// The hook waits for both localhost requests together, never for more than
+/// 300ms. A stalled loopback socket cannot hold an agent session hostage.
+/// Timed-out jobs intentionally retain their small task allocation until the
+/// short-lived runner process exits; freeing it here would race the worker.
+fn waitForPosts(posts: []PostJob) void {
+    if (posts.len == 0) return;
+    const polls = post_timeout_ms / post_poll_ms;
+    var scope = plat.Scope.init();
+    defer scope.deinit();
+    for (0..polls) |_| {
+        var all_done = true;
+        for (posts) |post| {
+            if (!post.task.done.load(.acquire)) {
+                all_done = false;
+                break;
+            }
+        }
+        if (all_done) break;
+        std.Io.sleep(scope.io(), std.Io.Duration.fromMilliseconds(post_poll_ms), .awake) catch {};
+    }
+    for (posts) |*post| {
+        if (post.task.done.load(.acquire)) {
+            post.thread.join();
+            std.heap.page_allocator.destroy(post.task);
+        } else {
+            post.thread.detach();
+        }
+    }
+}
+
+/// Minimal HTTP POST to the sidecar. The caller owns the deadline; this
+/// worker only flushes a small request and never waits for a response.
+fn postLocalhostBlocking(path: []const u8, body: []const u8, token: []const u8) void {
     var scope = plat.Scope.init();
     defer scope.deinit();
     const io = scope.io();
@@ -424,9 +515,9 @@ fn postLocalhost(path: []const u8, body: []const u8, token: []const u8) void {
     // No .timeout here: Zig 0.16 panics on it (netConnectIpPosix and
     // netConnectIpWindows are both "TODO implement ... with timeout"),
     // and a panic in the runner is the one thing this binary must never
-    // do to an agent. The old 300ms SO_RCVTIMEO/SO_SNDTIMEO bound is
-    // therefore gone; the target is loopback, so connect either wins
-    // immediately or fails with connection refused when no app listens.
+    // do to an agent. The caller's worker deadline is the timeout boundary;
+    // the target is loopback, so connect either wins immediately or fails
+    // with connection refused when no app listens.
     var stream = addr.connect(io, .{ .mode = .stream, .protocol = .tcp }) catch return;
     defer stream.close(io);
     var req_buf: [1600]u8 = undefined;
@@ -435,12 +526,6 @@ fn postLocalhost(path: []const u8, body: []const u8, token: []const u8) void {
     var writer = stream.writer(io, &write_buf);
     writer.interface.writeAll(req) catch return;
     writer.interface.flush() catch return;
-    // Drain a token of the reply so the server sees an orderly close;
-    // the runner never inspects it (every failure exits 0 silently).
-    var read_buf: [256]u8 = undefined;
-    var reader = stream.reader(io, &read_buf);
-    var resp: [256]u8 = undefined;
-    _ = reader.interface.readSliceShort(&resp) catch {};
 }
 
 // ------------------------------------------------------------ parity
