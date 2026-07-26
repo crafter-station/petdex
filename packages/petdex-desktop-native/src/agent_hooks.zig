@@ -55,6 +55,18 @@ pub const AgentInfo = struct {
 
 pub const agent_count = 4;
 
+/// Set once in main() from CLAUDE_CONFIG_DIR (Zig 0.16 has no global
+/// getenv; env rides std.process.Init). Empty/unset means `~/.claude`.
+/// Claude Code supports fully isolated installs through this var, so
+/// writing to the default dir would wire hooks into a config the
+/// user's actual instance never reads.
+pub var claude_config_dir: ?[]const u8 = null;
+
+fn claudeDir(buf: []u8, home: []const u8) ?[]const u8 {
+    if (claude_config_dir) |d| if (d.len > 0) return d;
+    return std.fmt.bufPrint(buf, "{s}/.claude", .{home}) catch null;
+}
+
 /// The five Claude-shaped hook events the bubble pipeline rides.
 const claude_events = [_]HookEvent{
     .{ .event = "UserPromptSubmit", .phase = "user-prompt" },
@@ -108,9 +120,12 @@ pub fn scan(allocator: std.mem.Allocator, home: []const u8) [agent_count]AgentIn
         .{ .kind = .opencode },
     };
     var path: [512]u8 = undefined;
+    // Second buffer: the Claude settings path is joined onto `dir`,
+    // which may itself live in `path` — bufPrint must not alias.
+    var cfg_path: [512]u8 = undefined;
     for (&out) |*info| {
         const dir = switch (info.kind) {
-            .claude_code => std.fmt.bufPrint(&path, "{s}/.claude", .{home}) catch continue,
+            .claude_code => claudeDir(&path, home) orelse continue,
             .codex => std.fmt.bufPrint(&path, "{s}/.codex", .{home}) catch continue,
             .gemini => std.fmt.bufPrint(&path, "{s}/.gemini", .{home}) catch continue,
             .opencode => std.fmt.bufPrint(&path, "{s}/.config/opencode", .{home}) catch continue,
@@ -118,7 +133,7 @@ pub fn scan(allocator: std.mem.Allocator, home: []const u8) [agent_count]AgentIn
         if (!dirExists(dir)) continue;
         info.status = .none;
         const cfg = switch (info.kind) {
-            .claude_code => std.fmt.bufPrint(&path, "{s}/.claude/settings.json", .{home}) catch continue,
+            .claude_code => std.fmt.bufPrint(&cfg_path, "{s}/settings.json", .{dir}) catch continue,
             .codex => std.fmt.bufPrint(&path, "{s}/.codex/hooks.json", .{home}) catch continue,
             .gemini => std.fmt.bufPrint(&path, "{s}/.gemini/settings.json", .{home}) catch continue,
             .opencode => std.fmt.bufPrint(&path, "{s}/.config/opencode/plugins/petdex.js", .{home}) catch continue,
@@ -150,8 +165,10 @@ fn emptyObject(a: std.mem.Allocator) std.json.Value {
 const HookEvent = struct { event: []const u8, phase: []const u8 };
 
 pub fn installClaude(allocator: std.mem.Allocator, home: []const u8) bool {
+    var dir_buf: [512]u8 = undefined;
     var path_buf: [512]u8 = undefined;
-    const path = std.fmt.bufPrint(&path_buf, "{s}/.claude/settings.json", .{home}) catch return false;
+    const dir = claudeDir(&dir_buf, home) orelse return false;
+    const path = std.fmt.bufPrint(&path_buf, "{s}/settings.json", .{dir}) catch return false;
     return installJsonHooks(allocator, path, &claude_events, "claude-code");
 }
 
@@ -357,7 +374,9 @@ pub fn uninstall(allocator: std.mem.Allocator, home: []const u8, kind: AgentKind
     var path_buf: [512]u8 = undefined;
     switch (kind) {
         .claude_code => {
-            const path = std.fmt.bufPrint(&path_buf, "{s}/.claude/settings.json", .{home}) catch return false;
+            var dir_buf: [512]u8 = undefined;
+            const dir = claudeDir(&dir_buf, home) orelse return false;
+            const path = std.fmt.bufPrint(&path_buf, "{s}/settings.json", .{dir}) catch return false;
             return uninstallJsonHooks(allocator, path);
         },
         .gemini => {
@@ -435,6 +454,27 @@ test "installClaude merges into a real fixture home non-destructively" {
     // Backup exists.
     const bak = std.fmt.bufPrint(&pb, "{s}/.claude/settings.json.pre-petdex-backup", .{home}) catch unreachable;
     try t.expect(fileExists(bak));
+}
+
+test "claude honors CLAUDE_CONFIG_DIR override for install, scan, uninstall" {
+    const override = "/tmp/petdex-agenthooks-claude-b";
+    const home = "/tmp/petdex-agenthooks-nonexistent-home";
+    plat.makeDir(override);
+    claude_config_dir = override;
+    defer claude_config_dir = null;
+    try t.expect(installClaude(t.allocator, home));
+    var pb: [512]u8 = undefined;
+    const cfg = std.fmt.bufPrint(&pb, "{s}/settings.json", .{override}) catch unreachable;
+    const merged = readFileAlloc(t.allocator, cfg, 1024 * 1024).?;
+    defer t.allocator.free(merged);
+    try t.expect(std.mem.indexOf(u8, merged, "petdex-hook") != null);
+    // Detection follows the same dir even though home has no .claude.
+    const scanned = scan(t.allocator, home);
+    try t.expectEqual(HookStatus.current, scanned[0].status);
+    // Uninstall targets the override too.
+    try t.expect(uninstall(t.allocator, home, .claude_code));
+    const after = scan(t.allocator, home);
+    try t.expectEqual(HookStatus.none, after[0].status);
 }
 
 test "installCodex writes hooks.json and feature flag" {

@@ -1615,6 +1615,9 @@ pub fn main(init: std.process.Init) !void {
     // %USERPROFILE%\.petdex\pets. HOME still wins where it exists, so a
     // POSIX user pointing it elsewhere keeps that.
     env_home = init.environ_map.get("HOME") orelse init.environ_map.get("USERPROFILE");
+    // Claude Code reads its config from CLAUDE_CONFIG_DIR when set;
+    // hooks written to the default ~/.claude would never be seen.
+    agent_hooks.claude_config_dir = init.environ_map.get("CLAUDE_CONFIG_DIR");
     // Hook hot path: `<binary> bubble <phase> [agent]` runs the
     // in-binary runner and exits before any UI machinery spins up.
     // initAllocator, not init: on Windows the command line arrives as
