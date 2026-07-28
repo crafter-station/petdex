@@ -134,6 +134,8 @@ pub const Msg = union(enum) {
     toggle_waiting_sound,
     chime_done: native_sdk.EffectExit,
     set_bubble_text_size: f32,
+    toggle_hide_dock,
+    quit_app,
     install_agent: u32,
     uninstall_agent: u32,
     pet_filter: canvas.TextInputEvent,
@@ -144,7 +146,7 @@ pub const Msg = union(enum) {
     dismiss_install_error,
     noop,
 
-    pub const view_unbound = .{ "frame_tick", "poll_tick", "physics_tick", "frame_clock", "cycle_state", "chime_done" };
+    pub const view_unbound = .{ "frame_tick", "poll_tick", "physics_tick", "frame_clock", "cycle_state", "chime_done", "quit_app" };
 };
 
 pub const Model = struct {
@@ -199,6 +201,10 @@ pub const Model = struct {
     /// fixed 13 (the `.sm` rung); this keeps 13 as the floor and lets
     /// the settings slider raise it to 20.
     bubble_text_px: f32 = bubble_text_min_px,
+    /// macOS: run as a menu-bar app — no Dock icon, no app switcher
+    /// entry. The status item stays either way, so Settings and Quit
+    /// never lose their handle. Off by default.
+    hide_dock: bool = false,
     pet_x: f64 = 0,
     pet_y: f64 = 0,
     agents: [agent_hooks.agent_count]agent_hooks.AgentInfo = .{
@@ -778,7 +784,7 @@ fn saveSettings(model: *const Model) void {
     const path = settingsPath(&path_buf) orelse return;
     var buf: [256]u8 = undefined;
     const active = if (model.active_pet < catalog_len) catalog[model.active_pet].slice() else "";
-    const json = std.fmt.bufPrint(&buf, "{{\"active_pet\":\"{s}\",\"scale\":{d:.2},\"bubbles\":{},\"waiting_sound\":{},\"bubble_text\":{d:.1},\"agents_prompted\":{}}}", .{ active, model.scale, model.bubbles_enabled, model.waiting_sound, model.bubble_text_px, model.agents_prompted }) catch return;
+    const json = std.fmt.bufPrint(&buf, "{{\"active_pet\":\"{s}\",\"scale\":{d:.2},\"bubbles\":{},\"waiting_sound\":{},\"bubble_text\":{d:.1},\"hide_dock\":{},\"agents_prompted\":{}}}", .{ active, model.scale, model.bubbles_enabled, model.waiting_sound, model.bubble_text_px, model.hide_dock, model.agents_prompted }) catch return;
     cWriteFile(path, json);
 }
 
@@ -877,6 +883,7 @@ var initial_pet: u32 = 0;
 var initial_bubbles: bool = true;
 var initial_waiting_sound: bool = false;
 var initial_bubble_text_px: f32 = bubble_text_min_px;
+var initial_hide_dock: bool = false;
 var initial_agents_prompted: bool = false;
 
 // ------------------------------------------------------------- avatars
@@ -1063,6 +1070,11 @@ fn resolveInitialPet(io: std.Io, allocator: std.mem.Allocator, environ_map: *std
             if (std.mem.indexOf(u8, json, "\"waiting_sound\":true") != null) {
                 initial_waiting_sound = true;
             }
+            // Opt-in like the sound: only an explicit true hides the
+            // Dock icon, a missing key keeps the stock behavior.
+            if (std.mem.indexOf(u8, json, "\"hide_dock\":true") != null) {
+                initial_hide_dock = true;
+            }
         }
     }
     const index = catalogIndexOf(wanted) orelse 0;
@@ -1198,6 +1210,12 @@ pub fn boot(model: *Model, fx: *Effects) void {
     model.waiting_sound = initial_waiting_sound;
     model.bubble_text_px = initial_bubble_text_px;
     model.agents_prompted = initial_agents_prompted;
+    model.hide_dock = initial_hide_dock;
+    // Applied via the main queue, so the flip lands as soon as the
+    // host's runloop spins up; a Regular-policy Dock icon may blink in
+    // for the first frames of a hidden-dock boot, which beats holding
+    // the setting hostage to an SDK boot hook that does not exist yet.
+    if (model.hide_dock) plat.setDockIconHidden(true);
     if (env_home) |home| model.agents = agent_hooks.scan(boot_allocator, home);
 
     // First point where the platform codec is reachable: `init_fx` runs
@@ -1431,6 +1449,12 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             model.bubble_text_px = bubble_text_min_px + fraction * (bubble_text_max_px - bubble_text_min_px);
             saveSettings(model);
         },
+        .toggle_hide_dock => {
+            model.hide_dock = !model.hide_dock;
+            plat.setDockIconHidden(model.hide_dock);
+            saveSettings(model);
+        },
+        .quit_app => plat.requestQuit(),
         .set_scale => |fraction| {
             model.scale = 0.4 + fraction * 0.8;
             _ = fitWindow(model, fx);
@@ -1633,6 +1657,7 @@ pub fn onCommand(name: []const u8) ?Msg {
     if (std.mem.eql(u8, name, "petdex.cycle")) return .cycle_state;
     if (std.mem.eql(u8, name, "petdex.settings")) return .open_settings;
     if (std.mem.eql(u8, name, "petdex.close")) return .close_pet;
+    if (std.mem.eql(u8, name, "petdex.quit")) return .quit_app;
     return null;
 }
 
@@ -2155,6 +2180,24 @@ fn settingsView(ui: *AppUi, model: *const Model) AppUi.Node {
                 }, .{}),
             }),
         }),
+        // Dock presence is an AppKit concept; other platforms have no
+        // equivalent toggle to offer, so the row only exists on macOS.
+        if (builtin.os.tag == .macos)
+            ui.el(.panel, .{ .style_tokens = .{ .background = .surface, .radius = .md } }, .{
+                ui.row(.{ .padding = 12, .cross = .center, .gap = 12 }, .{
+                    ui.column(.{ .grow = 1 }, .{
+                        ui.text(.{}, "Hide Dock icon"),
+                        ui.text(.{ .size = .sm, .style_tokens = .{ .foreground = .text_muted } }, "Petdex lives in the menu bar only"),
+                    }),
+                    ui.el(.switch_control, .{
+                        .selected = model.hide_dock,
+                        .on_toggle = .toggle_hide_dock,
+                        .semantics = .{ .label = "Hide Dock icon" },
+                    }, .{}),
+                }),
+            })
+        else
+            ui.el(.stack, .{}, .{}),
         ui.el(.panel, .{ .style_tokens = .{ .background = .surface, .radius = .md } }, .{
             ui.row(.{ .padding = 12, .cross = .center, .gap = 12 }, .{
                 ui.column(.{ .grow = 1 }, .{
@@ -2201,6 +2244,36 @@ fn refreshHookSymlink(argv0: []const u8) void {
 
 // -------------------------------------------------------------------- app
 
+/// Menu-bar extra: Petdex's persistent handle. With the Dock icon
+/// hidden the app has no menu bar of its own, so this is the only
+/// always-reachable way to Settings and Quit; it is installed
+/// unconditionally so the hide-Dock toggle can never strand the user.
+const tray_items = [_]native_sdk.platform.TrayMenuItem{
+    .{ .id = 1, .label = "Open Settings", .command = "petdex.settings" },
+    .{ .id = 2, .separator = true },
+    .{ .id = 3, .label = "Quit Petdex", .command = "petdex.quit" },
+};
+
+/// The menu-bar button icon: the brand mark's silhouette with the face
+/// punched out (the host loads it as a template image, so only alpha
+/// survives). The platform gets a PATH, not bytes, and a relative path
+/// dies the moment Finder launches the bundle with cwd=/ — so the
+/// embedded PNG is materialized into the runtime dir at boot and the
+/// tray points at that absolute path. Missing HOME or a failed write
+/// degrade to the host's title fallback ("P"), never a broken item.
+const tray_icon_png = @embedFile("assets/tray-icon.png");
+var tray_icon_path_buf: [512]u8 = undefined;
+var tray_icon_path: []const u8 = "";
+
+fn materializeTrayIcon() void {
+    const home = env_home orelse return;
+    var dir_buf: [512]u8 = undefined;
+    const dir = std.fmt.bufPrint(&dir_buf, "{s}/.petdex/runtime", .{home}) catch return;
+    plat.makeDir(dir);
+    const path = std.fmt.bufPrint(&tray_icon_path_buf, "{s}/.petdex/runtime/tray-icon.png", .{home}) catch return;
+    if (plat.writeFile(path, tray_icon_png)) tray_icon_path = path;
+}
+
 const app_menus = [_]native_sdk.platform.Menu{.{
     .title = "Pet",
     .items = &.{
@@ -2242,6 +2315,7 @@ pub fn main(init: std.process.Init) !void {
         }
     }
     if (argv0) |a0| refreshHookSymlink(a0);
+    materializeTrayIcon();
     env_wanted_pet = init.environ_map.get("PETDEX_PET");
     boot_io = init.io;
     resolveInitialPet(init.io, boot_allocator, init.environ_map) catch |err| {
@@ -2256,6 +2330,11 @@ pub fn main(init: std.process.Init) !void {
         .view = rootView,
         .on_key = onKey,
         .on_command = onCommand,
+        .status_item = .{
+            .icon_path = tray_icon_path,
+            .tooltip = "Petdex",
+            .items = &tray_items,
+        },
         .on_frame = onFrame,
         .on_urls_opened = onUrlsOpened,
         .windows_fn = petdexWindows,

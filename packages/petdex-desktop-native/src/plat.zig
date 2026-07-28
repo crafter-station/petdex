@@ -268,6 +268,66 @@ pub fn processId() u32 {
     };
 }
 
+// ------------------------------------------------------- app presence
+
+/// The objc-runtime and libdispatch surface needed to flip the Dock
+/// icon at runtime. The SDK host pins the activation policy to Regular
+/// at boot and exposes no channel for it, so this reaches AppKit
+/// through the objc runtime directly. Compiled on macOS only: the
+/// externs do not exist elsewhere.
+const AppleApp = if (builtin.os.tag == .macos) struct {
+    extern fn objc_getClass(name: [*:0]const u8) ?*anyopaque;
+    extern fn sel_registerName(name: [*:0]const u8) ?*anyopaque;
+    extern fn objc_msgSend() void;
+    extern var _dispatch_main_q: anyopaque;
+    extern fn dispatch_async_f(queue: *anyopaque, context: ?*anyopaque, work: *const fn (?*anyopaque) callconv(.c) void) void;
+
+    /// Runs on the main queue: NSApplication is main-thread-only and
+    /// every caller sits on the runtime loop thread.
+    fn applyPolicy(context: ?*anyopaque) callconv(.c) void {
+        // NSApplicationActivationPolicyRegular = 0, Accessory = 1;
+        // encoded in the context pointer (null = regular).
+        const policy: isize = if (context == null) 0 else 1;
+        const NSApplication = objc_getClass("NSApplication") orelse return;
+        const shared_sel = sel_registerName("sharedApplication") orelse return;
+        const MsgSendObj = *const fn (?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque;
+        const app = @as(MsgSendObj, @ptrCast(&objc_msgSend))(NSApplication, shared_sel) orelse return;
+        const set_sel = sel_registerName("setActivationPolicy:") orelse return;
+        const MsgSendPolicy = *const fn (?*anyopaque, ?*anyopaque, isize) callconv(.c) bool;
+        _ = @as(MsgSendPolicy, @ptrCast(&objc_msgSend))(app, set_sel, policy);
+    }
+} else struct {};
+
+/// Hide or show the app's Dock icon (macOS activation policy
+/// `.accessory` vs `.regular`). Windows still open and focus in
+/// accessory mode; the app just leaves the Dock and app switcher.
+/// No-op on other platforms.
+pub fn setDockIconHidden(hidden: bool) void {
+    if (builtin.os.tag != .macos) return;
+    const ctx: ?*anyopaque = if (hidden) @ptrFromInt(1) else null;
+    AppleApp.dispatch_async_f(&AppleApp._dispatch_main_q, ctx, AppleApp.applyPolicy);
+}
+
+extern "c" fn kill(pid: c_int, sig: c_int) c_int;
+
+/// Quit the way a menu quit would. SIGTERM rides the hosts'
+/// graceful-shutdown paths (the macOS host turns it into `NSApp
+/// terminate` through a dispatch source, sealing journals on the way
+/// out); Windows has no SIGTERM, so it exits directly.
+///
+/// `kill(getpid())`, deliberately not `raise()`: the host listens
+/// through a kqueue-backed dispatch source, and EVFILT_SIGNAL only
+/// sees process-directed signals — `raise()` in a multithreaded
+/// process is `pthread_kill(self)`, which the source never observes
+/// (verified: an external `kill -TERM` quit the app, an in-process
+/// `raise` was silently dropped).
+pub fn requestQuit() void {
+    if (builtin.os.tag == .windows) {
+        std.os.windows.kernel32.ExitProcess(0);
+    }
+    _ = kill(@intCast(processId()), 15); // SIGTERM
+}
+
 /// Open a URL or a folder in the desktop's default handler. One
 /// spawn, no shell, so a path with quotes cannot become an argument
 /// injection the way the old `system()` string could.

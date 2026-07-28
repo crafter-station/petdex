@@ -1,0 +1,10 @@
+<!-- Menu-bar template variant of public/brand/petdex-mark.svg: the host
+     loads the PNG with `image.template = YES`, so only the alpha channel
+     survives — the gradient body becomes the silhouette and the white
+     face rects are punched out (evenodd) instead of painted. Rebuild the
+     PNG from the repo root with:
+       bun -e "require('sharp')(require('fs').readFileSync('packages/petdex-desktop-native/src/assets/tray-icon.svg'),{density:300}).resize(36,36).png().toFile('packages/petdex-desktop-native/src/assets/tray-icon.png')"
+-->
+<svg fill="none" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <path fill="#000000" fill-rule="evenodd" clip-rule="evenodd" d="M20 4h24a16 16 0 0 1 16 16v24a16 16 0 0 1-16 16H20A16 16 0 0 1 4 44V20A16 16 0 0 1 20 4Zm2 16h6v6h-6v-6Zm14 0h6v6h-6v-6Zm-20 6h6v18h-6V26Zm26 0h6v18h-6V26Zm-20 12h20v6H22v-6Z"/>
+</svg>

@@ -7,7 +7,7 @@
     .icons = .{"assets/icon.png"},
     .platforms = .{ "macos", "windows", "linux" },
     .permissions = .{ "view", "command" },
-    .capabilities = .{ "native_views", "gpu_surfaces", "menus", "url_schemes" },
+    .capabilities = .{ "native_views", "gpu_surfaces", "menus", "url_schemes", "tray" },
     // petdex.dev links straight into a running app (`petdex://<slug>`
     // swaps the active pet). Without the declaration macOS has no owner
     // for the scheme and the link dies before reaching the app, which is
