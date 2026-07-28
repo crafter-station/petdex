@@ -135,6 +135,8 @@ pub const Msg = union(enum) {
     chime_done: native_sdk.EffectExit,
     set_bubble_text_size: f32,
     toggle_hide_dock,
+    toggle_launch_at_login,
+    toggle_focus_mode,
     quit_app,
     install_agent: u32,
     uninstall_agent: u32,
@@ -146,7 +148,7 @@ pub const Msg = union(enum) {
     dismiss_install_error,
     noop,
 
-    pub const view_unbound = .{ "frame_tick", "poll_tick", "physics_tick", "frame_clock", "cycle_state", "chime_done", "quit_app" };
+    pub const view_unbound = .{ "frame_tick", "poll_tick", "physics_tick", "frame_clock", "cycle_state", "chime_done", "quit_app", "toggle_focus_mode" };
 };
 
 pub const Model = struct {
@@ -205,6 +207,17 @@ pub const Model = struct {
     /// entry. The status item stays either way, so Settings and Quit
     /// never lose their handle. Off by default.
     hide_dock: bool = false,
+    /// Mirror of SMAppService's status, never a stored wish: boot and
+    /// every toggle re-query, so a rejected registration (unbundled
+    /// dev binary, user-declined approval) snaps visibly back.
+    launch_at_login: bool = false,
+    /// Session-only mute for the bubble (tray toggle): the sprite
+    /// keeps reacting, the narration pauses. Deliberately not
+    /// persisted — focus ends when the app restarts.
+    focus_mode: bool = false,
+    /// Whether the persisted pet position was applied after the first
+    /// window fit (it must land after the fit's bottom_center anchor).
+    pos_restored: bool = false,
     pet_x: f64 = 0,
     pet_y: f64 = 0,
     agents: [agent_hooks.agent_count]agent_hooks.AgentInfo = .{
@@ -782,9 +795,18 @@ fn cWriteFile(path: []const u8, bytes: []const u8) void {
 fn saveSettings(model: *const Model) void {
     var path_buf: [512]u8 = undefined;
     const path = settingsPath(&path_buf) orelse return;
-    var buf: [256]u8 = undefined;
+    var buf: [320]u8 = undefined;
     const active = if (model.active_pet < catalog_len) catalog[model.active_pet].slice() else "";
-    const json = std.fmt.bufPrint(&buf, "{{\"active_pet\":\"{s}\",\"scale\":{d:.2},\"bubbles\":{},\"waiting_sound\":{},\"bubble_text\":{d:.1},\"hide_dock\":{},\"agents_prompted\":{}}}", .{ active, model.scale, model.bubbles_enabled, model.waiting_sound, model.bubble_text_px, model.hide_dock, model.agents_prompted }) catch return;
+    // The position keys only exist once the window has been fitted and
+    // read: a save fired on the very first frame would otherwise
+    // persist the (0,0) the model boots with and pin the pet to the
+    // top-left corner on every launch after.
+    var pos_buf: [64]u8 = undefined;
+    const pos = if (model.window_fitted)
+        std.fmt.bufPrint(&pos_buf, ",\"pet_x\":{d:.0},\"pet_y\":{d:.0}", .{ model.pet_x, model.pet_y }) catch ""
+    else
+        "";
+    const json = std.fmt.bufPrint(&buf, "{{\"active_pet\":\"{s}\",\"scale\":{d:.2},\"bubbles\":{},\"waiting_sound\":{},\"bubble_text\":{d:.1},\"hide_dock\":{}{s},\"agents_prompted\":{}}}", .{ active, model.scale, model.bubbles_enabled, model.waiting_sound, model.bubble_text_px, model.hide_dock, pos, model.agents_prompted }) catch return;
     cWriteFile(path, json);
 }
 
@@ -885,6 +907,13 @@ var initial_waiting_sound: bool = false;
 var initial_bubble_text_px: f32 = bubble_text_min_px;
 var initial_hide_dock: bool = false;
 var initial_agents_prompted: bool = false;
+/// Persisted pet window origin; null on first run (or a settings file
+/// from before positions were saved), which keeps the platform's
+/// default placement. Off-screen values from an unplugged monitor are
+/// left to the platform's own clamping (the same edge handling the
+/// throw physics rides).
+var initial_pet_x: ?f64 = null;
+var initial_pet_y: ?f64 = null;
 
 // ------------------------------------------------------------- avatars
 // One slot for the CURRENT bubble's agent avatar (claude-code, codex,
@@ -1075,6 +1104,12 @@ fn resolveInitialPet(io: std.Io, allocator: std.mem.Allocator, environ_map: *std
             if (std.mem.indexOf(u8, json, "\"hide_dock\":true") != null) {
                 initial_hide_dock = true;
             }
+            if (hook_server.jsonNumberPub(json, "pet_x")) |x| {
+                if (hook_server.jsonNumberPub(json, "pet_y")) |y| {
+                    initial_pet_x = x;
+                    initial_pet_y = y;
+                }
+            }
         }
     }
     const index = catalogIndexOf(wanted) orelse 0;
@@ -1211,6 +1246,7 @@ pub fn boot(model: *Model, fx: *Effects) void {
     model.bubble_text_px = initial_bubble_text_px;
     model.agents_prompted = initial_agents_prompted;
     model.hide_dock = initial_hide_dock;
+    model.launch_at_login = plat.launchAtLoginEnabled();
     // Applied via the main queue, so the flip lands as soon as the
     // host's runloop spins up; a Regular-policy Dock icon may blink in
     // for the first frames of a hidden-dock boot, which beats holding
@@ -1454,6 +1490,13 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             plat.setDockIconHidden(model.hide_dock);
             saveSettings(model);
         },
+        .toggle_launch_at_login => {
+            _ = plat.setLaunchAtLogin(!model.launch_at_login);
+            // SMAppService is the source of truth (see the model
+            // field): reflect the status query, not the wish.
+            model.launch_at_login = plat.launchAtLoginEnabled();
+        },
+        .toggle_focus_mode => model.focus_mode = !model.focus_mode,
         .quit_app => plat.requestQuit(),
         .set_scale => |fraction| {
             model.scale = 0.4 + fraction * 0.8;
@@ -1504,6 +1547,19 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
                 // fit it to the drawn sprite so the whole window IS the
                 // pet — no invisible band above it eating clicks.
                 model.window_fitted = fitWindow(model, fx);
+                // Restore the persisted position once, right after the
+                // first fit: the fit re-anchors bottom_center, so a
+                // move applied before it would be anchored away.
+                if (model.window_fitted and !model.pos_restored) {
+                    model.pos_restored = true;
+                    if (initial_pet_x) |x| {
+                        if (initial_pet_y) |y| {
+                            if (fx.moveWindow("main", 0, 0, false)) |cur| {
+                                _ = fx.moveWindow("main", x - cur.x, y - cur.y, false);
+                            }
+                        }
+                    }
+                }
             }
             const now = fx.wallMs();
             if (model.throwing) {
@@ -1535,6 +1591,10 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
                 if (model.throw_elapsed_ms >= physics_max_duration_ms or speed < physics_min_vel) {
                     model.throwing = false;
                     applyState(model, .waving, 1200, fx);
+                    // The throw settled: this is where the pet will sit
+                    // until the next gesture, so persist it here rather
+                    // than on every physics frame.
+                    saveSettings(model);
                 }
                 return;
             }
@@ -1576,10 +1636,15 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
                 model.dragging = false;
                 const velocity = releaseVelocity(model) orelse {
                     model.sample_len = 0;
+                    saveSettings(model);
                     return;
                 };
                 model.sample_len = 0;
-                if (@abs(velocity.x) < 1 and @abs(velocity.y) < 1) return;
+                if (@abs(velocity.x) < 1 and @abs(velocity.y) < 1) {
+                    // A plain drop (no throw): the pet rests here.
+                    saveSettings(model);
+                    return;
+                }
                 model.throwing = true;
                 model.vx = velocity.x;
                 model.vy = velocity.y;
@@ -1658,6 +1723,7 @@ pub fn onCommand(name: []const u8) ?Msg {
     if (std.mem.eql(u8, name, "petdex.settings")) return .open_settings;
     if (std.mem.eql(u8, name, "petdex.close")) return .close_pet;
     if (std.mem.eql(u8, name, "petdex.quit")) return .quit_app;
+    if (std.mem.eql(u8, name, "petdex.focus")) return .toggle_focus_mode;
     return null;
 }
 
@@ -1768,7 +1834,7 @@ fn splitLines(text: []const u8, max_chars: usize) [2][]const u8 {
 const tail_h_f: f32 = 9;
 
 fn bubbleActive(model: *const Model) bool {
-    return model.bubbles_enabled and model.bubble.text_len > 0;
+    return model.bubbles_enabled and !model.focus_mode and model.bubble.text_len > 0;
 }
 
 /// The window tracks exactly what is drawn: the sprite, plus a band
@@ -2180,6 +2246,24 @@ fn settingsView(ui: *AppUi, model: *const Model) AppUi.Node {
                 }, .{}),
             }),
         }),
+        // Login items ride SMAppService, so like the Dock row this one
+        // only exists on macOS.
+        if (builtin.os.tag == .macos)
+            ui.el(.panel, .{ .style_tokens = .{ .background = .surface, .radius = .md } }, .{
+                ui.row(.{ .padding = 12, .cross = .center, .gap = 12 }, .{
+                    ui.column(.{ .grow = 1 }, .{
+                        ui.text(.{}, "Launch at login"),
+                        ui.text(.{ .size = .sm, .style_tokens = .{ .foreground = .text_muted } }, "Start Petdex when you log in"),
+                    }),
+                    ui.el(.switch_control, .{
+                        .selected = model.launch_at_login,
+                        .on_toggle = .toggle_launch_at_login,
+                        .semantics = .{ .label = "Launch at login" },
+                    }, .{}),
+                }),
+            })
+        else
+            ui.el(.stack, .{}, .{}),
         // Dock presence is an AppKit concept; other platforms have no
         // equivalent toggle to offer, so the row only exists on macOS.
         if (builtin.os.tag == .macos)
@@ -2248,11 +2332,19 @@ fn refreshHookSymlink(argv0: []const u8) void {
 /// hidden the app has no menu bar of its own, so this is the only
 /// always-reachable way to Settings and Quit; it is installed
 /// unconditionally so the hide-Dock toggle can never strand the user.
-const tray_items = [_]native_sdk.platform.TrayMenuItem{
-    .{ .id = 1, .label = "Open Settings", .command = "petdex.settings" },
-    .{ .id = 2, .separator = true },
-    .{ .id = 3, .label = "Quit Petdex", .command = "petdex.quit" },
-};
+/// Model-derived (the `status_item_fn` shape) so Focus Mode can show
+/// its state in the label; the static options keep icon and tooltip.
+fn petdexStatusItem(model: *const Model, scratch: *PetdexApp.StatusItemScratch) PetdexApp.StatusItemState {
+    scratch.items[0] = .{ .id = 1, .label = "Open Settings", .command = "petdex.settings" };
+    scratch.items[1] = .{
+        .id = 2,
+        .label = if (model.focus_mode) "Focus Mode: On" else "Focus Mode: Off",
+        .command = "petdex.focus",
+    };
+    scratch.items[2] = .{ .id = 3, .separator = true };
+    scratch.items[3] = .{ .id = 4, .label = "Quit Petdex", .command = "petdex.quit" };
+    return .{ .items = scratch.items[0..4] };
+}
 
 /// The menu-bar button icon: the brand mark's silhouette with the face
 /// punched out (the host loads it as a template image, so only alpha
@@ -2333,8 +2425,8 @@ pub fn main(init: std.process.Init) !void {
         .status_item = .{
             .icon_path = tray_icon_path,
             .tooltip = "Petdex",
-            .items = &tray_items,
         },
+        .status_item_fn = petdexStatusItem,
         .on_frame = onFrame,
         .on_urls_opened = onUrlsOpened,
         .windows_fn = petdexWindows,

@@ -281,6 +281,19 @@ const AppleApp = if (builtin.os.tag == .macos) struct {
     extern fn objc_msgSend() void;
     extern var _dispatch_main_q: anyopaque;
     extern fn dispatch_async_f(queue: *anyopaque, context: ?*anyopaque, work: *const fn (?*anyopaque) callconv(.c) void) void;
+    extern fn dlopen(path: [*:0]const u8, mode: c_int) ?*anyopaque;
+
+    /// `SMAppService.mainAppService` — the macOS 13+ login-item API.
+    /// ServiceManagement is not among the frameworks the SDK links, so
+    /// it is dlopen'd on first use (idempotent; RTLD_NOW). Null on
+    /// macOS < 13, where objc_getClass finds no such class.
+    fn smAppService() ?*anyopaque {
+        _ = dlopen("/System/Library/Frameworks/ServiceManagement.framework/ServiceManagement", 2);
+        const cls = objc_getClass("SMAppService") orelse return null;
+        const sel = sel_registerName("mainAppService") orelse return null;
+        const MsgSendObj = *const fn (?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque;
+        return @as(MsgSendObj, @ptrCast(&objc_msgSend))(cls, sel);
+    }
 
     /// Runs on the main queue: NSApplication is main-thread-only and
     /// every caller sits on the runtime loop thread.
@@ -306,6 +319,28 @@ pub fn setDockIconHidden(hidden: bool) void {
     if (builtin.os.tag != .macos) return;
     const ctx: ?*anyopaque = if (hidden) @ptrFromInt(1) else null;
     AppleApp.dispatch_async_f(&AppleApp._dispatch_main_q, ctx, AppleApp.applyPolicy);
+}
+
+/// Whether the app is registered as a login item (macOS 13+;
+/// SMAppServiceStatusEnabled == 1). False anywhere the API is missing.
+pub fn launchAtLoginEnabled() bool {
+    if (builtin.os.tag != .macos) return false;
+    const svc = AppleApp.smAppService() orelse return false;
+    const sel = AppleApp.sel_registerName("status") orelse return false;
+    const MsgSendInt = *const fn (?*anyopaque, ?*anyopaque) callconv(.c) isize;
+    return @as(MsgSendInt, @ptrCast(&AppleApp.objc_msgSend))(svc, sel) == 1;
+}
+
+/// Register/unregister the app as a login item. Returns whether the
+/// call reported success; callers should re-query
+/// `launchAtLoginEnabled` rather than trust the wish — an unbundled
+/// dev binary or a user-declined approval rejects the registration.
+pub fn setLaunchAtLogin(enabled: bool) bool {
+    if (builtin.os.tag != .macos) return false;
+    const svc = AppleApp.smAppService() orelse return false;
+    const sel = AppleApp.sel_registerName(if (enabled) "registerAndReturnError:" else "unregisterAndReturnError:") orelse return false;
+    const MsgSendErr = *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) bool;
+    return @as(MsgSendErr, @ptrCast(&AppleApp.objc_msgSend))(svc, sel, null);
 }
 
 extern "c" fn kill(pid: c_int, sig: c_int) c_int;
