@@ -1294,6 +1294,13 @@ fn applyState(model: *Model, state: State, duration_ms: u32, fx: *Effects) void 
 
 pub fn boot(model: *Model, fx: *Effects) void {
     if (env_home) |home| {
+        // Upgrade old CLI-written hooks before any agent starts another
+        // session. The migration recognizes only Petdex-owned legacy
+        // commands and leaves malformed or foreign configs untouched.
+        const migration = agent_hooks.migrateLegacyHooks(boot_allocator, home);
+        if (migration.failed > 0) {
+            std.debug.print("petdex: {d} legacy hook configuration(s) could not be migrated; repair the config and update the affected agent in Settings\n", .{migration.failed});
+        }
         hook_server.start(boot_allocator, home) catch |err| {
             std.debug.print("petdex: hook server failed to start ({s})\n", .{@errorName(err)});
         };
