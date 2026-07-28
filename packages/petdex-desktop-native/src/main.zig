@@ -2252,3 +2252,17 @@ test "waiting chime fires only on the transition into waiting" {
     try std.testing.expect(!shouldChime(.waiting, .idle));
     try std.testing.expect(!shouldChime(.running, .idle));
 }
+
+test {
+    // `zig build test` only collects tests from the root module FILE,
+    // and imports are analyzed lazily — so without these references
+    // every test in the imported files (18 today, across agent_hooks,
+    // hook_runner and installer) compiled green and never ran. This
+    // block is the standard aggregator: referencing the imports forces
+    // their semantic analysis, which is what registers their tests.
+    _ = agent_hooks;
+    _ = hook_runner;
+    _ = hook_server;
+    _ = installer;
+    _ = plat;
+}

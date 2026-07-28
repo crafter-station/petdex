@@ -136,6 +136,22 @@ jobs:
           "$NATIVE_CLI" build
           ls -lh zig-out/bin/
 
+      - name: Run the test suite
+        # The suite ran on nobody's machine until the root aggregator
+        # existed: `zig build test` collects tests from the root module
+        # file only, so the imported files' tests (agent_hooks' config
+        # merging, hook_runner's payload parsing, installer's URL
+        # checks) compiled green and never executed — and CI had no
+        # test step to notice. Unix legs only for now: the fixture
+        # tests write under /tmp by absolute POSIX path, which Windows
+        # has no equivalent for until the fixtures learn a portable
+        # temp dir.
+        if: matrix.platform != 'windows'
+        working-directory: packages/petdex-desktop-native
+        shell: bash
+        run: |
+          "$NATIVE_CLI" test .
+
       # Compiling proves nothing about whether the app draws: the hook
       # server regression that shipped in this branch compiled fine on
       # every platform. These steps run the binary, exercise the hook
