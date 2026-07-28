@@ -131,6 +131,8 @@ pub const Msg = union(enum) {
     open_pet_page: u32,
     appearance: native_sdk.platform.Appearance,
     toggle_bubbles,
+    toggle_waiting_sound,
+    chime_done: native_sdk.EffectExit,
     install_agent: u32,
     uninstall_agent: u32,
     pet_filter: canvas.TextInputEvent,
@@ -141,7 +143,7 @@ pub const Msg = union(enum) {
     dismiss_install_error,
     noop,
 
-    pub const view_unbound = .{ "frame_tick", "poll_tick", "physics_tick", "frame_clock", "cycle_state" };
+    pub const view_unbound = .{ "frame_tick", "poll_tick", "physics_tick", "frame_clock", "cycle_state", "chime_done" };
 };
 
 pub const Model = struct {
@@ -184,6 +186,10 @@ pub const Model = struct {
     active_pet: u32 = 0,
     window_fitted: bool = false,
     bubbles_enabled: bool = true,
+    /// Opt-in chime on the transition into `waiting`. Off by default,
+    /// unlike the toggles around it: sound is intrusive in a way
+    /// passive UI never is, so it has to be an explicit opt-in.
+    waiting_sound: bool = false,
     pet_x: f64 = 0,
     pet_y: f64 = 0,
     agents: [agent_hooks.agent_count]agent_hooks.AgentInfo = .{
@@ -755,7 +761,7 @@ fn saveSettings(model: *const Model) void {
     const path = settingsPath(&path_buf) orelse return;
     var buf: [256]u8 = undefined;
     const active = if (model.active_pet < catalog_len) catalog[model.active_pet].slice() else "";
-    const json = std.fmt.bufPrint(&buf, "{{\"active_pet\":\"{s}\",\"scale\":{d:.2},\"bubbles\":{},\"agents_prompted\":{}}}", .{ active, model.scale, model.bubbles_enabled, model.agents_prompted }) catch return;
+    const json = std.fmt.bufPrint(&buf, "{{\"active_pet\":\"{s}\",\"scale\":{d:.2},\"bubbles\":{},\"waiting_sound\":{},\"agents_prompted\":{}}}", .{ active, model.scale, model.bubbles_enabled, model.waiting_sound, model.agents_prompted }) catch return;
     cWriteFile(path, json);
 }
 
@@ -852,6 +858,7 @@ fn freeSheet(s: *Sheet) void {
 var initial_scale: f32 = 0.7;
 var initial_pet: u32 = 0;
 var initial_bubbles: bool = true;
+var initial_waiting_sound: bool = false;
 var initial_agents_prompted: bool = false;
 
 // ------------------------------------------------------------- avatars
@@ -1030,6 +1037,11 @@ fn resolveInitialPet(io: std.Io, allocator: std.mem.Allocator, environ_map: *std
             if (std.mem.indexOf(u8, json, "\"agents_prompted\":true") != null) {
                 initial_agents_prompted = true;
             }
+            // Opposite default from bubbles: the chime is opt-in, so
+            // only an explicit true (never a missing key) enables it.
+            if (std.mem.indexOf(u8, json, "\"waiting_sound\":true") != null) {
+                initial_waiting_sound = true;
+            }
         }
     }
     const index = catalogIndexOf(wanted) orelse 0;
@@ -1082,7 +1094,46 @@ fn dwellFor(state: State, duration_ms: u32) u32 {
     return min_dwell_ms;
 }
 
+const chime_key: u64 = 23;
+
+/// Optional audible ping when the pet enters `waiting` (permission
+/// prompts, idle alerts: the agent is blocked on the user). Playback
+/// rides the platform's stock event sound through `fx.spawn` — no
+/// bundled asset, no new dependency, and the exit Msg means the child
+/// is always reaped. A machine without the player binary gets a
+/// rejected exit on `chime_done` and quietly stays silent, as does a
+/// chime posted while the previous one is still playing (same key,
+/// spawn rejects the overlap).
+fn playWaitingChime(fx: *Effects) void {
+    const argv: []const []const u8 = switch (builtin.os.tag) {
+        .macos => &.{ "/usr/bin/afplay", "/System/Library/Sounds/Glass.aiff" },
+        .windows => &.{ "rundll32", "user32.dll,MessageBeep" },
+        // The freedesktop `complete` event sound; canberra ships with
+        // GNOME/KDE and this no-ops where it does not.
+        else => &.{ "canberra-gtk-play", "--id", "complete" },
+    };
+    fx.spawn(.{
+        .key = chime_key,
+        .argv = argv,
+        .output = .collect,
+        .on_exit = Effects.exitMsg(.chime_done),
+    });
+}
+
+/// Chime on the edge, not the level: `waiting` is often re-posted (one
+/// Notification hook per permission prompt while the same prompt sits
+/// unanswered, multiple agents), and a ping per re-post would train
+/// users to turn the feature straight back off. The poll_tick dwell
+/// path refreshes an already-waiting state without calling applyState,
+/// so this sees real transitions only; once the user responds the
+/// state leaves `waiting`, and the next prompt is a fresh edge that
+/// chimes again.
+fn shouldChime(previous: State, next: State) bool {
+    return next == .waiting and previous != .waiting;
+}
+
 fn applyState(model: *Model, state: State, duration_ms: u32, fx: *Effects) void {
+    if (model.waiting_sound and shouldChime(model.state, state)) playWaitingChime(fx);
     model.state = state;
     model.frame_index = 0;
     model.shown_at_ms = fx.wallMs();
@@ -1109,6 +1160,7 @@ pub fn boot(model: *Model, fx: *Effects) void {
     // Agents section.
     model.scale = initial_scale;
     model.bubbles_enabled = initial_bubbles;
+    model.waiting_sound = initial_waiting_sound;
     model.agents_prompted = initial_agents_prompted;
     if (env_home) |home| model.agents = agent_hooks.scan(boot_allocator, home);
 
@@ -1330,6 +1382,15 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             model.bubbles_enabled = !model.bubbles_enabled;
             saveSettings(model);
         },
+        .toggle_waiting_sound => {
+            model.waiting_sound = !model.waiting_sound;
+            saveSettings(model);
+            // Flipping it on plays the chime once: the only way to
+            // judge a sound is to hear it, and hunting for a permission
+            // prompt just to preview a volume level is busywork.
+            if (model.waiting_sound) playWaitingChime(fx);
+        },
+        .chime_done => {},
         .set_scale => |fraction| {
             model.scale = 0.4 + fraction * 0.8;
             _ = fitWindow(model, fx);
@@ -2025,6 +2086,19 @@ fn settingsView(ui: *AppUi, model: *const Model) AppUi.Node {
         ui.el(.panel, .{ .style_tokens = .{ .background = .surface, .radius = .md } }, .{
             ui.row(.{ .padding = 12, .cross = .center, .gap = 12 }, .{
                 ui.column(.{ .grow = 1 }, .{
+                    ui.text(.{}, "Waiting sound"),
+                    ui.text(.{ .size = .sm, .style_tokens = .{ .foreground = .text_muted } }, "Play a chime when your agent is waiting for your input"),
+                }),
+                ui.el(.switch_control, .{
+                    .selected = model.waiting_sound,
+                    .on_toggle = .toggle_waiting_sound,
+                    .semantics = .{ .label = "Waiting sound" },
+                }, .{}),
+            }),
+        }),
+        ui.el(.panel, .{ .style_tokens = .{ .background = .surface, .radius = .md } }, .{
+            ui.row(.{ .padding = 12, .cross = .center, .gap = 12 }, .{
+                ui.column(.{ .grow = 1 }, .{
                     ui.text(.{}, "Custom pets"),
                     ui.text(.{ .size = .sm, .style_tokens = .{ .foreground = .text_muted } }, "~/.petdex/pets"),
                 }),
@@ -2129,4 +2203,14 @@ pub fn main(init: std.process.Init) !void {
             .navigation = .{ .allowed_origins = &.{ "zero://inline", "zero://app" } },
         },
     }, init);
+}
+
+test "waiting chime fires only on the transition into waiting" {
+    try std.testing.expect(shouldChime(.running, .waiting));
+    try std.testing.expect(shouldChime(.idle, .waiting));
+    // Re-posted waiting while the prompt is still up: stay quiet.
+    try std.testing.expect(!shouldChime(.waiting, .waiting));
+    // Leaving waiting never chimes.
+    try std.testing.expect(!shouldChime(.waiting, .idle));
+    try std.testing.expect(!shouldChime(.running, .idle));
 }
