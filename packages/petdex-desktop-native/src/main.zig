@@ -190,6 +190,10 @@ pub const Model = struct {
     /// unlike the toggles around it: sound is intrusive in a way
     /// passive UI never is, so it has to be an explicit opt-in.
     waiting_sound: bool = false,
+    /// When the current waiting spell began, and whether its single
+    /// follow-up ping already fired (see waiting_escalation_ms).
+    waiting_since_ms: i64 = 0,
+    waiting_escalated: bool = false,
     pet_x: f64 = 0,
     pet_y: f64 = 0,
     agents: [agent_hooks.agent_count]agent_hooks.AgentInfo = .{
@@ -1132,8 +1136,22 @@ fn shouldChime(previous: State, next: State) bool {
     return next == .waiting and previous != .waiting;
 }
 
+/// One follow-up ping when a prompt has sat unanswered this long: the
+/// first chime is easy to miss mid-flow, and a prompt still up two
+/// minutes later means it really was missed. Exactly one escalation
+/// per waiting spell — a repeating ping is an alarm clock, not a pet.
+const waiting_escalation_ms: i64 = 120_000;
+
+fn shouldEscalate(state: State, waiting_since_ms: i64, escalated: bool, now: i64) bool {
+    return state == .waiting and !escalated and now - waiting_since_ms >= waiting_escalation_ms;
+}
+
 fn applyState(model: *Model, state: State, duration_ms: u32, fx: *Effects) void {
-    if (model.waiting_sound and shouldChime(model.state, state)) playWaitingChime(fx);
+    if (shouldChime(model.state, state)) {
+        model.waiting_since_ms = fx.wallMs();
+        model.waiting_escalated = false;
+        if (model.waiting_sound) playWaitingChime(fx);
+    }
     model.state = state;
     model.frame_index = 0;
     model.shown_at_ms = fx.wallMs();
@@ -1556,6 +1574,10 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
                 }
             }
             const now = fx.wallMs();
+            if (model.waiting_sound and shouldEscalate(model.state, model.waiting_since_ms, model.waiting_escalated, now)) {
+                model.waiting_escalated = true;
+                playWaitingChime(fx);
+            }
             const dwell_over = now - model.shown_at_ms >= model.shown_dwell_ms;
             if (!dwell_over) return;
             if (hook_server.mailbox.pop()) |event| {
@@ -2203,6 +2225,17 @@ pub fn main(init: std.process.Init) !void {
             .navigation = .{ .allowed_origins = &.{ "zero://inline", "zero://app" } },
         },
     }, init);
+}
+
+test "waiting escalation pings once, only while still waiting" {
+    // Not yet due.
+    try std.testing.expect(!shouldEscalate(.waiting, 0, false, waiting_escalation_ms - 1));
+    // Due, not yet fired.
+    try std.testing.expect(shouldEscalate(.waiting, 0, false, waiting_escalation_ms));
+    // Already fired: never again this spell.
+    try std.testing.expect(!shouldEscalate(.waiting, 0, true, waiting_escalation_ms * 2));
+    // The user answered; the spell is over.
+    try std.testing.expect(!shouldEscalate(.idle, 0, false, waiting_escalation_ms));
 }
 
 test "waiting chime fires only on the transition into waiting" {
