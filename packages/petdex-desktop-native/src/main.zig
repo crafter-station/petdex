@@ -184,6 +184,12 @@ pub const Model = struct {
     dragging: bool = false,
     grab_dx: f64 = 0,
     grab_dy: f64 = 0,
+    // Where and when the current grab began, for tap detection on
+    // release; pat_flip alternates the reaction between two states.
+    press_x: f64 = 0,
+    press_y: f64 = 0,
+    press_ms: i64 = 0,
+    pat_flip: bool = false,
     settings_open: bool = false,
     /// Sprite scale, persisted. Codex parity: the settings slider maps
     /// 0.4..1.2 over this.
@@ -667,6 +673,21 @@ fn drainPendingInstall(model: *Model, fx: *Effects) void {
 }
 
 pub const PosSample = struct { x: f64 = 0, y: f64 = 0, t_ms: i64 = 0 };
+
+// ---------------------------------------------------------------- petting
+
+/// Tap tolerances: the window may jitter a device pixel under a
+/// too-quick grab, and 400ms is the classic click ceiling — anything
+/// longer reads as a held grab, not a pat.
+const tap_max_ms: i64 = 400;
+const tap_slop_px: f64 = 3;
+/// How long the reaction plays before the dwell hands back to idle
+/// (the throw-end waving uses the same figure).
+const pat_react_ms: u32 = 1200;
+
+fn isTap(held_ms: i64, dx: f64, dy: f64) bool {
+    return held_ms <= tap_max_ms and @abs(dx) < tap_slop_px and @abs(dy) < tap_slop_px;
+}
 
 const physics_timer_key: u64 = 3;
 const physics_tick_ms: u32 = 16;
@@ -1634,6 +1655,17 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
                 // Release: velocity from our own 100ms sample tail,
                 // the WebView renderer's computeVelocity semantics.
                 model.dragging = false;
+                // A tap, not a drag: the window never left the press
+                // point and the button came back up quickly. Until now
+                // a plain left-click did nothing at all — the pet gets
+                // patted and reacts, alternating so it doesn't feel
+                // canned (#557's "pet" interaction).
+                if (isTap(now - model.press_ms, read.x - model.press_x, read.y - model.press_y)) {
+                    model.sample_len = 0;
+                    model.pat_flip = !model.pat_flip;
+                    applyState(model, if (model.pat_flip) .jumping else .waving, pat_react_ms, fx);
+                    return;
+                }
                 const velocity = releaseVelocity(model) orelse {
                     model.sample_len = 0;
                     saveSettings(model);
@@ -1662,6 +1694,9 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
                 model.dragging = true;
                 model.grab_dx = read.cursor_x - read.x;
                 model.grab_dy = read.cursor_y - read.y;
+                model.press_x = read.x;
+                model.press_y = read.y;
+                model.press_ms = now;
                 model.sample_len = 0;
                 pushSample(model, read.x, read.y, now);
             }
@@ -2494,4 +2529,16 @@ test "bubble wrap budget scales inversely with the text size" {
     try std.testing.expectEqual(@as(usize, 17), bubbleCharsPerLine(bubble_text_max_px));
     // Never below the floor, even past the slider's range.
     try std.testing.expect(bubbleCharsPerLine(40) >= 10);
+}
+
+test "tap detection separates pats from drags" {
+    // Clean click: quick, still.
+    try std.testing.expect(isTap(120, 0, 0));
+    // Device-pixel jitter under a fast grab still counts.
+    try std.testing.expect(isTap(300, 2, -2));
+    // Held too long: a grab, not a pat.
+    try std.testing.expect(!isTap(tap_max_ms + 1, 0, 0));
+    // Moved: a drag, not a pat.
+    try std.testing.expect(!isTap(120, tap_slop_px, 0));
+    try std.testing.expect(!isTap(120, 0, -tap_slop_px));
 }
