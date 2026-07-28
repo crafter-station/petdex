@@ -133,6 +133,7 @@ pub const Msg = union(enum) {
     toggle_bubbles,
     toggle_waiting_sound,
     chime_done: native_sdk.EffectExit,
+    set_bubble_text_size: f32,
     install_agent: u32,
     uninstall_agent: u32,
     pet_filter: canvas.TextInputEvent,
@@ -194,6 +195,10 @@ pub const Model = struct {
     /// follow-up ping already fired (see waiting_escalation_ms).
     waiting_since_ms: i64 = 0,
     waiting_escalated: bool = false,
+    /// Bubble text size in points, persisted. The bubble rendered at a
+    /// fixed 13 (the `.sm` rung); this keeps 13 as the floor and lets
+    /// the settings slider raise it to 20.
+    bubble_text_px: f32 = bubble_text_min_px,
     pet_x: f64 = 0,
     pet_y: f64 = 0,
     agents: [agent_hooks.agent_count]agent_hooks.AgentInfo = .{
@@ -223,6 +228,14 @@ fn petdexTokens(model: *const Model) canvas.DesignTokens {
         .contrast = if (model.high_contrast) .high else .standard,
         .reduce_motion = model.reduce_motion,
     });
+    // The `.heading` typography rung is unused anywhere in this app
+    // (section titles sit on `.lg`), so it is repurposed as THE bubble
+    // text size: per-widget sizes only step ±1pt around the body base,
+    // and scaling the body base itself would drag the whole settings
+    // window along. Aiming the free rung at the persisted preference
+    // gives the bubble a real 13..20pt range while every other window
+    // keeps stock type.
+    tokens.typography.heading_size = model.bubble_text_px;
     if (model.high_contrast) return tokens;
     const c = &tokens.colors;
     if (model.dark) {
@@ -765,7 +778,7 @@ fn saveSettings(model: *const Model) void {
     const path = settingsPath(&path_buf) orelse return;
     var buf: [256]u8 = undefined;
     const active = if (model.active_pet < catalog_len) catalog[model.active_pet].slice() else "";
-    const json = std.fmt.bufPrint(&buf, "{{\"active_pet\":\"{s}\",\"scale\":{d:.2},\"bubbles\":{},\"waiting_sound\":{},\"agents_prompted\":{}}}", .{ active, model.scale, model.bubbles_enabled, model.waiting_sound, model.agents_prompted }) catch return;
+    const json = std.fmt.bufPrint(&buf, "{{\"active_pet\":\"{s}\",\"scale\":{d:.2},\"bubbles\":{},\"waiting_sound\":{},\"bubble_text\":{d:.1},\"agents_prompted\":{}}}", .{ active, model.scale, model.bubbles_enabled, model.waiting_sound, model.bubble_text_px, model.agents_prompted }) catch return;
     cWriteFile(path, json);
 }
 
@@ -863,6 +876,7 @@ var initial_scale: f32 = 0.7;
 var initial_pet: u32 = 0;
 var initial_bubbles: bool = true;
 var initial_waiting_sound: bool = false;
+var initial_bubble_text_px: f32 = bubble_text_min_px;
 var initial_agents_prompted: bool = false;
 
 // ------------------------------------------------------------- avatars
@@ -1035,6 +1049,9 @@ fn resolveInitialPet(io: std.Io, allocator: std.mem.Allocator, environ_map: *std
             if (hook_server.jsonNumberPub(json, "scale")) |v| {
                 if (v >= 0.3 and v <= 1.5) initial_scale = @floatCast(v);
             }
+            if (hook_server.jsonNumberPub(json, "bubble_text")) |v| {
+                if (v >= bubble_text_min_px and v <= bubble_text_max_px) initial_bubble_text_px = @floatCast(v);
+            }
             if (hook_server.jsonStringPub(json, "bubbles")) |_| {} else if (std.mem.indexOf(u8, json, "\"bubbles\":false") != null) {
                 initial_bubbles = false;
             }
@@ -1179,6 +1196,7 @@ pub fn boot(model: *Model, fx: *Effects) void {
     model.scale = initial_scale;
     model.bubbles_enabled = initial_bubbles;
     model.waiting_sound = initial_waiting_sound;
+    model.bubble_text_px = initial_bubble_text_px;
     model.agents_prompted = initial_agents_prompted;
     if (env_home) |home| model.agents = agent_hooks.scan(boot_allocator, home);
 
@@ -1409,6 +1427,10 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             if (model.waiting_sound) playWaitingChime(fx);
         },
         .chime_done => {},
+        .set_bubble_text_size => |fraction| {
+            model.bubble_text_px = bubble_text_min_px + fraction * (bubble_text_max_px - bubble_text_min_px);
+            saveSettings(model);
+        },
         .set_scale => |fraction| {
             model.scale = 0.4 + fraction * 0.8;
             _ = fitWindow(model, fx);
@@ -1632,10 +1654,24 @@ const pet_menu = [_]AppUi.ContextMenuItem{
 const bubble_window_w: f32 = 340;
 const bubble_window_h: f32 = 150;
 const bubble_text_w: f32 = 250;
-const bubble_chars_per_line: usize = 26;
+const bubble_base_chars_per_line: usize = 26;
 const bubble_max_lines: usize = 2;
-const bubble_display_chars: usize = bubble_chars_per_line * bubble_max_lines;
 const bubble_card_pad: f32 = 12;
+
+/// Bubble text size bounds. 13 is the `.sm` rung the bubble always
+/// rendered at; 20 is as far as the fixed 340x150 window carries four
+/// honest lines plus avatar and padding without clipping.
+const bubble_text_min_px: f32 = 13;
+const bubble_text_max_px: f32 = 20;
+
+/// Wrap budget at the current text size: the 26-char budget was tuned
+/// for 13pt over the same fixed card width, so it scales inversely
+/// with the glyph size (bigger type, fewer columns). Floor of 10 keeps
+/// a word plus ellipsis viable even past the slider's max.
+fn bubbleCharsPerLine(text_px: f32) usize {
+    const scaled = @as(f32, @floatFromInt(bubble_base_chars_per_line)) * bubble_text_min_px / text_px;
+    return @max(10, @as(usize, @intFromFloat(@round(scaled))));
+}
 
 /// Count display characters (UTF-8 sequences, not bytes).
 fn charCount(text: []const u8) usize {
@@ -1761,12 +1797,14 @@ pub fn rootView(ui: *AppUi, model: *const Model) AppUi.Node {
 // ----------------------------------------------------------- bubble window
 
 fn bubbleView(ui: *AppUi, model: *const Model) AppUi.Node {
+    const chars_per_line = bubbleCharsPerLine(model.bubble_text_px);
+    const display_chars = chars_per_line * bubble_max_lines;
     const title_raw = model.bubble.title[0..model.bubble.title_len];
     const text_raw = model.bubble.text[0..model.bubble.text_len];
-    const title_clipped = clipDisplay(title_raw, bubble_display_chars, &bubble_title_scratch);
-    const text_clipped = clipDisplay(text_raw, bubble_display_chars, &bubble_text_scratch);
-    const title_lines = splitLines(title_clipped, bubble_chars_per_line);
-    const text_lines = splitLines(text_clipped, bubble_chars_per_line + 2);
+    const title_clipped = clipDisplay(title_raw, display_chars, &bubble_title_scratch);
+    const text_clipped = clipDisplay(text_raw, display_chars, &bubble_text_scratch);
+    const title_lines = splitLines(title_clipped, chars_per_line);
+    const text_lines = splitLines(text_clipped, chars_per_line + 2);
 
     const title_fg = if (model.dark) canvas.Color.rgb8(237, 237, 238) else canvas.Color.rgb8(17, 17, 17);
     const muted_fg = if (model.dark) canvas.Color.rgb8(156, 158, 168) else canvas.Color.rgb8(88, 92, 106);
@@ -1775,16 +1813,18 @@ fn bubbleView(ui: *AppUi, model: *const Model) AppUi.Node {
     // Up to four honest single-line nodes; empty lines render nothing.
     var rows: [4]AppUi.Node = undefined;
     var row_count: usize = 0;
+    // `.heading` is the app-repurposed bubble-text rung (see
+    // petdexTokens): 13pt by default, the settings slider raises it.
     for (title_lines) |line| {
         if (line.len == 0) continue;
-        var node2 = ui.paragraph(.{ .size = .sm }, &.{.{ .text = line, .weight = .bold }});
+        var node2 = ui.paragraph(.{ .size = .heading }, &.{.{ .text = line, .weight = .bold }});
         node2.widget.style.foreground = title_fg;
         rows[row_count] = node2;
         row_count += 1;
     }
     for (text_lines) |line| {
         if (line.len == 0) continue;
-        var node2 = ui.text(.{ .size = .sm }, line);
+        var node2 = ui.text(.{ .size = .heading }, line);
         node2.widget.style.foreground = text_fg;
         rows[row_count] = node2;
         row_count += 1;
@@ -2053,6 +2093,7 @@ fn settingsView(ui: *AppUi, model: *const Model) AppUi.Node {
         shown += 1;
     }
     const scale_fraction: f32 = (model.scale - 0.4) / 0.8;
+    const bubble_text_fraction: f32 = (model.bubble_text_px - bubble_text_min_px) / (bubble_text_max_px - bubble_text_min_px);
     // One scrollable page: the root scroll takes the window frame and
     // everything - full pet catalog included - flows inside it. No
     // more per-section band budgets.
@@ -2090,6 +2131,15 @@ fn settingsView(ui: *AppUi, model: *const Model) AppUi.Node {
                     ui.text(.{ .size = .sm, .style_tokens = .{ .foreground = .text_muted } }, "Adjust the size of your pet"),
                 }),
                 ui.el(.slider, .{ .width = 150, .value = scale_fraction, .on_value = AppUi.valueMsg(.set_scale), .semantics = .{ .label = "Pet size" } }, .{}),
+            }),
+        }),
+        ui.el(.panel, .{ .style_tokens = .{ .background = .surface, .radius = .md } }, .{
+            ui.row(.{ .padding = 12, .cross = .center, .gap = 12 }, .{
+                ui.column(.{ .grow = 1 }, .{
+                    ui.text(.{}, "Bubble text size"),
+                    ui.text(.{ .size = .sm, .style_tokens = .{ .foreground = .text_muted } }, "Size of the bubble text"),
+                }),
+                ui.el(.slider, .{ .width = 150, .value = bubble_text_fraction, .on_value = AppUi.valueMsg(.set_bubble_text_size), .semantics = .{ .label = "Bubble text size" } }, .{}),
             }),
         }),
         ui.el(.panel, .{ .style_tokens = .{ .background = .surface, .radius = .md } }, .{
@@ -2265,4 +2315,12 @@ test {
     _ = hook_server;
     _ = installer;
     _ = plat;
+}
+
+test "bubble wrap budget scales inversely with the text size" {
+    // 26 chars was tuned for the 13pt default; it must survive as-is.
+    try std.testing.expectEqual(@as(usize, 26), bubbleCharsPerLine(bubble_text_min_px));
+    try std.testing.expectEqual(@as(usize, 17), bubbleCharsPerLine(bubble_text_max_px));
+    // Never below the floor, even past the slider's range.
+    try std.testing.expect(bubbleCharsPerLine(40) >= 10);
 }
