@@ -261,9 +261,17 @@ pub fn replaceSymlink(target: []const u8, link: []const u8) bool {
 
 /// Own pid, for the /whoami endpoint. std has no portable accessor in
 /// 0.16, so this is the one genuine per-platform branch in this file.
+///
+/// Linux goes through the raw syscall rather than libc: `std.c.getpid`
+/// is an `extern "c"` declaration, and Linux refuses to compile one
+/// unless the build links libc explicitly. The app binary does, but
+/// `native test` also builds an analysis object that does not, so the
+/// libc path failed the Linux leg of CI while compiling fine on macOS
+/// and Windows. The syscall needs no linkage and returns the same pid.
 pub fn processId() u32 {
     return switch (builtin.os.tag) {
         .windows => std.os.windows.GetCurrentProcessId(),
+        .linux => @intCast(std.os.linux.getpid()),
         else => @intCast(std.c.getpid()),
     };
 }
