@@ -94,7 +94,13 @@ jobs:
         working-directory: packages/petdex-desktop-native
         shell: bash
         run: |
-          "$NATIVE_CLI" build
+          # Released binaries must run on every x86-64 CPU, not just the
+          # runner's. Without -Dcpu=baseline Zig targets the host, and
+          # the GitHub runner is new enough to emit AVX-512: the
+          # desktop-v0.3.1 Windows exe carries 862 kmovd and 199
+          # vpternlogd, which no Zen 3 chip decodes. That is the
+          # 0xC000001D illegal-instruction crash in #604 and #618.
+          "$NATIVE_CLI" build -Dcpu=baseline
           ls -lh zig-out/bin/
 
       - name: Stage the binary (Linux)

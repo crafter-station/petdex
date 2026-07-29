@@ -133,7 +133,10 @@ jobs:
         working-directory: packages/petdex-desktop-native
         shell: bash
         run: |
-          "$NATIVE_CLI" build
+          # Match the release build: baseline x86-64, so CI exercises
+          # the same instruction set users actually get. See the note in
+          # desktop-release.yml.
+          "$NATIVE_CLI" build -Dcpu=baseline
           ls -lh zig-out/bin/
 
       - name: Run the test suite
