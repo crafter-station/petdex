@@ -137,6 +137,8 @@ pub const Msg = union(enum) {
     toggle_hide_dock,
     toggle_launch_at_login,
     toggle_focus_mode,
+    toggle_rotate_pets,
+    shuffle_pet,
     quit_app,
     install_agent: u32,
     uninstall_agent: u32,
@@ -148,7 +150,7 @@ pub const Msg = union(enum) {
     dismiss_install_error,
     noop,
 
-    pub const view_unbound = .{ "frame_tick", "poll_tick", "physics_tick", "frame_clock", "cycle_state", "chime_done", "quit_app", "toggle_focus_mode" };
+    pub const view_unbound = .{ "frame_tick", "poll_tick", "physics_tick", "frame_clock", "cycle_state", "chime_done", "quit_app", "toggle_focus_mode", "shuffle_pet" };
 };
 
 pub const Model = struct {
@@ -221,6 +223,14 @@ pub const Model = struct {
     /// keeps reacting, the narration pauses. Deliberately not
     /// persisted — focus ends when the app restarts.
     focus_mode: bool = false,
+    /// Daily pet rotation: when on, the pet advances round-robin
+    /// through the catalog once per day (UTC epoch-day). Off by
+    /// default; enabling never swaps on the spot — the current pet
+    /// becomes today's, rotation starts tomorrow.
+    rotate_pets: bool = false,
+    /// The epoch-day the current pet was chosen for. A manual pick
+    /// stamps today, pinning it until tomorrow.
+    rotation_day: u32 = 0,
     /// Whether the persisted pet position was applied after the first
     /// window fit (it must land after the fit's bottom_center anchor).
     pos_restored: bool = false,
@@ -816,7 +826,10 @@ fn cWriteFile(path: []const u8, bytes: []const u8) void {
 fn saveSettings(model: *const Model) void {
     var path_buf: [512]u8 = undefined;
     const path = settingsPath(&path_buf) orelse return;
-    var buf: [320]u8 = undefined;
+    // Headroom check (a bufPrint overflow here fails silently and
+    // drops the whole save): worst case with a 63-char slug, every
+    // field present and negative coordinates is ~255 bytes.
+    var buf: [384]u8 = undefined;
     const active = if (model.active_pet < catalog_len) catalog[model.active_pet].slice() else "";
     // The position keys only exist once the window has been fitted and
     // read: a save fired on the very first frame would otherwise
@@ -827,7 +840,7 @@ fn saveSettings(model: *const Model) void {
         std.fmt.bufPrint(&pos_buf, ",\"pet_x\":{d:.0},\"pet_y\":{d:.0}", .{ model.pet_x, model.pet_y }) catch ""
     else
         "";
-    const json = std.fmt.bufPrint(&buf, "{{\"active_pet\":\"{s}\",\"scale\":{d:.2},\"bubbles\":{},\"waiting_sound\":{},\"bubble_text\":{d:.1},\"hide_dock\":{}{s},\"agents_prompted\":{}}}", .{ active, model.scale, model.bubbles_enabled, model.waiting_sound, model.bubble_text_px, model.hide_dock, pos, model.agents_prompted }) catch return;
+    const json = std.fmt.bufPrint(&buf, "{{\"active_pet\":\"{s}\",\"scale\":{d:.2},\"bubbles\":{},\"waiting_sound\":{},\"bubble_text\":{d:.1},\"hide_dock\":{},\"rotate_pets\":{},\"rotation_day\":{d}{s},\"agents_prompted\":{}}}", .{ active, model.scale, model.bubbles_enabled, model.waiting_sound, model.bubble_text_px, model.hide_dock, model.rotate_pets, model.rotation_day, pos, model.agents_prompted }) catch return;
     cWriteFile(path, json);
 }
 
@@ -927,6 +940,8 @@ var initial_bubbles: bool = true;
 var initial_waiting_sound: bool = false;
 var initial_bubble_text_px: f32 = bubble_text_min_px;
 var initial_hide_dock: bool = false;
+var initial_rotate_pets: bool = false;
+var initial_rotation_day: u32 = 0;
 var initial_agents_prompted: bool = false;
 /// Persisted pet window origin; null on first run (or a settings file
 /// from before positions were saved), which keeps the platform's
@@ -1131,6 +1146,13 @@ fn resolveInitialPet(io: std.Io, allocator: std.mem.Allocator, environ_map: *std
                     initial_pet_y = y;
                 }
             }
+            // Opt-in like the sound and the Dock toggle.
+            if (std.mem.indexOf(u8, json, "\"rotate_pets\":true") != null) {
+                initial_rotate_pets = true;
+            }
+            if (hook_server.jsonNumberPub(json, "rotation_day")) |v| {
+                if (v >= 0) initial_rotation_day = @intFromFloat(v);
+            }
         }
     }
     const index = catalogIndexOf(wanted) orelse 0;
@@ -1174,6 +1196,31 @@ fn isDurationState(state: State) bool {
         .waving, .failed, .review, .jumping => true,
         else => false,
     };
+}
+
+// ---------------------------------------------------------------- rotation
+
+/// UTC epoch-day: the rotation only needs "did the calendar day
+/// change", and epoch-day flips at UTC midnight — night hours for most
+/// timezones — without dragging timezone math into the app.
+fn dayFromWallMs(wall_ms: i64) u32 {
+    return @intCast(@divTrunc(wall_ms, std.time.ms_per_day));
+}
+
+/// Advance to the next loadable pet, round-robin by catalog order:
+/// deterministic (no repeats until the catalog wraps) and skipping
+/// sheets the codec refuses, at most one full loop. Rides the same
+/// select_pet Msg the settings list dispatches, so activation cannot
+/// drift between a click, a rotation, and a shuffle.
+fn advancePet(model: *Model, fx: *Effects) void {
+    if (catalog_len < 2) return;
+    var offset: u32 = 1;
+    while (offset < catalog_len) : (offset += 1) {
+        const idx: u32 = (model.active_pet + offset) % @as(u32, @intCast(catalog_len));
+        update(model, .{ .select_pet = idx }, fx);
+        // select_pet only commits after a successful sheet load.
+        if (model.active_pet == idx) return;
+    }
 }
 
 /// Port of state-queue.ts dwellFor.
@@ -1267,6 +1314,8 @@ pub fn boot(model: *Model, fx: *Effects) void {
     model.bubble_text_px = initial_bubble_text_px;
     model.agents_prompted = initial_agents_prompted;
     model.hide_dock = initial_hide_dock;
+    model.rotate_pets = initial_rotate_pets;
+    model.rotation_day = initial_rotation_day;
     model.launch_at_login = plat.launchAtLoginEnabled();
     // Applied via the main queue, so the flip lands as soon as the
     // host's runloop spins up; a Regular-policy Dock icon may blink in
@@ -1485,6 +1534,10 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             if (!loadSheetForPet(fx, &catalog[index])) return;
             model.active_pet = index;
             model.frame_index = 0;
+            // A pick — manual or rotation, same Msg on purpose — is
+            // today's pet: the daily rotation leaves it alone until
+            // the next day.
+            model.rotation_day = dayFromWallMs(fx.wallMs());
             registerStateFrames(model.state, fx);
             armFrameTimer(model, fx);
             saveSettings(model);
@@ -1518,6 +1571,14 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             model.launch_at_login = plat.launchAtLoginEnabled();
         },
         .toggle_focus_mode => model.focus_mode = !model.focus_mode,
+        .toggle_rotate_pets => {
+            model.rotate_pets = !model.rotate_pets;
+            // Enabling never swaps on the spot: the pet on screen
+            // becomes today's, and rotation starts tomorrow.
+            model.rotation_day = dayFromWallMs(fx.wallMs());
+            saveSettings(model);
+        },
+        .shuffle_pet => advancePet(model, fx),
         .quit_app => plat.requestQuit(),
         .set_scale => |fraction| {
             model.scale = 0.4 + fraction * 0.8;
@@ -1724,6 +1785,15 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
                 model.waiting_escalated = true;
                 playWaitingChime(fx);
             }
+            // Daily rotation: fires on the first tick of a new
+            // epoch-day (boot included, so an app that slept through
+            // midnight — or was closed — still rotates when it next
+            // runs). select_pet inside advancePet stamps today and
+            // persists, closing the loop.
+            if (model.rotate_pets and model.rotation_day != dayFromWallMs(now)) {
+                model.rotation_day = dayFromWallMs(now);
+                advancePet(model, fx);
+            }
             const dwell_over = now - model.shown_at_ms >= model.shown_dwell_ms;
             if (!dwell_over) return;
             if (hook_server.mailbox.pop()) |event| {
@@ -1759,6 +1829,7 @@ pub fn onCommand(name: []const u8) ?Msg {
     if (std.mem.eql(u8, name, "petdex.close")) return .close_pet;
     if (std.mem.eql(u8, name, "petdex.quit")) return .quit_app;
     if (std.mem.eql(u8, name, "petdex.focus")) return .toggle_focus_mode;
+    if (std.mem.eql(u8, name, "petdex.shuffle")) return .shuffle_pet;
     return null;
 }
 
@@ -2281,6 +2352,19 @@ fn settingsView(ui: *AppUi, model: *const Model) AppUi.Node {
                 }, .{}),
             }),
         }),
+        ui.el(.panel, .{ .style_tokens = .{ .background = .surface, .radius = .md } }, .{
+            ui.row(.{ .padding = 12, .cross = .center, .gap = 12 }, .{
+                ui.column(.{ .grow = 1 }, .{
+                    ui.text(.{}, "Rotate pet daily"),
+                    ui.text(.{ .size = .sm, .style_tokens = .{ .foreground = .text_muted } }, "Wake up to a different pet each day"),
+                }),
+                ui.el(.switch_control, .{
+                    .selected = model.rotate_pets,
+                    .on_toggle = .toggle_rotate_pets,
+                    .semantics = .{ .label = "Rotate pet daily" },
+                }, .{}),
+            }),
+        }),
         // Login items ride SMAppService, so like the Dock row this one
         // only exists on macOS.
         if (builtin.os.tag == .macos)
@@ -2376,9 +2460,10 @@ fn petdexStatusItem(model: *const Model, scratch: *PetdexApp.StatusItemScratch) 
         .label = if (model.focus_mode) "Focus Mode: On" else "Focus Mode: Off",
         .command = "petdex.focus",
     };
-    scratch.items[2] = .{ .id = 3, .separator = true };
-    scratch.items[3] = .{ .id = 4, .label = "Quit Petdex", .command = "petdex.quit" };
-    return .{ .items = scratch.items[0..4] };
+    scratch.items[2] = .{ .id = 3, .label = "Shuffle Pet", .command = "petdex.shuffle" };
+    scratch.items[3] = .{ .id = 4, .separator = true };
+    scratch.items[4] = .{ .id = 5, .label = "Quit Petdex", .command = "petdex.quit" };
+    return .{ .items = scratch.items[0..5] };
 }
 
 /// The menu-bar button icon: the brand mark's silhouette with the face
@@ -2541,4 +2626,12 @@ test "tap detection separates pats from drags" {
     // Moved: a drag, not a pat.
     try std.testing.expect(!isTap(120, tap_slop_px, 0));
     try std.testing.expect(!isTap(120, 0, -tap_slop_px));
+}
+
+test "epoch-day flips exactly at UTC midnight" {
+    try std.testing.expectEqual(@as(u32, 0), dayFromWallMs(0));
+    try std.testing.expectEqual(@as(u32, 0), dayFromWallMs(std.time.ms_per_day - 1));
+    try std.testing.expectEqual(@as(u32, 1), dayFromWallMs(std.time.ms_per_day));
+    // A real date (2026-07-29T12:00Z), so a unit slip cannot pass.
+    try std.testing.expectEqual(@as(u32, 20663), dayFromWallMs(1785326400000));
 }
