@@ -1,7 +1,7 @@
 {
   "$schema": "./built-with.schema.json",
   "version": 1,
-  "lastUpdated": "2026-07-17",
+  "lastUpdated": "2026-07-29",
   "categories": {
     "desktop-companion": {
       "label": "Desktop companions",
@@ -514,6 +514,24 @@
         "url": "https://github.com/Seeed-Solution/vibe-pet#readme"
       },
       "screenshot": "/built-with/vibe-pet.png"
+    },
+    {
+      "slug": "petos",
+      "name": "PetOS",
+      "tagline": "AI desktop pet agent for Windows and macOS with local memory, proactive companion chat, focus modes, and Petdex import support.",
+      "category": "desktop-companion",
+      "repo": "omlovelife/PetOS-Agent",
+      "homepage": "https://www.petos.one/",
+      "stars": 0,
+      "language": "JavaScript",
+      "platforms": ["macOS", "Windows"],
+      "addedAt": "2026-07-29",
+      "evidence": {
+        "type": "readme",
+        "quote": "内置默认伙伴，也可从 Petdex 或本地文件夹导入。每只宠物有自己的形象、性格与记忆空间。",
+        "url": "https://github.com/omlovelife/PetOS-Agent#readme"
+      },
+      "screenshot": "/built-with/petos.webp"
     }
   ]
 }
