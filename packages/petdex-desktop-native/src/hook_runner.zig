@@ -180,7 +180,13 @@ pub fn formatBubble(phase: []const u8, payload: []const u8, out: []u8) ?[]const 
         return if (done) "Ran command" else "Running command";
     }
     if (asciiEqlLower(tool, "grep")) {
-        if (jsonString(payload, "pattern")) |p| return fmt3(out, if (done) "Searched \"" else "Searching \"", clipRaw(p, 28), "\"");
+        // Curly quotes, not ASCII ones: the bubble text is embedded raw
+        // into the POST body and read back out by hook_server's scanner,
+        // and neither step decodes escapes. A bare `"` closed the JSON
+        // string early and the pattern never reached the bubble; an
+        // escaped `\"` fares no better, since the reader stops at the
+        // backslash too.
+        if (jsonString(payload, "pattern")) |p| return fmt3(out, if (done) "Searched “" else "Searching “", clipRaw(p, 28), "”");
         return if (done) "Searched files" else "Searching files";
     }
     if (asciiEqlLower(tool, "glob")) {
@@ -557,6 +563,42 @@ test "unknown tool falls through to generic" {
     var out: [256]u8 = undefined;
     const payload = "{\"tool_name\":\"mcp__custom__thing\"}";
     try t.expectEqualStrings("Calling mcp__custom__thing", formatBubble("pre", payload, &out).?);
+}
+
+test "grep quotes the pattern without ASCII quotes" {
+    var out: [256]u8 = undefined;
+    const payload = "{\"tool_name\":\"Grep\",\"tool_input\":{\"pattern\":\"TODO\"}}";
+    try t.expectEqualStrings("Searching “TODO”", formatBubble("pre", payload, &out).?);
+    try t.expectEqualStrings("Searched “TODO”", formatBubble("post", payload, &out).?);
+}
+
+test "every template survives the body round trip" {
+    // The bug this pins: a bubble goes out as raw bytes interpolated into
+    // the POST body and comes back through hook_server's scanner, which
+    // stops at the first `"` OR `\` and decodes neither. A template that
+    // renders either one loses everything after it, silently — the ASCII
+    // quotes Grep used to wrap its pattern in dropped the pattern.
+    const payloads = [_][]const u8{
+        "{\"tool_name\":\"Grep\",\"tool_input\":{\"pattern\":\"TODO\"}}",
+        "{\"tool_name\":\"Glob\",\"tool_input\":{\"pattern\":\"*.zig\"}}",
+        "{\"tool_name\":\"Read\",\"tool_input\":{\"file_path\":\"/a/b/server.ts\"}}",
+        "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git status\"}}",
+        "{\"tool_name\":\"WebFetch\",\"tool_input\":{\"url\":\"https://petdex.dev/x\"}}",
+        "{\"tool_name\":\"Agent\",\"tool_input\":{\"description\":\"review hooks\"}}",
+    };
+    for (payloads) |payload| {
+        for ([_][]const u8{ "pre", "post" }) |phase| {
+            var out: [256]u8 = undefined;
+            const text = formatBubble(phase, payload, &out) orelse continue;
+            var body_buf: [1024]u8 = undefined;
+            const body = try std.fmt.bufPrint(
+                &body_buf,
+                "{{\"text\":\"{s}\",\"busy\":true,\"agent_source\":\"claude-code\"}}",
+                .{text},
+            );
+            try t.expectEqualStrings(text, jsonString(body, "text").?);
+        }
+    }
 }
 
 test "session phases render fixed strings" {

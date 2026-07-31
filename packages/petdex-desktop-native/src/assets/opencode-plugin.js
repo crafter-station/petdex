@@ -73,7 +73,10 @@ function formatTool(toolName, toolInput, phase) {
     }
     case "grep": {
       const pattern = fieldFrom(toolInput, "pattern");
-      return pattern ? (past ? "Searched \"" + clip(pattern, 28) + "\"" : "Searching \"" + clip(pattern, 28) + "\"") : past ? "Searched files" : "Searching files";
+      // Curly quotes: JSON.stringify escapes an ASCII `"` correctly, but
+      // the sidecar reads the body back with a scanner that stops at the
+      // backslash, so the pattern never reaches the bubble.
+      return pattern ? (past ? "Searched “" + clip(pattern, 28) + "”" : "Searching “" + clip(pattern, 28) + "”") : past ? "Searched files" : "Searching files";
     }
     case "glob": {
       const pattern = fieldFrom(toolInput, "pattern");

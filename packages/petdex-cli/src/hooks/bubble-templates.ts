@@ -110,9 +110,11 @@ export function formatBubble(event: BubbleEvent): string {
     case "grep": {
       const pattern = fieldFrom(toolInput, "pattern");
       if (pattern) {
+        // Curly quotes keep this in parity with the in-app runner, where
+        // an ASCII `"` truncates the bubble on the way to the sidecar.
         return past
-          ? `Searched "${clip(pattern, 28)}"`
-          : `Searching "${clip(pattern, 28)}"`;
+          ? `Searched “${clip(pattern, 28)}”`
+          : `Searching “${clip(pattern, 28)}”`;
       }
       return past ? "Searched files" : "Searching files";
     }

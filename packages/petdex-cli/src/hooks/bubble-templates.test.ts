@@ -144,7 +144,29 @@ describe("formatBubble - grep + glob", () => {
         toolName: "Grep",
         toolInput: { pattern: "TODO" },
       }),
-    ).toBe('Searching "TODO"');
+    ).toBe("Searching “TODO”");
+  });
+
+  test("no template renders an ASCII quote", () => {
+    // The in-app runner embeds this text raw into the sidecar POST body
+    // and hook_server reads it back with a scanner that decodes nothing,
+    // so a `"` or a `\` anywhere in a template truncates the bubble.
+    for (const toolName of ["Grep", "Glob", "Read", "Bash", "WebFetch"]) {
+      for (const phase of ["running", "done"] as const) {
+        const text = formatBubble({
+          kind: "tool",
+          phase,
+          toolName,
+          toolInput: {
+            pattern: "TODO",
+            file_path: "a.ts",
+            url: "https://x.dev",
+          },
+        });
+        expect(text).not.toContain('"');
+        expect(text).not.toContain("\\");
+      }
+    }
   });
 
   test("Glob done with pattern", () => {
