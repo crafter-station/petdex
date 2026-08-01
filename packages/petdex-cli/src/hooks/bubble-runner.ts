@@ -230,10 +230,38 @@ export function stateForEvent(
     return "running";
   }
   if (phase === "post") return "idle";
+  if (phase === "tool-failure") return "failed";
   if (phase === "stop" || phase === "session-end") return "waving";
   if (phase === "user-prompt" || phase === "session-start") return "jumping";
   if (phase === "waiting" || phase === "notification") return "waiting";
   return null;
+}
+
+/**
+ * `failed` is a duration state in the desktop app — it reverts to idle once its
+ * dwell expires, and with no explicit duration that dwell is the 250ms floor
+ * against a 1220ms animation. 1220 is `failed`'s durationMs in
+ * src/lib/pet-states.ts.
+ */
+export const FAILED_DURATION_MS = 1220;
+
+/**
+ * The /state request body. Extracted and pure so it is reachable from tests:
+ * built inline in runBubble it sits behind a token read and a fetch, which is
+ * why nothing covered it before. One construction path, so `durationMs === 0`
+ * provably renders exactly what shipped before the tool-failure phase existed.
+ * Key order matches the Zig port byte for byte — JSON.stringify preserves
+ * insertion order, so appending `duration` last would silently diverge.
+ */
+export function stateBody(
+  state: string,
+  durationMs: number,
+  agentSource: string | null,
+): Record<string, unknown> {
+  const body: Record<string, unknown> = { state };
+  if (durationMs > 0) body.duration = durationMs;
+  body.agent_source = agentSource;
+  return body;
 }
 
 export async function readStdin(
@@ -351,6 +379,20 @@ export function eventFromArgs(
     return { kind: "session.start" };
   if (phase === "waiting" || phase === "notification")
     return { kind: "session.waiting" };
+
+  // Handled before the generic tool path on purpose. That path substitutes the
+  // literal lowercase "tool" when tool_name is missing, which would render
+  // "tool failed" here against the Zig runner's "Tool failed" — a parity break.
+  // The substitution stays where it is; the running/done templates depend on it.
+  if (phase === "tool-failure") {
+    const { toolName } = parseStdin(stdin);
+    return {
+      kind: "tool",
+      phase: "failed",
+      toolName: toolName ?? "",
+      toolInput: undefined,
+    };
+  }
 
   // Tool events: "pre" → running, "post" → done
   const toolPhase: "running" | "done" | null =
@@ -470,11 +512,14 @@ export async function runBubble(args: string[]): Promise<void> {
     // busy: the turn is still running (prompt submitted, tools firing).
     // stop and waiting events settle it - the app renders a spinner
     // beside the text while busy.
+    // tool-failure keeps the spinner: a failed tool does not end the turn, the
+    // agent reacts to the error and carries on.
     const busy =
       phase === "user-prompt" ||
       phase === "session-start" ||
       phase === "pre" ||
-      phase === "post";
+      phase === "post" ||
+      phase === "tool-failure";
     const body: Record<string, unknown> = {
       text,
       busy,
@@ -484,8 +529,13 @@ export async function runBubble(args: string[]): Promise<void> {
     tasks.push(postJson(SIDECAR_BUBBLE_URL, body, token));
   }
   if (state) {
+    const durationMs = phase === "tool-failure" ? FAILED_DURATION_MS : 0;
     tasks.push(
-      postJson(SIDECAR_STATE_URL, { state, agent_source: agentSource }, token),
+      postJson(
+        SIDECAR_STATE_URL,
+        stateBody(state, durationMs, agentSource),
+        token,
+      ),
     );
   }
   await Promise.all(tasks);

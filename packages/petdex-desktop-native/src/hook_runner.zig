@@ -87,7 +87,10 @@ pub fn run(phase: []const u8, arg_agent: ?[]const u8, home: []const u8) void {
         pruneSessions(sessions_dir);
     }
 
-    const busy = isPromptPhase(phase) or std.mem.eql(u8, phase, "pre") or std.mem.eql(u8, phase, "post");
+    // A failed tool does not end the turn — the agent reacts to the error and
+    // keeps working — so the bubble keeps its spinner, same as `post`.
+    const busy = isPromptPhase(phase) or std.mem.eql(u8, phase, "pre") or
+        std.mem.eql(u8, phase, "post") or isToolFailurePhase(phase);
     const state = stateForEvent(phase, jsonString(payload, "tool_name"));
 
     var posts: [2]PostJob = undefined;
@@ -106,7 +109,8 @@ pub fn run(phase: []const u8, arg_agent: ?[]const u8, home: []const u8) void {
         }
     }
     if (state) |s| {
-        const body = std.fmt.bufPrint(&body_buf, "{{\"state\":\"{s}\",\"agent_source\":\"{s}\"}}", .{ s, agent }) catch null;
+        const duration_ms: u32 = if (isToolFailurePhase(phase)) failed_duration_ms else 0;
+        const body = stateBody(&body_buf, s, duration_ms, agent);
         if (body) |b| {
             if (startPost("/state", b, token)) |post| {
                 posts[post_count] = post;
@@ -125,7 +129,33 @@ fn isStopPhase(phase: []const u8) bool {
     return std.mem.eql(u8, phase, "stop") or std.mem.eql(u8, phase, "session-end");
 }
 
+fn isToolFailurePhase(phase: []const u8) bool {
+    return std.mem.eql(u8, phase, "tool-failure");
+}
+
+/// The /state request body. Extracted and pure for one reason: `run()` reaches
+/// stdin, the token file and a socket, so a body built inline there is
+/// unreachable from `zig test`. One format string with an optional fragment
+/// means duration_ms == 0 provably renders exactly what shipped before this
+/// phase existed — byte-identity for every other agent is structural, not a
+/// promise someone has to keep across future edits.
+pub fn stateBody(out: []u8, state: []const u8, duration_ms: u32, agent: []const u8) ?[]const u8 {
+    var dur_buf: [24]u8 = undefined;
+    const dur: []const u8 = if (duration_ms > 0)
+        (std.fmt.bufPrint(&dur_buf, ",\"duration\":{d}", .{duration_ms}) catch return null)
+    else
+        "";
+    return std.fmt.bufPrint(out, "{{\"state\":\"{s}\"{s},\"agent_source\":\"{s}\"}}", .{ state, dur, agent }) catch null;
+}
+
 // ------------------------------------------------------- state mapping
+
+/// `failed` is a duration state (main.zig isDurationState), so it reverts to
+/// idle once its dwell expires — and dwellFor(.failed, 0) yields only the 250ms
+/// floor against a 1220ms animation, about two of eight frames. The tool-failure
+/// POST therefore carries an explicit duration. 1220 is `failed`'s durationMs in
+/// src/lib/pet-states.ts, not a magic number.
+pub const failed_duration_ms: u32 = 1220;
 
 /// Port of stateForEvent: phase + tool → sprite state.
 pub fn stateForEvent(phase: []const u8, tool_name: ?[]const u8) ?[]const u8 {
@@ -136,6 +166,7 @@ pub fn stateForEvent(phase: []const u8, tool_name: ?[]const u8) ?[]const u8 {
         return "running";
     }
     if (std.mem.eql(u8, phase, "post")) return "idle";
+    if (isToolFailurePhase(phase)) return "failed";
     if (isStopPhase(phase)) return "waving";
     if (isPromptPhase(phase)) return "jumping";
     if (std.mem.eql(u8, phase, "waiting") or std.mem.eql(u8, phase, "notification")) return "waiting";
@@ -151,6 +182,13 @@ pub fn formatBubble(phase: []const u8, payload: []const u8, out: []u8) ?[]const 
     if (isPromptPhase(phase)) return "Thinking…";
     if (isStopPhase(phase)) return "Done.";
     if (std.mem.eql(u8, phase, "waiting") or std.mem.eql(u8, phase, "notification")) return "Waiting for you…";
+    // Tool name only, never the payload's `error` string. jsonString stops at
+    // the first `"` or `\` and decodes neither, and error text routinely carries
+    // both; tool_name is a controlled identifier from the agent's own registry.
+    if (isToolFailurePhase(phase)) {
+        const failed_tool = jsonString(payload, "tool_name") orelse return "Tool failed";
+        return fmt2(out, clipRaw(failed_tool, 28), " failed");
+    }
 
     const running = std.mem.eql(u8, phase, "pre");
     const done = std.mem.eql(u8, phase, "post");
@@ -573,6 +611,57 @@ test "state mapping mirrors the TS runner" {
     try t.expectEqualStrings("waving", stateForEvent("stop", null).?);
     try t.expectEqualStrings("jumping", stateForEvent("user-prompt", null).?);
     try t.expectEqualStrings("waiting", stateForEvent("notification", null).?);
+    try t.expectEqualStrings("failed", stateForEvent("tool-failure", "Bash").?);
+}
+
+test "tool-failure bubble names the tool and never the error text" {
+    var out: [256]u8 = undefined;
+    const payload =
+        "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"npm test\"}," ++
+        "\"error\":\"Command failed: \\\"npm test\\\" exited 1\",\"error_type\":\"execution_failed\"}";
+    const rendered = formatBubble("tool-failure", payload, &out).?;
+    try t.expectEqualStrings("Bash failed", rendered);
+    // AC9: the payload carries both an ASCII quote and a backslash, and neither
+    // reaches the bubble. jsonString would truncate the body at the first one.
+    try t.expect(std.mem.indexOfScalar(u8, rendered, '"') == null);
+    try t.expect(std.mem.indexOfScalar(u8, rendered, '\\') == null);
+    // Missing tool_name falls back capitalised, matching the TS runner.
+    try t.expectEqualStrings("Tool failed", formatBubble("tool-failure", "{}", &out).?);
+}
+
+test "stateBody adds duration only for the failure phase" {
+    var buf: [256]u8 = undefined;
+    try t.expectEqualStrings(
+        "{\"state\":\"failed\",\"duration\":1220,\"agent_source\":\"qoder\"}",
+        stateBody(&buf, "failed", failed_duration_ms, "qoder").?,
+    );
+    // AC12 regression guard: every pre-existing phase must render exactly what
+    // shipped before this change. This fails the moment anyone reintroduces a
+    // second format string or reorders the keys.
+    try t.expectEqualStrings(
+        "{\"state\":\"idle\",\"agent_source\":\"claude-code\"}",
+        stateBody(&buf, "idle", 0, "claude-code").?,
+    );
+    try t.expectEqualStrings(
+        "{\"state\":\"waving\",\"agent_source\":\"codex\"}",
+        stateBody(&buf, "waving", 0, "codex").?,
+    );
+}
+
+test "tool-failure bubble survives the sidecar reader round trip" {
+    // The whole class #628 exposed: formatBubble output is embedded raw into the
+    // POST body, then read back by a scanner that stops at `"` and `\`. Push the
+    // new template through both halves and assert nothing is lost.
+    var out: [256]u8 = undefined;
+    const rendered = formatBubble("tool-failure", "{\"tool_name\":\"Bash\"}", &out).?;
+    var body_buf: [512]u8 = undefined;
+    const body = std.fmt.bufPrint(
+        &body_buf,
+        "{{\"text\":\"{s}\",\"busy\":true,\"agent_source\":\"qoder\"}}",
+        .{rendered},
+    ) catch unreachable;
+    try t.expectEqualStrings("Bash failed", jsonString(body, "text").?);
+    try t.expectEqualStrings("qoder", jsonString(body, "agent_source").?);
 }
 
 test "transcript tail takes the newest assistant text" {

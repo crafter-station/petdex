@@ -18,6 +18,10 @@ pub const AgentKind = enum(u8) {
     codex,
     gemini,
     opencode,
+    // One row for every Qoder config root (see qoder_roots). Appended, not
+    // sorted in: agent_art and agent_icon_ids are indexed by @intFromEnum, so
+    // inserting would re-map every existing glyph.
+    qoder,
 
     pub fn displayName(self: AgentKind) []const u8 {
         return switch (self) {
@@ -25,6 +29,7 @@ pub const AgentKind = enum(u8) {
             .codex => "Codex",
             .gemini => "Gemini CLI",
             .opencode => "opencode",
+            .qoder => "Qoder",
         };
     }
 
@@ -34,6 +39,7 @@ pub const AgentKind = enum(u8) {
             .codex => "codex",
             .gemini => "gemini",
             .opencode => "opencode",
+            .qoder => "qoder",
         };
     }
 };
@@ -54,7 +60,7 @@ pub const AgentInfo = struct {
     status: HookStatus = .absent,
 };
 
-pub const agent_count = 4;
+pub const agent_count = 5;
 
 /// Claude Code keeps everything under ~/.claude unless CLAUDE_CONFIG_DIR
 /// points elsewhere — that env var is how people run several fully
@@ -80,11 +86,130 @@ fn claudeSettingsPath(buf: []u8, home: []const u8) ?[]const u8 {
     return std.fmt.bufPrint(buf, "{s}/.claude/settings.json", .{home}) catch null;
 }
 
+/// `*_CONFIG_DIR` is a complete root path, like CLAUDE_CONFIG_DIR; `*_CLI_HOME`
+/// replaces the home directory instead, so the root becomes `$CLI_HOME/<leaf>`.
+/// Missing either writes hooks where that install never reads. Snapshotted once
+/// from main()'s environ_map, same pattern as env_claude_config_dir.
+/// `*_CONFIG_DIR_NAME` is out of scope: it renames only the leaf, and its
+/// absence degrades to a visible "Not detected" rather than a wrong-root write.
+pub var env_qoder_config_dir: ?[]const u8 = null;
+pub var env_qoder_cn_config_dir: ?[]const u8 = null;
+pub var env_qoder_cli_home: ?[]const u8 = null;
+pub var env_qoder_cn_cli_home: ?[]const u8 = null;
+
+fn nonEmpty(value: ?[]const u8) ?[]const u8 {
+    const v = value orelse return null;
+    return if (v.len == 0) null else v;
+}
+
+/// One row, N config roots. A table rather than a `cn` boolean so resolve,
+/// scan, install and uninstall are all the same loop.
+const QoderRoot = struct {
+    leaf: []const u8,
+    config_dir: *const ?[]const u8,
+    cli_home: *const ?[]const u8,
+};
+
+const qoder_roots = [_]QoderRoot{
+    .{ .leaf = ".qoder", .config_dir = &env_qoder_config_dir, .cli_home = &env_qoder_cli_home },
+    .{ .leaf = ".qoder-cn", .config_dir = &env_qoder_cn_config_dir, .cli_home = &env_qoder_cn_cli_home },
+};
+
+fn qoderRootDir(buf: []u8, home: []const u8, root: QoderRoot) ?[]const u8 {
+    if (nonEmpty(root.config_dir.*)) |dir| return std.fmt.bufPrint(buf, "{s}", .{dir}) catch null;
+    const base = nonEmpty(root.cli_home.*) orelse home;
+    return std.fmt.bufPrint(buf, "{s}/{s}", .{ base, root.leaf }) catch null;
+}
+
+fn qoderRootSettings(buf: []u8, home: []const u8, root: QoderRoot) ?[]const u8 {
+    if (nonEmpty(root.config_dir.*)) |dir| return std.fmt.bufPrint(buf, "{s}/settings.json", .{dir}) catch null;
+    const base = nonEmpty(root.cli_home.*) orelse home;
+    return std.fmt.bufPrint(buf, "{s}/{s}/settings.json", .{ base, root.leaf }) catch null;
+}
+
+/// The settings files this row is willing to act on, deduplicated.
+const QoderPaths = struct {
+    bufs: [qoder_roots.len][512]u8 = undefined,
+    lens: [qoder_roots.len]usize = @splat(0),
+    count: usize = 0,
+
+    fn slice(self: *const QoderPaths, i: usize) []const u8 {
+        return self.bufs[i][0..self.lens[i]];
+    }
+
+    fn push(self: *QoderPaths, path: []const u8) void {
+        if (path.len > self.bufs[0].len or self.count == self.bufs.len) return;
+        // Roots collapse to one file if both *_CONFIG_DIR point at one
+        // directory. Writing twice is harmless; counting twice is not.
+        for (0..self.count) |i| {
+            if (std.mem.eql(u8, self.slice(i), path)) return;
+        }
+        @memcpy(self.bufs[self.count][0..path.len], path);
+        self.lens[self.count] = path.len;
+        self.count += 1;
+    }
+};
+
+/// Roots that exist and whose settings.json we could actually merge into. An
+/// unreadable or malformed config is skipped, not reported as "no hooks":
+/// installJsonHooks refuses those every time, so counting one would peg the row
+/// at "not installed" behind a button that can never succeed.
+fn qoderActionablePaths(allocator: std.mem.Allocator, home: []const u8) QoderPaths {
+    var out: QoderPaths = .{};
+    for (qoder_roots) |root| {
+        var dir_buf: [512]u8 = undefined;
+        const dir = qoderRootDir(&dir_buf, home, root) orelse continue;
+        if (!dirExists(dir)) continue;
+        var path_buf: [512]u8 = undefined;
+        const path = qoderRootSettings(&path_buf, home, root) orelse continue;
+        if (!canInstallJsonHooks(allocator, path, &qoder_events)) continue;
+        out.push(path);
+    }
+    return out;
+}
+
+/// Whichever root still needs a press decides the button. `.node` is
+/// unreachable here today (no legacy runner ever wrote these hooks) but folding
+/// it keeps the rule total.
+fn worseStatus(a: HookStatus, b: HookStatus) HookStatus {
+    if (a == .none or b == .none) return .none;
+    if (a == .node or b == .node) return .node;
+    return .current;
+}
+
+fn qoderStatus(allocator: std.mem.Allocator, home: []const u8) HookStatus {
+    const paths = qoderActionablePaths(allocator, home);
+    var folded: ?HookStatus = null;
+    for (0..paths.count) |i| {
+        const path = paths.slice(i);
+        const status = blk: {
+            const content = readFileAlloc(allocator, path, 512 * 1024) orelse break :blk HookStatus.none;
+            defer allocator.free(content);
+            break :blk classifyConfig(allocator, content);
+        };
+        folded = if (folded) |f| worseStatus(f, status) else status;
+    }
+    return folded orelse .absent;
+}
+
 /// The five Claude-shaped hook events the bubble pipeline rides.
 const claude_events = [_]HookEvent{
     .{ .event = "UserPromptSubmit", .phase = "user-prompt" },
     .{ .event = "PreToolUse", .phase = "pre" },
     .{ .event = "PostToolUse", .phase = "post" },
+    .{ .event = "Notification", .phase = "notification" },
+    .{ .event = "Stop", .phase = "stop" },
+};
+
+/// The Claude five plus PostToolUseFailure, the one event no other wired agent
+/// reports — it is what lights the `failed` sprite row. The two Post* events are
+/// mutually exclusive per tool call (coreToolHookTriggers.ts:288 gates
+/// PostToolUse on `!toolResult.error`), so no trailing `idle` stomps it.
+const qoder_events = [_]HookEvent{
+    .{ .event = "UserPromptSubmit", .phase = "user-prompt" },
+    .{ .event = "PreToolUse", .phase = "pre" },
+    .{ .event = "PostToolUse", .phase = "post" },
+    .{ .event = "PostToolUseFailure", .phase = "tool-failure" },
     .{ .event = "Notification", .phase = "notification" },
     .{ .event = "Stop", .phase = "stop" },
 };
@@ -236,7 +361,13 @@ pub fn scan(allocator: std.mem.Allocator, home: []const u8) [agent_count]AgentIn
         .{ .kind = .codex },
         .{ .kind = .gemini },
         .{ .kind = .opencode },
+        .{ .kind = .qoder },
     };
+    // Several roots behind one row: cannot ride the single-dir/single-config
+    // shape below, so it is resolved up front. The arms `continue` rather than
+    // `unreachable` so dropping this line degrades to "not detected" instead of
+    // panicking in release.
+    out[@intFromEnum(AgentKind.qoder)].status = qoderStatus(allocator, home);
     var path: [512]u8 = undefined;
     for (&out) |*info| {
         const dir = switch (info.kind) {
@@ -244,6 +375,7 @@ pub fn scan(allocator: std.mem.Allocator, home: []const u8) [agent_count]AgentIn
             .codex => std.fmt.bufPrint(&path, "{s}/.codex", .{home}) catch continue,
             .gemini => std.fmt.bufPrint(&path, "{s}/.gemini", .{home}) catch continue,
             .opencode => std.fmt.bufPrint(&path, "{s}/.config/opencode", .{home}) catch continue,
+            .qoder => continue,
         };
         if (!dirExists(dir)) continue;
         info.status = .none;
@@ -252,6 +384,7 @@ pub fn scan(allocator: std.mem.Allocator, home: []const u8) [agent_count]AgentIn
             .codex => std.fmt.bufPrint(&path, "{s}/.codex/hooks.json", .{home}) catch continue,
             .gemini => std.fmt.bufPrint(&path, "{s}/.gemini/settings.json", .{home}) catch continue,
             .opencode => std.fmt.bufPrint(&path, "{s}/.config/opencode/plugins/petdex.js", .{home}) catch continue,
+            .qoder => continue,
         };
         if (readFileAlloc(allocator, cfg, 512 * 1024)) |content| {
             defer allocator.free(content);
@@ -283,6 +416,28 @@ pub fn installClaude(allocator: std.mem.Allocator, home: []const u8) bool {
     var path_buf: [512]u8 = undefined;
     const path = claudeSettingsPath(&path_buf, home) orelse return false;
     return installJsonHooks(allocator, path, &claude_events, "claude-code", 2, false);
+}
+
+/// Pure settings.json: no feature flag like Codex, and no hooksConfig write
+/// like Gemini — `hooksConfig.enabled` already defaults to true upstream, so
+/// writing it could only clobber a deliberate opt-out. Timeout is in seconds.
+pub fn installQoder(allocator: std.mem.Allocator, home: []const u8) bool {
+    const paths = qoderActionablePaths(allocator, home);
+    if (paths.count == 0) return false;
+    var ok = true;
+    for (0..paths.count) |i| {
+        if (!installJsonHooks(allocator, paths.slice(i), &qoder_events, "qoder", 2, false)) ok = false;
+    }
+    return ok;
+}
+
+fn uninstallQoder(allocator: std.mem.Allocator, home: []const u8) bool {
+    const paths = qoderActionablePaths(allocator, home);
+    var ok = true;
+    for (0..paths.count) |i| {
+        if (!uninstallJsonHooks(allocator, paths.slice(i))) ok = false;
+    }
+    return ok;
 }
 
 /// Gemini rides the exact same settings.json hook shape as Claude,
@@ -662,6 +817,9 @@ pub fn migrateLegacyHooks(allocator: std.mem.Allocator, home: []const u8) Legacy
             // Keep its existing explicit Update action rather than changing
             // it as part of this bubble-runner migration.
             .opencode => continue,
+            // Unreachable: no legacy runner ever wrote these hooks, so this
+            // cannot scan as .node. Install is the consistent answer anyway.
+            .qoder => installQoder(allocator, home),
         };
         if (migrated) result.migrated += 1 else result.failed += 1;
     }
@@ -689,6 +847,7 @@ pub fn uninstall(allocator: std.mem.Allocator, home: []const u8, kind: AgentKind
             plat.deleteFile(p);
             return true;
         },
+        .qoder => return uninstallQoder(allocator, home),
     }
 }
 
@@ -823,6 +982,293 @@ test "CLAUDE_CONFIG_DIR redirects install, scan and uninstall" {
     env_claude_config_dir = "";
     const blank = scan(t.allocator, home);
     try t.expectEqual(HookStatus.absent, blank[0].status);
+}
+
+test "installQoder writes six events and stays out of the rest of the config" {
+    const home = "/tmp/petdex-qoder-fixture";
+    plat.makeDir(home ++ "/.qoder");
+    const fixture =
+        \\{"model":"auto","hooksConfig":{"enabled":false},"hooks":{"PreToolUse":[
+        \\ {"matcher":"Bash","hooks":[{"type":"command","command":"my-own-thing"}]}
+        \\]},"statusLine":{"type":"command"}}
+    ;
+    var pb: [512]u8 = undefined;
+    const cfg = std.fmt.bufPrint(&pb, "{s}/.qoder/settings.json", .{home}) catch unreachable;
+    try t.expect(writeFile(cfg, fixture));
+    try t.expect(installQoder(t.allocator, home));
+    const merged = readFileAlloc(t.allocator, cfg, 1024 * 1024).?;
+    defer t.allocator.free(merged);
+
+    // All six events, including the one no other agent reports.
+    for ([_][]const u8{ "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "Notification", "Stop" }) |event| {
+        try t.expect(std.mem.indexOf(u8, merged, event) != null);
+    }
+    try t.expect(std.mem.indexOf(u8, merged, "bubble tool-failure qoder") != null);
+    try t.expect(std.mem.indexOf(u8, merged, "\"timeout\": 2") != null);
+    // Foreign keys and the user's own hook survive untouched.
+    try t.expect(std.mem.indexOf(u8, merged, "my-own-thing") != null);
+    try t.expect(std.mem.indexOf(u8, merged, "statusLine") != null);
+    // hooksConfig.enabled defaults true upstream, so a deliberate opt-out must
+    // survive: install writes nothing outside the hooks object.
+    try t.expect(std.mem.indexOf(u8, merged, "\"enabled\": false") != null);
+    try t.expect(std.mem.indexOf(u8, merged, "disableAllHooks") == null);
+
+    // Idempotent.
+    try t.expect(installQoder(t.allocator, home));
+    const merged2 = readFileAlloc(t.allocator, cfg, 1024 * 1024).?;
+    defer t.allocator.free(merged2);
+    try t.expectEqual(@as(usize, 1), std.mem.count(u8, merged2, "bubble pre qoder"));
+    try t.expectEqual(@as(usize, 1), std.mem.count(u8, merged2, "bubble tool-failure qoder"));
+
+    const bak = std.fmt.bufPrint(&pb, "{s}/.qoder/settings.json.pre-petdex-backup", .{home}) catch unreachable;
+    try t.expect(fileExists(bak));
+}
+
+const qoder_row = @intFromEnum(AgentKind.qoder);
+
+/// Clear every qoder env override and restore the caller's on scope exit.
+fn saveQoderEnv() [4]?[]const u8 {
+    const saved = [4]?[]const u8{ env_qoder_config_dir, env_qoder_cn_config_dir, env_qoder_cli_home, env_qoder_cn_cli_home };
+    env_qoder_config_dir = null;
+    env_qoder_cn_config_dir = null;
+    env_qoder_cli_home = null;
+    env_qoder_cn_cli_home = null;
+    return saved;
+}
+
+fn restoreQoderEnv(saved: [4]?[]const u8) void {
+    env_qoder_config_dir = saved[0];
+    env_qoder_cn_config_dir = saved[1];
+    env_qoder_cli_home = saved[2];
+    env_qoder_cn_cli_home = saved[3];
+}
+
+test "qoderStatus folds the roots worst-first" {
+    // Table over every pair the fold can see. `.absent` never reaches it —
+    // qoderActionablePaths drops roots that are not there — so the matrix is
+    // the three actionable states squared, and the rule has to be symmetric.
+    const cases = [_]struct { a: HookStatus, b: HookStatus, want: HookStatus }{
+        .{ .a = .current, .b = .current, .want = .current },
+        .{ .a = .current, .b = .node, .want = .node },
+        .{ .a = .current, .b = .none, .want = .none },
+        .{ .a = .node, .b = .current, .want = .node },
+        .{ .a = .node, .b = .node, .want = .node },
+        .{ .a = .node, .b = .none, .want = .none },
+        .{ .a = .none, .b = .current, .want = .none },
+        .{ .a = .none, .b = .node, .want = .none },
+        .{ .a = .none, .b = .none, .want = .none },
+    };
+    for (cases) |c| {
+        try t.expectEqual(c.want, worseStatus(c.a, c.b));
+        try t.expectEqual(c.want, worseStatus(c.b, c.a));
+    }
+}
+
+test "one qoder row covers every root present" {
+    const saved = saveQoderEnv();
+    defer restoreQoderEnv(saved);
+
+    // Each case gets its own fixture home. A single home mutated in place would
+    // pass once and then fail on re-run, because plat has no recursive delete
+    // and the "must be absent" assertions cannot un-create a directory.
+
+    // Neither build installed: no row at all.
+    const empty_home = "/tmp/petdex-qoder-neither";
+    plat.makeDir(empty_home);
+    try t.expectEqual(HookStatus.absent, scan(t.allocator, empty_home)[qoder_row].status);
+
+    // Only the CN build present: one row, and Install reaches it.
+    const cn_home = "/tmp/petdex-qoder-cn-only";
+    plat.makeDir(cn_home);
+    plat.makeDir(cn_home ++ "/.qoder-cn");
+    // "present but not connected" is only reachable from a config this test has
+    // not already installed into, so reset rather than depend on a fresh /tmp.
+    plat.deleteFile(cn_home ++ "/.qoder-cn/settings.json");
+    plat.deleteFile(cn_home ++ "/.qoder-cn/settings.json.pre-petdex-backup");
+    try t.expectEqual(HookStatus.none, scan(t.allocator, cn_home)[qoder_row].status);
+    try t.expect(installQoder(t.allocator, cn_home));
+    try t.expectEqual(HookStatus.current, scan(t.allocator, cn_home)[qoder_row].status);
+
+    // Both present: one Install covers both roots, one Disconnect clears both.
+    const both_home = "/tmp/petdex-qoder-both";
+    plat.makeDir(both_home);
+    plat.makeDir(both_home ++ "/.qoder");
+    plat.makeDir(both_home ++ "/.qoder-cn");
+    plat.deleteFile(both_home ++ "/.qoder/settings.json");
+    plat.deleteFile(both_home ++ "/.qoder-cn/settings.json");
+    try t.expect(installQoder(t.allocator, both_home));
+    try t.expectEqual(HookStatus.current, scan(t.allocator, both_home)[qoder_row].status);
+    var pb: [512]u8 = undefined;
+    for ([_][]const u8{ ".qoder", ".qoder-cn" }) |leaf| {
+        const cfg = std.fmt.bufPrint(&pb, "{s}/{s}/settings.json", .{ both_home, leaf }) catch unreachable;
+        const merged = readFileAlloc(t.allocator, cfg, 1024 * 1024).?;
+        defer t.allocator.free(merged);
+        try t.expect(std.mem.indexOf(u8, merged, "bubble tool-failure qoder") != null);
+    }
+
+    try t.expect(uninstall(t.allocator, both_home, .qoder));
+    try t.expectEqual(HookStatus.none, scan(t.allocator, both_home)[qoder_row].status);
+}
+
+test "a partially connected qoder reads as not installed and one press completes it" {
+    const saved = saveQoderEnv();
+    defer restoreQoderEnv(saved);
+
+    const home = "/tmp/petdex-qoder-partial";
+    plat.makeDir(home);
+    plat.makeDir(home ++ "/.qoder");
+    plat.makeDir(home ++ "/.qoder-cn");
+    plat.deleteFile(home ++ "/.qoder/settings.json");
+    plat.deleteFile(home ++ "/.qoder-cn/settings.json");
+
+    // Connect the global root only, by writing straight to its config.
+    var pb: [512]u8 = undefined;
+    const global_cfg = std.fmt.bufPrint(&pb, "{s}/.qoder/settings.json", .{home}) catch unreachable;
+    try t.expect(installJsonHooks(t.allocator, global_cfg, &qoder_events, "qoder", 2, false));
+
+    // Worst-first: the untouched CN root decides the button.
+    try t.expectEqual(HookStatus.none, scan(t.allocator, home)[qoder_row].status);
+
+    // One press completes it; the already-connected root stays at exactly one
+    // entry per event rather than gaining a duplicate.
+    try t.expect(installQoder(t.allocator, home));
+    try t.expectEqual(HookStatus.current, scan(t.allocator, home)[qoder_row].status);
+    const merged = readFileAlloc(t.allocator, global_cfg, 1024 * 1024).?;
+    defer t.allocator.free(merged);
+    try t.expectEqual(@as(usize, 1), std.mem.count(u8, merged, "bubble pre qoder"));
+}
+
+test "a qoder root we could never write to is excluded, not counted as unhooked" {
+    const saved = saveQoderEnv();
+    defer restoreQoderEnv(saved);
+
+    const home = "/tmp/petdex-qoder-broken-root";
+    plat.makeDir(home);
+    plat.makeDir(home ++ "/.qoder");
+    plat.makeDir(home ++ "/.qoder-cn");
+    plat.deleteFile(home ++ "/.qoder/settings.json");
+
+    // The CN root carries a config installJsonHooks would refuse forever.
+    var pb: [512]u8 = undefined;
+    const broken = std.fmt.bufPrint(&pb, "{s}/.qoder-cn/settings.json", .{home}) catch unreachable;
+    const garbage = "{\"hooks\": {\"PreToolUse\": [ truncated";
+    try t.expect(writeFile(broken, garbage));
+
+    // Counting it would peg the row at .none behind a button that can never
+    // succeed. It is dropped instead, so the row tracks the healthy root.
+    try t.expectEqual(HookStatus.none, scan(t.allocator, home)[qoder_row].status);
+    try t.expect(installQoder(t.allocator, home));
+    try t.expectEqual(HookStatus.current, scan(t.allocator, home)[qoder_row].status);
+
+    // And the refused config is still byte-for-byte untouched.
+    const after = readFileAlloc(t.allocator, broken, 1024 * 1024).?;
+    defer t.allocator.free(after);
+    try t.expectEqualStrings(garbage, after);
+}
+
+test "qoder roots that resolve to the same path collapse to one" {
+    const saved = saveQoderEnv();
+    defer restoreQoderEnv(saved);
+
+    const home = "/tmp/petdex-qoder-samepath-home";
+    const shared = "/tmp/petdex-qoder-samepath-shared";
+    plat.makeDir(home);
+    plat.makeDir(shared);
+    var pb: [512]u8 = undefined;
+    const cfg = std.fmt.bufPrint(&pb, "{s}/settings.json", .{shared}) catch unreachable;
+    plat.deleteFile(cfg);
+
+    // Both builds pointed at one directory: a misconfiguration, but it must not
+    // double-count or double-write.
+    env_qoder_config_dir = shared;
+    env_qoder_cn_config_dir = shared;
+    try t.expectEqual(@as(usize, 1), qoderActionablePaths(t.allocator, home).count);
+    try t.expect(installQoder(t.allocator, home));
+    const merged = readFileAlloc(t.allocator, cfg, 1024 * 1024).?;
+    defer t.allocator.free(merged);
+    try t.expectEqual(@as(usize, 1), std.mem.count(u8, merged, "bubble pre qoder"));
+    try t.expectEqual(HookStatus.current, scan(t.allocator, home)[qoder_row].status);
+}
+
+test "each qoder root honours only its own env overrides" {
+    const saved = saveQoderEnv();
+    defer restoreQoderEnv(saved);
+
+    // A home with no ~/.qoder at all: only the override dir exists.
+    const home = "/tmp/petdex-qoder-env-home";
+    const alt = "/tmp/petdex-qoder-env-alt";
+    plat.makeDir(home);
+    plat.makeDir(alt);
+    var pb: [512]u8 = undefined;
+    const alt_cfg = std.fmt.bufPrint(&pb, "{s}/settings.json", .{alt}) catch unreachable;
+    plat.deleteFile(alt_cfg);
+
+    // The global build's variable must move the global root and nothing else:
+    // the CN root stays unresolved, so the row reflects the override alone.
+    env_qoder_config_dir = alt;
+    try t.expect(installQoder(t.allocator, home));
+    const written = readFileAlloc(t.allocator, alt_cfg, 1024 * 1024).?;
+    defer t.allocator.free(written);
+    try t.expect(std.mem.indexOf(u8, written, "bubble pre qoder") != null);
+
+    var def_pb: [512]u8 = undefined;
+    const default_cfg = std.fmt.bufPrint(&def_pb, "{s}/.qoder/settings.json", .{home}) catch unreachable;
+    try t.expect(!fileExists(default_cfg));
+    try t.expectEqual(HookStatus.current, scan(t.allocator, home)[qoder_row].status);
+
+    try t.expect(uninstall(t.allocator, home, .qoder));
+    const cleared = readFileAlloc(t.allocator, alt_cfg, 1024 * 1024).?;
+    defer t.allocator.free(cleared);
+    try t.expect(std.mem.indexOf(u8, cleared, "petdex-hook") == null);
+
+    // CLI_HOME relocates the home directory rather than the root, so the leaf
+    // is still appended. Empty string reads as unset, matching Claude's rule.
+    env_qoder_config_dir = "";
+    env_qoder_cli_home = "/tmp/petdex-qoder-clihome";
+    plat.makeDir("/tmp/petdex-qoder-clihome");
+    plat.makeDir("/tmp/petdex-qoder-clihome/.qoder");
+    try t.expect(installQoder(t.allocator, home));
+    const cli_home_cfg = std.fmt.bufPrint(&pb, "/tmp/petdex-qoder-clihome/.qoder/settings.json", .{}) catch unreachable;
+    try t.expect(fileExists(cli_home_cfg));
+    try t.expectEqual(HookStatus.current, scan(t.allocator, home)[qoder_row].status);
+}
+
+test "installQoder removes only its command from a mixed hook group" {
+    const home = "/tmp/petdex-qoder-mixed";
+    plat.makeDir(home ++ "/.qoder");
+    var path_buf: [512]u8 = undefined;
+    const config = std.fmt.bufPrint(&path_buf, "{s}/.qoder/settings.json", .{home}) catch unreachable;
+    const fixture =
+        \\{"hooks":{"Stop":[{"hooks":[
+        \\ {"type":"command","command":"my-own-stop-hook"},
+        \\ {"type":"command","command":"node $HOME/.petdex/bin/petdex.js bubble stop qoder"}
+        \\]}]}}
+    ;
+    try t.expect(writeFile(config, fixture));
+    try t.expect(installQoder(t.allocator, home));
+    const merged = readFileAlloc(t.allocator, config, 1024 * 1024).?;
+    defer t.allocator.free(merged);
+    try t.expect(std.mem.indexOf(u8, merged, "my-own-stop-hook") != null);
+    try t.expect(std.mem.indexOf(u8, merged, "petdex.js") == null);
+
+    try t.expect(uninstall(t.allocator, home, .qoder));
+    const cleared = readFileAlloc(t.allocator, config, 1024 * 1024).?;
+    defer t.allocator.free(cleared);
+    try t.expect(std.mem.indexOf(u8, cleared, "my-own-stop-hook") != null);
+    try t.expect(std.mem.indexOf(u8, cleared, "petdex-hook") == null);
+}
+
+test "installQoder refuses a malformed config without overwriting it" {
+    const home = "/tmp/petdex-qoder-malformed";
+    plat.makeDir(home ++ "/.qoder");
+    var path_buf: [512]u8 = undefined;
+    const config = std.fmt.bufPrint(&path_buf, "{s}/.qoder/settings.json", .{home}) catch unreachable;
+    const broken = "{\"hooks\": {\"PreToolUse\": [ truncated";
+    try t.expect(writeFile(config, broken));
+    try t.expect(!installQoder(t.allocator, home));
+    const after = readFileAlloc(t.allocator, config, 1024 * 1024).?;
+    defer t.allocator.free(after);
+    try t.expectEqualStrings(broken, after);
 }
 
 test "installClaude removes only its command from a mixed hook group" {

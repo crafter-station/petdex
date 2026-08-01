@@ -264,6 +264,7 @@ pub const Model = struct {
         .{ .kind = .codex },
         .{ .kind = .gemini },
         .{ .kind = .opencode },
+        .{ .kind = .qoder },
     },
     agents_prompted: bool = false,
     codex_trust_note: bool = false,
@@ -1080,7 +1081,10 @@ var initial_pet_y: ?f64 = null;
 // assets/agents/, re-registered only when the agent changes.
 const avatar_image_id: u64 = 13;
 const tail_image_id: u64 = 14;
-const agent_icon_ids = [agent_hooks.agent_count]u64{ 9, 10, 11, 15 };
+// The registry caps at 16 slots and 16 is the last one free, so both Qoder
+// builds share it — they ship the same artwork anyway.
+const agent_icon_ids = [agent_hooks.agent_count]u64{ 9, 10, 11, 15, 16 };
+const agent_icon_px: usize = 40;
 var agents_icons_ready: bool = false;
 var agents_icons_dark: bool = false;
 
@@ -1095,6 +1099,7 @@ const agent_art = [agent_hooks.agent_count]AgentArt{
     .{ .light = @embedFile("assets/agents/codex.png"), .dark = @embedFile("assets/agents/codex.png") },
     .{ .light = @embedFile("assets/agents/gemini.png"), .dark = @embedFile("assets/agents/gemini.png") },
     .{ .light = @embedFile("assets/agents/opencode-light.png"), .dark = @embedFile("assets/agents/opencode-dark.png") },
+    .{ .light = @embedFile("assets/agents/qoder.png"), .dark = @embedFile("assets/agents/qoder.png") },
 };
 const agent_fallback_art: []const u8 = @embedFile("assets/agents/fallback.png");
 
@@ -1663,6 +1668,7 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
                 .codex => agent_hooks.installCodex(boot_allocator, home),
                 .gemini => agent_hooks.installGemini(boot_allocator, home),
                 .opencode => agent_hooks.installOpencode(boot_allocator, home),
+                .qoder => agent_hooks.installQoder(boot_allocator, home),
             };
             if (ok and kind == .codex) model.codex_trust_note = true;
             model.agents = agent_hooks.scan(boot_allocator, home);
@@ -2835,6 +2841,16 @@ pub fn main(init: std.process.Init) !void {
     // their Claude Code never reads, and detection shows them as
     // disconnected after a successful connect (#601).
     agent_hooks.env_claude_config_dir = init.environ_map.get("CLAUDE_CONFIG_DIR");
+    // Qoder's two builds each resolve their root through two variables, and the
+    // prefix differs per build (QODER_* vs QODERCN_*). Unlike every other
+    // touchpoint for these agents, nothing here is compiler-enforced: omit a
+    // line and the app still builds, the tests still pass (they set the globals
+    // directly), and the only symptom is hooks written to a root that install
+    // never reads.
+    agent_hooks.env_qoder_config_dir = init.environ_map.get("QODER_CONFIG_DIR");
+    agent_hooks.env_qoder_cn_config_dir = init.environ_map.get("QODERCN_CONFIG_DIR");
+    agent_hooks.env_qoder_cli_home = init.environ_map.get("QODER_CLI_HOME");
+    agent_hooks.env_qoder_cn_cli_home = init.environ_map.get("QODERCN_CLI_HOME");
     // Hook hot path: `<binary> bubble <phase> [agent]` runs the
     // in-binary runner and exits before any UI machinery spins up.
     // initAllocator, not init: on Windows the command line arrives as

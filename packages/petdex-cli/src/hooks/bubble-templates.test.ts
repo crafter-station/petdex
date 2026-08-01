@@ -218,6 +218,46 @@ describe("formatBubble - clipping", () => {
     expect(text).toContain("…");
   });
 
+  test("failed phase names the tool, never the error text", () => {
+    expect(
+      formatBubble({
+        kind: "tool",
+        phase: "failed",
+        toolName: "Bash",
+        toolInput: { command: "npm test" },
+      }),
+    ).toBe("Bash failed");
+    expect(
+      formatBubble({
+        kind: "tool",
+        phase: "failed",
+        toolName: "Read",
+        toolInput: undefined,
+      }),
+    ).toBe("Read failed");
+    // Mirrors hook_runner.zig: absent tool_name renders capitalised, not the
+    // lowercase "tool" the running/done path substitutes.
+    expect(
+      formatBubble({
+        kind: "tool",
+        phase: "failed",
+        toolName: "",
+        toolInput: undefined,
+      }),
+    ).toBe("Tool failed");
+  });
+
+  test("failed phase output is free of characters the sidecar reader truncates on", () => {
+    const rendered = formatBubble({
+      kind: "tool",
+      phase: "failed",
+      toolName: "Bash",
+      toolInput: { command: 'echo "hi" \\ there' },
+    });
+    expect(rendered).not.toContain('"');
+    expect(rendered).not.toContain("\\");
+  });
+
   test("never throws on weird input", () => {
     expect(() =>
       formatBubble({

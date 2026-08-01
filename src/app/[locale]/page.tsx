@@ -173,6 +173,7 @@ export default async function Home({
                     ["codex", "Codex"],
                     ["gemini", "Gemini CLI"],
                     ["opencode", "opencode"],
+                    ["qoder", "Qoder"],
                   ] as const
                 ).map(([slug, name]) => (
                   <Image

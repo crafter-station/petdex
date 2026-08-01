@@ -17,11 +17,13 @@ import {
   clipPreview,
   clipTitle,
   eventFromArgs,
+  FAILED_DURATION_MS,
   lastAssistantText,
   pruneSessions,
   readStdin,
   rememberSessionTitle,
   sessionTitle,
+  stateBody,
   stateForEvent,
 } from "./bubble-runner";
 
@@ -290,6 +292,54 @@ describe("eventFromArgs - tool events", () => {
       toolName: "tool",
       toolInput: undefined,
     });
+  });
+});
+
+describe("tool-failure phase (mirrors hook_runner.zig)", () => {
+  test("routes to the failed sprite row", () => {
+    expect(stateForEvent(["tool-failure"], "Bash")).toBe("failed");
+  });
+
+  test("carries toolName through instead of the generic 'tool' substitution", () => {
+    const stdin = JSON.stringify({
+      tool_name: "Bash",
+      tool_input: { command: "npm test" },
+      error: 'Command failed: "npm test" exited 1',
+    });
+    expect(eventFromArgs(["tool-failure"], stdin)).toEqual({
+      kind: "tool",
+      phase: "failed",
+      toolName: "Bash",
+      toolInput: undefined,
+    });
+    // Missing tool_name must NOT pick up the lowercase "tool" fallback the
+    // running/done path uses — the Zig runner renders "Tool failed".
+    expect(eventFromArgs(["tool-failure"], "{}")).toEqual({
+      kind: "tool",
+      phase: "failed",
+      toolName: "",
+      toolInput: undefined,
+    });
+  });
+
+  test("stateBody adds duration only for the failure phase", () => {
+    expect(stateBody("failed", FAILED_DURATION_MS, "qoder")).toEqual({
+      state: "failed",
+      duration: 1220,
+      agent_source: "qoder",
+    });
+    // Key order matches the Zig port: state, duration, agent_source.
+    expect(
+      JSON.stringify(stateBody("failed", FAILED_DURATION_MS, "qoder")),
+    ).toBe('{"state":"failed","duration":1220,"agent_source":"qoder"}');
+    // Regression guard: every pre-existing phase must serialize exactly what
+    // shipped before this change, with no duration key at all.
+    expect(JSON.stringify(stateBody("idle", 0, "claude-code"))).toBe(
+      '{"state":"idle","agent_source":"claude-code"}',
+    );
+    expect(JSON.stringify(stateBody("waving", 0, "codex"))).toBe(
+      '{"state":"waving","agent_source":"codex"}',
+    );
   });
 });
 

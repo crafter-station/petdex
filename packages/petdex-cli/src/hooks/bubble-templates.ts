@@ -11,7 +11,7 @@
  * once it returns. This is what makes Codex's mascot feel alive.
  */
 
-export type BubblePhase = "running" | "done";
+export type BubblePhase = "running" | "done" | "failed";
 
 export type BubbleEvent =
   | { kind: "tool"; phase: BubblePhase; toolName: string; toolInput?: unknown }
@@ -74,6 +74,15 @@ export function formatBubble(event: BubbleEvent): string {
   if (event.kind === "session.waiting") return "Waiting for you…";
 
   const { toolName, phase, toolInput } = event;
+
+  // A tool that failed. The name only — never the payload's `error` string:
+  // the sidecar's reader stops at the first `"` or `\` and decodes neither,
+  // and error text routinely carries both, while tool_name is a controlled
+  // identifier from the agent's own registry.
+  if (phase === "failed") {
+    return toolName ? `${clip(toolName, 28)} failed` : "Tool failed";
+  }
+
   const kind = canonicalToolKind(toolName);
   const past = phase === "done";
 
