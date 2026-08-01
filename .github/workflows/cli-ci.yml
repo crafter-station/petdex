@@ -38,7 +38,7 @@ jobs:
         uses: oven-sh/setup-bun@v2
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
 
