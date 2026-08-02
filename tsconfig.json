@@ -1,5 +1,11 @@
 {
   "compilerOptions": {
+    // bun-types is installed but was never declared, so tsc did not know
+    // about beforeEach/toMatchObject/resolves and reported 25 errors
+    // across the test tree. They looked harmless until
+    // experimental.useTypeScriptCli made Next type-check for real during
+    // build, which broke the Vercel deploy.
+    "types": ["bun-types"],
     "target": "ES2020",
     "lib": ["dom", "dom.iterable", "esnext"],
     "allowJs": true,
@@ -31,5 +37,19 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules", "packages", ".scratch", "seed"]
+  // Tests are excluded from the build's type check: bun test runs them
+  // with its own runtime types, and tsc reads them against Next's config
+  // where bun-types 1.3.13 and TypeScript 7 disagree about matchers like
+  // resolves and toMatchObject. Those 25 errors sat harmless until
+  // experimental.useTypeScriptCli made Next type-check for real during
+  // build, which took the Vercel deploy down. Nothing here silences an
+  // error in shipped code: all 25 were in .test.ts files.
+  "exclude": [
+    "node_modules",
+    "packages",
+    ".scratch",
+    "seed",
+    "**/*.test.ts",
+    "**/*.test.tsx"
+  ]
 }
