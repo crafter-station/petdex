@@ -14,7 +14,7 @@
       "titleDefault": "Petdex：为你的编程智能体准备的动画宠物",
       "titleDefault__fixme": true,
       "titleTemplate": "%s | Petdex",
-      "description": "Petdex 是面向编程智能体的公开动画宠物图库，支持 ChatGPT（Codex）、Claude Code、Gemini CLI、OpenCode、Qoder、Kimi Code 和 CodeBuddy。你可以浏览开源宠物、预览动画状态，并用一条命令安装到本地。",
+      "description": "Petdex 是面向编程智能体的公开动画宠物图库，支持 ChatGPT（Codex）、Claude Code、Gemini CLI、OpenCode、Qoder、Kimi Code、CodeBuddy 和 OMP。你可以浏览开源宠物、预览动画状态，并用一条命令安装到本地。",
       "description__fixme": true,
       "ogTitle": "Petdex：为你的编程智能体准备的动画宠物",
       "ogTitle__fixme": true,
@@ -144,7 +144,7 @@
       "spriteAlt": "{name} 惊喜宠物",
       "spriteAlt__fixme": true
     },
-    "jsonLdDescription": "面向 ChatGPT（Codex）、Claude Code、Gemini、OpenCode、Qoder、Kimi Code 和 CodeBuddy 等编程智能体的公开动画宠物图库。用一条命令即可安装。",
+    "jsonLdDescription": "面向 ChatGPT（Codex）、Claude Code、Gemini、OpenCode、Qoder、Kimi Code、CodeBuddy 和 OMP 等编程智能体的公开动画宠物图库。用一条命令即可安装。",
     "jsonLdDescription__fixme": true,
     "jsonLdFeaturedPets": "精选编程智能体宠物",
     "jsonLdFeaturedPets__fixme": true,
@@ -775,7 +775,7 @@
     "metadata": {
       "title": "关于 Petdex：为你的编程智能体准备的动画宠物",
       "title__fixme": true,
-      "description": "Petdex 是面向 ChatGPT（Codex）、Claude Code、Gemini、OpenCode、Qoder、Kimi Code 和 CodeBuddy 等编程智能体的开源动画宠物图库。浏览目录、用一条命令安装，或提交你自己的作品。",
+      "description": "Petdex 是面向 ChatGPT（Codex）、Claude Code、Gemini、OpenCode、Qoder、Kimi Code、CodeBuddy 和 OMP 等编程智能体的开源动画宠物图库。浏览目录、用一条命令安装，或提交你自己的作品。",
       "description__fixme": true,
       "ogTitle": "关于 Petdex",
       "ogDescription": "面向编程智能体的开源动画宠物图库。",
@@ -1257,7 +1257,7 @@
     "preview": {
       "title": "Petdex Desktop",
       "title__fixme": true,
-      "status": "一只漂浮宠物会陪在 Codex、Claude、Gemini、OpenCode、Qoder、Kimi Code 和 CodeBuddy 旁边。",
+      "status": "一只漂浮宠物会陪在 Codex、Claude、Gemini、OpenCode、Qoder、Kimi Code、CodeBuddy 和 OMP 旁边。",
       "status__fixme": true,
       "terminalLabel": "终端",
       "terminalLabel__fixme": true,
@@ -1278,7 +1278,7 @@
       "crossAgent": {
         "title": "跨 Agent 响应",
         "title__fixme": true,
-        "description": "在 Claude Code、Codex CLI、Gemini CLI、OpenCode、Qoder、Kimi Code 和 CodeBuddy 中安装钩子。宠物会响应每次工具调用。",
+        "description": "在 Claude Code、Codex CLI、Gemini CLI、OpenCode、Qoder、Kimi Code、CodeBuddy 和 OMP 中安装钩子。宠物会响应每次工具调用。",
         "description__fixme": true
       },
       "alwaysWithYou": {
@@ -1302,7 +1302,7 @@
       "step1": {
         "title": "一键接入",
         "title__fixme": true,
-        "hint": "自动检测你的 AI Agent（Claude Code、Codex、Gemini、OpenCode、Qoder、Kimi Code、CodeBuddy），写入 hooks，并唤醒宠物",
+        "hint": "自动检测你的 AI Agent（Claude Code、Codex、Gemini、OpenCode、Qoder、Kimi Code、CodeBuddy、OMP），写入 hooks，并唤醒宠物",
         "hint__fixme": true
       },
       "installPet": {
@@ -1393,7 +1393,7 @@
   "desktopAnnouncement": {
     "eyebrow": "新功能 · 桌面应用",
     "title": "Petdex 现在可以悬浮在你的 Agent 旁",
-    "description": "把一只宠物放在屏幕上，它会响应 Claude、Codex、Gemini、OpenCode、Qoder、Kimi Code 或 CodeBuddy 的每次工具调用。无边框，始终置顶，可惯性拖动。",
+    "description": "把一只宠物放在屏幕上，它会响应 Claude、Codex、Gemini、OpenCode、Qoder、Kimi Code、CodeBuddy 或 OMP 的每次工具调用。无边框，始终置顶，可惯性拖动。",
     "platforms": "今日支持 macOS，Linux 和 Windows 即将推出。",
     "downloadCta": "下载",
     "seeHowCta": "了解工作原理"

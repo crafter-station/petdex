@@ -24,6 +24,7 @@ pub const AgentKind = enum(u8) {
     qoder,
     kimi_code,
     codebuddy,
+    omp,
 
     pub fn displayName(self: AgentKind) []const u8 {
         return switch (self) {
@@ -34,6 +35,7 @@ pub const AgentKind = enum(u8) {
             .qoder => "Qoder",
             .kimi_code => "Kimi Code",
             .codebuddy => "CodeBuddy",
+            .omp => "OMP",
         };
     }
 
@@ -46,6 +48,7 @@ pub const AgentKind = enum(u8) {
             .qoder => "qoder",
             .kimi_code => "kimi-code",
             .codebuddy => "codebuddy",
+            .omp => "omp",
         };
     }
 };
@@ -66,7 +69,7 @@ pub const AgentInfo = struct {
     status: HookStatus = .absent,
 };
 
-pub const agent_count = 7;
+pub const agent_count = 8;
 
 /// Claude Code keeps everything under ~/.claude unless CLAUDE_CONFIG_DIR
 /// points elsewhere — that env var is how people run several fully
@@ -370,6 +373,7 @@ pub fn scan(allocator: std.mem.Allocator, home: []const u8) [agent_count]AgentIn
         .{ .kind = .qoder },
         .{ .kind = .kimi_code },
         .{ .kind = .codebuddy },
+        .{ .kind = .omp },
     };
     // Several roots behind one row: cannot ride the single-dir/single-config
     // shape below, so it is resolved up front. The arms `continue` rather than
@@ -386,6 +390,7 @@ pub fn scan(allocator: std.mem.Allocator, home: []const u8) [agent_count]AgentIn
             .qoder => continue,
             .kimi_code => kimiConfigDir(&path, home) orelse continue,
             .codebuddy => std.fmt.bufPrint(&path, "{s}/.codebuddy", .{home}) catch continue,
+            .omp => ompAgentDir(&path, home) orelse continue,
         };
         if (!dirExists(dir)) continue;
         info.status = .none;
@@ -397,6 +402,7 @@ pub fn scan(allocator: std.mem.Allocator, home: []const u8) [agent_count]AgentIn
             .qoder => continue,
             .kimi_code => kimiConfigPath(&path, home) orelse continue,
             .codebuddy => std.fmt.bufPrint(&path, "{s}/.codebuddy/settings.json", .{home}) catch continue,
+            .omp => ompExtensionPath(&path, home) orelse continue,
         };
         if (readFileAlloc(allocator, cfg, 512 * 1024)) |content| {
             defer allocator.free(content);
@@ -405,6 +411,11 @@ pub fn scan(allocator: std.mem.Allocator, home: []const u8) [agent_count]AgentIn
             // outdated so Update can refresh it.
             if (info.kind == .opencode) {
                 info.status = if (std.mem.eql(u8, std.mem.trim(u8, content, " \n"), std.mem.trim(u8, opencode_plugin, " \n"))) .current else .node;
+            } else if (info.kind == .omp) {
+                // Same rule as the opencode plugin: this is a whole file we
+                // own, so a byte-identical copy is connected and anything
+                // else is an older build that Update refreshes.
+                info.status = if (std.mem.eql(u8, std.mem.trim(u8, content, " \n"), std.mem.trim(u8, omp_extension, " \n"))) .current else .node;
             } else if (info.kind == .kimi_code) {
                 // TOML, so the JSON classifier cannot read it. Substring
                 // matching is enough here: `petdex-hook` is the current
@@ -475,6 +486,52 @@ pub fn installGemini(allocator: std.mem.Allocator, home: []const u8) bool {
     var path_buf: [512]u8 = undefined;
     const path = std.fmt.bufPrint(&path_buf, "{s}/.gemini/settings.json", .{home}) catch return false;
     return installJsonHooks(allocator, path, &gemini_events, "gemini", 2000, true);
+}
+
+// ------------------------------------------------------------------ omp
+
+/// OMP (Oh My Pi) has no shell-command hooks. Its docs call that
+/// subsystem legacy and point at an in-process extension API, so install
+/// here writes one TypeScript module rather than editing a config, the
+/// same shape as the opencode plugin.
+///
+/// Discovery needs no manifest: a single `.ts` file dropped into the
+/// extensions directory is loaded, with the default export taken as the
+/// factory (docs/extension-loading.md).
+const omp_extension = @embedFile("assets/omp-extension.ts");
+
+/// `$PI_CODING_AGENT_DIR` relocates the whole agent base, so it wins over
+/// the default `~/.omp/agent`. Named profiles
+/// (`~/.omp/profiles/<name>/agent`) are a third root, but nothing on disk
+/// says which profile is active without OMP's own `--profile` flag, so
+/// this targets the default and lets a profile user point the env var.
+pub var env_pi_coding_agent_dir: ?[]const u8 = null;
+
+fn ompAgentDir(buf: []u8, home: []const u8) ?[]const u8 {
+    if (env_pi_coding_agent_dir) |dir| {
+        if (dir.len != 0) return std.fmt.bufPrint(buf, "{s}", .{dir}) catch null;
+    }
+    return std.fmt.bufPrint(buf, "{s}/.omp/agent", .{home}) catch null;
+}
+
+fn ompExtensionPath(buf: []u8, home: []const u8) ?[]const u8 {
+    var dir_buf: [512]u8 = undefined;
+    const dir = ompAgentDir(&dir_buf, home) orelse return null;
+    return std.fmt.bufPrint(buf, "{s}/extensions/petdex.ts", .{dir}) catch null;
+}
+
+pub fn installOmp(allocator: std.mem.Allocator, home: []const u8) bool {
+    var dir_buf: [512]u8 = undefined;
+    const agent_dir = ompAgentDir(&dir_buf, home) orelse return false;
+    plat.makeDir(agent_dir);
+    var ext_dir_buf: [512]u8 = undefined;
+    const ext_dir = std.fmt.bufPrint(&ext_dir_buf, "{s}/extensions", .{agent_dir}) catch return false;
+    plat.makeDir(ext_dir);
+
+    var path_buf: [512]u8 = undefined;
+    const path = ompExtensionPath(&path_buf, home) orelse return false;
+    if (!backupOnce(allocator, path)) return false;
+    return writeFile(path, omp_extension);
 }
 
 // ------------------------------------------------------------ codebuddy
@@ -1024,6 +1081,7 @@ pub fn migrateLegacyHooks(allocator: std.mem.Allocator, home: []const u8) Legacy
             .qoder => installQoder(allocator, home),
             .kimi_code => installKimiCode(allocator, home),
             .codebuddy => installCodeBuddy(allocator, home),
+            .omp => installOmp(allocator, home),
         };
         if (migrated) result.migrated += 1 else result.failed += 1;
     }
@@ -1059,6 +1117,11 @@ pub fn uninstall(allocator: std.mem.Allocator, home: []const u8, kind: AgentKind
         .codebuddy => {
             const p = std.fmt.bufPrint(&path_buf, "{s}/.codebuddy/settings.json", .{home}) catch return false;
             return uninstallJsonHooks(allocator, p);
+        },
+        .omp => {
+            const p = ompExtensionPath(&path_buf, home) orelse return false;
+            plat.deleteFile(p);
+            return true;
         },
     }
 }
@@ -1827,4 +1890,71 @@ test "codebuddy wires only events with documented payloads" {
     for (codebuddy_events) |ev| {
         try t.expect(!std.mem.eql(u8, ev.phase, "tool-failure"));
     }
+}
+
+test "omp install writes the extension where OMP discovers it" {
+    const saved = env_pi_coding_agent_dir;
+    defer env_pi_coding_agent_dir = saved;
+    env_pi_coding_agent_dir = null;
+
+    const home = "/tmp/petdex-omp-home";
+    plat.makeDir(home);
+    plat.makeDir(home ++ "/.omp");
+    plat.makeDir(home ++ "/.omp/agent");
+    var pb: [512]u8 = undefined;
+    const ext = std.fmt.bufPrint(&pb, "{s}/.omp/agent/extensions/petdex.ts", .{home}) catch unreachable;
+    plat.deleteFile(ext);
+
+    try t.expect(installOmp(t.allocator, home));
+    const written = readFileAlloc(t.allocator, ext, 1024 * 1024).?;
+    defer t.allocator.free(written);
+    // A single .ts file with a default export is all OMP needs; no
+    // manifest, so the file itself has to carry the factory.
+    try t.expect(std.mem.indexOf(u8, written, "export default function") != null);
+    // Failure comes from isError on tool_result, not from parsing text.
+    try t.expect(std.mem.indexOf(u8, written, "isError") != null);
+
+    const agents = scan(t.allocator, home);
+    try t.expectEqual(HookStatus.current, agents[@intFromEnum(AgentKind.omp)].status);
+
+    try t.expect(uninstall(t.allocator, home, .omp));
+    try t.expect(!fileExists(ext));
+}
+
+test "PI_CODING_AGENT_DIR relocates the whole OMP agent base" {
+    const saved = env_pi_coding_agent_dir;
+    defer env_pi_coding_agent_dir = saved;
+
+    const home = "/tmp/petdex-omp-nohome";
+    const alt = "/tmp/petdex-omp-alt";
+    plat.makeDir(home);
+    plat.makeDir(alt);
+
+    env_pi_coding_agent_dir = alt;
+    try t.expect(installOmp(t.allocator, home));
+    var pb: [512]u8 = undefined;
+    const alt_ext = std.fmt.bufPrint(&pb, "{s}/extensions/petdex.ts", .{alt}) catch unreachable;
+    try t.expect(fileExists(alt_ext));
+    // Nothing leaked into the default root.
+    var db: [512]u8 = undefined;
+    const default_ext = std.fmt.bufPrint(&db, "{s}/.omp/agent/extensions/petdex.ts", .{home}) catch unreachable;
+    try t.expect(!fileExists(default_ext));
+
+    // Blank falls back, so an empty export does not write to a directory
+    // literally named "".
+    env_pi_coding_agent_dir = "";
+    var fb: [512]u8 = undefined;
+    const fallback = ompExtensionPath(&fb, home).?;
+    try t.expect(std.mem.indexOf(u8, fallback, "/.omp/agent/extensions/") != null);
+}
+
+test "omp extension maps every state the sprite sheet has" {
+    // The generated file is the whole integration, so a missing state
+    // here is a pet that never reaches that row.
+    for ([_][]const u8{ "jumping", "review", "running", "idle", "failed", "waiting", "waving" }) |state| {
+        try t.expect(std.mem.indexOf(u8, omp_extension, state) != null);
+    }
+    // Grep bubbles use typographic quotes: an ASCII quote closes the JSON
+    // string early and the pattern vanishes (#628).
+    try t.expect(std.mem.indexOf(u8, omp_extension, "\\\"") == null);
 }

@@ -11,7 +11,7 @@
     "root": {
       "titleDefault": "Petdex: Mascotas animadas para tus agentes de código",
       "titleTemplate": "%s | Petdex",
-      "description": "Petdex es la galería pública de mascotas animadas para agentes de código. Funciona con ChatGPT (Codex), Claude Code, Gemini CLI, OpenCode, Qoder, Kimi Code y CodeBuddy. Explora mascotas open source, previsualiza sus animaciones e instala una con un solo comando.",
+      "description": "Petdex es la galería pública de mascotas animadas para agentes de código. Funciona con ChatGPT (Codex), Claude Code, Gemini CLI, OpenCode, Qoder, Kimi Code, CodeBuddy y OMP. Explora mascotas open source, previsualiza sus animaciones e instala una con un solo comando.",
       "ogTitle": "Petdex: Mascotas animadas para tus agentes de código",
       "twitterTitle": "Petdex: Mascotas animadas para tus agentes de código",
       "keywords": {
@@ -125,7 +125,7 @@
       "viewAria": "Ver {name}",
       "spriteAlt": "{name} como mascota sorpresa"
     },
-    "jsonLdDescription": "Galería pública de mascotas animadas para agentes de código como ChatGPT (Codex), Claude Code, Gemini, OpenCode, Qoder, Kimi Code y CodeBuddy. Instala una con un solo comando.",
+    "jsonLdDescription": "Galería pública de mascotas animadas para agentes de código como ChatGPT (Codex), Claude Code, Gemini, OpenCode, Qoder, Kimi Code, CodeBuddy y OMP. Instala una con un solo comando.",
     "jsonLdFeaturedPets": "Mascotas destacadas para agentes de código",
     "featuredCollections": {
       "eyebrow": "Colecciones destacadas",
@@ -633,7 +633,7 @@
   "about": {
     "metadata": {
       "title": "Acerca de Petdex: Mascotas animadas para tus agentes de código",
-      "description": "Petdex es una galería open source de mascotas animadas para agentes de código como ChatGPT (Codex), Claude Code, Gemini, OpenCode, Qoder, Kimi Code y CodeBuddy. Recorre el catálogo, instala con un comando o envía el tuyo.",
+      "description": "Petdex es una galería open source de mascotas animadas para agentes de código como ChatGPT (Codex), Claude Code, Gemini, OpenCode, Qoder, Kimi Code, CodeBuddy y OMP. Recorre el catálogo, instala con un comando o envía el tuyo.",
       "ogTitle": "Acerca de Petdex",
       "ogDescription": "Una galería open source de mascotas animadas para agentes de código."
     },
@@ -1039,7 +1039,7 @@
     },
     "preview": {
       "title": "Petdex Desktop",
-      "status": "Una mascota flotante se queda junto a Codex, Claude, Gemini, OpenCode, Qoder, Kimi Code y CodeBuddy.",
+      "status": "Una mascota flotante se queda junto a Codex, Claude, Gemini, OpenCode, Qoder, Kimi Code, CodeBuddy y OMP.",
       "terminalLabel": "Terminal",
       "agentLabel": "Hooks de agentes instalados",
       "defaultPet": "Mascota despierta",
@@ -1051,7 +1051,7 @@
       "title": "Una mascota que vive en tu flujo de trabajo",
       "crossAgent": {
         "title": "Reacciones entre agentes",
-        "description": "Los hooks se instalan en Claude Code, Codex CLI, Gemini CLI, OpenCode, Qoder, Kimi Code y CodeBuddy. Tu mascota reacciona a cada tool call."
+        "description": "Los hooks se instalan en Claude Code, Codex CLI, Gemini CLI, OpenCode, Qoder, Kimi Code, CodeBuddy y OMP. Tu mascota reacciona a cada tool call."
       },
       "alwaysWithYou": {
         "title": "Siempre contigo",
@@ -1067,7 +1067,7 @@
       "title": "Listo en 30 segundos",
       "step1": {
         "title": "Conecta todo",
-        "hint": "Detecta tus agentes (Claude Code, Codex, Gemini, OpenCode, Qoder, Kimi Code, CodeBuddy), instala los hooks y despierta la mascota"
+        "hint": "Detecta tus agentes (Claude Code, Codex, Gemini, OpenCode, Qoder, Kimi Code, CodeBuddy, OMP), instala los hooks y despierta la mascota"
       },
       "installPet": {
         "title": "Instala {slug}",
@@ -1129,7 +1129,7 @@
   "desktopAnnouncement": {
     "eyebrow": "Nuevo · App de escritorio",
     "title": "Petdex ahora flota junto a tu agente de código",
-    "description": "Pon una mascota en tu pantalla que reacciona a cada tool call de Claude, Codex, Gemini, OpenCode, Qoder, Kimi Code o CodeBuddy. Sin marco, siempre encima, arrastra con momentum.",
+    "description": "Pon una mascota en tu pantalla que reacciona a cada tool call de Claude, Codex, Gemini, OpenCode, Qoder, Kimi Code, CodeBuddy u OMP. Sin marco, siempre encima, arrastra con momentum.",
     "platforms": "macOS hoy. Linux y Windows pronto.",
     "downloadCta": "Descargar",
     "seeHowCta": "Ver cómo funciona"

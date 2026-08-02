@@ -267,6 +267,7 @@ pub const Model = struct {
         .{ .kind = .qoder },
         .{ .kind = .kimi_code },
         .{ .kind = .codebuddy },
+        .{ .kind = .omp },
     },
     agents_prompted: bool = false,
     codex_trust_note: bool = false,
@@ -1121,6 +1122,7 @@ const agent_art = [agent_hooks.agent_count]AgentArt{
     .{ .light = @embedFile("assets/agents/qoder.png"), .dark = @embedFile("assets/agents/qoder.png") },
     .{ .light = @embedFile("assets/agents/kimi-code.png"), .dark = @embedFile("assets/agents/kimi-code.png") },
     .{ .light = @embedFile("assets/agents/codebuddy.png"), .dark = @embedFile("assets/agents/codebuddy.png") },
+    .{ .light = @embedFile("assets/agents/omp.png"), .dark = @embedFile("assets/agents/omp.png") },
 };
 const agent_fallback_art: []const u8 = @embedFile("assets/agents/fallback.png");
 
@@ -1731,6 +1733,7 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
                 .qoder => agent_hooks.installQoder(boot_allocator, home),
                 .kimi_code => agent_hooks.installKimiCode(boot_allocator, home),
                 .codebuddy => agent_hooks.installCodeBuddy(boot_allocator, home),
+                .omp => agent_hooks.installOmp(boot_allocator, home),
             };
             if (ok and kind == .codex) model.codex_trust_note = true;
             model.agents = agent_hooks.scan(boot_allocator, home);
@@ -2908,6 +2911,7 @@ pub fn main(init: std.process.Init) !void {
     // same blind spot #601 described applies: hooks written to the
     // default dir would land somewhere it never reads.
     agent_hooks.env_kimi_code_home = init.environ_map.get("KIMI_CODE_HOME");
+    agent_hooks.env_pi_coding_agent_dir = init.environ_map.get("PI_CODING_AGENT_DIR");
     // Qoder's two builds each resolve their root through two variables, and the
     // prefix differs per build (QODER_* vs QODERCN_*). Unlike every other
     // touchpoint for these agents, nothing here is compiler-enforced: omit a
