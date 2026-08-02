@@ -124,5 +124,9 @@ export function containsUrl(
   return null;
 }
 
+// Email addresses trip the bare-domain rule, which is correct (the
+// filter exists to stop contact-harvesting spam) but the old wording
+// only said "URLs", so a submitter reading it did not know their own
+// address was the problem. #631 sat for days on exactly that confusion.
 export const URL_BLOCKED_REASON =
-  "URLs are not allowed in this field. Use the credit URL field for links.";
+  "Links and email addresses are not allowed in this field. Use the credit URL field for links.";

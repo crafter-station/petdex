@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 
-import { containsUrl } from "@/lib/url-blocklist";
+import { containsUrl, URL_BLOCKED_REASON } from "@/lib/url-blocklist";
 
 describe("containsUrl — pass cases", () => {
   it("passes on plain text without any URL", () => {
@@ -170,5 +170,24 @@ describe("containsUrl — allowlisted legit domains", () => {
     const hit = containsUrl(["description", "join promo.dev for free"]);
     expect(hit).not.toBeNull();
     expect(hit?.pattern).toBe("bare_domain");
+  });
+});
+
+describe("containsUrl — email addresses", () => {
+  it("blocks an email, because the domain in it is what spam harvests", () => {
+    const hit = containsUrl([
+      "description",
+      "A pixel-art companion. Contact haipengzhu33@gmail.com",
+    ]);
+    expect(hit).not.toBeNull();
+    expect(hit?.field).toBe("description");
+  });
+
+  it("says so in the reason, so a submitter can tell what tripped it", () => {
+    // #631: someone put their address in a description to take
+    // suggestions privately, got told "URLs are not allowed", and had no
+    // way to connect that to their own email. The rule was right; the
+    // wording was not.
+    expect(URL_BLOCKED_REASON.toLowerCase()).toContain("email");
   });
 });
