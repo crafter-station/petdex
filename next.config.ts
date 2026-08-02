@@ -171,6 +171,13 @@ const publicHtmlCacheSources = [
 const mockRoot = path.resolve(__dirname, "src/lib/mock");
 
 const nextConfig: NextConfig = {
+  experimental: {
+    // TypeScript 7 dropped the compiler API Next reads for its dev-time
+    // type checking, so `bun dev` crashed on boot after the 6-to-7 bump
+    // in #580. This is the escape hatch Next's own error names: it drives
+    // `tsc` as a CLI instead of importing its API.
+    useTypeScriptCli: true,
+  },
   // Hide the framework banner on every response.
   poweredByHeader: false,
   images: {

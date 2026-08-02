@@ -22,10 +22,18 @@ const ASSET = {
   "win32-x64": "/api/desktop/latest-release?asset=win32-x64",
 } as const;
 
-type Build = { key: keyof typeof ASSET; os: "macos" | "windows" | "linux" };
+type Build = {
+  key: keyof typeof ASSET;
+  os: "macos" | "windows" | "linux";
+  /// Shown in parentheses after the OS name. Only macOS ships two
+  /// architectures, and the row lists both, so without this they would
+  /// read as the same link twice.
+  hint?: string;
+};
 
 const BUILDS: Build[] = [
-  { key: "darwin-arm64", os: "macos" },
+  { key: "darwin-arm64", os: "macos", hint: "Apple Silicon" },
+  { key: "darwin-x64", os: "macos", hint: "Intel" },
   { key: "win32-x64", os: "windows" },
   { key: "linux-x64", os: "linux" },
 ];
@@ -35,6 +43,7 @@ function primaryBuild(platform: Platform, arch: MacArch): Build | null {
     return {
       key: arch === "intel" ? "darwin-x64" : "darwin-arm64",
       os: "macos",
+      hint: arch === "intel" ? "Intel" : "Apple Silicon",
     };
   }
   if (platform === "windows") return { key: "win32-x64", os: "windows" };
@@ -56,7 +65,10 @@ export function DownloadHero() {
   const platform = usePlatform();
   const arch = useMacArch();
   const primary = primaryBuild(platform, arch);
-  const others = BUILDS.filter((b) => b.os !== primary?.os);
+  // Filter by build, not by OS: a Mac visitor has already been handed
+  // one architecture, and hiding the other one leaves an Intel user
+  // whose arch we failed to detect with nowhere to go.
+  const others = BUILDS.filter((b) => b.key !== primary?.key);
 
   return (
     <section className="mx-auto flex w-full max-w-xl flex-col items-center px-5 pt-16 pb-20 text-center md:pt-24">
@@ -94,6 +106,10 @@ export function DownloadHero() {
             >
               <ArrowDownToLine className="size-[18px]" />
               {t(`for.${primary.os}`)}
+              {/* Name the architecture on the primary button too. It is
+                  detected, not chosen, so saying which one it picked is
+                  what lets someone notice it guessed wrong. */}
+              {primary.hint ? ` (${primary.hint})` : ""}
             </a>
             <p className="font-mono text-xs text-muted-3">{t("freeNote")}</p>
           </>
@@ -114,6 +130,7 @@ export function DownloadHero() {
               className="underline decoration-border-strong underline-offset-4 transition hover:text-foreground"
             >
               {t(`for.${b.os}`)}
+              {b.hint ? ` (${b.hint})` : ""}
             </a>
           ))}
         </div>
