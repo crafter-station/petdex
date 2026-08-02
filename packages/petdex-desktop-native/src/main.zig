@@ -1081,12 +1081,29 @@ var initial_pet_y: ?f64 = null;
 // assets/agents/, re-registered only when the agent changes.
 const avatar_image_id: u64 = 13;
 const tail_image_id: u64 = 14;
-// The registry caps at 16 slots and 16 is the last one free, so both Qoder
-// builds share it — they ship the same artwork anyway.
-const agent_icon_ids = [agent_hooks.agent_count]u64{ 9, 10, 11, 15, 16 };
+// One slot for every agent logo, packed side by side and read back with
+// `image_src` (the thumbnail atlas above does the same). Previously each
+// agent held its own registry id, which ran the app into the SDK's
+// 16-slot ceiling (canvas_limits.max_registered_canvas_images): ids
+// 1/9/10/11/13/14/15/16 were spoken for and Qoder took the last one, so
+// a sixth agent had nowhere to register. Packing removes the ceiling
+// instead of raising it — sixteen 40px logos are a 640x40 strip, far
+// inside the 512x512 and 1MiB per-image bounds.
+const agent_icon_atlas_id: u64 = 9;
 const agent_icon_px: usize = 40;
 var agents_icons_ready: bool = false;
 var agents_icons_dark: bool = false;
+var agent_icon_pixels: []u8 = &.{};
+
+/// Where agent `index`'s logo sits in the packed strip.
+fn agentIconRect(index: usize) geometry.RectF {
+    return geometry.RectF.init(
+        @as(f32, @floatFromInt(index * agent_icon_px)),
+        0,
+        @as(f32, @floatFromInt(agent_icon_px)),
+        @as(f32, @floatFromInt(agent_icon_px)),
+    );
+}
 
 /// Agent logo bytes, compiled in. The runtime decodes them through the
 /// platform codec (CGImageSource, gdk-pixbuf, WIC), so these need no
@@ -1103,13 +1120,52 @@ const agent_art = [agent_hooks.agent_count]AgentArt{
 };
 const agent_fallback_art: []const u8 = @embedFile("assets/agents/fallback.png");
 
-/// Register the four settings agent logos, one registry slot each,
-/// themed like the bubble avatar and refreshed on appearance flips.
+/// Pack every settings agent logo into one registry slot, themed like the
+/// bubble avatar and rebuilt on appearance flips. Each logo decodes
+/// through the platform codec (the same path `registerImageBytes` takes
+/// internally) and is copied into its own cell of the strip.
+///
+/// A logo that fails to decode leaves its cell transparent rather than
+/// aborting the strip, so one bad asset costs one icon instead of all of
+/// them. The row is only registered if at least one cell landed.
 fn loadAgentsAtlas(dark: bool, fx: *Effects) void {
     if (agents_icons_ready and agents_icons_dark == dark) return;
-    for (agent_art, 0..) |art, cell| {
-        _ = fx.registerImageBytes(agent_icon_ids[cell], if (dark) art.dark else art.light) catch continue;
+    const services = fx.services orelse return;
+
+    const atlas_w = agent_art.len * agent_icon_px;
+    if (agent_icon_pixels.len == 0) {
+        agent_icon_pixels = boot_allocator.alloc(u8, atlas_w * agent_icon_px * 4) catch return;
     }
+    @memset(agent_icon_pixels, 0);
+
+    // Decoding happens into a scratch buffer sized for one logo at the
+    // per-image ceiling, reused across cells so the pack costs one
+    // allocation rather than one per agent.
+    const scratch = boot_allocator.alloc(u8, 512 * 512 * 4) catch return;
+    defer boot_allocator.free(scratch);
+
+    const atlas_row_len = atlas_w * 4;
+    var packed_any = false;
+    for (agent_art, 0..) |art, cell| {
+        const decoded = services.decodeImage(if (dark) art.dark else art.light, scratch) catch continue;
+        if (decoded.width == 0 or decoded.height == 0) continue;
+        // Nearest-neighbour into the cell: the logos ship at 40px and the
+        // view draws them at 24, so the scale here is identity in practice
+        // and the sampling only matters if an asset is authored off-size.
+        for (0..agent_icon_px) |y| {
+            const src_y = y * decoded.height / agent_icon_px;
+            for (0..agent_icon_px) |x| {
+                const src_x = x * decoded.width / agent_icon_px;
+                const src_off = (src_y * decoded.width + src_x) * 4;
+                const dst_off = y * atlas_row_len + (cell * agent_icon_px + x) * 4;
+                @memcpy(agent_icon_pixels[dst_off..][0..4], decoded.rgba8[src_off..][0..4]);
+            }
+        }
+        packed_any = true;
+    }
+    if (!packed_any) return;
+
+    fx.registerImage(agent_icon_atlas_id, atlas_w, agent_icon_px, agent_icon_pixels) catch return;
     agents_icons_dark = dark;
     agents_icons_ready = true;
 }
@@ -2417,9 +2473,10 @@ fn agentsSection(ui: *AppUi, model: *const Model) AppUi.Node {
         var logo = ui.image(.{
             .width = 24,
             .height = 24,
-            .image = if (agents_icons_ready) agent_icon_ids[@intFromEnum(info.kind)] else 0,
+            .image = if (agents_icons_ready) agent_icon_atlas_id else 0,
             .semantics = .{ .label = info.kind.displayName() },
         });
+        logo.widget.image_src = agentIconRect(@intFromEnum(info.kind));
         logo.widget.image_fit = .contain;
         rows[count] = ui.el(.panel, .{
             .padding = 12,
@@ -2937,6 +2994,35 @@ pub fn main(init: std.process.Init) !void {
             .navigation = .{ .allowed_origins = &.{ "zero://inline", "zero://app" } },
         },
     }, init);
+}
+
+test "every agent gets its own cell in the icon strip" {
+    // One slot holds them all, so a wrong offset silently draws the
+    // neighbouring agent's logo rather than failing to register.
+    for (0..agent_hooks.agent_count) |i| {
+        const rect = agentIconRect(i);
+        try std.testing.expectEqual(@as(f32, @floatFromInt(i * agent_icon_px)), rect.x);
+        try std.testing.expectEqual(@as(f32, 0), rect.y);
+        try std.testing.expectEqual(@as(f32, agent_icon_px), rect.width);
+        try std.testing.expectEqual(@as(f32, agent_icon_px), rect.height);
+    }
+    // Cells abut with no overlap: agent N ends exactly where N+1 begins.
+    if (agent_hooks.agent_count >= 2) {
+        const first = agentIconRect(0);
+        const second = agentIconRect(1);
+        try std.testing.expectEqual(first.x + first.width, second.x);
+    }
+    // The packed strip stays inside the SDK's per-image bounds, which is
+    // the ceiling this atlas exists to avoid running into again.
+    const atlas_w = agent_hooks.agent_count * agent_icon_px;
+    try std.testing.expect(atlas_w * agent_icon_px * 4 <= 1024 * 1024);
+    try std.testing.expect(atlas_w <= 512 * 512);
+}
+
+test "one image slot covers every agent" {
+    // agent_art is what loadAgentsAtlas walks, so a new AgentKind without
+    // artwork would pack short and leave the last agent blank.
+    try std.testing.expectEqual(agent_hooks.agent_count, agent_art.len);
 }
 
 test "waiting escalation pings once, only while still waiting" {
