@@ -71,8 +71,24 @@ export async function POST(req: Request): Promise<Response> {
       );
     }
     if (typeof f.size !== "number" || f.size <= 0 || f.size > MAX_BYTES) {
+      // Name the file and both numbers. The bare code sent someone to
+      // #594 with a 1536x2288 sprite, the canonical size, and no way to
+      // tell which of the three uploads was over or by how much — the
+      // zip is sent alongside the sprite and a webp barely compresses,
+      // so it is usually the zip that trips this, not the art.
+      const mb = (n: number) => `${(n / (1024 * 1024)).toFixed(1)} MB`;
+      const size = typeof f.size === "number" ? f.size : 0;
       return NextResponse.json(
-        { error: "file_too_large", maxBytes: MAX_BYTES },
+        {
+          error: "file_too_large",
+          maxBytes: MAX_BYTES,
+          role: f.role,
+          size,
+          message:
+            size > 0
+              ? `Your ${f.role} is ${mb(size)}, over the ${mb(MAX_BYTES)} limit.`
+              : `Your ${f.role} has no readable size.`,
+        },
         { status: 400 },
       );
     }

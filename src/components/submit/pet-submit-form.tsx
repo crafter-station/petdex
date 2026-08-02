@@ -39,6 +39,12 @@ type ParsedPet = {
   source: "folder" | "zip" | "spritesheet";
 };
 
+// Mirrors MAX_BYTES in /api/r2/presign. Checked here too so an oversized
+// pet is caught before the upload starts rather than after the round
+// trip, and so the message can name the file (#594 reported only the
+// bare error code with no way to tell which of the three was over).
+const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
+
 const MAX_DISPLAY_NAME_LENGTH = 60;
 const MAX_DESCRIPTION_LENGTH = 500;
 
@@ -399,6 +405,22 @@ export function PetSubmitForm() {
       `${deriveSlug(parsed.petId, displayName)}-pet.json`,
       { type: "application/json" },
     );
+
+    const oversized = (
+      [
+        ["zip", zipFile.size],
+        ["sprite", spriteFile.size],
+      ] as const
+    ).find(([, size]) => size > MAX_UPLOAD_BYTES);
+    if (oversized) {
+      const [role, size] = oversized;
+      const mb = (n: number) => `${(n / (1024 * 1024)).toFixed(1)} MB`;
+      const message = `Your ${role} is ${mb(size)}, over the ${mb(MAX_UPLOAD_BYTES)} limit.`;
+      uploadErrorRef.current = message;
+      setUploadError(message);
+      setSubmission({ kind: "error", message });
+      return;
+    }
 
     setSubmission({ kind: "uploading", step: "uploading" });
     setUploadError(null);
