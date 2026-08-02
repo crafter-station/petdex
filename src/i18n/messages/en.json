@@ -11,7 +11,7 @@
     "root": {
       "titleDefault": "Petdex: Animated pets for your coding agents",
       "titleTemplate": "%s | Petdex",
-      "description": "Petdex is the public gallery of animated pets for coding agents. Works with ChatGPT (Codex), Claude Code, Gemini CLI, OpenCode, Qoder, and Kimi Code. Browse open-source pets, preview their animations, and install one with a single command.",
+      "description": "Petdex is the public gallery of animated pets for coding agents. Works with ChatGPT (Codex), Claude Code, Gemini CLI, OpenCode, Qoder, Kimi Code, and CodeBuddy. Browse open-source pets, preview their animations, and install one with a single command.",
       "ogTitle": "Petdex: Animated pets for your coding agents",
       "twitterTitle": "Petdex: Animated pets for your coding agents",
       "keywords": {
@@ -125,7 +125,7 @@
       "viewAria": "View {name}",
       "spriteAlt": "{name} surprise pet"
     },
-    "jsonLdDescription": "Public gallery of animated pets for coding agents like ChatGPT (Codex), Claude Code, Gemini, OpenCode, Qoder, and Kimi Code. Install one with a single command.",
+    "jsonLdDescription": "Public gallery of animated pets for coding agents like ChatGPT (Codex), Claude Code, Gemini, OpenCode, Qoder, Kimi Code, and CodeBuddy. Install one with a single command.",
     "jsonLdFeaturedPets": "Featured coding agent pets",
     "featuredCollections": {
       "eyebrow": "Featured collections",
@@ -633,7 +633,7 @@
   "about": {
     "metadata": {
       "title": "About Petdex: Animated pets for your coding agents",
-      "description": "Petdex is an open-source gallery of animated pets for coding agents like ChatGPT (Codex), Claude Code, Gemini, OpenCode, Qoder, and Kimi Code. Browse the catalog, install with one command, or submit your own.",
+      "description": "Petdex is an open-source gallery of animated pets for coding agents like ChatGPT (Codex), Claude Code, Gemini, OpenCode, Qoder, Kimi Code, and CodeBuddy. Browse the catalog, install with one command, or submit your own.",
       "ogTitle": "About Petdex",
       "ogDescription": "An open-source gallery of animated pets for coding agents."
     },
@@ -1039,7 +1039,7 @@
     },
     "preview": {
       "title": "Petdex Desktop",
-      "status": "A floating pet stays beside Codex, Claude, Gemini, OpenCode, Qoder, and Kimi Code.",
+      "status": "A floating pet stays beside Codex, Claude, Gemini, OpenCode, Qoder, Kimi Code, and CodeBuddy.",
       "terminalLabel": "Terminal",
       "agentLabel": "Agent hooks installed",
       "defaultPet": "Mascot awake",
@@ -1051,7 +1051,7 @@
       "title": "A pet that actually lives in your workflow",
       "crossAgent": {
         "title": "Cross-agent reactions",
-        "description": "Hooks install in Claude Code, Codex CLI, Gemini CLI, OpenCode, Qoder, and Kimi Code. Your pet reacts to each tool call."
+        "description": "Hooks install in Claude Code, Codex CLI, Gemini CLI, OpenCode, Qoder, Kimi Code, and CodeBuddy. Your pet reacts to each tool call."
       },
       "alwaysWithYou": {
         "title": "Always with you",
@@ -1067,7 +1067,7 @@
       "title": "Set up in 30 seconds",
       "step1": {
         "title": "Wire it up",
-        "hint": "Picks your agents (Claude Code, Codex, Gemini, OpenCode, Qoder, Kimi Code), writes hooks, and wakes the mascot"
+        "hint": "Picks your agents (Claude Code, Codex, Gemini, OpenCode, Qoder, Kimi Code, CodeBuddy), writes hooks, and wakes the mascot"
       },
       "installPet": {
         "title": "Install {slug}",
@@ -1129,7 +1129,7 @@
   "desktopAnnouncement": {
     "eyebrow": "New · Desktop App",
     "title": "Petdex now floats beside your coding agent",
-    "description": "Drop a pet on your screen that reacts to every Claude, Codex, Gemini, OpenCode, Qoder or Kimi Code tool call. Frameless, always on top, drags with momentum.",
+    "description": "Drop a pet on your screen that reacts to every Claude, Codex, Gemini, OpenCode, Qoder, Kimi Code or CodeBuddy tool call. Frameless, always on top, drags with momentum.",
     "platforms": "macOS today. Linux and Windows soon.",
     "downloadCta": "Download",
     "seeHowCta": "See how it works"

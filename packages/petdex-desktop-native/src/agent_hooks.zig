@@ -23,6 +23,7 @@ pub const AgentKind = enum(u8) {
     // read by the same index, so inserting would re-map every existing glyph.
     qoder,
     kimi_code,
+    codebuddy,
 
     pub fn displayName(self: AgentKind) []const u8 {
         return switch (self) {
@@ -32,6 +33,7 @@ pub const AgentKind = enum(u8) {
             .opencode => "opencode",
             .qoder => "Qoder",
             .kimi_code => "Kimi Code",
+            .codebuddy => "CodeBuddy",
         };
     }
 
@@ -43,6 +45,7 @@ pub const AgentKind = enum(u8) {
             .opencode => "opencode",
             .qoder => "qoder",
             .kimi_code => "kimi-code",
+            .codebuddy => "codebuddy",
         };
     }
 };
@@ -63,7 +66,7 @@ pub const AgentInfo = struct {
     status: HookStatus = .absent,
 };
 
-pub const agent_count = 6;
+pub const agent_count = 7;
 
 /// Claude Code keeps everything under ~/.claude unless CLAUDE_CONFIG_DIR
 /// points elsewhere — that env var is how people run several fully
@@ -366,6 +369,7 @@ pub fn scan(allocator: std.mem.Allocator, home: []const u8) [agent_count]AgentIn
         .{ .kind = .opencode },
         .{ .kind = .qoder },
         .{ .kind = .kimi_code },
+        .{ .kind = .codebuddy },
     };
     // Several roots behind one row: cannot ride the single-dir/single-config
     // shape below, so it is resolved up front. The arms `continue` rather than
@@ -381,6 +385,7 @@ pub fn scan(allocator: std.mem.Allocator, home: []const u8) [agent_count]AgentIn
             .opencode => std.fmt.bufPrint(&path, "{s}/.config/opencode", .{home}) catch continue,
             .qoder => continue,
             .kimi_code => kimiConfigDir(&path, home) orelse continue,
+            .codebuddy => std.fmt.bufPrint(&path, "{s}/.codebuddy", .{home}) catch continue,
         };
         if (!dirExists(dir)) continue;
         info.status = .none;
@@ -391,6 +396,7 @@ pub fn scan(allocator: std.mem.Allocator, home: []const u8) [agent_count]AgentIn
             .opencode => std.fmt.bufPrint(&path, "{s}/.config/opencode/plugins/petdex.js", .{home}) catch continue,
             .qoder => continue,
             .kimi_code => kimiConfigPath(&path, home) orelse continue,
+            .codebuddy => std.fmt.bufPrint(&path, "{s}/.codebuddy/settings.json", .{home}) catch continue,
         };
         if (readFileAlloc(allocator, cfg, 512 * 1024)) |content| {
             defer allocator.free(content);
@@ -469,6 +475,41 @@ pub fn installGemini(allocator: std.mem.Allocator, home: []const u8) bool {
     var path_buf: [512]u8 = undefined;
     const path = std.fmt.bufPrint(&path_buf, "{s}/.gemini/settings.json", .{home}) catch return false;
     return installJsonHooks(allocator, path, &gemini_events, "gemini", 2000, true);
+}
+
+// ------------------------------------------------------------ codebuddy
+
+/// CodeBuddy is derived from Claude Code rather than compatible with it:
+/// it reads `~/.codebuddy/settings.json` in the same `hooks.<Event>`
+/// shape but never Claude's own file, so it needs its own row instead of
+/// a second config root on the Claude one.
+///
+/// It declares 27+ events, of which only the Claude-shaped core has
+/// documented payload schemas. Wiring the long tail (Elicitation,
+/// TeammateIdle, WorktreeCreate, and friends) would mean guessing at
+/// field names, so this stays on the documented set.
+///
+/// No tool-failure event: unlike Kimi and Qoder, a failed call surfaces
+/// as the `tool_response` field on PostToolUse. Reading that would mean
+/// pattern-matching prose to decide what "failed" looks like, and a pet
+/// that flashes `failed` on a successful grep is worse than one that
+/// never flashes it at all. So `failed` stays dark here until CodeBuddy
+/// grows a distinct event, and `post` reports plain `idle`.
+const codebuddy_events = [_]HookEvent{
+    .{ .event = "UserPromptSubmit", .phase = "user-prompt" },
+    .{ .event = "PreToolUse", .phase = "pre" },
+    .{ .event = "PostToolUse", .phase = "post" },
+    .{ .event = "Notification", .phase = "notification" },
+    .{ .event = "Stop", .phase = "stop" },
+};
+
+pub fn installCodeBuddy(allocator: std.mem.Allocator, home: []const u8) bool {
+    var dir_buf: [512]u8 = undefined;
+    const dir = std.fmt.bufPrint(&dir_buf, "{s}/.codebuddy", .{home}) catch return false;
+    plat.makeDir(dir);
+    var path_buf: [512]u8 = undefined;
+    const path = std.fmt.bufPrint(&path_buf, "{s}/.codebuddy/settings.json", .{home}) catch return false;
+    return installJsonHooks(allocator, path, &codebuddy_events, "codebuddy", 2, false);
 }
 
 // ------------------------------------------------------------ kimi code
@@ -982,6 +1023,7 @@ pub fn migrateLegacyHooks(allocator: std.mem.Allocator, home: []const u8) Legacy
             // cannot scan as .node. Install is the consistent answer anyway.
             .qoder => installQoder(allocator, home),
             .kimi_code => installKimiCode(allocator, home),
+            .codebuddy => installCodeBuddy(allocator, home),
         };
         if (migrated) result.migrated += 1 else result.failed += 1;
     }
@@ -1013,6 +1055,10 @@ pub fn uninstall(allocator: std.mem.Allocator, home: []const u8, kind: AgentKind
         .kimi_code => {
             const p = kimiConfigPath(&path_buf, home) orelse return false;
             return writeKimiHooks(allocator, p, false);
+        },
+        .codebuddy => {
+            const p = std.fmt.bufPrint(&path_buf, "{s}/.codebuddy/settings.json", .{home}) catch return false;
+            return uninstallJsonHooks(allocator, p);
         },
     }
 }
@@ -1725,4 +1771,60 @@ test "kimi hook headers tolerate TOML whitespace" {
     try t.expect(!isKimiHookHeader("[[mcp_servers]]"));
     try t.expect(!isKimiHookHeader("[hooks]"));
     try t.expect(!isKimiHookHeader("command = \"[[hooks]]\""));
+}
+
+test "codebuddy merges into its own config and leaves Claude's alone" {
+    const home = "/tmp/petdex-codebuddy-home";
+    plat.makeDir(home);
+    plat.makeDir(home ++ "/.codebuddy");
+    plat.makeDir(home ++ "/.claude");
+    var pb: [512]u8 = undefined;
+    const cfg = std.fmt.bufPrint(&pb, "{s}/.codebuddy/settings.json", .{home}) catch unreachable;
+    try t.expect(writeFile(cfg,
+        \\{"model":"codebuddy-pro","hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"my-own-hook"}]}]}}
+    ));
+    // A Claude config that must not be touched: CodeBuddy is derived from
+    // Claude Code, so writing to the wrong file is the plausible mistake.
+    var cb: [512]u8 = undefined;
+    const claude_cfg = std.fmt.bufPrint(&cb, "{s}/.claude/settings.json", .{home}) catch unreachable;
+    try t.expect(writeFile(claude_cfg, "{\"untouched\":true}"));
+
+    try t.expect(installCodeBuddy(t.allocator, home));
+    const written = readFileAlloc(t.allocator, cfg, 1024 * 1024).?;
+    defer t.allocator.free(written);
+    try t.expect(std.mem.indexOf(u8, written, "petdex-hook") != null);
+    try t.expect(std.mem.indexOf(u8, written, "my-own-hook") != null);
+    try t.expect(std.mem.indexOf(u8, written, "codebuddy-pro") != null);
+
+    const claude_after = readFileAlloc(t.allocator, claude_cfg, 1024 * 1024).?;
+    defer t.allocator.free(claude_after);
+    try t.expect(std.mem.indexOf(u8, claude_after, "petdex") == null);
+
+    const agents = scan(t.allocator, home);
+    try t.expectEqual(HookStatus.current, agents[@intFromEnum(AgentKind.codebuddy)].status);
+
+    try t.expect(uninstall(t.allocator, home, .codebuddy));
+    const cleared = readFileAlloc(t.allocator, cfg, 1024 * 1024).?;
+    defer t.allocator.free(cleared);
+    try t.expect(std.mem.indexOf(u8, cleared, "petdex-hook") == null);
+    try t.expect(std.mem.indexOf(u8, cleared, "my-own-hook") != null);
+}
+
+test "codebuddy wires only events with documented payloads" {
+    // It declares 27+ events; the long tail has no documented schema, so
+    // guessing at field names is how an adapter starts reading garbage.
+    for (codebuddy_events) |ev| {
+        const documented = std.mem.eql(u8, ev.event, "UserPromptSubmit") or
+            std.mem.eql(u8, ev.event, "PreToolUse") or
+            std.mem.eql(u8, ev.event, "PostToolUse") or
+            std.mem.eql(u8, ev.event, "Notification") or
+            std.mem.eql(u8, ev.event, "Stop");
+        try t.expect(documented);
+    }
+    // No tool-failure phase: CodeBuddy reports failure as a field on
+    // PostToolUse rather than its own event, and inferring it from prose
+    // would light `failed` on healthy calls. Deliberate, not an omission.
+    for (codebuddy_events) |ev| {
+        try t.expect(!std.mem.eql(u8, ev.phase, "tool-failure"));
+    }
 }

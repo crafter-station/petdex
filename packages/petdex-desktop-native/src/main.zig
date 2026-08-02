@@ -266,6 +266,7 @@ pub const Model = struct {
         .{ .kind = .opencode },
         .{ .kind = .qoder },
         .{ .kind = .kimi_code },
+        .{ .kind = .codebuddy },
     },
     agents_prompted: bool = false,
     codex_trust_note: bool = false,
@@ -1119,6 +1120,7 @@ const agent_art = [agent_hooks.agent_count]AgentArt{
     .{ .light = @embedFile("assets/agents/opencode-light.png"), .dark = @embedFile("assets/agents/opencode-dark.png") },
     .{ .light = @embedFile("assets/agents/qoder.png"), .dark = @embedFile("assets/agents/qoder.png") },
     .{ .light = @embedFile("assets/agents/kimi-code.png"), .dark = @embedFile("assets/agents/kimi-code.png") },
+    .{ .light = @embedFile("assets/agents/codebuddy.png"), .dark = @embedFile("assets/agents/codebuddy.png") },
 };
 const agent_fallback_art: []const u8 = @embedFile("assets/agents/fallback.png");
 
@@ -1728,6 +1730,7 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
                 .opencode => agent_hooks.installOpencode(boot_allocator, home),
                 .qoder => agent_hooks.installQoder(boot_allocator, home),
                 .kimi_code => agent_hooks.installKimiCode(boot_allocator, home),
+                .codebuddy => agent_hooks.installCodeBuddy(boot_allocator, home),
             };
             if (ok and kind == .codex) model.codex_trust_note = true;
             model.agents = agent_hooks.scan(boot_allocator, home);

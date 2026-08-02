@@ -175,6 +175,7 @@ export default async function Home({
                     ["opencode", "opencode"],
                     ["qoder", "Qoder"],
                     ["kimi-code", "Kimi Code"],
+                    ["codebuddy", "CodeBuddy"],
                   ] as const
                 ).map(([slug, name]) => (
                   <Image
