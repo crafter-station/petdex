@@ -265,6 +265,7 @@ pub const Model = struct {
         .{ .kind = .gemini },
         .{ .kind = .opencode },
         .{ .kind = .qoder },
+        .{ .kind = .kimi_code },
     },
     agents_prompted: bool = false,
     codex_trust_note: bool = false,
@@ -1117,6 +1118,7 @@ const agent_art = [agent_hooks.agent_count]AgentArt{
     .{ .light = @embedFile("assets/agents/gemini.png"), .dark = @embedFile("assets/agents/gemini.png") },
     .{ .light = @embedFile("assets/agents/opencode-light.png"), .dark = @embedFile("assets/agents/opencode-dark.png") },
     .{ .light = @embedFile("assets/agents/qoder.png"), .dark = @embedFile("assets/agents/qoder.png") },
+    .{ .light = @embedFile("assets/agents/kimi-code.png"), .dark = @embedFile("assets/agents/kimi-code.png") },
 };
 const agent_fallback_art: []const u8 = @embedFile("assets/agents/fallback.png");
 
@@ -1725,6 +1727,7 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
                 .gemini => agent_hooks.installGemini(boot_allocator, home),
                 .opencode => agent_hooks.installOpencode(boot_allocator, home),
                 .qoder => agent_hooks.installQoder(boot_allocator, home),
+                .kimi_code => agent_hooks.installKimiCode(boot_allocator, home),
             };
             if (ok and kind == .codex) model.codex_trust_note = true;
             model.agents = agent_hooks.scan(boot_allocator, home);
@@ -2898,6 +2901,10 @@ pub fn main(init: std.process.Init) !void {
     // their Claude Code never reads, and detection shows them as
     // disconnected after a successful connect (#601).
     agent_hooks.env_claude_config_dir = init.environ_map.get("CLAUDE_CONFIG_DIR");
+    // Kimi Code relocates its whole config with KIMI_CODE_HOME, so the
+    // same blind spot #601 described applies: hooks written to the
+    // default dir would land somewhere it never reads.
+    agent_hooks.env_kimi_code_home = init.environ_map.get("KIMI_CODE_HOME");
     // Qoder's two builds each resolve their root through two variables, and the
     // prefix differs per build (QODER_* vs QODERCN_*). Unlike every other
     // touchpoint for these agents, nothing here is compiler-enforced: omit a

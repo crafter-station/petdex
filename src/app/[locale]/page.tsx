@@ -174,6 +174,7 @@ export default async function Home({
                     ["gemini", "Gemini CLI"],
                     ["opencode", "opencode"],
                     ["qoder", "Qoder"],
+                    ["kimi-code", "Kimi Code"],
                   ] as const
                 ).map(([slug, name]) => (
                   <Image

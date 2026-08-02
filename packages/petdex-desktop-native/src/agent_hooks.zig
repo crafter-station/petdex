@@ -19,9 +19,10 @@ pub const AgentKind = enum(u8) {
     gemini,
     opencode,
     // One row for every Qoder config root (see qoder_roots). Appended, not
-    // sorted in: agent_art and agent_icon_ids are indexed by @intFromEnum, so
-    // inserting would re-map every existing glyph.
+    // sorted in: agent_art is indexed by @intFromEnum and the icon strip is
+    // read by the same index, so inserting would re-map every existing glyph.
     qoder,
+    kimi_code,
 
     pub fn displayName(self: AgentKind) []const u8 {
         return switch (self) {
@@ -30,6 +31,7 @@ pub const AgentKind = enum(u8) {
             .gemini => "Gemini CLI",
             .opencode => "opencode",
             .qoder => "Qoder",
+            .kimi_code => "Kimi Code",
         };
     }
 
@@ -40,6 +42,7 @@ pub const AgentKind = enum(u8) {
             .gemini => "gemini",
             .opencode => "opencode",
             .qoder => "qoder",
+            .kimi_code => "kimi-code",
         };
     }
 };
@@ -60,7 +63,7 @@ pub const AgentInfo = struct {
     status: HookStatus = .absent,
 };
 
-pub const agent_count = 5;
+pub const agent_count = 6;
 
 /// Claude Code keeps everything under ~/.claude unless CLAUDE_CONFIG_DIR
 /// points elsewhere — that env var is how people run several fully
@@ -362,6 +365,7 @@ pub fn scan(allocator: std.mem.Allocator, home: []const u8) [agent_count]AgentIn
         .{ .kind = .gemini },
         .{ .kind = .opencode },
         .{ .kind = .qoder },
+        .{ .kind = .kimi_code },
     };
     // Several roots behind one row: cannot ride the single-dir/single-config
     // shape below, so it is resolved up front. The arms `continue` rather than
@@ -376,6 +380,7 @@ pub fn scan(allocator: std.mem.Allocator, home: []const u8) [agent_count]AgentIn
             .gemini => std.fmt.bufPrint(&path, "{s}/.gemini", .{home}) catch continue,
             .opencode => std.fmt.bufPrint(&path, "{s}/.config/opencode", .{home}) catch continue,
             .qoder => continue,
+            .kimi_code => kimiConfigDir(&path, home) orelse continue,
         };
         if (!dirExists(dir)) continue;
         info.status = .none;
@@ -385,6 +390,7 @@ pub fn scan(allocator: std.mem.Allocator, home: []const u8) [agent_count]AgentIn
             .gemini => std.fmt.bufPrint(&path, "{s}/.gemini/settings.json", .{home}) catch continue,
             .opencode => std.fmt.bufPrint(&path, "{s}/.config/opencode/plugins/petdex.js", .{home}) catch continue,
             .qoder => continue,
+            .kimi_code => kimiConfigPath(&path, home) orelse continue,
         };
         if (readFileAlloc(allocator, cfg, 512 * 1024)) |content| {
             defer allocator.free(content);
@@ -393,6 +399,17 @@ pub fn scan(allocator: std.mem.Allocator, home: []const u8) [agent_count]AgentIn
             // outdated so Update can refresh it.
             if (info.kind == .opencode) {
                 info.status = if (std.mem.eql(u8, std.mem.trim(u8, content, " \n"), std.mem.trim(u8, opencode_plugin, " \n"))) .current else .node;
+            } else if (info.kind == .kimi_code) {
+                // TOML, so the JSON classifier cannot read it. Substring
+                // matching is enough here: `petdex-hook` is the current
+                // runner and `petdex.js` is the legacy node one, and both
+                // only ever appear inside a command we wrote.
+                info.status = if (std.mem.indexOf(u8, content, "petdex-hook") != null)
+                    .current
+                else if (std.mem.indexOf(u8, content, "petdex") != null)
+                    .node
+                else
+                    .none;
             } else {
                 info.status = classifyConfig(allocator, content);
             }
@@ -452,6 +469,150 @@ pub fn installGemini(allocator: std.mem.Allocator, home: []const u8) bool {
     var path_buf: [512]u8 = undefined;
     const path = std.fmt.bufPrint(&path_buf, "{s}/.gemini/settings.json", .{home}) catch return false;
     return installJsonHooks(allocator, path, &gemini_events, "gemini", 2000, true);
+}
+
+// ------------------------------------------------------------ kimi code
+
+/// Kimi Code declares hooks as a TOML array of tables inside its single
+/// config file, one `[[hooks]]` entry per event, rather than a JSON tree
+/// like the Claude-shaped agents. Fields are fixed: an unknown key fails
+/// the whole config load, so the writer emits exactly event/command and
+/// nothing else.
+///
+/// `PostToolUseFailure` is its own event (PostToolUse only fires on
+/// success), so the `failed` sprite row lights up the same way Qoder's
+/// does, with no trailing `idle` to stomp it.
+const kimi_events = [_]HookEvent{
+    .{ .event = "UserPromptSubmit", .phase = "user-prompt" },
+    .{ .event = "PreToolUse", .phase = "pre" },
+    .{ .event = "PostToolUse", .phase = "post" },
+    .{ .event = "PostToolUseFailure", .phase = "tool-failure" },
+    .{ .event = "Notification", .phase = "notification" },
+    .{ .event = "Stop", .phase = "stop" },
+};
+
+/// `$KIMI_CODE_HOME/config.toml` when the variable is set and non-empty,
+/// `~/.kimi-code/config.toml` otherwise. Snapshotted once in main() from
+/// environ_map, the same `env_home` pattern the Claude override uses:
+/// Zig 0.16 has no global getenv.
+///
+/// The deprecated predecessor (`kimi-cli`, Python, `~/.kimi/`) is
+/// deliberately not probed. It is being wound down upstream and writing
+/// to it would install hooks into a CLI the user is migrating off.
+pub var env_kimi_code_home: ?[]const u8 = null;
+
+fn kimiConfigDir(buf: []u8, home: []const u8) ?[]const u8 {
+    if (env_kimi_code_home) |dir| {
+        if (dir.len != 0) return std.fmt.bufPrint(buf, "{s}", .{dir}) catch null;
+    }
+    return std.fmt.bufPrint(buf, "{s}/.kimi-code", .{home}) catch null;
+}
+
+fn kimiConfigPath(buf: []u8, home: []const u8) ?[]const u8 {
+    if (env_kimi_code_home) |dir| {
+        if (dir.len != 0) return std.fmt.bufPrint(buf, "{s}/config.toml", .{dir}) catch null;
+    }
+    return std.fmt.bufPrint(buf, "{s}/.kimi-code/config.toml", .{home}) catch null;
+}
+
+/// True when `line` opens a `[[hooks]]` table, tolerating the whitespace
+/// TOML allows inside the brackets.
+fn isKimiHookHeader(line: []const u8) bool {
+    const trimmed = std.mem.trim(u8, line, " \t\r\n");
+    if (!std.mem.startsWith(u8, trimmed, "[[") or !std.mem.endsWith(u8, trimmed, "]]")) return false;
+    return std.mem.eql(u8, std.mem.trim(u8, trimmed[2 .. trimmed.len - 2], " \t"), "hooks");
+}
+
+/// Copy `content` minus every `[[hooks]]` block whose command mentions
+/// petdex, leaving foreign hooks and all other config untouched. A block
+/// runs from its header to the next table header or end of file.
+fn stripKimiPetdexHooks(out: *std.array_list.Managed(u8), content: []const u8) bool {
+    var i: usize = 0;
+    while (i < content.len) {
+        const nl = std.mem.indexOfScalarPos(u8, content, i, '\n');
+        const line_end = if (nl) |n| n + 1 else content.len;
+        const line = content[i..line_end];
+
+        if (!isKimiHookHeader(line)) {
+            out.appendSlice(line) catch return false;
+            i = line_end;
+            continue;
+        }
+
+        // Header of a hook block: find where it ends, then decide whether
+        // the whole span is ours.
+        var cursor = line_end;
+        var block_end = content.len;
+        while (cursor < content.len) {
+            const s_nl = std.mem.indexOfScalarPos(u8, content, cursor, '\n');
+            const s_end = if (s_nl) |n| n + 1 else content.len;
+            const s_line = std.mem.trim(u8, content[cursor..s_end], " \t\r\n");
+            if (std.mem.startsWith(u8, s_line, "[")) {
+                block_end = cursor;
+                break;
+            }
+            cursor = s_end;
+        }
+        if (cursor >= content.len) block_end = content.len;
+
+        const block = content[i..block_end];
+        const ours = std.mem.indexOf(u8, block, "petdex") != null;
+        if (!ours) out.appendSlice(block) catch return false;
+        i = block_end;
+    }
+    return true;
+}
+
+/// Rewrite the hooks Petdex owns, preserving everything else in the file.
+/// Existing petdex blocks are removed first so a re-install refreshes
+/// rather than duplicating, which is what makes this idempotent.
+fn writeKimiHooks(allocator: std.mem.Allocator, path: []const u8, install: bool) bool {
+    const existing = readFileAlloc(allocator, path, 1024 * 1024);
+    defer if (existing) |e| allocator.free(e);
+    // Uninstall on a file that was never written is already done.
+    if (existing == null and !install) return true;
+    if (!backupOnce(allocator, path)) return false;
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    var out = std.array_list.Managed(u8).init(arena.allocator());
+
+    if (existing) |content| {
+        if (!stripKimiPetdexHooks(&out, content)) return false;
+        // Trailing newline so an appended table never lands on a
+        // half-written last line.
+        if (out.items.len > 0 and out.items[out.items.len - 1] != '\n') out.append('\n') catch return false;
+    }
+    if (!install) return writeFile(path, out.items);
+
+    var cmd_buf: [512]u8 = undefined;
+    for (kimi_events) |ev| {
+        const command = canonicalCommand(&cmd_buf, ev.phase, "kimi-code") orelse return false;
+        // Blank line AFTER the table, never before: a leading newline would
+        // leave the separator attached to the previous block, so the strip
+        // pass would not carry it away on re-install and the tables would
+        // accumulate on every refresh.
+        out.appendSlice("[[hooks]]\nevent = \"") catch return false;
+        out.appendSlice(ev.event) catch return false;
+        out.appendSlice("\"\ncommand = \"") catch return false;
+        // TOML basic strings escape backslash and quote; the canonical
+        // command carries quotes around $HOME paths.
+        for (command) |c| {
+            if (c == '\\' or c == '"') out.append('\\') catch return false;
+            out.append(c) catch return false;
+        }
+        out.appendSlice("\"\n\n") catch return false;
+    }
+    return writeFile(path, out.items);
+}
+
+pub fn installKimiCode(allocator: std.mem.Allocator, home: []const u8) bool {
+    var dir_buf: [512]u8 = undefined;
+    const dir = kimiConfigDir(&dir_buf, home) orelse return false;
+    plat.makeDir(dir);
+    var path_buf: [512]u8 = undefined;
+    const path = kimiConfigPath(&path_buf, home) orelse return false;
+    return writeKimiHooks(allocator, path, true);
 }
 
 /// opencode has no hooks: it loads a self-contained JS plugin that
@@ -662,7 +823,7 @@ fn inspectFeatureHooks(toml: []const u8) FeatureHooksInspection {
         const relative_end = std.mem.indexOfScalar(u8, toml[line_start..], '\n');
         const line_end = if (relative_end) |end| line_start + end else toml.len;
         const line = toml[line_start..line_end];
-        const trimmed = std.mem.trim(u8, line, " \t\r");
+        const trimmed = std.mem.trim(u8, line, " \t\r\n");
         if (trimmed.len > 0 and trimmed[0] == '[') {
             const name = sectionName(trimmed) orelse return .{ .state = .unsafe };
             if (std.mem.startsWith(u8, name, "features.")) return .{ .state = .unsafe };
@@ -820,6 +981,7 @@ pub fn migrateLegacyHooks(allocator: std.mem.Allocator, home: []const u8) Legacy
             // Unreachable: no legacy runner ever wrote these hooks, so this
             // cannot scan as .node. Install is the consistent answer anyway.
             .qoder => installQoder(allocator, home),
+            .kimi_code => installKimiCode(allocator, home),
         };
         if (migrated) result.migrated += 1 else result.failed += 1;
     }
@@ -848,6 +1010,10 @@ pub fn uninstall(allocator: std.mem.Allocator, home: []const u8, kind: AgentKind
             return true;
         },
         .qoder => return uninstallQoder(allocator, home),
+        .kimi_code => {
+            const p = kimiConfigPath(&path_buf, home) orelse return false;
+            return writeKimiHooks(allocator, p, false);
+        },
     }
 }
 
@@ -1477,4 +1643,86 @@ test "uninstallCodex preserves foreign hooks in a mixed config" {
     defer t.allocator.free(after);
     try t.expect(std.mem.indexOf(u8, after, "my-own-hook") != null);
     try t.expect(std.mem.indexOf(u8, after, "petdex.js") == null);
+}
+
+test "kimi writes its hooks as TOML and keeps foreign config" {
+    const saved = env_kimi_code_home;
+    defer env_kimi_code_home = saved;
+    const home = "/tmp/petdex-kimi-home";
+    plat.makeDir(home);
+    plat.makeDir(home ++ "/.kimi-code");
+    var pb: [512]u8 = undefined;
+    const cfg = std.fmt.bufPrint(&pb, "{s}/.kimi-code/config.toml", .{home}) catch unreachable;
+    // A config the user already owns, including a hook of their own.
+    try t.expect(writeFile(cfg,
+        \\model = "kimi-k2"
+        \\
+        \\[[hooks]]
+        \\event = "PreToolUse"
+        \\command = "my-own-linter"
+        \\
+    ));
+
+    try t.expect(installKimiCode(t.allocator, home));
+    const written = readFileAlloc(t.allocator, cfg, 1024 * 1024).?;
+    defer t.allocator.free(written);
+    // Ours landed, one table per event.
+    try t.expect(std.mem.indexOf(u8, written, "PostToolUseFailure") != null);
+    try t.expect(std.mem.indexOf(u8, written, "petdex-hook") != null);
+    // Theirs survived, untouched.
+    try t.expect(std.mem.indexOf(u8, written, "my-own-linter") != null);
+    try t.expect(std.mem.indexOf(u8, written, "model = \"kimi-k2\"") != null);
+
+    // Re-install refreshes rather than duplicating.
+    try t.expect(installKimiCode(t.allocator, home));
+    const again = readFileAlloc(t.allocator, cfg, 1024 * 1024).?;
+    defer t.allocator.free(again);
+    try t.expectEqual(std.mem.count(u8, written, "petdex-hook"), std.mem.count(u8, again, "petdex-hook"));
+
+    // Uninstall removes only ours.
+    try t.expect(uninstall(t.allocator, home, .kimi_code));
+    const cleared = readFileAlloc(t.allocator, cfg, 1024 * 1024).?;
+    defer t.allocator.free(cleared);
+    try t.expect(std.mem.indexOf(u8, cleared, "petdex") == null);
+    try t.expect(std.mem.indexOf(u8, cleared, "my-own-linter") != null);
+    try t.expect(std.mem.indexOf(u8, cleared, "model = \"kimi-k2\"") != null);
+}
+
+test "KIMI_CODE_HOME redirects install and detection" {
+    const saved = env_kimi_code_home;
+    defer env_kimi_code_home = saved;
+    const home = "/tmp/petdex-kimi-nohome";
+    const alt = "/tmp/petdex-kimi-alt";
+    plat.makeDir(home);
+    plat.makeDir(alt);
+    var pb: [512]u8 = undefined;
+    const alt_cfg = std.fmt.bufPrint(&pb, "{s}/config.toml", .{alt}) catch unreachable;
+    plat.deleteFile(alt_cfg);
+
+    env_kimi_code_home = alt;
+    try t.expect(installKimiCode(t.allocator, home));
+    try t.expect(fileExists(alt_cfg));
+    // Nothing leaked into the default root.
+    var db: [512]u8 = undefined;
+    const default_cfg = std.fmt.bufPrint(&db, "{s}/.kimi-code/config.toml", .{home}) catch unreachable;
+    try t.expect(!fileExists(default_cfg));
+
+    const agents = scan(t.allocator, home);
+    try t.expectEqual(HookStatus.current, agents[@intFromEnum(AgentKind.kimi_code)].status);
+
+    // Blank and unset both fall back, so a shell exporting an empty var
+    // does not silently write to a directory named "".
+    env_kimi_code_home = "";
+    const blank = scan(t.allocator, home);
+    try t.expectEqual(HookStatus.absent, blank[@intFromEnum(AgentKind.kimi_code)].status);
+}
+
+test "kimi hook headers tolerate TOML whitespace" {
+    try t.expect(isKimiHookHeader("[[hooks]]"));
+    try t.expect(isKimiHookHeader("  [[hooks]]  "));
+    try t.expect(isKimiHookHeader("[[ hooks ]]"));
+    // Not ours: a different table, or a single-bracket table of the same name.
+    try t.expect(!isKimiHookHeader("[[mcp_servers]]"));
+    try t.expect(!isKimiHookHeader("[hooks]"));
+    try t.expect(!isKimiHookHeader("command = \"[[hooks]]\""));
 }
