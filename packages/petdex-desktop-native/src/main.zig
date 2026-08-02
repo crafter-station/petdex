@@ -57,62 +57,13 @@ const shell_scene: native_sdk.ShellConfig = .{ .windows = &shell_windows };
 
 // ----------------------------------------------------------------- states
 
-pub const State = enum(u8) {
-    idle,
-    @"running-right",
-    @"running-left",
-    waving,
-    jumping,
-    failed,
-    waiting,
-    running,
-    review,
-
-    pub fn next(self: State) State {
-        const n = (@intFromEnum(self) + 1) % 9;
-        return @enumFromInt(n);
-    }
-};
-
-const FrameSpec = struct { col: u64, dur_ms: u32 };
-
-fn uniform(comptime count: u64, comptime dur: u32, comptime last: u32) [count]FrameSpec {
-    var frames: [count]FrameSpec = undefined;
-    for (&frames, 0..) |*f, i| {
-        f.* = .{ .col = i, .dur_ms = if (i == count - 1) last else dur };
-    }
-    return frames;
-}
-
-const idle_frames = [_]FrameSpec{
-    .{ .col = 0, .dur_ms = 280 }, .{ .col = 1, .dur_ms = 110 },
-    .{ .col = 2, .dur_ms = 110 }, .{ .col = 3, .dur_ms = 140 },
-    .{ .col = 4, .dur_ms = 140 }, .{ .col = 5, .dur_ms = 320 },
-};
-const running_right_frames = uniform(8, 120, 220);
-const running_left_frames = uniform(8, 120, 220);
-const waving_frames = uniform(4, 140, 280);
-const jumping_frames = uniform(5, 140, 280);
-const failed_frames = uniform(8, 140, 240);
-const waiting_frames = uniform(6, 150, 260);
-const running_frames = uniform(6, 120, 220);
-const review_frames = uniform(6, 150, 280);
-
-const StateDef = struct { row: u64, frames: []const FrameSpec };
-
-fn stateDef(state: State) StateDef {
-    return switch (state) {
-        .idle => .{ .row = 0, .frames = &idle_frames },
-        .@"running-right" => .{ .row = 1, .frames = &running_right_frames },
-        .@"running-left" => .{ .row = 2, .frames = &running_left_frames },
-        .waving => .{ .row = 3, .frames = &waving_frames },
-        .jumping => .{ .row = 4, .frames = &jumping_frames },
-        .failed => .{ .row = 5, .frames = &failed_frames },
-        .waiting => .{ .row = 6, .frames = &waiting_frames },
-        .running => .{ .row = 7, .frames = &running_frames },
-        .review => .{ .row = 8, .frames = &review_frames },
-    };
-}
+// Sprite tables live in sprite.zig (#613). Re-exported so the many
+// `State` and `stateDef` references below read unchanged.
+const sprite = @import("sprite.zig");
+pub const State = sprite.State;
+const FrameSpec = sprite.FrameSpec;
+const StateDef = sprite.StateDef;
+const stateDef = sprite.stateDef;
 
 // ------------------------------------------------------------------ model
 
@@ -327,40 +278,16 @@ fn onAppearance(appearance: native_sdk.platform.Appearance) ?Msg {
     return .{ .appearance = appearance };
 }
 
-// 32 silently truncated real installs: this machine had 47 pets across
-// the two roots, so 15 of them never reached Settings. The ceiling is
-// the thumbnail atlas, which registers as one image and has to fit the
-// registry's 1MB slot: 96 cells of 48x52 is 0.91MB, and 128 would be
-// 1.22MB.
-pub const max_catalog = 96;
-pub const CatalogEntry = struct {
-    name: [64]u8 = @splat(0),
-    len: usize = 0,
-    root: [160]u8 = @splat(0),
-    root_len: usize = 0,
-
-    pub fn slice(self: *const CatalogEntry) []const u8 {
-        return self.name[0..self.len];
-    }
-    pub fn rootSlice(self: *const CatalogEntry) []const u8 {
-        return self.root[0..self.root_len];
-    }
-};
-pub var catalog: [max_catalog]CatalogEntry = @splat(.{});
-pub var catalog_len: usize = 0;
-
-/// Slug to catalog index, the lookup both entry points into "pick this
-/// pet" share: boot resolution (env/settings) and the petdex:// deep
-/// link. Null means not installed, which each caller answers
-/// differently — boot falls back to the first pet, a deep link ignores
-/// the URL.
-fn catalogIndexOf(slug: []const u8) ?usize {
-    if (slug.len == 0) return null;
-    for (catalog[0..catalog_len], 0..) |*entry, i| {
-        if (std.mem.eql(u8, entry.slice(), slug)) return i;
-    }
-    return null;
-}
+// Catalog table and slug lookup live in catalog.zig (#613).
+const catalog_mod = @import("catalog.zig");
+const settings_view = @import("settings_view.zig");
+pub const max_catalog = catalog_mod.max_catalog;
+pub const CatalogEntry = catalog_mod.CatalogEntry;
+const catalogIndexOf = catalog_mod.catalogIndexOf;
+// Aliases, not copies: `catalog` and `catalog_mod.catalog_len` are mutable state the
+// install queue and the settings view both write, so they have to stay
+// one storage location.
+const catalog = &catalog_mod.catalog;
 
 // ---------------------------------------------------------------- install
 // `petdex://<slug>` for a pet that is not on disk downloads it first.
@@ -594,9 +521,9 @@ fn mirrorToCodexRoot(slug: []const u8, ext_png: bool) void {
 fn catalogAppend(slug: []const u8, active: usize) ?usize {
     if (catalogIndexOf(slug)) |existing| return existing;
     const root = installer.install_roots[0];
-    const slot = if (catalog_len < max_catalog) blk: {
-        catalog_len += 1;
-        break :blk catalog_len - 1;
+    const slot = if (catalog_mod.catalog_len < max_catalog) blk: {
+        catalog_mod.catalog_len += 1;
+        break :blk catalog_mod.catalog_len - 1;
     } else evict: {
         // Never evict the pet currently on screen: its decoded sheet is
         // live and the entry backs the name the window is showing.
@@ -810,18 +737,18 @@ fn scanCatalog(io: std.Io, allocator: std.mem.Allocator) void {
         while (it.next(io) catch null) |entry| {
             if (entry.kind != .directory) continue;
             if (!petNameOk(entry.name)) continue;
-            if (catalog_len >= max_catalog) return;
+            if (catalog_mod.catalog_len >= max_catalog) return;
             var duplicate = false;
-            for (catalog[0..catalog_len]) |*existing| {
+            for (catalog[0..catalog_mod.catalog_len]) |*existing| {
                 if (std.mem.eql(u8, existing.slice(), entry.name)) duplicate = true;
             }
             if (duplicate) continue;
-            var e = &catalog[catalog_len];
+            var e = &catalog[catalog_mod.catalog_len];
             @memcpy(e.name[0..entry.name.len], entry.name);
             e.len = entry.name.len;
             @memcpy(e.root[0..root.len], root);
             e.root_len = root.len;
-            catalog_len += 1;
+            catalog_mod.catalog_len += 1;
         }
     }
 }
@@ -840,7 +767,7 @@ const max_custom_font_bytes: usize = 24 * 1024 * 1024;
 var initial_font_path: [512]u8 = @splat(0);
 var initial_font_path_len: usize = 0;
 var initial_font_load_failed: bool = false;
-var custom_font_active: bool = false;
+pub var custom_font_active: bool = false;
 
 /// Tiny file helpers usable from the runtime thread. They carry their
 /// own Io (see plat.zig), so the main thread's never leaks off-thread;
@@ -908,7 +835,7 @@ fn saveSettings(model: *const Model) void {
     // drops the whole save): keep room for the configurable bubble
     // fields, rotation state, a long slug, and negative coordinates.
     var buf: [1536]u8 = undefined;
-    const active = if (model.active_pet < catalog_len) catalog[model.active_pet].slice() else "";
+    const active = if (model.active_pet < catalog_mod.catalog_len) catalog[model.active_pet].slice() else "";
     // The position keys only exist once the window has been fitted and
     // read: a save fired on the very first frame would otherwise
     // persist the (0,0) the model boots with and pin the pet to the
@@ -1267,7 +1194,7 @@ fn decodeSheetForThumb(fx: *Effects, entry: *const CatalogEntry) ?Sheet {
 /// the poll timer builds one per tick while settings is open, so the
 /// pet never freezes behind a 28-conversion batch.
 fn buildNextThumb(fx: *Effects) void {
-    if (thumbs_built >= catalog_len) return;
+    if (thumbs_built >= catalog_mod.catalog_len) return;
     const index = thumbs_built;
     thumbs_built += 1;
     if (thumbs_pixels.len == 0) {
@@ -1301,7 +1228,7 @@ fn buildNextThumb(fx: *Effects) void {
 fn resolveInitialPet(io: std.Io, allocator: std.mem.Allocator, environ_map: *std.process.Environ.Map) !void {
     _ = environ_map;
     scanCatalog(io, allocator);
-    if (catalog_len == 0) return error.NoPetInstalled;
+    if (catalog_mod.catalog_len == 0) return error.NoPetInstalled;
 
     var wanted: []const u8 = "";
     var settings_buf: [512]u8 = undefined;
@@ -1420,10 +1347,10 @@ fn dayFromWallMs(wall_ms: i64) u32 {
 /// select_pet Msg the settings list dispatches, so activation cannot
 /// drift between a click, a rotation, and a shuffle.
 fn advancePet(model: *Model, fx: *Effects) void {
-    if (catalog_len < 2) return;
+    if (catalog_mod.catalog_len < 2) return;
     var offset: u32 = 1;
-    while (offset < catalog_len) : (offset += 1) {
-        const idx: u32 = (model.active_pet + offset) % @as(u32, @intCast(catalog_len));
+    while (offset < catalog_mod.catalog_len) : (offset += 1) {
+        const idx: u32 = (model.active_pet + offset) % @as(u32, @intCast(catalog_mod.catalog_len));
         update(model, .{ .select_pet = idx }, fx);
         // select_pet only commits after a successful sheet load.
         if (model.active_pet == idx) return;
@@ -1549,13 +1476,13 @@ pub fn boot(model: *Model, fx: *Effects) void {
 
     // First point where the platform codec is reachable: `init_fx` runs
     // on the loop thread right after the runtime binds services onto fx.
-    if (catalog_len == 0) return;
+    if (catalog_mod.catalog_len == 0) return;
     // A single unreadable sheet used to leave an empty window even with
     // a full catalog behind it (one shipped pet is a 3-byte stub), so
     // the chosen pet is a preference here, not a requirement.
     var chosen: ?usize = null;
-    for (0..catalog_len) |offset| {
-        const index = (initial_pet + offset) % catalog_len;
+    for (0..catalog_mod.catalog_len) |offset| {
+        const index = (initial_pet + offset) % catalog_mod.catalog_len;
         if (loadSheetForPet(fx, &catalog[index])) {
             chosen = index;
             break;
@@ -1568,9 +1495,9 @@ pub fn boot(model: *Model, fx: *Effects) void {
         // to nothing while sitting right there on disk. Telling that
         // user to install a pet sends them in the wrong direction.
         if (builtin.os.tag == .linux) {
-            std.debug.print("petdex: {d} pet(s) installed but none decoded; on Linux webp needs the gdk-pixbuf loader (apt install webp-pixbuf-loader)\n", .{catalog_len});
+            std.debug.print("petdex: {d} pet(s) installed but none decoded; on Linux webp needs the gdk-pixbuf loader (apt install webp-pixbuf-loader)\n", .{catalog_mod.catalog_len});
         } else {
-            std.debug.print("petdex: {d} pet(s) installed but none decoded; the sheet may be corrupt\n", .{catalog_len});
+            std.debug.print("petdex: {d} pet(s) installed but none decoded; the sheet may be corrupt\n", .{catalog_mod.catalog_len});
         }
         return;
     };
@@ -1689,7 +1616,7 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             // The pet is only usable once the catalog knows it; a fresh
             // thumbnail pass picks it up the next time settings is open.
             const index = catalogAppend(slug, model.active_pet);
-            thumbs_built = @min(thumbs_built, catalog_len);
+            thumbs_built = @min(thumbs_built, catalog_mod.catalog_len);
             if (model.install.activate_when_done) {
                 if (index) |i| {
                     // Deliberately routed through the same Msg the
@@ -1757,7 +1684,7 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
         .settings_closed => model.settings_open = false,
         .close_pet => fx.closeWindow("main"),
         .select_pet => |index| {
-            if (index >= catalog_len or index == model.active_pet) return;
+            if (index >= catalog_mod.catalog_len or index == model.active_pet) return;
             if (!loadSheetForPet(fx, &catalog[index])) return;
             model.active_pet = index;
             model.frame_index = 0;
@@ -1850,7 +1777,7 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             saveSettings(model);
         },
         .open_pet_page => |index| {
-            if (index >= catalog_len) return;
+            if (index >= catalog_mod.catalog_len) return;
             var buf: [256]u8 = undefined;
             const url = std.fmt.bufPrint(&buf, "https://petdex.dev/pets/{s}", .{catalog[index].slice()}) catch return;
             plat.openExternal(url);
@@ -2034,7 +1961,7 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             // `petdex://<slug>` link has work to do.
             drainPendingInstall(model, fx);
             if (!model.sheet_loaded) return;
-            if (model.settings_open and thumbs_built < catalog_len) buildNextThumb(fx);
+            if (model.settings_open and thumbs_built < catalog_mod.catalog_len) buildNextThumb(fx);
             const now = fx.wallMs();
             if (hook_server.mailbox.takeBubble(&model.bubble)) {
                 if (!model.bubbles_enabled or model.focus_mode or model.bubble.text_len == 0) {
@@ -2114,11 +2041,11 @@ const pet_menu = [_]AppUi.ContextMenuItem{
 // enough for the configured maximum; one full em per character also covers
 // CJK glyphs, unlike the previous 0.62 Latin-average estimate.
 const bubble_columns_default: u16 = 40;
-const bubble_columns_min: u16 = 8;
-const bubble_columns_max: u16 = 120;
+pub const bubble_columns_min: u16 = 8;
+pub const bubble_columns_max: u16 = 120;
 const bubble_answer_lines_default: u8 = 2;
-const bubble_answer_lines_min: u8 = 1;
-const bubble_answer_lines_max: u8 = 8;
+pub const bubble_answer_lines_min: u8 = 1;
+pub const bubble_answer_lines_max: u8 = 8;
 const bubble_avatar_width: f32 = 20;
 const bubble_busy_width: f32 = 16;
 const bubble_content_gap: f32 = 8;
@@ -2175,15 +2102,15 @@ fn bubbleFontSize(model: *const Model) f32 {
 }
 
 /// Bubble text size bounds shared by all desktop platforms.
-const bubble_text_min_px: f32 = 8;
-const bubble_text_max_px: f32 = 20;
+pub const bubble_text_min_px: f32 = 8;
+pub const bubble_text_max_px: f32 = 20;
 /// The size the bubble shipped at before the slider existed, and the
 /// floor the range used to have. #625 lowered the minimum to 8 for people
 /// who want a denser bubble, but left the default pinned to the minimum,
 /// so every install silently shrank to 8 and the slider sat hard left.
 /// The default is its own value now: widening the range must not move
 /// what a fresh install looks like.
-const bubble_text_default_px: f32 = 13;
+pub const bubble_text_default_px: f32 = 13;
 
 /// Count display characters (UTF-8 sequences, not bytes).
 fn charCount(text: []const u8) usize {
@@ -2478,390 +2405,19 @@ fn petdexWindows(model: *const Model, scratch: *PetdexApp.WindowsScratch) []cons
 fn petdexWindowView(ui: *PetdexApp.Ui, model: *const Model, window_label: []const u8) PetdexApp.Ui.Node {
     if (std.mem.eql(u8, window_label, "bubble")) return bubbleView(ui, model);
     std.debug.assert(std.mem.eql(u8, window_label, settings_window_label));
-    return settingsView(ui, model);
+    return settings_view.settingsView(ui, model, .{
+        .ready = agents_icons_ready,
+        .image = agent_icon_atlas_id,
+        .rect = &agentIconRect,
+    }, .{
+        .image = thumb_atlas_id,
+        .ready = &thumbs_ready,
+        .cell_w = @floatFromInt(thumb_w),
+        .cell_h = @floatFromInt(thumb_h),
+    });
 }
 
-fn agentStatusCaption(info: agent_hooks.AgentInfo, codex_note: bool) []const u8 {
-    if (info.kind == .codex and codex_note) return "Installed - restart Codex and approve its hooks once";
-    if (info.kind == .opencode) {
-        return switch (info.status) {
-            .absent => "Not detected",
-            .none => "Plugin not installed",
-            .node => "Plugin outdated",
-            .current => "Connected",
-        };
-    }
-    return switch (info.status) {
-        .absent => "Not detected",
-        .none => "Hooks not installed",
-        .node => "Hooks outdated (CLI runner)",
-        .current => "Connected",
-    };
-}
 
-fn agentsSection(ui: *AppUi, model: *const Model) AppUi.Node {
-    var rows: [agent_hooks.agent_count]AppUi.Node = undefined;
-    var count: usize = 0;
-    for (model.agents, 0..) |info, i| {
-        if (info.status == .absent) continue;
-        const trailing = if (info.status == .current)
-            ui.button(.{
-                .size = .sm,
-                .variant = .secondary,
-                .on_press = Msg{ .uninstall_agent = @intCast(i) },
-            }, "Disconnect")
-        else
-            ui.button(.{
-                .size = .sm,
-                .variant = .primary,
-                .on_press = Msg{ .install_agent = @intCast(i) },
-            }, if (info.status == .node) "Update" else "Install");
-        var logo = ui.image(.{
-            .width = 24,
-            .height = 24,
-            .image = if (agents_icons_ready) agent_icon_atlas_id else 0,
-            .semantics = .{ .label = info.kind.displayName() },
-        });
-        logo.widget.image_src = agentIconRect(@intFromEnum(info.kind));
-        logo.widget.image_fit = .contain;
-        rows[count] = ui.el(.panel, .{
-            .padding = 12,
-            .gap = 12,
-            .cross = .center,
-            .style_tokens = .{ .background = .surface, .radius = .md },
-            .semantics = .{ .label = info.kind.displayName() },
-        }, .{
-            ui.row(.{ .gap = 12, .cross = .center }, .{
-                logo,
-                ui.column(.{ .grow = 1, .main = .center }, .{
-                    ui.text(.{}, info.kind.displayName()),
-                    ui.text(.{ .size = .sm, .style_tokens = .{ .foreground = .text_muted } }, agentStatusCaption(info, model.codex_trust_note)),
-                }),
-                trailing,
-            }),
-        });
-        count += 1;
-    }
-    if (count == 0) {
-        return ui.el(.panel, .{ .padding = 12, .style_tokens = .{ .background = .surface, .radius = .md } }, .{
-            ui.text(.{ .size = .sm, .style_tokens = .{ .foreground = .text_muted } }, "No coding agents detected on this machine"),
-        });
-    }
-    return ui.column(.{ .gap = 12 }, @as([]const AppUi.Node, rows[0..count]));
-}
-
-var more_label_buf: [48]u8 = undefined;
-
-fn moreLabel(total: usize) []const u8 {
-    return std.fmt.bufPrint(&more_label_buf, "Show all ({d})", .{total}) catch "Show all";
-}
-
-fn petMatchesFilter(name: []const u8, filter: []const u8) bool {
-    if (filter.len == 0) return true;
-    if (name.len < filter.len) return false;
-    var i: usize = 0;
-    while (i + filter.len <= name.len) : (i += 1) {
-        var match = true;
-        for (filter, 0..) |c, j| {
-            if (std.ascii.toLower(name[i + j]) != std.ascii.toLower(c)) {
-                match = false;
-                break;
-            }
-        }
-        if (match) return true;
-    }
-    return false;
-}
-
-var install_label_buf: [128]u8 = undefined;
-
-/// Download progress and the last failure, in the Settings page the app
-/// already has. A deep-link install is otherwise invisible: the pet just
-/// appears seconds later with no indication anything was happening.
-fn installBanner(ui: *AppUi, model: *const Model) AppUi.Node {
-    if (model.install.busy()) {
-        const slug = model.install.currentSlug();
-        const label = switch (model.install.phase) {
-            .manifest => std.fmt.bufPrint(&install_label_buf, "Looking up pets\u{2026}", .{}) catch "Looking up pets",
-            // The pet.json leg is a few hundred bytes and flashes past,
-            // so both download legs read as one "Downloading" step
-            // rather than flickering between two labels.
-            .pet_json, .spritesheet => std.fmt.bufPrint(&install_label_buf, "Downloading {s}\u{2026}", .{slug}) catch "Downloading pet",
-            .idle => unreachable,
-        };
-        return ui.el(.panel, .{ .padding = 12, .style_tokens = .{ .background = .surface, .radius = .md } }, .{
-            ui.row(.{ .gap = 10, .cross = .center }, .{
-                ui.el(.spinner, .{ .width = 16, .height = 16, .semantics = .{ .label = "Installing" } }, .{}),
-                ui.text(.{ .size = .sm }, label),
-            }),
-        });
-    }
-    if (model.install.error_len > 0) {
-        var message = ui.text(.{ .size = .sm }, model.install.errorSlice());
-        message.widget.style.foreground = canvas.Color.rgb8(250, 105, 94);
-        return ui.el(.panel, .{ .padding = 12, .style_tokens = .{ .background = .surface, .radius = .md } }, .{
-            ui.row(.{ .gap = 10, .cross = .center }, .{
-                ui.column(.{ .grow = 1 }, .{message}),
-                ui.button(.{ .size = .sm, .variant = .secondary, .on_press = .dismiss_install_error }, "Dismiss"),
-            }),
-        });
-    }
-    return ui.el(.stack, .{}, .{});
-}
-
-fn settingsView(ui: *AppUi, model: *const Model) AppUi.Node {
-    var rows: [max_catalog]AppUi.Node = undefined;
-    var shown: usize = 0;
-    var matches: usize = 0;
-    const max_visible: usize = if (model.pets_expanded) max_catalog else 6;
-    const filter = model.pet_filter[0..model.pet_filter_len];
-    for (catalog[0..@min(catalog_len, max_catalog)], 0..) |*entry, i| {
-        if (!petMatchesFilter(entry.slice(), filter)) continue;
-        matches += 1;
-        if (shown >= max_visible) continue;
-        const active = i == model.active_pet;
-        var thumb = ui.image(.{
-            .width = 40,
-            .height = 44,
-            .image = if (thumbs_ready[i]) thumb_atlas_id else 0,
-            .semantics = .{ .label = entry.slice() },
-        });
-        thumb.widget.image_src = geometry.RectF.init(
-            @as(f32, @floatFromInt(i * thumb_w)),
-            0,
-            @as(f32, @floatFromInt(thumb_w)),
-            @as(f32, @floatFromInt(thumb_h)),
-        );
-        thumb.widget.image_fit = .contain;
-        thumb.widget.image_sampling = .nearest;
-        rows[shown] = ui.el(.list_item, .{
-            .height = 56,
-            .padding = 8,
-            .gap = 12,
-            .cross = .center,
-            .on_press = Msg{ .select_pet = @intCast(i) },
-            .selected = active,
-            .style_tokens = .{ .background = .surface, .radius = .md },
-            .semantics = .{ .label = entry.slice() },
-        }, .{
-            thumb,
-            ui.column(.{ .grow = 1, .main = .center }, .{
-                ui.text(.{}, entry.slice()),
-                ui.text(.{ .size = .sm, .style_tokens = .{ .foreground = .text_muted } }, entry.rootSlice()),
-            }),
-            if (active)
-                ui.button(.{ .size = .sm, .width = 64, .variant = .primary, .disabled = true }, "Active")
-            else
-                ui.button(.{ .size = .sm, .width = 64, .variant = .primary, .on_press = Msg{ .select_pet = @intCast(i) } }, "Select"),
-            ui.button(.{ .size = .sm, .variant = .secondary, .on_press = Msg{ .open_pet_page = @intCast(i) } }, "Open"),
-        });
-        shown += 1;
-    }
-    const scale_fraction: f32 = (model.scale - 0.4) / 0.8;
-    const bubble_text_fraction: f32 = (model.bubble_text_px - bubble_text_min_px) / (bubble_text_max_px - bubble_text_min_px);
-    // One scrollable page: the root scroll takes the window frame and
-    // everything - full pet catalog included - flows inside it. No
-    // more per-section band budgets.
-    return ui.scroll(.{ .grow = 1 }, .{ui.column(.{ .padding = 16, .gap = 12 }, .{
-        ui.text(.{ .size = .lg }, "Pets"),
-        installBanner(ui, model),
-        ui.el(.search_field, .{
-            .height = 34,
-            .text = filter,
-            .on_input = AppUi.inputMsg(.pet_filter),
-            .placeholder = "Search pets",
-            .semantics = .{ .label = "Search pets" },
-        }, .{}),
-        // Search-first catalog: six rows collapsed, the whole catalog
-        // expanded - the page itself scrolls, so no nested scroll and
-        // the extent stays exact.
-        ui.column(.{ .gap = 6 }, @as([]const AppUi.Node, rows[0..shown])),
-        if (matches > shown)
-            ui.button(.{ .size = .sm, .variant = .secondary, .on_press = .toggle_pets_expanded }, moreLabel(matches))
-        else if (model.pets_expanded and matches > 6)
-            ui.button(.{ .size = .sm, .variant = .secondary, .on_press = .toggle_pets_expanded }, "Show less")
-        else if (matches == 0)
-            ui.text(.{ .size = .sm, .style_tokens = .{ .foreground = .text_muted } }, "No pets match your search")
-        else
-            ui.el(.stack, .{}, .{}),
-        ui.el(.stack, .{ .height = 10 }, .{}),
-        ui.text(.{ .size = .lg }, "Agents"),
-        agentsSection(ui, model),
-        ui.el(.stack, .{ .height = 10 }, .{}),
-        ui.text(.{ .size = .lg }, "Appearance"),
-        ui.el(.panel, .{ .style_tokens = .{ .background = .surface, .radius = .md } }, .{
-            ui.row(.{ .padding = 12, .cross = .center, .gap = 12 }, .{
-                ui.column(.{ .grow = 1 }, .{
-                    ui.text(.{}, "Pet size"),
-                    ui.text(.{ .size = .sm, .style_tokens = .{ .foreground = .text_muted } }, "Adjust the size of your pet"),
-                }),
-                ui.el(.slider, .{ .width = 150, .value = scale_fraction, .on_value = AppUi.valueMsg(.set_scale), .semantics = .{ .label = "Pet size" } }, .{}),
-            }),
-        }),
-        ui.el(.panel, .{ .style_tokens = .{ .background = .surface, .radius = .md } }, .{
-            ui.row(.{ .padding = 12, .cross = .center, .gap = 12 }, .{
-                ui.column(.{ .grow = 1 }, .{
-                    ui.text(.{}, "Bubble text size"),
-                    ui.text(.{ .size = .sm, .style_tokens = .{ .foreground = .text_muted } }, "Size of the bubble text"),
-                }),
-                ui.el(.slider, .{ .width = 150, .value = bubble_text_fraction, .on_value = AppUi.valueMsg(.set_bubble_text_size), .semantics = .{ .label = "Bubble text size" } }, .{}),
-            }),
-        }),
-        ui.el(.panel, .{ .style_tokens = .{ .background = .surface, .radius = .md } }, .{
-            ui.row(.{ .padding = 12, .cross = .center, .gap = 12 }, .{
-                ui.column(.{ .grow = 1 }, .{
-                    ui.text(.{}, "Characters per line"),
-                    ui.text(.{ .size = .sm, .style_tokens = .{ .foreground = .text_muted } }, "8–120; maximum characters before wrapping"),
-                }),
-                ui.el(.input, .{
-                    .width = 72,
-                    .height = 34,
-                    .text = model.bubble_columns_text[0..model.bubble_columns_text_len],
-                    .on_input = AppUi.inputMsg(.bubble_columns_input),
-                    .semantics = .{ .label = "Characters per line" },
-                }, .{}),
-            }),
-        }),
-        ui.el(.panel, .{ .style_tokens = .{ .background = .surface, .radius = .md } }, .{
-            ui.row(.{ .padding = 12, .cross = .center, .gap = 12 }, .{
-                ui.column(.{ .grow = 1 }, .{
-                    ui.text(.{}, "Answer lines"),
-                    ui.text(.{ .size = .sm, .style_tokens = .{ .foreground = .text_muted } }, "1–8 answer rows; title uses one additional row"),
-                }),
-                ui.el(.input, .{
-                    .width = 72,
-                    .height = 34,
-                    .text = model.bubble_answer_lines_text[0..model.bubble_answer_lines_text_len],
-                    .on_input = AppUi.inputMsg(.bubble_answer_lines_input),
-                    .semantics = .{ .label = "Answer lines" },
-                }, .{}),
-            }),
-        }),
-        ui.el(.panel, .{ .style_tokens = .{ .background = .surface, .radius = .md } }, .{
-            ui.column(.{ .padding = 12, .gap = 8 }, .{
-                ui.text(.{}, "Custom font file"),
-                ui.text(.{ .size = .sm, .style_tokens = .{ .foreground = .text_muted } },
-                    if (model.font_load_failed)
-                        "Could not load this TrueType font; the default font is active"
-                    else if (model.font_path_dirty)
-                        "Saved; restart Petdex to apply"
-                    else if (custom_font_active)
-                        "Applied to all app text; restart after changing the path"
-                    else
-                        "Optional local .ttf path; leave empty for the default font"),
-                ui.el(.input, .{
-                    .height = 34,
-                    .text = model.font_path[0..model.font_path_len],
-                    .on_input = AppUi.inputMsg(.font_path_input),
-                    .placeholder = "/path/to/font.ttf",
-                    .semantics = .{ .label = "Custom font file path" },
-                }, .{}),
-            }),
-        }),
-        ui.el(.panel, .{ .style_tokens = .{ .background = .surface, .radius = .md } }, .{
-            ui.row(.{ .padding = 12, .cross = .center, .gap = 12 }, .{
-                ui.column(.{ .grow = 1 }, .{
-                    ui.text(.{}, "Show messages"),
-                    ui.text(.{ .size = .sm, .style_tokens = .{ .foreground = .text_muted } }, "Agent activity bubbles over the pet"),
-                }),
-                ui.el(.switch_control, .{
-                    .selected = model.bubbles_enabled,
-                    .on_toggle = .toggle_bubbles,
-                    .semantics = .{ .label = "Show messages" },
-                }, .{}),
-            }),
-        }),
-        ui.el(.panel, .{ .style_tokens = .{ .background = .surface, .radius = .md } }, .{
-            ui.row(.{ .padding = 12, .cross = .center, .gap = 12 }, .{
-                ui.column(.{ .grow = 1 }, .{
-                    ui.text(.{}, "Bubble lifetime"),
-                    ui.text(.{ .size = .sm, .style_tokens = .{ .foreground = .text_muted } }, "0 keeps bubbles visible; 1–60 seconds enables expiry"),
-                }),
-                ui.el(.input, .{
-                    .width = 72,
-                    .height = 34,
-                    .text = model.bubble_lifetime_text[0..model.bubble_lifetime_text_len],
-                    .on_input = AppUi.inputMsg(.bubble_lifetime_input),
-                    .semantics = .{ .label = "Bubble lifetime in seconds" },
-                }, .{}),
-            }),
-        }),
-        ui.el(.panel, .{ .style_tokens = .{ .background = .surface, .radius = .md } }, .{
-            ui.row(.{ .padding = 12, .cross = .center, .gap = 12 }, .{
-                ui.column(.{ .grow = 1 }, .{
-                    ui.text(.{}, "Rotate pet daily"),
-                    ui.text(.{ .size = .sm, .style_tokens = .{ .foreground = .text_muted } }, "Wake up to a different pet each day"),
-                }),
-                ui.el(.switch_control, .{
-                    .selected = model.rotate_pets,
-                    .on_toggle = .toggle_rotate_pets,
-                    .semantics = .{ .label = "Rotate pet daily" },
-                }, .{}),
-            }),
-        }),
-        // Login items ride SMAppService, so like the Dock row this one
-        // only exists on macOS.
-        if (builtin.os.tag == .macos)
-            ui.el(.panel, .{ .style_tokens = .{ .background = .surface, .radius = .md } }, .{
-                ui.row(.{ .padding = 12, .cross = .center, .gap = 12 }, .{
-                    ui.column(.{ .grow = 1 }, .{
-                        ui.text(.{}, "Launch at login"),
-                        ui.text(.{ .size = .sm, .style_tokens = .{ .foreground = .text_muted } }, "Start Petdex when you log in"),
-                    }),
-                    ui.el(.switch_control, .{
-                        .selected = model.launch_at_login,
-                        .on_toggle = .toggle_launch_at_login,
-                        .semantics = .{ .label = "Launch at login" },
-                    }, .{}),
-                }),
-            })
-        else
-            ui.el(.stack, .{}, .{}),
-        // Dock presence is an AppKit concept; other platforms have no
-        // equivalent toggle to offer, so the row only exists on macOS.
-        if (builtin.os.tag == .macos)
-            ui.el(.panel, .{ .style_tokens = .{ .background = .surface, .radius = .md } }, .{
-                ui.row(.{ .padding = 12, .cross = .center, .gap = 12 }, .{
-                    ui.column(.{ .grow = 1 }, .{
-                        ui.text(.{}, "Hide Dock icon"),
-                        ui.text(.{ .size = .sm, .style_tokens = .{ .foreground = .text_muted } }, "Petdex lives in the menu bar only"),
-                    }),
-                    ui.el(.switch_control, .{
-                        .selected = model.hide_dock,
-                        .on_toggle = .toggle_hide_dock,
-                        .semantics = .{ .label = "Hide Dock icon" },
-                    }, .{}),
-                }),
-            })
-        else
-            ui.el(.stack, .{}, .{}),
-        ui.el(.panel, .{ .style_tokens = .{ .background = .surface, .radius = .md } }, .{
-            ui.row(.{ .padding = 12, .cross = .center, .gap = 12 }, .{
-                ui.column(.{ .grow = 1 }, .{
-                    ui.text(.{}, "Waiting sound"),
-                    ui.text(.{ .size = .sm, .style_tokens = .{ .foreground = .text_muted } }, "Play a chime when your agent is waiting for your input"),
-                }),
-                ui.el(.switch_control, .{
-                    .selected = model.waiting_sound,
-                    .on_toggle = .toggle_waiting_sound,
-                    .semantics = .{ .label = "Waiting sound" },
-                }, .{}),
-            }),
-        }),
-        ui.el(.panel, .{ .style_tokens = .{ .background = .surface, .radius = .md } }, .{
-            ui.row(.{ .padding = 12, .cross = .center, .gap = 12 }, .{
-                ui.column(.{ .grow = 1 }, .{
-                    ui.text(.{}, "Custom pets"),
-                    ui.text(.{ .size = .sm, .style_tokens = .{ .foreground = .text_muted } }, "~/.petdex/pets"),
-                }),
-                ui.button(.{ .on_press = .open_pets_folder }, "Open folder"),
-            }),
-        }),
-        // Trailing spacer: the column's own bottom padding is not part
-        // of the scroll extent, so the last card needs explicit air.
-        ui.el(.stack, .{ .height = 8 }, .{}),
-    })});
-}
 
 /// Keep `~/.petdex/bin/petdex-hook` pointing at the running binary so
 /// agent hooks survive app updates: the hooks reference the stable
