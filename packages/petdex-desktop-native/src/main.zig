@@ -36,6 +36,11 @@ const win_w: f32 = frame_w * max_scale;
 const win_h: f32 = frame_h * max_scale;
 const cols: u64 = 8;
 const sheet_image_id: u64 = 1;
+/// What a first run offers to download. Small, friendly, and already in
+/// the public catalog, so the empty state resolves through the ordinary
+/// install path rather than shipping ~2MB of sprite sheet inside every
+/// binary on every platform.
+const default_pet_slug = "boba";
 
 const app_permissions = [_][]const u8{ native_sdk.security.permission_command, native_sdk.security.permission_view };
 const shell_views = [_]native_sdk.ShellView{
@@ -102,6 +107,7 @@ pub const Msg = union(enum) {
     pet_json_done: native_sdk.EffectExit,
     spritesheet_done: native_sdk.EffectExit,
     dismiss_install_error,
+    install_first_pet,
     noop,
 
     pub const view_unbound = .{ "frame_tick", "poll_tick", "physics_tick", "frame_clock", "cycle_state", "chime_done", "quit_app", "toggle_focus_mode", "shuffle_pet" };
@@ -1577,6 +1583,19 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
         },
         .toggle_pets_expanded => model.pets_expanded = !model.pets_expanded,
         .dismiss_install_error => model.install.error_len = 0,
+        .install_first_pet => {
+            // A fresh install has no pets, so the pet window renders an
+            // empty panel: a grey rectangle with nothing in it and no way
+            // to tell whether Petdex is broken or just unfurnished. This
+            // is the one-click way out, riding the same queue a
+            // `petdex://` deep link uses, so activation after download
+            // takes the identical path.
+            if (model.install.busy()) return;
+            model.install.error_len = 0;
+            _ = model.install.enqueue(default_pet_slug);
+            model.install.activate_when_done = true;
+            startInstallQueue(model, fx);
+        },
         .manifest_done => |exit| {
             if (model.install.phase != .manifest) return;
             // A nonzero curl exit means no usable manifest on disk, so
@@ -1684,10 +1703,24 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
         .settings_closed => model.settings_open = false,
         .close_pet => fx.closeWindow("main"),
         .select_pet => |index| {
-            if (index >= catalog_mod.catalog_len or index == model.active_pet) return;
+            if (index >= catalog_mod.catalog_len) return;
+            // `index == active_pet` is a no-op only once a sheet is up.
+            // On a first run active_pet is 0 and the pet just downloaded
+            // lands at 0 too, so the early return skipped the very
+            // activation the empty state exists to perform.
+            if (index == model.active_pet and model.sheet_loaded) return;
             if (!loadSheetForPet(fx, &catalog[index])) return;
             model.active_pet = index;
             model.frame_index = 0;
+            // First pet on a fresh install: the window was drawing the
+            // empty state, and nothing else flips this back.
+            if (!model.sheet_loaded) {
+                model.sheet_loaded = true;
+                pet_display_name = catalog[index].slice();
+                const n = @min(pet_display_name.len, model.pet_name.len);
+                @memcpy(model.pet_name[0..n], pet_display_name[0..n]);
+                model.pet_name_len = n;
+            }
             // A pick — manual or rotation, same Msg on purpose — is
             // today's pet: the daily rotation leaves it alone until
             // the next day.
@@ -2236,10 +2269,78 @@ fn syncBubbleWindow(model: *const Model, fx: *Effects) void {
     }
 }
 
-pub fn rootView(ui: *AppUi, model: *const Model) AppUi.Node {
-    if (!model.sheet_loaded) {
-        return ui.panel(.{ .width = frame_w, .height = frame_h, .semantics = .{ .label = "No pet installed" } }, .{});
+/// What the pet window shows before there is a pet to draw.
+///
+/// This used to be a bare panel: a grey rectangle with no text and no
+/// action, which reads as a broken app rather than an empty one. The two
+/// ways to get here need different answers, and the code already knew
+/// the difference — it just said so in a debug print nobody sees.
+///
+/// Nothing installed is the first-run case, and it gets a button. The
+/// download rides the same queue a `petdex://` link uses instead of
+/// bundling a sheet into every binary: boba is ~2MB against a 4.5MB
+/// executable, which is a permanent 43% for a state that ends the moment
+/// someone picks a pet.
+///
+/// Pets installed but none decoded is the other case, and on Linux it is
+/// the common one: gdk-pixbuf needs a loader plugin per format and
+/// Ubuntu ships none for webp, so every pet fails while sitting right
+/// there on disk. Offering that user a download sends them in exactly
+/// the wrong direction.
+fn emptyStateView(ui: *AppUi, model: *const Model) AppUi.Node {
+    const has_pets = catalog_mod.catalog_len > 0;
+    // The pet window is 192pt wide, so these have to fit a narrow column
+    // rather than a sentence's worth of room: the first attempt read
+    // "Pets found, none could be drawn. Linux needs webp-pixbuf-loader."
+    // and rendered as an ellipsis. Newlines rather than one long line,
+    // since the label truncates instead of wrapping.
+    const body = if (!has_pets)
+        "No pet yet"
+    else if (builtin.os.tag == .linux)
+        "Pets found,\nnone could\nbe drawn.\n\nLinux needs\nwebp-pixbuf-\nloader."
+    else
+        "Pets found,\nnone could\nbe drawn.\n\nThe sheet may\nbe corrupt.";
+
+    // style_tokens rather than a literal colour: the muted token already
+    // tracks the theme, which is the same reason the settings rows use it.
+    const label = ui.text(.{
+        .size = .sm,
+        .text_alignment = .center,
+        .style_tokens = .{ .foreground = .text_muted },
+    }, body);
+
+    var children: [3]AppUi.Node = undefined;
+    var count: usize = 0;
+    children[count] = label;
+    count += 1;
+    if (!has_pets) {
+        children[count] = ui.button(.{
+            .size = .sm,
+            .variant = .primary,
+            .on_press = Msg.install_first_pet,
+        }, if (model.install.busy()) "Downloading..." else "Get a pet");
+        count += 1;
     }
+    if (model.install.error_len > 0) {
+        // Same literal the settings banner uses: the token set has no
+        // error colour, so matching it keeps the two error surfaces
+        // reading as one thing.
+        var err = ui.text(.{ .size = .sm, .text_alignment = .center }, model.install.errorSlice());
+        err.widget.style.foreground = canvas.Color.rgb8(250, 105, 94);
+        children[count] = err;
+        count += 1;
+    }
+
+    return ui.panel(.{
+        .width = frame_w,
+        .height = frame_h,
+        .padding = 16,
+        .semantics = .{ .label = "No pet installed" },
+    }, .{ui.column(.{ .grow = 1, .main = .center, .cross = .center, .gap = 10 }, children[0..count])});
+}
+
+pub fn rootView(ui: *AppUi, model: *const Model) AppUi.Node {
+    if (!model.sheet_loaded) return emptyStateView(ui, model);
     const w = frame_w * model.scale;
     const h = frame_h * model.scale;
     var node = ui.image(.{
@@ -2630,6 +2731,34 @@ test "one image slot covers every agent" {
     // agent_art is what loadAgentsAtlas walks, so a new AgentKind without
     // artwork would pack short and leave the last agent blank.
     try std.testing.expectEqual(agent_hooks.agent_count, agent_art.len);
+}
+
+test "activating index 0 works before any sheet is loaded" {
+    // Two bugs met here on a first run. `active_pet` starts at 0 and the
+    // first downloaded pet lands at index 0, so an `index == active_pet`
+    // early return skipped the activation the empty state exists to
+    // perform, and `sheet_loaded` never flipped because select_pet
+    // assumed a sheet was already up. Both failed silently: the pet
+    // downloaded to disk and the window kept drawing the empty state.
+    const fresh: Model = .{};
+    try std.testing.expectEqual(@as(u32, 0), fresh.active_pet);
+    try std.testing.expect(!fresh.sheet_loaded);
+    // The guard has to consider both, not just the index.
+    const would_skip_before = 0 == fresh.active_pet;
+    const would_skip_now = 0 == fresh.active_pet and fresh.sheet_loaded;
+    try std.testing.expect(would_skip_before);
+    try std.testing.expect(!would_skip_now);
+}
+
+test "empty-state copy fits the pet window" {
+    // The label truncates rather than wrapping, and the window is 192pt,
+    // so a sentence renders as an ellipsis (which is how the first
+    // attempt shipped). Every line has to stand alone.
+    const longest = "Pets found,\nnone could\nbe drawn.\n\nLinux needs\nwebp-pixbuf-\nloader.";
+    var it = std.mem.splitScalar(u8, longest, '\n');
+    while (it.next()) |line| {
+        try std.testing.expect(line.len <= 14);
+    }
 }
 
 test "bubble text default is its own value, not the range floor" {
