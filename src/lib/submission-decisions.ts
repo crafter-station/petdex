@@ -41,6 +41,34 @@ export function submissionOwnerNotificationHref(input: {
   return "/my-pets";
 }
 
+/**
+ * Whether an admin action leaves the pet's public artifacts (preview,
+ * thumb, stickers) stale, and whether the old slug's copies should go.
+ *
+ * Republishing used to key on a rename alone. Artifacts are derived from
+ * the spritesheet, so approving new art under the same slug left the old
+ * ones live until the 6-hourly backfill happened to notice, which is long
+ * enough for a profile card and its detail page to show different sprites
+ * (#590). Deletion still keys on the slug, because that is the only case
+ * where the old keys are orphaned.
+ */
+export function planPublicArtifacts(input: {
+  action: SubmissionAdminAction;
+  wasApproved: boolean;
+  isApproved: boolean;
+  slugChanged: boolean;
+  spritesheetChanged: boolean;
+}): { republish: boolean; deleteOld: boolean } {
+  return {
+    republish:
+      input.action === "edit" &&
+      input.wasApproved &&
+      input.isApproved &&
+      (input.slugChanged || input.spritesheetChanged),
+    deleteOld: input.wasApproved && (!input.isApproved || input.slugChanged),
+  };
+}
+
 export async function applySubmissionAction(
   id: string,
   body: SubmissionActionInput,
@@ -115,6 +143,10 @@ export async function applySubmissionAction(
     columns: {
       slug: true,
       status: true,
+      // Read to decide whether public artifacts are stale: a sprite swap
+      // that keeps the same slug still invalidates preview, thumb and
+      // stickers, and the slug comparison alone would miss it (#590).
+      spritesheetUrl: true,
     },
     where: eq(schema.submittedPets.id, id),
   });
@@ -136,20 +168,17 @@ export async function applySubmissionAction(
   if (body.action === "approve" && !options.skipSideEffects) {
     row = await runPostApprovalEffects(row, actor, db);
   }
-  if (
-    body.action === "edit" &&
-    current.status === "approved" &&
-    row.status === "approved" &&
-    current.slug !== row.slug &&
-    !options.skipSideEffects
-  ) {
+  const artifactPlan = planPublicArtifacts({
+    action: body.action,
+    wasApproved: current.status === "approved",
+    isApproved: row.status === "approved",
+    slugChanged: current.slug !== row.slug,
+    spritesheetChanged: current.spritesheetUrl !== row.spritesheetUrl,
+  });
+  if (artifactPlan.republish && !options.skipSideEffects) {
     await publishApprovedPublicArtifacts(row, actor);
   }
-  if (
-    current.status === "approved" &&
-    (row.status !== "approved" || current.slug !== row.slug) &&
-    !options.skipSideEffects
-  ) {
+  if (artifactPlan.deleteOld && !options.skipSideEffects) {
     await deletePetPublicArtifacts(current.slug, actor);
   }
 

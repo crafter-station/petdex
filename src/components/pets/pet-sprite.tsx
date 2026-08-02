@@ -44,6 +44,38 @@ type PetSpriteProps = {
 
 const ATLAS_SHEET_WIDTH = 1536;
 
+/**
+ * Which sprite to draw, and how, once the preview's success or failure is
+ * known. Pure so it can be tested without a DOM: the component owns the
+ * probe and the state, this owns the decision.
+ */
+export function resolveSprite({
+  preferredSrc,
+  fallbackSrc,
+  failedSrc,
+  preferredLayout,
+  cycleStates,
+}: {
+  preferredSrc: string;
+  fallbackSrc?: string;
+  failedSrc: string | null;
+  preferredLayout: PetSpriteLayout;
+  cycleStates: boolean;
+}) {
+  const useFallback = fallbackSrc != null && failedSrc === preferredSrc;
+  return {
+    useFallback,
+    src: useFallback ? fallbackSrc : preferredSrc,
+    layout: useFallback ? ("atlas" as const) : preferredLayout,
+    // Callers decide `cycleStates` from whether a preview URL exists, before
+    // anyone knows the preview will 404 (pet-gallery.tsx passes
+    // `cycleStates={!previewSrc}`). A card that falls back is in the same
+    // position as one that never had a preview, so it cycles too — otherwise
+    // recovered cards all freeze on `idle` while their neighbours vary.
+    cycleStates: cycleStates || useFallback,
+  };
+}
+
 function PetSpriteImpl({
   src: preferredSrc,
   state = "idle",
@@ -51,13 +83,17 @@ function PetSpriteImpl({
   label,
   className = "",
   layout: preferredLayout = "atlas",
-  cycleStates = false,
+  cycleStates: preferredCycleStates = false,
   fallbackSrc,
 }: PetSpriteProps) {
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
-  const useFallback = fallbackSrc != null && failedSrc === preferredSrc;
-  const src = useFallback ? fallbackSrc : preferredSrc;
-  const layout = useFallback ? "atlas" : preferredLayout;
+  const { useFallback, src, layout, cycleStates } = resolveSprite({
+    preferredSrc,
+    fallbackSrc,
+    failedSrc,
+    preferredLayout,
+    cycleStates: preferredCycleStates,
+  });
 
   const fixedAnimation =
     petStates.find((item) => item.id === state) ?? petStates[0];
