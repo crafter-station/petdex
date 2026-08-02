@@ -86,7 +86,11 @@ const PLATFORM_ASSET_PATTERNS: Record<string, RegExp[]> = {
     /^petdex-desktop-darwin-arm64(\.zip)?$/, // bare binary, legacy CLI flow
     /^petdex-desktop-native-darwin-arm64\.zip$/, // native rewrite bundle
   ],
-  "darwin-x64": [/^Petdex-x64\.dmg$/, /^petdex-desktop-darwin-x64(\.zip)?$/],
+  "darwin-x64": [
+    /^Petdex-x64\.dmg$/,
+    /^petdex-desktop-darwin-x64(\.zip)?$/,
+    /^petdex-desktop-native-darwin-x64\.zip$/, // native rewrite bundle
+  ],
   // The native rewrite is the only build that produces a Linux binary:
   // the WebView desktop never had a Linux release job.
   "linux-x64": [

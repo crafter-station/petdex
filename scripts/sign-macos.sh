@@ -11,11 +11,22 @@
 #   APPLE_API_KEY, APPLE_API_KEY_ID, APPLE_API_ISSUER, SIGN_IDENTITY
 #
 # Usage:
-#   scripts/sign-macos.sh [output-dir]
+#   scripts/sign-macos.sh [output-dir] [arm64|x64]
 #   gh release upload desktop-vX.Y.Z <output-dir>/*.zip --clobber
 set -euo pipefail
 
 OUT="${1:-dist/macos}"
+# Which Mac this build runs on. arm64 by default so the common case is
+# unchanged; pass x64 for the Intel build (#609). Cross-compiled from
+# either host: Zig does not need an Intel machine, but the signature and
+# notarization still come from this keychain, so both architectures ship
+# from the same workstation run.
+ARCH="${2:-arm64}"
+case "$ARCH" in
+  arm64) ZIG_TARGET="aarch64-macos" ;;
+  x64)   ZIG_TARGET="x86_64-macos" ;;
+  *) echo "unknown arch: $ARCH (expected arm64 or x64)" >&2; exit 1 ;;
+esac
 PKG="packages/petdex-desktop-native"
 CREDS="$HOME/.config/petdex-apple/env"
 
@@ -32,10 +43,17 @@ KEY="$APPLE_API_KEY"
 : "${NATIVE_SDK_PATH:?set NATIVE_SDK_PATH to the pinned SDK checkout}"
 
 mkdir -p "$OUT"
-rm -rf "$OUT/Petdex.app" "$OUT"/*.zip
+# Only this arch's outputs: a second run for the other arch must not
+# delete what the first one produced.
+rm -rf "$OUT/Petdex.app" "$OUT/petdex-desktop-darwin-$ARCH.zip" \
+  "$OUT/petdex-desktop-native-darwin-$ARCH.zip" "$OUT/Petdex-$ARCH.dmg"
 
-echo "==> build"
-(cd "$PKG" && "$NATIVE_CLI" build)
+echo "==> build ($ARCH)"
+# -Dcpu=baseline for the same reason the release workflow uses it: Zig
+# targets the host CPU otherwise, and a Mac newer than the user's would
+# emit instructions their machine cannot decode (#604 was exactly this
+# on Windows).
+(cd "$PKG" && "$NATIVE_CLI" build -Dtarget="$ZIG_TARGET" -Dcpu=baseline)
 
 echo "==> package + sign"
 # The bundle must be named Petdex.app: the name is baked into the
@@ -71,7 +89,7 @@ echo "==> dmg"
 # macOS App Translocation: the app runs from a random read-only path
 # under /var/folders, so anything it writes that points at its own
 # binary (the agent hook symlink, for one) breaks on the next boot.
-DMG="$OUT/Petdex-arm64.dmg"
+DMG="$OUT/Petdex-$ARCH.dmg"
 STAGE="$OUT/dmg-stage"
 rm -rf "$STAGE" "$DMG"
 mkdir -p "$STAGE"
@@ -94,8 +112,8 @@ echo "==> stage release assets"
 # is the name existing installs update through; shipping a bare
 # executable under it does not work, since a lone Mach-O outside its
 # bundle fails Gatekeeper the same way an unsigned app does.
-ditto -c -k --keepParent "$OUT/Petdex.app" "$OUT/petdex-desktop-native-darwin-arm64.zip"
-cp "$OUT/petdex-desktop-native-darwin-arm64.zip" "$OUT/petdex-desktop-darwin-arm64.zip"
+ditto -c -k --keepParent "$OUT/Petdex.app" "$OUT/petdex-desktop-native-darwin-$ARCH.zip"
+cp "$OUT/petdex-desktop-native-darwin-$ARCH.zip" "$OUT/petdex-desktop-darwin-$ARCH.zip"
 
 ls -lh "$OUT"/*.zip "$DMG"
 echo
