@@ -835,14 +835,14 @@ async function cmdEdit(args: string[]): Promise<void> {
   }
 
   s.start("Submitting edit");
-  const editRes = await fetch(`${PETDEX_URL}/api/my-pets/${petId}/edit`, {
+  const editRes = await fetch(`${PETDEX_URL}/api/cli/edit`, {
     method: "PATCH",
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
       Origin: PETDEX_URL,
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ ...body, petId }),
   });
 
   if (!editRes.ok) {

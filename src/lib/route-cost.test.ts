@@ -33,6 +33,10 @@ describe("route cost helpers", () => {
     );
   });
 
+  it("keeps the CLI edit endpoint in its own static bucket", () => {
+    expect(normalizeRouteCostPath("/api/cli/edit")).toBe("/api/cli/edit");
+  });
+
   it("keeps static API routes ahead of dynamic patterns", () => {
     expect(normalizeRouteCostPath("/en/collections/opengraph-image")).toBe(
       "/collections/opengraph-image",
