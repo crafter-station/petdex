@@ -2,8 +2,8 @@
  * Petdex MCP Server — stdio-based Model Context Protocol server for Antigravity.
  *
  * Antigravity connects to this via its MCP Servers panel. The agent calls
- * tools like `petdex_set_state` during its work, which POST to the petdex
- * sidecar for the desktop mascot to display.
+ * tools like `petdex_set_state` during its work, which POST to the Petdex
+ * desktop hook server for the mascot to display.
  *
  * Protocol: JSON-RPC 2.0 over stdin/stdout (standard MCP transport).
  * No external MCP SDK dependency — the surface is small enough to inline.
@@ -17,9 +17,9 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 
-const SIDECAR_URL = "http://127.0.0.1:7777";
-const STATE_URL = `${SIDECAR_URL}/state`;
-const BUBBLE_URL = `${SIDECAR_URL}/bubble`;
+const HOOK_SERVER_URL = "http://127.0.0.1:7777";
+const STATE_URL = `${HOOK_SERVER_URL}/state`;
+const BUBBLE_URL = `${HOOK_SERVER_URL}/bubble`;
 const TOKEN_PATH = path.join(homedir(), ".petdex", "runtime", "update-token");
 const KILLSWITCH_PATH = path.join(
   homedir(),
@@ -248,7 +248,7 @@ async function handleRequest(req: JsonRpcRequest): Promise<void> {
                   type: "text",
                   text: result.ok
                     ? `Pet state set to "${state}"`
-                    : "Sidecar unreachable — is petdex-desktop running?",
+                    : "Desktop hook server unreachable; is Petdex Desktop running?",
                 },
               ],
             },
@@ -277,7 +277,7 @@ async function handleRequest(req: JsonRpcRequest): Promise<void> {
                   type: "text",
                   text: result.ok
                     ? `Bubble shown: "${text}"`
-                    : "Sidecar unreachable — is petdex-desktop running?",
+                    : "Desktop hook server unreachable; is Petdex Desktop running?",
                 },
               ],
             },
@@ -286,13 +286,13 @@ async function handleRequest(req: JsonRpcRequest): Promise<void> {
         }
 
         case "petdex_status": {
-          // Probe the live sidecar health endpoint instead of just checking
+          // Probe the live hook server health endpoint instead of just checking
           // token presence — the token file persists across restarts and is
           // not removed on shutdown, so token presence alone is not a reliable
           // indicator of whether the desktop is currently running.
           let reachable = false;
           try {
-            const res = await fetch(`${SIDECAR_URL}/health`, {
+            const res = await fetch(`${HOOK_SERVER_URL}/health`, {
               signal: AbortSignal.timeout(500),
             });
             reachable = res.ok;

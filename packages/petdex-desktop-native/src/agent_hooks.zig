@@ -714,7 +714,7 @@ pub fn installKimiCode(allocator: std.mem.Allocator, home: []const u8) bool {
 }
 
 /// opencode has no hooks: it loads a self-contained JS plugin that
-/// posts straight to the sidecar from inside its own runtime. Install
+/// posts straight to the in-process hook server from inside its own runtime. Install
 /// is writing one file (a build-time snapshot of the CLI's template).
 const opencode_plugin = @embedFile("assets/opencode-plugin.js");
 

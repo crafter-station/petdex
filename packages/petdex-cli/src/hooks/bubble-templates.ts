@@ -62,7 +62,7 @@ function basename(path: string): string {
   return idx >= 0 ? path.slice(idx + 1) : path;
 }
 
-/** Truncate to N chars with ellipsis so no bubble overflows the WebView. */
+/** Truncate to N chars with ellipsis so no bubble overflows the desktop app. */
 function clip(text: string, max = 40): string {
   if (text.length <= max) return text;
   return `${text.slice(0, max - 1)}…`;
@@ -76,7 +76,7 @@ export function formatBubble(event: BubbleEvent): string {
   const { toolName, phase, toolInput } = event;
 
   // A tool that failed. The name only — never the payload's `error` string:
-  // the sidecar's reader stops at the first `"` or `\` and decodes neither,
+  // the hook server's reader stops at the first `"` or `\` and decodes neither,
   // and error text routinely carries both, while tool_name is a controlled
   // identifier from the agent's own registry.
   if (phase === "failed") {
@@ -120,7 +120,7 @@ export function formatBubble(event: BubbleEvent): string {
       const pattern = fieldFrom(toolInput, "pattern");
       if (pattern) {
         // Curly quotes keep this in parity with the in-app runner, where
-        // an ASCII `"` truncates the bubble on the way to the sidecar.
+        // an ASCII `"` truncates the bubble on the way to the hook server.
         return past
           ? `Searched “${clip(pattern, 28)}”`
           : `Searching “${clip(pattern, 28)}”`;

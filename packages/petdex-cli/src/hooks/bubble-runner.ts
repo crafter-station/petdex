@@ -1,7 +1,7 @@
 /**
  * `petdex bubble <event>` — invoked from agent hooks on every tool
  * lifecycle event. Reads the agent's hook payload from stdin, formats
- * a human bubble via templates, POSTs to the sidecar.
+ * a human bubble via templates, POSTs to the desktop hook server.
  *
  * Hot path: this runs 20-50× per active session. We:
  *   - retain a bounded stdin prefix while draining the rest, so oversized
@@ -12,8 +12,8 @@
  *   - use a 300ms fetch timeout (matches /state hook timing)
  *
  * Events:
- *   pre <tool|user-prompt|notification>   — sidecar receives "running"-phase bubble
- *   post <tool>                           — sidecar receives "done"-phase bubble
+ *   pre <tool|user-prompt|notification>   — hook server receives "running"-phase bubble
+ *   post <tool>                           — hook server receives "done"-phase bubble
  *   stop                                  — session.end bubble
  */
 
@@ -39,9 +39,9 @@ import { type BubbleEvent, formatBubble } from "./bubble-templates";
 const RUNTIME_DIR = join(homedir(), ".petdex", "runtime");
 const TOKEN_PATH = join(RUNTIME_DIR, "update-token");
 const KILLSWITCH_PATH = join(RUNTIME_DIR, "hooks-disabled");
-const SIDECAR_BASE = "http://127.0.0.1:7777";
-const SIDECAR_BUBBLE_URL = `${SIDECAR_BASE}/bubble`;
-const SIDECAR_STATE_URL = `${SIDECAR_BASE}/state`;
+const HOOK_SERVER_BASE = "http://127.0.0.1:7777";
+const HOOK_SERVER_BUBBLE_URL = `${HOOK_SERVER_BASE}/bubble`;
+const HOOK_SERVER_STATE_URL = `${HOOK_SERVER_BASE}/state`;
 const STDIN_CAP = 64 * 1024;
 const SESSIONS_DIR = join(RUNTIME_DIR, "sessions");
 const TITLE_MAX = 60;
@@ -444,7 +444,7 @@ async function postJson(
       signal: controller.signal,
     });
   } catch {
-    // Sidecar offline / aborted: stay silent. The agent must never
+    // Hook server offline / aborted: stay silent. The agent must never
     // see this fail.
   } finally {
     clearTimeout(timer);
@@ -504,7 +504,7 @@ export async function runBubble(args: string[]): Promise<void> {
   const token = readToken();
   if (!token) return;
 
-  // Fire both POSTs in parallel — they hit the same sidecar via
+  // Fire both POSTs in parallel — they hit the same hook server via
   // localhost, the rate limiter shares a budget, and we don't want
   // bubble latency to dominate state latency or vice versa.
   const tasks: Promise<unknown>[] = [];
@@ -526,13 +526,13 @@ export async function runBubble(args: string[]): Promise<void> {
       agent_source: agentSource,
     };
     if (title) body.title = title;
-    tasks.push(postJson(SIDECAR_BUBBLE_URL, body, token));
+    tasks.push(postJson(HOOK_SERVER_BUBBLE_URL, body, token));
   }
   if (state) {
     const durationMs = phase === "tool-failure" ? FAILED_DURATION_MS : 0;
     tasks.push(
       postJson(
-        SIDECAR_STATE_URL,
+        HOOK_SERVER_STATE_URL,
         stateBody(state, durationMs, agentSource),
         token,
       ),

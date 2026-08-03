@@ -15,8 +15,8 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-const SIDECAR_URL = "http://127.0.0.1:7777/state";
-const SIDECAR_BUBBLE_URL = "http://127.0.0.1:7777/bubble";
+const HOOK_SERVER_URL = "http://127.0.0.1:7777/state";
+const HOOK_SERVER_BUBBLE_URL = "http://127.0.0.1:7777/bubble";
 const RUNTIME_DIR = join(homedir(), ".petdex", "runtime");
 const TOKEN_PATH = join(RUNTIME_DIR, "update-token");
 const KILLSWITCH_PATH = join(RUNTIME_DIR, "hooks-disabled");
@@ -53,7 +53,7 @@ async function postJson(
       signal: AbortSignal.timeout(300),
     });
   } catch {
-    // sidecar offline: stay quiet, the agent shouldn't notice.
+    // Hook server offline: stay quiet, the agent should not notice.
   }
 }
 
@@ -76,7 +76,7 @@ async function notify({
   // one existsSync and nothing else.
   if (existsSync(KILLSWITCH_PATH)) return;
   const token = await readToken();
-  if (!token) return; // sidecar offline or missing — silently no-op
+  if (!token) return; // Hook server offline or missing; silently no-op.
   const stateBody: Record<string, unknown> =
     duration != null
       ? { state, duration, agent_source: AGENT_SOURCE }
@@ -88,8 +88,10 @@ async function notify({
   if (title) bubbleBody.title = title;
   if (busy !== undefined) bubbleBody.busy = busy;
   await Promise.all([
-    postJson(SIDECAR_URL, stateBody, token),
-    text ? postJson(SIDECAR_BUBBLE_URL, bubbleBody, token) : Promise.resolve(),
+    postJson(HOOK_SERVER_URL, stateBody, token),
+    text
+      ? postJson(HOOK_SERVER_BUBBLE_URL, bubbleBody, token)
+      : Promise.resolve(),
   ]);
 }
 
@@ -124,7 +126,7 @@ function describeTool(
       return `${done ? "Edited" : "Editing"} ${clip(field("file_path") ?? field("path") ?? "a file", 28)}`;
     case "grep": {
       const pattern = field("pattern");
-      // Typographic quotes, not ASCII: the sidecar reads the bubble body
+      // Typographic quotes, not ASCII: the hook server reads the bubble body
       // back with a scanner that stops at a bare quote (#628).
       return pattern
         ? `${done ? "Searched" : "Searching"} “${clip(pattern, 24)}”`
@@ -242,7 +244,7 @@ export default function petdex(pi: ExtensionAPI): void {
       ctx.ui.notify(
         token
           ? "Petdex is connected."
-          : "Petdex desktop is not running (no sidecar token).",
+          : "Petdex Desktop is not running (no hook server token).",
         token ? "info" : "warning",
       );
     },

@@ -9,6 +9,8 @@
 #
 # Needs ~/.config/petdex-apple/env with:
 #   APPLE_API_KEY, APPLE_API_KEY_ID, APPLE_API_ISSUER, SIGN_IDENTITY
+# And the caller must export NATIVE_CLI and NATIVE_SDK_PATH for the pinned
+# Native SDK used by the matching CI build.
 #
 # Usage:
 #   scripts/sign-macos.sh [output-dir] [arm64|x64]
