@@ -200,6 +200,36 @@ async function bootstrap(client: PGlite): Promise<void> {
       "created_at" timestamp with time zone NOT NULL DEFAULT now(),
       "updated_at" timestamp with time zone NOT NULL DEFAULT now()
     )`,
+    `CREATE TABLE IF NOT EXISTS "pet_export_approvals" (
+      "pet_id" text NOT NULL REFERENCES "submitted_pets"("id") ON DELETE CASCADE,
+      "scope" text NOT NULL DEFAULT 'stickers',
+      "status" text NOT NULL,
+      "source_sha256" text NOT NULL,
+      "policy_version" text NOT NULL,
+      "reviewed_by" text NOT NULL,
+      "reason" text NOT NULL,
+      "reviewed_at" timestamp with time zone NOT NULL DEFAULT now(),
+      "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+      "updated_at" timestamp with time zone NOT NULL DEFAULT now(),
+      PRIMARY KEY ("pet_id", "scope")
+    )`,
+    `CREATE TABLE IF NOT EXISTS "pet_sticker_publications" (
+      "pet_id" text PRIMARY KEY REFERENCES "submitted_pets"("id") ON DELETE CASCADE,
+      "source_sha256" text NOT NULL,
+      "artifact_version" text NOT NULL,
+      "states" jsonb NOT NULL,
+      "formats" jsonb NOT NULL,
+      "treatments" jsonb NOT NULL,
+      "object_count" integer NOT NULL,
+      "total_bytes" integer NOT NULL,
+      "manifest_sha256" text NOT NULL,
+      "status" text NOT NULL,
+      "cleanup_status" text NOT NULL DEFAULT 'not_required',
+      "cleanup_error" text,
+      "published_at" timestamp with time zone NOT NULL DEFAULT now(),
+      "revoked_at" timestamp with time zone,
+      "updated_at" timestamp with time zone NOT NULL DEFAULT now()
+    )`,
     `CREATE TABLE IF NOT EXISTS "pet_likes" (
       "user_id" text NOT NULL,
       "pet_slug" text NOT NULL,
