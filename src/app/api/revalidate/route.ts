@@ -7,7 +7,10 @@ import {
   revalidatePetTags,
 } from "@/lib/db/cached-aggregates";
 import { petPreviewUrl } from "@/lib/pet-preview";
-import { petStickerUrl } from "@/lib/pet-sticker-artifacts";
+import {
+  legacyPetStickerRedirectUrls,
+  petStickerUrl,
+} from "@/lib/pet-sticker-artifacts";
 import { petThumbnailUrl } from "@/lib/pet-thumbnail";
 
 import { locales } from "@/i18n/config";
@@ -108,6 +111,7 @@ async function purgeCloudflarePetUrls(slugs: string[]): Promise<void> {
     petPreviewUrl(slug),
     petThumbnailUrl(slug),
     petStickerUrl(slug),
+    ...legacyPetStickerRedirectUrls(slug),
   ]);
 
   try {

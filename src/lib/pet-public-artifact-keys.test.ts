@@ -3,6 +3,7 @@ import { describe, expect, it } from "bun:test";
 import { petPreviewKey } from "@/lib/pet-preview";
 import { petPublicArtifactKeys } from "@/lib/pet-public-artifact-keys";
 import {
+  legacyPetStickerRedirectUrls,
   PET_STICKER_FORMATS,
   PET_STICKER_STATES,
   PET_STICKER_TREATMENTS,
@@ -29,5 +30,13 @@ describe("pet public artifact keys", () => {
     }
 
     expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it("covers every legacy immutable sticker redirect", () => {
+    expect(legacyPetStickerRedirectUrls("claude-crab")).toEqual([
+      "https://petdex.dev/api/pets/claude-crab/sticker",
+      "https://petdex.dev/api/pets/claude-crab/sticker?format=gif",
+      "https://petdex.dev/api/pets/claude-crab/sticker?format=png",
+    ]);
   });
 });

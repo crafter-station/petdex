@@ -387,6 +387,5 @@ function stickerAssetUrl(
 }
 
 function downloadUrl(item: StickerDeckItem, demo: boolean): string {
-  const url = stickerAssetUrl(item, "webp", demo);
-  return demo ? url : `${url}&download=1`;
+  return stickerAssetUrl(item, "webp", demo);
 }

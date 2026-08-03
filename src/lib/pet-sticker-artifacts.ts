@@ -6,8 +6,6 @@ export type PetStickerTreatment = "clean" | "outline";
 
 export const PET_STICKER_CACHE_HEADER =
   "public, max-age=31536000, s-maxage=31536000, immutable";
-export const PET_STICKER_REDIRECT_CACHE_HEADER =
-  "public, max-age=86400, s-maxage=604800";
 export const PET_STICKER_UNAVAILABLE_CACHE_HEADER =
   "public, max-age=300, s-maxage=300";
 
@@ -107,6 +105,11 @@ export function petStickerFilename(
   const suffix = state === "idle" ? "" : `-${state}`;
   const treatmentSuffix = treatment === "outline" ? "-outline" : "";
   return `${slug}${suffix}${treatmentSuffix}-sticker.${format}`;
+}
+
+export function legacyPetStickerRedirectUrls(slug: string): string[] {
+  const base = `https://petdex.dev/api/pets/${slug}/sticker`;
+  return [base, `${base}?format=gif`, `${base}?format=png`];
 }
 
 export function petStickerPackKey(slug: string): string {

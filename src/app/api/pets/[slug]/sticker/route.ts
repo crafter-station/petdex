@@ -5,7 +5,6 @@ import {
   parseExactPetStickerFormat,
   parseExactPetStickerState,
   parseExactPetStickerTreatment,
-  petStickerFilename,
   petStickerUrl,
 } from "@/lib/pet-sticker-artifacts";
 import { getStickerArtifactAccess } from "@/lib/sticker-export";
@@ -52,9 +51,5 @@ export async function GET(
     { status: 307 },
   );
   response.headers.set("cache-control", "no-store");
-  response.headers.set(
-    "content-disposition",
-    `${url.searchParams.get("download") === "1" ? "attachment" : "inline"}; filename="${petStickerFilename(access.slug, state, format, treatment)}"`,
-  );
   return response;
 }
