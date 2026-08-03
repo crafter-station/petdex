@@ -1,5 +1,6 @@
 import * as BunTest from "bun:test";
 
+import { R2_PUBLIC_BASE } from "@/lib/r2-public-url";
 import type { StickerArtifactAccess } from "@/lib/sticker-export";
 
 const { beforeEach, describe, expect, it } = BunTest;
@@ -84,7 +85,7 @@ describe("GET /api/pets/[slug]/sticker", () => {
     expect(response.status).toBe(307);
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(response.headers.get("location")).toBe(
-      "https://assets.petdex.dev/pets/claude-crab/stickers/whatsapp/waiting-outline.webp",
+      `${R2_PUBLIC_BASE}/pets/claude-crab/stickers/whatsapp/waiting-outline.webp`,
     );
     expect(calls).toEqual([
       ["claude-crab", "waiting", "webp", "outline", "whatsapp"],

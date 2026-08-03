@@ -43,8 +43,11 @@ describe("pet public artifact keys", () => {
   it("covers every legacy immutable sticker redirect", () => {
     expect(legacyPetStickerRedirectUrls("claude-crab")).toEqual([
       "https://petdex.dev/api/pets/claude-crab/sticker",
+      "https://petdex.dev/api/pets/claude-crab/sticker?download=1",
       "https://petdex.dev/api/pets/claude-crab/sticker?format=gif",
+      "https://petdex.dev/api/pets/claude-crab/sticker?format=gif&download=1",
       "https://petdex.dev/api/pets/claude-crab/sticker?format=png",
+      "https://petdex.dev/api/pets/claude-crab/sticker?format=png&download=1",
     ]);
   });
 

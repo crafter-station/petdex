@@ -6,7 +6,6 @@ import {
   PutObjectCommand,
 } from "@aws-sdk/client-s3";
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
-import sharp from "sharp";
 
 import { db, schema } from "@/lib/db/client";
 import type { PetStateId } from "@/lib/pet-states";
@@ -35,7 +34,6 @@ import {
   stickerFormatsForProfile,
 } from "@/lib/sticker-export-policy";
 import {
-  applyStickerOutline,
   renderSticker,
   renderWhatsAppTray,
   STICKER_SIZES,
@@ -463,7 +461,7 @@ async function buildArtifact(
     };
   }
 
-  const sticker = await renderStickerWithFallback(source, ref);
+  const sticker = await renderStickerArtifact(source, ref);
   return {
     body: sticker.buffer,
     contentType: sticker.contentType,
@@ -478,67 +476,23 @@ async function buildArtifact(
   };
 }
 
-async function renderStickerWithFallback(
+async function renderStickerArtifact(
   source: Buffer,
   ref: Extract<ArtifactRef, { kind: "sticker" }>,
 ) {
-  try {
-    const output = await renderSticker(source, {
-      state: ref.state,
-      format: ref.format,
-      treatment: ref.treatment,
-      size:
-        ref.profile === "whatsapp"
-          ? STICKER_SIZES.whatsapp
-          : STICKER_SIZES.default,
-    });
-    if (ref.profile === "whatsapp") {
-      await assertWhatsAppSticker(output.buffer);
-    }
-    return output;
-  } catch (error) {
-    if (
-      ref.profile === "whatsapp" ||
-      ref.format === "gif" ||
-      !isExtractAreaError(error)
-    ) {
-      throw error;
-    }
-    const size = STICKER_SIZES.default;
-    const raw = await sharp(source)
-      .extract({ left: 0, top: 0, width: 192, height: 208 })
-      .resize(size, size, {
-        fit: "contain",
-        kernel: "nearest",
-        background: { r: 0, g: 0, b: 0, alpha: 0 },
-      })
-      .ensureAlpha()
-      .raw()
-      .toBuffer();
-    const treated =
-      ref.treatment === "outline"
-        ? applyStickerOutline(
-            raw,
-            size,
-            size,
-            Math.max(2, Math.round(size / 48)),
-          )
-        : raw;
-    const image = sharp(treated, {
-      raw: { width: size, height: size, channels: 4 },
-    });
-    const buffer =
-      ref.format === "png"
-        ? await image.png({ compressionLevel: 9 }).toBuffer()
-        : await image.webp({ quality: 80, effort: 4 }).toBuffer();
-    return {
-      buffer,
-      contentType:
-        ref.format === "png" ? ("image/png" as const) : ("image/webp" as const),
-      isAnimated: false,
-      frameCount: 1,
-    };
+  const output = await renderSticker(source, {
+    state: ref.state,
+    format: ref.format,
+    treatment: ref.treatment,
+    size:
+      ref.profile === "whatsapp"
+        ? STICKER_SIZES.whatsapp
+        : STICKER_SIZES.default,
+  });
+  if (ref.profile === "whatsapp") {
+    await assertWhatsAppSticker(output.buffer);
   }
+  return output;
 }
 
 async function getPublishablePets(collectionSlug: string | null) {
@@ -786,20 +740,23 @@ async function notifyStickerRevalidation(slugs: string[]): Promise<void> {
   const secret = process.env.PETDEX_REVALIDATE_SECRET;
   if (!secret) throw new Error("PETDEX_REVALIDATE_SECRET is required");
   const base = process.env.PETDEX_URL?.trim() || "https://petdex.dev";
-  const response = await fetch(`${base}/api/revalidate`, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${secret}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      slugs,
-      tags: slugs.map((slug) => `sticker:${slug}`),
-    }),
-    signal: AbortSignal.timeout(15_000),
-  });
-  if (!response.ok) {
-    throw new Error(`petdex revalidation failed ${response.status}`);
+  for (let index = 0; index < slugs.length; index += 100) {
+    const batch = slugs.slice(index, index + 100);
+    const response = await fetch(`${base}/api/revalidate`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${secret}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        slugs: batch,
+        tags: batch.map((slug) => `sticker:${slug}`),
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) {
+      throw new Error(`petdex revalidation failed ${response.status}`);
+    }
   }
   console.log(`revalidated ${slugs.length} pets`);
 }
@@ -818,8 +775,4 @@ function isMissingObjectError(error: unknown): boolean {
 function errorReason(error: unknown): string {
   if (error instanceof Error) return error.message;
   return String(error);
-}
-
-function isExtractAreaError(error: unknown): boolean {
-  return error instanceof Error && error.message.includes("extract_area");
 }

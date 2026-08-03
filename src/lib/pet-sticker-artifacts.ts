@@ -129,7 +129,14 @@ export function petStickerFilename(
 
 export function legacyPetStickerRedirectUrls(slug: string): string[] {
   const base = `https://petdex.dev/api/pets/${slug}/sticker`;
-  return [base, `${base}?format=gif`, `${base}?format=png`];
+  return [
+    base,
+    `${base}?download=1`,
+    `${base}?format=gif`,
+    `${base}?format=gif&download=1`,
+    `${base}?format=png`,
+    `${base}?format=png&download=1`,
+  ];
 }
 
 export function petStickerTrayKey(slug: string): string {
