@@ -283,6 +283,7 @@ async function publishTask(task: StickerTask): Promise<PublishResult> {
           Metadata: {
             "petdex-slug": task.slug,
             "petdex-source-sha256": sourceSha256,
+            "petdex-artifact-version": STICKER_ARTIFACT_VERSION,
             "petdex-sha256": artifact.sha256,
           },
         }),
@@ -338,6 +339,11 @@ async function finalizeReactionPublication(
       );
       if (head.Metadata?.["petdex-source-sha256"] !== task.sourceSha256) {
         throw new Error(`stale object ${ref.key}`);
+      }
+      if (
+        head.Metadata?.["petdex-artifact-version"] !== STICKER_ARTIFACT_VERSION
+      ) {
+        throw new Error(`outdated object ${ref.key}`);
       }
       const sha256 = head.Metadata?.["petdex-sha256"];
       if (!sha256) throw new Error(`missing artifact hash ${ref.key}`);
@@ -639,7 +645,10 @@ async function r2ObjectIsCurrent(
     const head = await r2.send(
       new HeadObjectCommand({ Bucket: R2_BUCKET, Key: key }),
     );
-    return head.Metadata?.["petdex-source-sha256"] === sourceSha256;
+    return (
+      head.Metadata?.["petdex-source-sha256"] === sourceSha256 &&
+      head.Metadata?.["petdex-artifact-version"] === STICKER_ARTIFACT_VERSION
+    );
   } catch (error) {
     if (isMissingObjectError(error)) return false;
     throw error;
