@@ -18,6 +18,7 @@ import {
   type PetStickerFormat,
   type PetStickerProfile,
   petStickerFilename,
+  petStickerUrl,
 } from "@/lib/pet-sticker-artifacts";
 import {
   parseStickerDeck,
@@ -422,11 +423,5 @@ function stickerAssetUrl(
       profile,
     )}`;
   }
-  const params = new URLSearchParams({
-    state: item.state,
-    format,
-    treatment: item.treatment,
-  });
-  if (profile === "whatsapp") params.set("profile", profile);
-  return `/api/pets/${item.pet}/sticker?${params.toString()}`;
+  return petStickerUrl(item.pet, item.state, format, item.treatment, profile);
 }

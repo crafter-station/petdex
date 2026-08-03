@@ -236,6 +236,7 @@ if (mode === "apply") {
     const finalizeFailures = finalized.filter(
       (result): result is Extract<PublishResult, { ok: false }> => !result.ok,
     );
+    for (const result of finalizeFailures) failedSlugs.add(result.slug);
     console.log(
       `finalized publications ${finalized.length - finalizeFailures.length}`,
     );
@@ -249,6 +250,11 @@ if (mode === "apply") {
     ) {
       process.exit(1);
     }
+    await notifyStickerRevalidation(
+      validTasks
+        .filter((task) => !failedSlugs.has(task.slug))
+        .map((task) => task.slug),
+    );
   } else {
     if (failed.length > 0) process.exit(1);
     await purgeCdnUrls(
@@ -764,12 +770,38 @@ async function purgeCdnUrls(urls: string[], required = false): Promise<void> {
         signal: AbortSignal.timeout(10_000),
       },
     );
-    if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      success?: unknown;
+    } | null;
+    if (!response.ok || body?.success !== true) {
       throw new Error(`cloudflare purge failed ${response.status}`);
     }
     purged += batch.length;
   }
   console.log(`cloudflare purged ${purged}`);
+}
+
+async function notifyStickerRevalidation(slugs: string[]): Promise<void> {
+  if (slugs.length === 0) return;
+  const secret = process.env.PETDEX_REVALIDATE_SECRET;
+  if (!secret) throw new Error("PETDEX_REVALIDATE_SECRET is required");
+  const base = process.env.PETDEX_URL?.trim() || "https://petdex.dev";
+  const response = await fetch(`${base}/api/revalidate`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${secret}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      slugs,
+      tags: slugs.map((slug) => `stickers:${slug}`),
+    }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!response.ok) {
+    throw new Error(`petdex revalidation failed ${response.status}`);
+  }
+  console.log(`revalidated ${slugs.length} pets`);
 }
 
 function isMissingObjectError(error: unknown): boolean {

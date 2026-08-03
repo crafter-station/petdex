@@ -101,11 +101,7 @@ VALUES (
 	false,
 	now()
 )
-ON CONFLICT ("slug") DO UPDATE SET
-	"title" = excluded."title",
-	"description" = excluded."description",
-	"cover_pet_slug" = excluded."cover_pet_slug",
-	"updated_at" = now();
+ON CONFLICT ("slug") DO NOTHING;
 
 INSERT INTO "pet_collection_items" ("collection_id", "pet_slug", "position")
 SELECT 'claude', pet."slug", candidate."position"
@@ -120,5 +116,4 @@ FROM (VALUES
 	('clawdex', 7)
 ) AS candidate("slug", "position")
 INNER JOIN "submitted_pets" pet ON pet."slug" = candidate."slug" AND pet."status" = 'approved'
-ON CONFLICT ("collection_id", "pet_slug") DO UPDATE SET
-	"position" = excluded."position";
+ON CONFLICT ("collection_id", "pet_slug") DO NOTHING;

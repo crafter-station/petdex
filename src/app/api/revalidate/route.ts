@@ -7,11 +7,10 @@ import {
   revalidatePetTags,
 } from "@/lib/db/cached-aggregates";
 import { petPreviewUrl } from "@/lib/pet-preview";
-import {
-  legacyPetStickerRedirectUrls,
-  petStickerUrl,
-} from "@/lib/pet-sticker-artifacts";
+import { petPublicArtifactKeys } from "@/lib/pet-public-artifact-keys";
+import { legacyPetStickerRedirectUrls } from "@/lib/pet-sticker-artifacts";
 import { petThumbnailUrl } from "@/lib/pet-thumbnail";
+import { R2_PUBLIC_BASE } from "@/lib/r2-public-url";
 
 import { locales } from "@/i18n/config";
 
@@ -110,7 +109,7 @@ async function purgeCloudflarePetUrls(slugs: string[]): Promise<void> {
     // upload forever unless we purge it here (issue #553).
     petPreviewUrl(slug),
     petThumbnailUrl(slug),
-    petStickerUrl(slug),
+    ...petPublicArtifactKeys(slug).map((key) => `${R2_PUBLIC_BASE}/${key}`),
     ...legacyPetStickerRedirectUrls(slug),
   ]);
 

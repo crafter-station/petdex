@@ -7,6 +7,7 @@ import {
   PET_STICKER_FORMATS,
   PET_STICKER_STATES,
   PET_STICKER_TREATMENTS,
+  petStickerFilename,
   petStickerKey,
   petStickerTrayKey,
 } from "@/lib/pet-sticker-artifacts";
@@ -45,5 +46,23 @@ describe("pet public artifact keys", () => {
       "https://petdex.dev/api/pets/claude-crab/sticker?format=gif",
       "https://petdex.dev/api/pets/claude-crab/sticker?format=png",
     ]);
+  });
+
+  it("keeps web and WhatsApp artifact contracts distinct", () => {
+    expect(
+      petStickerKey("claude-crab", "waiting", "webp", "outline", "whatsapp"),
+    ).toBe("pets/claude-crab/stickers/whatsapp/waiting-outline.webp");
+    expect(
+      petStickerFilename(
+        "claude-crab",
+        "waiting",
+        "webp",
+        "outline",
+        "whatsapp",
+      ),
+    ).toBe("claude-crab-waiting-outline-whatsapp-sticker.webp");
+    expect(
+      petStickerFilename("claude-crab", "idle", "png", "clean", "web"),
+    ).toBe("claude-crab-sticker.png");
   });
 });
