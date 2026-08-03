@@ -18,6 +18,7 @@ import { useTranslations } from "next-intl";
 
 import { petStates } from "@/lib/pet-states";
 import { deriveSlug } from "@/lib/slug";
+import { PET_ASSET_MAX_BYTES } from "@/lib/upload-limits";
 
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -43,7 +44,7 @@ type ParsedPet = {
 // pet is caught before the upload starts rather than after the round
 // trip, and so the message can name the file (#594 reported only the
 // bare error code with no way to tell which of the three was over).
-const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = PET_ASSET_MAX_BYTES;
 
 const MAX_DISPLAY_NAME_LENGTH = 60;
 const MAX_DESCRIPTION_LENGTH = 500;

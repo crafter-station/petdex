@@ -11,11 +11,12 @@ import { verifyCliBearer } from "@/lib/cli-auth";
 import { presignPut } from "@/lib/r2";
 import { cliVerifyRatelimit, submitRatelimit } from "@/lib/ratelimit";
 import { deriveSlug } from "@/lib/slug";
+import { PET_ASSET_MAX_BYTES } from "@/lib/upload-limits";
 
 export const runtime = "nodejs";
 
 const MAX_KEY_LEN = 80;
-const MAX_BYTES = 8 * 1024 * 1024;
+const MAX_BYTES = PET_ASSET_MAX_BYTES;
 
 type Body = {
   slugHint?: string;

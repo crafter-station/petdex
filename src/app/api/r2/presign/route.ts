@@ -6,6 +6,7 @@ import { isAdmin } from "@/lib/admin";
 import { presignPut } from "@/lib/r2";
 import { presignRatelimit } from "@/lib/ratelimit";
 import { requireSameOrigin } from "@/lib/same-origin";
+import { PET_ASSET_MAX_BYTES } from "@/lib/upload-limits";
 
 export const runtime = "nodejs";
 
@@ -24,7 +25,7 @@ type AskedFile = {
   size: number;
 };
 
-const MAX_BYTES = 8 * 1024 * 1024;
+const MAX_BYTES = PET_ASSET_MAX_BYTES;
 
 export async function POST(req: Request): Promise<Response> {
   const csrf = requireSameOrigin(req);
