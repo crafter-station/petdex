@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   Check,
@@ -82,6 +82,13 @@ export function StickerExplorer({
     parseStickerDeck(initialParams.get("deck"), petSlugs),
   );
   const [notice, setNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    setSelection(parseStickerExplorerSelection(params, petSlugs));
+    setDeck(parseStickerDeck(params.get("deck"), petSlugs));
+  }, [searchParams, petSlugs]);
+
   const selectedPet =
     collection.pets.find((pet) => pet.slug === selection.pet) ??
     collection.pets[0];

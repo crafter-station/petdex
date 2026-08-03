@@ -794,7 +794,7 @@ async function notifyStickerRevalidation(slugs: string[]): Promise<void> {
     },
     body: JSON.stringify({
       slugs,
-      tags: slugs.map((slug) => `stickers:${slug}`),
+      tags: slugs.map((slug) => `sticker:${slug}`),
     }),
     signal: AbortSignal.timeout(15_000),
   });
