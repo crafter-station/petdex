@@ -460,6 +460,9 @@ function rowToSchema(
     colorFamily: (row.color_family as string | null) ?? null,
     featured: row.featured as boolean,
     dhash: (row.dhash as string | null) ?? null,
+    spriteSha256: (row.sprite_sha256 as string | null) ?? null,
+    petJsonSha256: (row.pet_json_sha256 as string | null) ?? null,
+    zipSha256: (row.zip_sha256 as string | null) ?? null,
     status: row.status as "approved" | "pending" | "rejected",
     source:
       (row.source as "submit" | "discover" | "claimed" | undefined) ?? "submit",

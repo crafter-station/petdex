@@ -5,6 +5,8 @@ import { petPublicArtifactKeys } from "@/lib/pet-public-artifact-keys";
 import {
   PET_STICKER_FORMATS,
   PET_STICKER_STATES,
+  PET_STICKER_TREATMENTS,
+  petStickerKey,
 } from "@/lib/pet-sticker-artifacts";
 import { petThumbnailKey } from "@/lib/pet-thumbnail";
 
@@ -18,7 +20,11 @@ describe("pet public artifact keys", () => {
 
     for (const state of PET_STICKER_STATES) {
       for (const format of PET_STICKER_FORMATS) {
-        expect(keys).toContain(`pets/cai-chao/stickers/${state}.${format}`);
+        for (const treatment of PET_STICKER_TREATMENTS) {
+          expect(keys).toContain(
+            petStickerKey("cai-chao", state, format, treatment),
+          );
+        }
       }
     }
 

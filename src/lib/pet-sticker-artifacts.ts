@@ -2,6 +2,7 @@ import type { PetStateId } from "@/lib/pet-states";
 import { R2_PUBLIC_BASE } from "@/lib/r2-public-url";
 
 export type PetStickerFormat = "webp" | "gif" | "png";
+export type PetStickerTreatment = "clean" | "outline";
 
 export const PET_STICKER_CACHE_HEADER =
   "public, max-age=31536000, s-maxage=31536000, immutable";
@@ -28,6 +29,11 @@ export const PET_STICKER_FORMATS = [
   "png",
 ] as const satisfies readonly PetStickerFormat[];
 
+export const PET_STICKER_TREATMENTS = [
+  "clean",
+  "outline",
+] as const satisfies readonly PetStickerTreatment[];
+
 export function isValidPetSlug(slug: string): boolean {
   return /^[a-z0-9-]{1,80}$/.test(slug);
 }
@@ -46,29 +52,61 @@ export function parsePetStickerFormat(value: string | null): PetStickerFormat {
     : "webp";
 }
 
+export function parseExactPetStickerState(
+  value: string | null,
+): PetStateId | null {
+  if (!value) return null;
+  return PET_STICKER_STATES.includes(value as PetStateId)
+    ? (value as PetStateId)
+    : null;
+}
+
+export function parseExactPetStickerFormat(
+  value: string | null,
+): PetStickerFormat | null {
+  if (!value) return null;
+  return PET_STICKER_FORMATS.includes(value as PetStickerFormat)
+    ? (value as PetStickerFormat)
+    : null;
+}
+
+export function parseExactPetStickerTreatment(
+  value: string | null,
+): PetStickerTreatment | null {
+  if (!value) return null;
+  return PET_STICKER_TREATMENTS.includes(value as PetStickerTreatment)
+    ? (value as PetStickerTreatment)
+    : null;
+}
+
 export function petStickerKey(
   slug: string,
   state: PetStateId = "idle",
   format: PetStickerFormat = "webp",
+  treatment: PetStickerTreatment = "clean",
 ): string {
-  return `pets/${slug}/stickers/${state}.${format}`;
+  const suffix = treatment === "outline" ? "-outline" : "";
+  return `pets/${slug}/stickers/${state}${suffix}.${format}`;
 }
 
 export function petStickerUrl(
   slug: string,
   state: PetStateId = "idle",
   format: PetStickerFormat = "webp",
+  treatment: PetStickerTreatment = "clean",
 ): string {
-  return `${R2_PUBLIC_BASE}/${petStickerKey(slug, state, format)}`;
+  return `${R2_PUBLIC_BASE}/${petStickerKey(slug, state, format, treatment)}`;
 }
 
 export function petStickerFilename(
   slug: string,
   state: PetStateId = "idle",
   format: PetStickerFormat = "webp",
+  treatment: PetStickerTreatment = "clean",
 ): string {
   const suffix = state === "idle" ? "" : `-${state}`;
-  return `${slug}${suffix}-sticker.${format}`;
+  const treatmentSuffix = treatment === "outline" ? "-outline" : "";
+  return `${slug}${suffix}${treatmentSuffix}-sticker.${format}`;
 }
 
 export function petStickerPackKey(slug: string): string {
