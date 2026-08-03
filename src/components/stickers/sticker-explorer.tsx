@@ -41,6 +41,8 @@ type Labels = {
   addToDeck: string;
   deck: string;
   emptyDeck: string;
+  shareReaction: string;
+  reactionShared: string;
   shareDeck: string;
   shared: string;
   deckFull: string;
@@ -117,6 +119,18 @@ export function StickerExplorer({
       return;
     }
     sync(selection, [...deck, selection]);
+  }
+
+  async function shareReaction() {
+    const params = upsertStickerExplorerParams(
+      new URLSearchParams(),
+      selection,
+      [],
+    );
+    await navigator.clipboard.writeText(
+      `${window.location.origin}${pathname}?${params.toString()}`,
+    );
+    showNotice(labels.reactionShared);
   }
 
   async function shareDeck() {
@@ -197,6 +211,14 @@ export function StickerExplorer({
           >
             <Plus className="size-4" />
             {labels.addToDeck}
+          </button>
+          <button
+            type="button"
+            onClick={shareReaction}
+            className="inline-flex h-11 items-center gap-2 rounded-full border border-border-base bg-background px-5 text-sm font-semibold transition hover:bg-surface-muted"
+          >
+            <Share2 className="size-4" />
+            {labels.shareReaction}
           </button>
           <button
             type="button"

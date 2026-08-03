@@ -105,6 +105,8 @@
     "addToDeck": "Add to deck",
     "deck": "Reaction deck",
     "emptyDeck": "Save reactions here, then share the whole deck as one URL.",
+    "shareReaction": "Copy reaction link",
+    "reactionShared": "Reaction link copied",
     "shareDeck": "Copy deck link",
     "shared": "Deck link copied",
     "deckFull": "Deck is full",

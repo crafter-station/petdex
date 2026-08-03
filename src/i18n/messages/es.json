@@ -105,6 +105,8 @@
     "addToDeck": "Agregar al deck",
     "deck": "Deck de reacciones",
     "emptyDeck": "Guarda reacciones aquí y comparte todo el deck con una sola URL.",
+    "shareReaction": "Copiar link de reacción",
+    "reactionShared": "Link de reacción copiado",
     "shareDeck": "Copiar link del deck",
     "shared": "Link del deck copiado",
     "deckFull": "El deck está lleno",

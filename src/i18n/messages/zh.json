@@ -112,6 +112,8 @@
     "addToDeck": "加入组合",
     "deck": "反应组合",
     "emptyDeck": "把反应保存在这里，然后用一个链接分享整个组合。",
+    "shareReaction": "复制反应链接",
+    "reactionShared": "反应链接已复制",
     "shareDeck": "复制组合链接",
     "shared": "组合链接已复制",
     "deckFull": "组合已满",
