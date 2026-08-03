@@ -57,7 +57,7 @@
     "next-intl": "^4.11.0",
     "next-themes": "^0.4.6",
     "node-vibrant": "^4.0.4",
-    "openai": "^6.35.0",
+    "openai": "^7.2.0",
     "postcss": "^8.5.13",
     "react": "19.2.8",
     "react-dom": "19.2.8",
