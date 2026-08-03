@@ -35,9 +35,48 @@ CREATE TABLE IF NOT EXISTS "pet_sticker_publications" (
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 
+ALTER TABLE "pet_sticker_publications" ADD COLUMN IF NOT EXISTS "source_sha256" text;
+ALTER TABLE "pet_sticker_publications" ADD COLUMN IF NOT EXISTS "artifact_version" text;
+ALTER TABLE "pet_sticker_publications" ADD COLUMN IF NOT EXISTS "states" jsonb;
+ALTER TABLE "pet_sticker_publications" ADD COLUMN IF NOT EXISTS "formats" jsonb;
 ALTER TABLE "pet_sticker_publications" ADD COLUMN IF NOT EXISTS "profiles" jsonb;
-UPDATE "pet_sticker_publications" SET "profiles" = '["web","whatsapp"]'::jsonb WHERE "profiles" IS NULL;
+ALTER TABLE "pet_sticker_publications" ADD COLUMN IF NOT EXISTS "treatments" jsonb;
+ALTER TABLE "pet_sticker_publications" ADD COLUMN IF NOT EXISTS "object_count" integer;
+ALTER TABLE "pet_sticker_publications" ADD COLUMN IF NOT EXISTS "total_bytes" integer;
+ALTER TABLE "pet_sticker_publications" ADD COLUMN IF NOT EXISTS "manifest_sha256" text;
+ALTER TABLE "pet_sticker_publications" ADD COLUMN IF NOT EXISTS "status" text;
+ALTER TABLE "pet_sticker_publications" ADD COLUMN IF NOT EXISTS "cleanup_status" text;
+ALTER TABLE "pet_sticker_publications" ADD COLUMN IF NOT EXISTS "cleanup_error" text;
+ALTER TABLE "pet_sticker_publications" ADD COLUMN IF NOT EXISTS "published_at" timestamp with time zone;
+ALTER TABLE "pet_sticker_publications" ADD COLUMN IF NOT EXISTS "revoked_at" timestamp with time zone;
+ALTER TABLE "pet_sticker_publications" ADD COLUMN IF NOT EXISTS "updated_at" timestamp with time zone;
+UPDATE "pet_sticker_publications" SET
+	"source_sha256" = COALESCE("source_sha256", ''),
+	"artifact_version" = COALESCE("artifact_version", 'legacy'),
+	"states" = COALESCE("states", '[]'::jsonb),
+	"formats" = COALESCE("formats", '[]'::jsonb),
+	"profiles" = COALESCE("profiles", '[]'::jsonb),
+	"treatments" = COALESCE("treatments", '[]'::jsonb),
+	"object_count" = COALESCE("object_count", 0),
+	"total_bytes" = COALESCE("total_bytes", 0),
+	"manifest_sha256" = COALESCE("manifest_sha256", ''),
+	"status" = COALESCE("status", 'revoked'),
+	"cleanup_status" = COALESCE("cleanup_status", 'pending'),
+	"published_at" = COALESCE("published_at", now()),
+	"updated_at" = COALESCE("updated_at", now());
+ALTER TABLE "pet_sticker_publications" ALTER COLUMN "source_sha256" SET NOT NULL;
+ALTER TABLE "pet_sticker_publications" ALTER COLUMN "artifact_version" SET NOT NULL;
+ALTER TABLE "pet_sticker_publications" ALTER COLUMN "states" SET NOT NULL;
+ALTER TABLE "pet_sticker_publications" ALTER COLUMN "formats" SET NOT NULL;
 ALTER TABLE "pet_sticker_publications" ALTER COLUMN "profiles" SET NOT NULL;
+ALTER TABLE "pet_sticker_publications" ALTER COLUMN "treatments" SET NOT NULL;
+ALTER TABLE "pet_sticker_publications" ALTER COLUMN "object_count" SET NOT NULL;
+ALTER TABLE "pet_sticker_publications" ALTER COLUMN "total_bytes" SET NOT NULL;
+ALTER TABLE "pet_sticker_publications" ALTER COLUMN "manifest_sha256" SET NOT NULL;
+ALTER TABLE "pet_sticker_publications" ALTER COLUMN "status" SET NOT NULL;
+ALTER TABLE "pet_sticker_publications" ALTER COLUMN "cleanup_status" SET NOT NULL;
+ALTER TABLE "pet_sticker_publications" ALTER COLUMN "published_at" SET NOT NULL;
+ALTER TABLE "pet_sticker_publications" ALTER COLUMN "updated_at" SET NOT NULL;
 
 CREATE INDEX IF NOT EXISTS "pet_export_approvals_scope_status_idx" ON "pet_export_approvals" ("scope","status");
 CREATE INDEX IF NOT EXISTS "pet_export_approvals_source_idx" ON "pet_export_approvals" ("pet_id","source_sha256");
