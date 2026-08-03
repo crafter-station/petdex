@@ -15,7 +15,7 @@ import { fetchSpritesheet, renderSticker } from "@/lib/sticker-renderer";
 
 const slug = readArg("slug");
 const collection = readArg("collection");
-const outputDir = resolve(readArg("output-dir") ?? ".sticker-review");
+const outputDir = resolve(readArg("output-dir") ?? "public/sticker-review");
 if (!slug && !collection) {
   throw new Error("pass --slug=<slug> or --collection=<slug>");
 }

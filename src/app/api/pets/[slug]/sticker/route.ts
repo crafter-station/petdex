@@ -31,6 +31,12 @@ export async function GET(
   if (!state || !format || !treatment) {
     return new NextResponse("invalid_sticker_variant", { status: 400 });
   }
+  if (format === "gif") {
+    return new NextResponse("gif_retired", {
+      status: 410,
+      headers: { "cache-control": "no-store" },
+    });
+  }
 
   const access = await getStickerArtifactAccess(slug, state, format, treatment);
   if (access.status !== "ok") {

@@ -27,10 +27,10 @@ describe("sticker export policy", () => {
       sourceSha256: "sprite-v2",
       policyVersion: STICKER_EXPORT_POLICY_VERSION,
       reviewedBy: "admin",
-      reason: null,
+      reason: "approved for sticker export",
+      reviewedAt: new Date(),
       createdAt: new Date(),
       updatedAt: new Date(),
-      revokedAt: null,
     };
 
     expect(isCurrentStickerExportAllowed(pet, approval)).toBe(true);
@@ -65,7 +65,7 @@ describe("sticker export policy", () => {
       totalBytes: 123,
       manifestSha256: "manifest",
       status: "complete" as const,
-      cleanupStatus: "not_needed" as const,
+      cleanupStatus: "not_required" as const,
       cleanupError: null,
       publishedAt: new Date(),
       revokedAt: null,
