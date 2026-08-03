@@ -5,7 +5,7 @@ import {
   HeadObjectCommand,
   PutObjectCommand,
 } from "@aws-sdk/client-s3";
-import { and, eq, isNotNull } from "drizzle-orm";
+import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import JSZip from "jszip";
 import sharp from "sharp";
 
@@ -212,7 +212,7 @@ if (mode === "apply") {
   if (artifacts.includes("reactions")) {
     const failedSlugs = new Set(failed.map((result) => result.slug));
     const purged = await mapLimit(
-      pendingTasks.filter((task) => !failedSlugs.has(task.slug)),
+      validTasks.filter((task) => !failedSlugs.has(task.slug)),
       publishConcurrency,
       purgeReactionTask,
     );
@@ -600,7 +600,11 @@ async function getPublishablePets(collectionSlug: string | null) {
         eq(schema.petCollections.id, schema.petCollectionItems.collectionId),
       )
       .where(
-        and(approvalWhere, eq(schema.petCollections.slug, collectionSlug)),
+        and(
+          approvalWhere,
+          eq(schema.petCollections.slug, collectionSlug),
+          isNull(schema.petCollections.ownerId),
+        ),
       );
     return rows.map((row) => ({
       ...row,
