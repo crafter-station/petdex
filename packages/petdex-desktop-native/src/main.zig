@@ -1541,7 +1541,7 @@ pub fn boot(model: *Model, fx: *Effects) void {
     // host's runloop spins up; a Regular-policy Dock icon may blink in
     // for the first frames of a hidden-dock boot, which beats holding
     // the setting hostage to an SDK boot hook that does not exist yet.
-    if (model.hide_dock) plat.setDockIconHidden(true);
+    plat.setDockIconHidden(model.hide_dock, true);
     if (env_home) |home| model.agents = agent_hooks.scan(boot_allocator, home);
 
     // First point where the platform codec is reachable: `init_fx` runs
@@ -1866,7 +1866,7 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
         },
         .toggle_hide_dock => {
             model.hide_dock = !model.hide_dock;
-            plat.setDockIconHidden(model.hide_dock);
+            plat.setDockIconHidden(model.hide_dock, true);
             saveSettings(model);
         },
         .toggle_launch_at_login => {
@@ -2049,6 +2049,9 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
                 // canned (#557's "pet" interaction).
                 if (isTap(now - model.press_ms, read.x - model.press_x, read.y - model.press_y)) {
                     model.sample_len = 0;
+                    if (newestBubble(model)) |bubble| {
+                        _ = plat.activateOriginApplication(bubble.origin_app, bubble.ttySlice(), bubble.cwdSlice());
+                    }
                     model.pat_flip = !model.pat_flip;
                     applyState(model, if (model.pat_flip) .jumping else .waving, pat_react_ms, fx);
                     return;
@@ -3331,6 +3334,7 @@ fn petdexWindows(model: *const Model, scratch: *PetdexApp.WindowsScratch) []cons
             .resizable = false,
             .titlebar = .chromeless,
             .floating = true,
+            .fullscreen_overlay = true,
             .transparent = true,
             .click_through = true,
         };
@@ -3365,8 +3369,6 @@ fn petdexWindowView(ui: *PetdexApp.Ui, model: *const Model, window_label: []cons
         .cell_h = @floatFromInt(thumb_h),
     });
 }
-
-
 
 /// Keep `~/.petdex/bin/petdex-hook` pointing at the running binary so
 /// agent hooks survive app updates: the hooks reference the stable
@@ -3476,7 +3478,8 @@ pub fn main(init: std.process.Init) !void {
         if (std.mem.eql(u8, cmd, "bubble")) {
             const phase = args_it.next() orelse return;
             const agent: ?[]const u8 = args_it.next();
-            hook_runner.run(phase, agent, env_home orelse return);
+            const origin_app = plat.OriginApplication.fromTermProgram(init.environ_map.get("TERM_PROGRAM"));
+            hook_runner.run(phase, agent, origin_app, init.environ_map.get("PWD"), env_home orelse return);
             return;
         }
     }

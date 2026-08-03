@@ -306,6 +306,118 @@ pub fn processId() u32 {
     };
 }
 
+/// GUI application that owns the terminal hosting the latest agent event.
+/// Hook metadata is allowlisted and never becomes an arbitrary bundle id.
+pub const OriginApplication = enum(u8) {
+    none,
+    terminal,
+    vscode,
+
+    pub fn fromTermProgram(value: ?[]const u8) OriginApplication {
+        const name = value orelse return .none;
+        if (std.mem.eql(u8, name, "Apple_Terminal")) return .terminal;
+        if (std.mem.eql(u8, name, "vscode")) return .vscode;
+        return .none;
+    }
+
+    pub fn wireName(self: OriginApplication) []const u8 {
+        return switch (self) {
+            .none => "",
+            .terminal => "Apple_Terminal",
+            .vscode => "vscode",
+        };
+    }
+
+    fn bundleIdentifier(self: OriginApplication) ?[]const u8 {
+        return switch (self) {
+            .none => null,
+            .terminal => "com.apple.Terminal",
+            .vscode => "com.microsoft.VSCode",
+        };
+    }
+};
+
+const terminal_focus_script =
+    \\on run argv
+    \\  set targetTTY to item 1 of argv
+    \\  tell application "Terminal"
+    \\    set allTabs to every tab of every window
+    \\    set windowIndex to 0
+    \\    repeat with tabsInWindow in allTabs
+    \\      set windowIndex to windowIndex + 1
+    \\      repeat with targetTab in tabsInWindow
+    \\        if (tty of targetTab) is targetTTY then
+    \\          set selected of targetTab to true
+    \\          set frontmost of window windowIndex to true
+    \\          activate
+    \\          return
+    \\        end if
+    \\      end repeat
+    \\    end repeat
+    \\  end tell
+    \\  error "Petdex could not find the source TTY" number 1
+    \\end run
+;
+
+const mac_c = struct {
+    extern "c" fn open(path: [*:0]const u8, flags: c_int, ...) c_int;
+    extern "c" fn close(fd: c_int) c_int;
+    extern "c" fn ttyname_r(fd: c_int, buf: [*]u8, len: usize) c_int;
+};
+
+pub fn controllingTty(buf: []u8) ?[]const u8 {
+    if (comptime builtin.os.tag != .macos) return null;
+    const fd = mac_c.open("/dev/tty", 0);
+    if (fd < 0) return null;
+    defer _ = mac_c.close(fd);
+    if (mac_c.ttyname_r(fd, buf.ptr, buf.len) != 0) return null;
+    const end = std.mem.indexOfScalar(u8, buf, 0) orelse return null;
+    return safeSourceTty(buf[0..end]);
+}
+
+pub fn safeSourceTty(value: ?[]const u8) ?[]const u8 {
+    const tty = value orelse return null;
+    if (tty.len <= "/dev/tty".len or tty.len > 63) return null;
+    if (!std.mem.startsWith(u8, tty, "/dev/tty")) return null;
+    for (tty["/dev/tty".len..]) |ch| {
+        if (!std.ascii.isAlphanumeric(ch)) return null;
+    }
+    return tty;
+}
+
+pub fn safeSourceCwd(value: ?[]const u8) ?[]const u8 {
+    const cwd = value orelse return null;
+    if (cwd.len == 0 or cwd.len > 511 or cwd[0] != '/') return null;
+    if (!std.unicode.utf8ValidateSlice(cwd)) return null;
+    for (cwd) |ch| {
+        if (ch < 0x20 or ch == '"' or ch == '\\') return null;
+    }
+    return cwd;
+}
+
+fn spawnAndWait(argv: []const []const u8) bool {
+    var scope = Scope.init();
+    defer scope.deinit();
+    const io = scope.io();
+    var child = std.process.spawn(io, .{ .argv = argv, .stdin = .ignore, .stdout = .ignore, .stderr = .ignore }) catch return false;
+    return switch (child.wait(io) catch return false) {
+        .exited => |code| code == 0,
+        else => false,
+    };
+}
+
+pub fn activateOriginApplication(origin: OriginApplication, source_tty: []const u8, source_cwd: []const u8) bool {
+    if (builtin.os.tag != .macos) return false;
+    _ = source_cwd;
+    if (origin == .terminal) {
+        if (safeSourceTty(source_tty)) |tty| {
+            if (spawnAndWait(&.{ "/usr/bin/osascript", "-e", terminal_focus_script, tty })) return true;
+        }
+    }
+    const bundle_id = origin.bundleIdentifier() orelse return false;
+    return spawnAndWait(&.{ "/usr/bin/open", "-b", bundle_id });
+}
+
 // ------------------------------------------------------- app presence
 
 /// The objc-runtime and libdispatch surface needed to flip the Dock
@@ -353,9 +465,12 @@ const AppleApp = if (builtin.os.tag == .macos) struct {
 /// `.accessory` vs `.regular`). Windows still open and focus in
 /// accessory mode; the app just leaves the Dock and app switcher.
 /// No-op on other platforms.
-pub fn setDockIconHidden(hidden: bool) void {
+pub fn setDockIconHidden(hidden: bool, fullscreen_overlay: bool) void {
     if (builtin.os.tag != .macos) return;
-    const ctx: ?*anyopaque = if (hidden) @ptrFromInt(1) else null;
+    // A fullscreen companion must remain accessory even when the user
+    // leaves Hide Dock icon disabled. This keeps the SDK's launch policy
+    // and the runtime toggle from fighting each other.
+    const ctx: ?*anyopaque = if (hidden or fullscreen_overlay) @ptrFromInt(1) else null;
     AppleApp.dispatch_async_f(&AppleApp._dispatch_main_q, ctx, AppleApp.applyPolicy);
 }
 

@@ -29,7 +29,7 @@ const post_poll_ms: u64 = 5;
 
 /// argv tail after "bubble": [phase, agent?]. Reads stdin, formats,
 /// POSTs bubble + state to the sidecar. Never fails outward.
-pub fn run(phase: []const u8, arg_agent: ?[]const u8, home: []const u8) void {
+pub fn run(phase: []const u8, arg_agent: ?[]const u8, origin_app: plat.OriginApplication, source_cwd_raw: ?[]const u8, home: []const u8) void {
     // Always finish consuming the host's payload before any early return.
     // The host may still be writing after the useful 64 KiB prefix, and
     // closing the read end early propagates EPIPE/Broken pipe to the agent.
@@ -53,6 +53,10 @@ pub fn run(phase: []const u8, arg_agent: ?[]const u8, home: []const u8) void {
     if (token.len == 0) return;
 
     const agent = jsonString(payload, "agent_source") orelse (arg_agent orelse "");
+    const source_app = origin_app.wireName();
+    var tty_buf: [64]u8 = undefined;
+    const source_tty = if (origin_app == .terminal) (plat.controllingTty(&tty_buf) orelse "") else "";
+    const source_cwd = plat.safeSourceCwd(source_cwd_raw) orelse "";
     const session_id = safeSessionId(jsonString(payload, "session_id"));
 
     // Session title: user-prompt seeds it, every event attaches it.
@@ -97,7 +101,7 @@ pub fn run(phase: []const u8, arg_agent: ?[]const u8, home: []const u8) void {
     var post_count: usize = 0;
     var body_buf: [1024]u8 = undefined;
     if (text.len > 0) {
-        const body = bubbleBody(&body_buf, text, title, busy, agent, session_id);
+        const body = bubbleBodyWithMetadata(&body_buf, text, title, busy, agent, session_id, source_app, source_tty, source_cwd);
         if (body) |b| {
             if (startPost("/bubble", b, token)) |post| {
                 posts[post_count] = post;
@@ -144,6 +148,10 @@ fn isToolFailurePhase(phase: []const u8) bool {
 /// precisely how session_id got parsed, used for titles, and then left out of
 /// the POST that needed it.
 pub fn bubbleBody(out: []u8, text: []const u8, title: []const u8, busy: bool, agent: []const u8, session_id: ?[]const u8) ?[]const u8 {
+    return bubbleBodyWithMetadata(out, text, title, busy, agent, session_id, "", "", "");
+}
+
+fn bubbleBodyWithMetadata(out: []u8, text: []const u8, title: []const u8, busy: bool, agent: []const u8, session_id: ?[]const u8, source_app: []const u8, source_tty: []const u8, source_cwd: []const u8) ?[]const u8 {
     var title_buf: [256]u8 = undefined;
     const title_part: []const u8 = if (title.len > 0)
         (std.fmt.bufPrint(&title_buf, ",\"title\":\"{s}\"", .{title}) catch return null)
@@ -154,7 +162,12 @@ pub fn bubbleBody(out: []u8, text: []const u8, title: []const u8, busy: bool, ag
         (std.fmt.bufPrint(&session_buf, ",\"session_id\":\"{s}\"", .{sid}) catch return null)
     else
         "";
-    return std.fmt.bufPrint(out, "{{\"text\":\"{s}\"{s},\"busy\":{},\"agent_source\":\"{s}\"{s}}}", .{ text, title_part, busy, agent, session_part }) catch null;
+    var metadata_buf: [704]u8 = undefined;
+    const metadata = if (source_app.len > 0 or source_tty.len > 0 or source_cwd.len > 0)
+        (std.fmt.bufPrint(&metadata_buf, ",\"source_app\":\"{s}\",\"source_tty\":\"{s}\",\"source_cwd\":\"{s}\"", .{ source_app, source_tty, source_cwd }) catch return null)
+    else
+        "";
+    return std.fmt.bufPrint(out, "{{\"text\":\"{s}\"{s},\"busy\":{},\"agent_source\":\"{s}\"{s}{s}}}", .{ text, title_part, busy, agent, session_part, metadata }) catch null;
 }
 
 /// The /state request body. Extracted and pure for one reason: `run()` reaches

@@ -50,11 +50,22 @@ pub const Bubble = struct {
     /// path), which is what keeps single-bubble behaviour identical.
     session: [64]u8 = @splat(0),
     session_len: usize = 0,
+    origin_app: plat.OriginApplication = .none,
+    source_tty: [64]u8 = @splat(0),
+    source_tty_len: usize = 0,
+    source_cwd: [512]u8 = @splat(0),
+    source_cwd_len: usize = 0,
     busy: bool = false,
     counter: u64 = 0,
 
     pub fn sessionSlice(self: *const Bubble) []const u8 {
         return self.session[0..self.session_len];
+    }
+    pub fn ttySlice(self: *const Bubble) []const u8 {
+        return self.source_tty[0..self.source_tty_len];
+    }
+    pub fn cwdSlice(self: *const Bubble) []const u8 {
+        return self.source_cwd[0..self.source_cwd_len];
     }
 };
 
@@ -128,6 +139,10 @@ pub const Mailbox = struct {
     /// full the least recently updated entry is evicted: an abandoned
     /// session must not hold a slot against a live one.
     pub fn setBubble(self: *Mailbox, session: []const u8, text: []const u8, agent: []const u8, title: []const u8, busy: bool) u64 {
+        return self.setBubbleWithMetadata(session, text, agent, title, .none, "", "", busy);
+    }
+
+    pub fn setBubbleWithMetadata(self: *Mailbox, session: []const u8, text: []const u8, agent: []const u8, title: []const u8, origin_app: plat.OriginApplication, source_tty: []const u8, source_cwd: []const u8, busy: bool) u64 {
         self.mutex.lock();
         defer self.mutex.unlock();
 
@@ -160,6 +175,13 @@ pub const Mailbox = struct {
         const tn = @min(title.len, slot.title.len);
         @memcpy(slot.title[0..tn], title[0..tn]);
         slot.title_len = tn;
+        slot.origin_app = origin_app;
+        const tty_n = @min(source_tty.len, slot.source_tty.len);
+        @memcpy(slot.source_tty[0..tty_n], source_tty[0..tty_n]);
+        slot.source_tty_len = tty_n;
+        const cwd_n = @min(source_cwd.len, slot.source_cwd.len);
+        @memcpy(slot.source_cwd[0..cwd_n], source_cwd[0..cwd_n]);
+        slot.source_cwd_len = cwd_n;
         slot.busy = busy;
 
         self.bubble_counter += 1;
@@ -418,12 +440,15 @@ fn route(server: *Server, conn: *Conn, method: []const u8, path: []const u8, hea
         const capped = text[0..@min(text.len, 200)];
         const agent = jsonString(body, "agent_source") orelse "";
         const title = jsonString(body, "title") orelse "";
+        const origin_app = plat.OriginApplication.fromTermProgram(jsonString(body, "source_app"));
+        const source_tty = plat.safeSourceTty(jsonString(body, "source_tty")) orelse "";
+        const source_cwd = plat.safeSourceCwd(jsonString(body, "source_cwd")) orelse "";
         const busy = std.mem.indexOf(u8, body, "\"busy\":true") != null;
         // No session_id means an agent that predates per-conversation
         // bubbles (or the MCP path, which has no session): the empty key
         // is one shared slot, so those callers keep the old behaviour.
         const session = jsonString(body, "session_id") orelse "";
-        const counter = mailbox.setBubble(session[0..@min(session.len, 64)], capped, agent[0..@min(agent.len, 24)], title[0..@min(title.len, 96)], busy);
+        const counter = mailbox.setBubbleWithMetadata(session[0..@min(session.len, 64)], capped, agent[0..@min(agent.len, 24)], title[0..@min(title.len, 96)], origin_app, source_tty, source_cwd, busy);
         mirrorBubble(server, capped, counter, title[0..@min(title.len, 96)], agent[0..@min(agent.len, 24)], busy) catch {};
         const out = std.fmt.bufPrint(&scratch, "{{\"ok\":true,\"counter\":{d}}}", .{counter}) catch return;
         return respond(conn, 200, out);
