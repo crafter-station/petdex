@@ -1,8 +1,9 @@
 import "server-only";
 
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, isNull } from "drizzle-orm";
 
 import { db, schema } from "@/lib/db/client";
+import { withNextDataCache } from "@/lib/next-data-cache";
 import type { PetStateId } from "@/lib/pet-states";
 import type {
   PetStickerFormat,
@@ -48,7 +49,10 @@ export async function getStickerCollection(
   if (!isStickerExplorerEnabled()) return null;
   const slug = rawSlug.trim().toLowerCase();
   const collection = await db.query.petCollections.findFirst({
-    where: eq(schema.petCollections.slug, slug),
+    where: and(
+      eq(schema.petCollections.slug, slug),
+      isNull(schema.petCollections.ownerId),
+    ),
   });
   if (!collection) return null;
 
@@ -113,36 +117,51 @@ export async function getStickerArtifactAccess(
   treatment: PetStickerTreatment,
 ): Promise<StickerArtifactAccess> {
   if (isStickerExportDisabled()) return { status: "disabled" };
-  const pet = await db.query.submittedPets.findFirst({
-    where: and(
-      eq(schema.submittedPets.slug, slug),
-      eq(schema.submittedPets.status, "approved"),
-    ),
-  });
-  if (!pet) return { status: "not_found" };
-
-  const [approval, publication] = await Promise.all([
-    db.query.petExportApprovals.findFirst({
-      where: and(
-        eq(schema.petExportApprovals.petId, pet.id),
-        eq(schema.petExportApprovals.scope, STICKER_EXPORT_SCOPE),
-      ),
-    }),
-    db.query.petStickerPublications.findFirst({
-      where: eq(schema.petStickerPublications.petId, pet.id),
-    }),
-  ]);
-  if (!isCurrentStickerExportAllowed(pet, approval ?? null)) {
+  const loadAccess = withNextDataCache(
+    async () => {
+      const rows = await db
+        .select({
+          pet: schema.submittedPets,
+          approval: schema.petExportApprovals,
+          publication: schema.petStickerPublications,
+        })
+        .from(schema.submittedPets)
+        .leftJoin(
+          schema.petExportApprovals,
+          and(
+            eq(schema.petExportApprovals.petId, schema.submittedPets.id),
+            eq(schema.petExportApprovals.scope, STICKER_EXPORT_SCOPE),
+          ),
+        )
+        .leftJoin(
+          schema.petStickerPublications,
+          eq(schema.petStickerPublications.petId, schema.submittedPets.id),
+        )
+        .where(
+          and(
+            eq(schema.submittedPets.slug, slug),
+            eq(schema.submittedPets.status, "approved"),
+          ),
+        )
+        .limit(1);
+      return rows[0] ?? null;
+    },
+    ["sticker-artifact-access", slug, state, format, treatment],
+    { tags: [`pet:${slug}`, `sticker:${slug}`], revalidate: 60 },
+  );
+  const row = await loadAccess();
+  if (!row) return { status: "not_found" };
+  if (!isCurrentStickerExportAllowed(row.pet, row.approval)) {
     return { status: "ineligible" };
   }
   if (
-    !isCurrentStickerPublication(pet, publication ?? null) ||
-    !publication ||
-    !hasPublishedStickerArtifact(publication, state, format, treatment)
+    !isCurrentStickerPublication(row.pet, row.publication) ||
+    !row.publication ||
+    !hasPublishedStickerArtifact(row.publication, state, format, treatment)
   ) {
     return { status: "missing" };
   }
-  return { status: "ok", petId: pet.id, slug: pet.slug };
+  return { status: "ok", petId: row.pet.id, slug: row.pet.slug };
 }
 
 export async function getPetStickerAvailability(slug: string): Promise<{
@@ -161,7 +180,12 @@ export async function getPetStickerAvailability(slug: string): Promise<{
       schema.petCollections,
       eq(schema.petCollectionItems.collectionId, schema.petCollections.id),
     )
-    .where(eq(schema.petCollectionItems.petSlug, slug))
+    .where(
+      and(
+        eq(schema.petCollectionItems.petSlug, slug),
+        isNull(schema.petCollections.ownerId),
+      ),
+    )
     .orderBy(
       desc(schema.petCollections.featured),
       asc(schema.petCollections.slug),
