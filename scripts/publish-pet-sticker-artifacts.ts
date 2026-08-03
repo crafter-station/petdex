@@ -32,7 +32,11 @@ import {
   STICKER_PUBLIC_FORMATS,
   STICKER_PUBLIC_TREATMENTS,
 } from "@/lib/sticker-export-policy";
-import { renderSticker, STICKER_SIZES } from "@/lib/sticker-renderer";
+import {
+  applyStickerOutline,
+  renderSticker,
+  STICKER_SIZES,
+} from "@/lib/sticker-renderer";
 import { isAllowedAssetUrl } from "@/lib/url-allowlist";
 
 type Mode = "check" | "apply";
@@ -205,22 +209,23 @@ if (mode === "apply") {
     console.log(`failed ${result.slug} ${result.reason}`);
   }
 
-  if (failed.length > 0) process.exit(1);
-
-  await purgeCdnUrls(
-    pendingTasks.flatMap((task) =>
-      task.refs
-        .filter((ref) => ref.kind === "sticker")
-        .map((ref) =>
-          petStickerUrl(task.slug, ref.state, ref.format, ref.treatment),
-        ),
-    ),
-    artifacts.includes("reactions"),
-  );
-
   if (artifacts.includes("reactions")) {
+    const failedSlugs = new Set(failed.map((result) => result.slug));
+    const purged = await mapLimit(
+      pendingTasks.filter((task) => !failedSlugs.has(task.slug)),
+      publishConcurrency,
+      purgeReactionTask,
+    );
+    const purgeFailures = purged.filter(
+      (result): result is Extract<PublishResult, { ok: false }> => !result.ok,
+    );
+    for (const result of purgeFailures) failedSlugs.add(result.slug);
+    console.log(`purged publications ${purged.length - purgeFailures.length}`);
+    for (const result of purgeFailures.slice(0, 20)) {
+      console.log(`purge failed ${result.slug} ${result.reason}`);
+    }
     const finalized = await mapLimit(
-      validTasks,
+      validTasks.filter((task) => !failedSlugs.has(task.slug)),
       publishConcurrency,
       finalizeReactionPublication,
     );
@@ -233,7 +238,24 @@ if (mode === "apply") {
     for (const result of finalizeFailures.slice(0, 20)) {
       console.log(`finalize failed ${result.slug} ${result.reason}`);
     }
-    if (finalizeFailures.length > 0) process.exit(1);
+    if (
+      failed.length > 0 ||
+      purgeFailures.length > 0 ||
+      finalizeFailures.length > 0
+    ) {
+      process.exit(1);
+    }
+  } else {
+    if (failed.length > 0) process.exit(1);
+    await purgeCdnUrls(
+      pendingTasks.flatMap((task) =>
+        task.refs
+          .filter((ref) => ref.kind === "sticker")
+          .map((ref) =>
+            petStickerUrl(task.slug, ref.state, ref.format, ref.treatment),
+          ),
+      ),
+    );
   }
 }
 
@@ -279,6 +301,26 @@ async function publishTask(task: StickerTask): Promise<PublishResult> {
       artifacts,
       bytes,
       sha256: hash.digest("hex"),
+    };
+  } catch (error) {
+    return { ok: false, slug: task.slug, reason: errorReason(error) };
+  }
+}
+
+async function purgeReactionTask(task: StickerTask): Promise<PublishResult> {
+  try {
+    const urls = task.refs
+      .filter((ref) => ref.kind === "sticker")
+      .map((ref) =>
+        petStickerUrl(task.slug, ref.state, ref.format, ref.treatment),
+      );
+    await purgeCdnUrls(urls, true);
+    return {
+      ok: true,
+      slug: task.slug,
+      artifacts: urls.length,
+      bytes: 0,
+      sha256: "",
     };
   } catch (error) {
     return { ok: false, slug: task.slug, reason: errorReason(error) };
@@ -415,19 +457,38 @@ async function renderStickerWithFallback(
       treatment: ref.treatment,
     });
   } catch (error) {
-    if (ref.format !== "webp" || !isExtractAreaError(error)) throw error;
-    const buffer = await sharp(source)
+    if (ref.format === "gif" || !isExtractAreaError(error)) throw error;
+    const size = STICKER_SIZES.default;
+    const raw = await sharp(source)
       .extract({ left: 0, top: 0, width: 192, height: 208 })
-      .resize(STICKER_SIZES.default, STICKER_SIZES.default, {
+      .resize(size, size, {
         fit: "contain",
         kernel: "nearest",
         background: { r: 0, g: 0, b: 0, alpha: 0 },
       })
-      .webp({ quality: 80, effort: 4 })
+      .ensureAlpha()
+      .raw()
       .toBuffer();
+    const treated =
+      ref.treatment === "outline"
+        ? applyStickerOutline(
+            raw,
+            size,
+            size,
+            Math.max(2, Math.round(size / 48)),
+          )
+        : raw;
+    const image = sharp(treated, {
+      raw: { width: size, height: size, channels: 4 },
+    });
+    const buffer =
+      ref.format === "png"
+        ? await image.png({ compressionLevel: 9 }).toBuffer()
+        : await image.webp({ quality: 80, effort: 4 }).toBuffer();
     return {
       buffer,
-      contentType: "image/webp" as const,
+      contentType:
+        ref.format === "png" ? ("image/png" as const) : ("image/webp" as const),
       isAnimated: false,
       frameCount: 1,
     };
