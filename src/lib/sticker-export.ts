@@ -149,6 +149,9 @@ export async function getPetStickerAvailability(slug: string): Promise<{
   available: boolean;
   collectionSlug: string | null;
 }> {
+  if (!isStickerExplorerEnabled()) {
+    return { available: false, collectionSlug: null };
+  }
   const idle = await getStickerArtifactAccess(slug, "idle", "webp", "clean");
   if (idle.status !== "ok") return { available: false, collectionSlug: null };
   const collection = await db

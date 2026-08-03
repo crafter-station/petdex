@@ -9,6 +9,7 @@ import { formatDexNumber, getDexEntryMap } from "@/lib/dex";
 import { buildLocaleAlternates } from "@/lib/locale-routing";
 import { resolveStoredOwnerCreditForSlug } from "@/lib/owner-credit";
 import { getPet, getStaticPetSlugs } from "@/lib/pets";
+import { getPetStickerAvailability } from "@/lib/sticker-export";
 import { getVariantsFor } from "@/lib/variants";
 
 import { ClaimCTA } from "@/components/auth/claim-cta";
@@ -164,10 +165,16 @@ export default async function PetPage({ params }: PageProps) {
         }
       : null;
 
-  const [ownerCreditResult, variants, memberOfCollections] = await Promise.all([
+  const [
+    ownerCreditResult,
+    variants,
+    memberOfCollections,
+    stickerAvailability,
+  ] = await Promise.all([
     resolveStoredOwnerCreditForSlug(slug),
     getVariantsFor(slug),
     getCollectionsContainingPet(slug),
+    getPetStickerAvailability(slug),
   ]);
   const ownerCredit = ownerCreditResult?.credit ?? null;
 
@@ -383,10 +390,14 @@ export default async function PetPage({ params }: PageProps) {
                     }}
                     variant="detail"
                   />
-                  <SaveAsSticker
-                    slug={pet.slug}
-                    displayName={pet.displayName}
-                  />
+                  {stickerAvailability.available &&
+                  stickerAvailability.collectionSlug ? (
+                    <SaveAsSticker
+                      slug={pet.slug}
+                      displayName={pet.displayName}
+                      collectionSlug={stickerAvailability.collectionSlug}
+                    />
+                  ) : null}
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
                   <PetCountersBar slug={pet.slug} />
