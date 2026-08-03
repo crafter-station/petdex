@@ -2,6 +2,7 @@ import type { PetStateId } from "@/lib/pet-states";
 import { R2_PUBLIC_BASE } from "@/lib/r2-public-url";
 
 export type PetStickerFormat = "webp" | "gif" | "png";
+export type PetStickerProfile = "web" | "whatsapp";
 export type PetStickerTreatment = "clean" | "outline";
 
 export const PET_STICKER_CACHE_HEADER =
@@ -31,6 +32,11 @@ export const PET_STICKER_TREATMENTS = [
   "clean",
   "outline",
 ] as const satisfies readonly PetStickerTreatment[];
+
+export const PET_STICKER_PROFILES = [
+  "web",
+  "whatsapp",
+] as const satisfies readonly PetStickerProfile[];
 
 export function isValidPetSlug(slug: string): boolean {
   return /^[a-z0-9-]{1,80}$/.test(slug);
@@ -77,14 +83,25 @@ export function parseExactPetStickerTreatment(
     : null;
 }
 
+export function parseExactPetStickerProfile(
+  value: string | null,
+): PetStickerProfile | null {
+  if (!value) return null;
+  return PET_STICKER_PROFILES.includes(value as PetStickerProfile)
+    ? (value as PetStickerProfile)
+    : null;
+}
+
 export function petStickerKey(
   slug: string,
   state: PetStateId = "idle",
   format: PetStickerFormat = "webp",
   treatment: PetStickerTreatment = "clean",
+  profile: PetStickerProfile = "web",
 ): string {
   const suffix = treatment === "outline" ? "-outline" : "";
-  return `pets/${slug}/stickers/${state}${suffix}.${format}`;
+  const profilePath = profile === "whatsapp" ? "whatsapp/" : "";
+  return `pets/${slug}/stickers/${profilePath}${state}${suffix}.${format}`;
 }
 
 export function petStickerUrl(
@@ -92,8 +109,9 @@ export function petStickerUrl(
   state: PetStateId = "idle",
   format: PetStickerFormat = "webp",
   treatment: PetStickerTreatment = "clean",
+  profile: PetStickerProfile = "web",
 ): string {
-  return `${R2_PUBLIC_BASE}/${petStickerKey(slug, state, format, treatment)}`;
+  return `${R2_PUBLIC_BASE}/${petStickerKey(slug, state, format, treatment, profile)}`;
 }
 
 export function petStickerFilename(
@@ -101,10 +119,12 @@ export function petStickerFilename(
   state: PetStateId = "idle",
   format: PetStickerFormat = "webp",
   treatment: PetStickerTreatment = "clean",
+  profile: PetStickerProfile = "web",
 ): string {
   const suffix = state === "idle" ? "" : `-${state}`;
   const treatmentSuffix = treatment === "outline" ? "-outline" : "";
-  return `${slug}${suffix}${treatmentSuffix}-sticker.${format}`;
+  const profileSuffix = profile === "whatsapp" ? "-whatsapp" : "";
+  return `${slug}${suffix}${treatmentSuffix}${profileSuffix}-sticker.${format}`;
 }
 
 export function legacyPetStickerRedirectUrls(slug: string): string[] {
@@ -112,14 +132,14 @@ export function legacyPetStickerRedirectUrls(slug: string): string[] {
   return [base, `${base}?format=gif`, `${base}?format=png`];
 }
 
-export function petStickerPackKey(slug: string): string {
-  return `pets/${slug}/wastickers.zip`;
+export function petStickerTrayKey(slug: string): string {
+  return `pets/${slug}/stickers/whatsapp/tray.png`;
 }
 
-export function petStickerPackUrl(slug: string): string {
-  return `${R2_PUBLIC_BASE}/${petStickerPackKey(slug)}`;
+export function petStickerTrayUrl(slug: string): string {
+  return `${R2_PUBLIC_BASE}/${petStickerTrayKey(slug)}`;
 }
 
-export function petStickerPackFilename(slug: string): string {
-  return `${slug}-petdex-stickers.zip`;
+export function petStickerTrayFilename(slug: string): string {
+  return `${slug}-whatsapp-tray.png`;
 }

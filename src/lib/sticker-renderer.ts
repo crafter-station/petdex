@@ -1,12 +1,11 @@
-// Sticker rendering for WeChat / WhatsApp / Discord export.
+// Sticker rendering for web and messaging exports.
 //
 // Each pet has a 9-state spritesheet (see pet-states.ts). We slice the
 // requested state's row, extract its frames, and encode an animated WebP
-// at 240×240 (sticker target across most platforms; WhatsApp wants 512
-// for packs but is tolerant of 240 for individual sends).
+// at either the 240×240 web profile or the 512×512 WhatsApp profile.
 //
 // WebP animated is preferred over GIF: smaller files, better alpha,
-// native WhatsApp pack format. Both WeChat and Discord accept it inline.
+// native WhatsApp image format. Both WeChat and Discord accept it inline.
 //
 // Single-frame export (the default 'idle' caller) collapses to a static
 // PNG via the same pipeline by skipping the animation envelope.
@@ -20,12 +19,8 @@ import { fetchR2Asset } from "@/lib/r2-fetch";
 
 const FRAME_W = 192;
 const FRAME_H = 208;
-// 240 is the WeChat custom sticker max + smallest common WhatsApp pack
-// dimension that survives Tencent's preview crawler. 512 is the WhatsApp
-// pack official spec but inflates files 4x for marginal quality gain on
-// 192x208 source pixel art.
 const OUT_DEFAULT = 240;
-const OUT_WHATSAPP_PACK = 512;
+const OUT_WHATSAPP = 512;
 
 const RESIZE_OPTS = {
   fit: "contain" as const,
@@ -270,7 +265,15 @@ export async function renderSticker(
   };
 }
 
+export async function renderWhatsAppTray(source: Buffer): Promise<Buffer> {
+  return await sharp(source)
+    .extract({ left: 0, top: 0, width: FRAME_W, height: FRAME_H })
+    .resize(96, 96, RESIZE_OPTS)
+    .png({ compressionLevel: 9 })
+    .toBuffer();
+}
+
 export const STICKER_SIZES = {
   default: OUT_DEFAULT,
-  whatsappPack: OUT_WHATSAPP_PACK,
+  whatsapp: OUT_WHATSAPP,
 };

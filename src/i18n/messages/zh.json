@@ -108,6 +108,8 @@
     "openExplorer": "反应贴纸",
     "copied": "贴纸已复制",
     "download": "下载 WebP",
+    "downloadWhatsApp": "WhatsApp WebP · 512px",
+    "whatsappNote": "符合 WhatsApp 媒体限制的动态 WebP。此操作仅下载单个反应，不会安装贴纸包。",
     "nextPet": "下一个宠物",
     "addToDeck": "加入组合",
     "deck": "反应组合",

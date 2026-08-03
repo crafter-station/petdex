@@ -10,8 +10,22 @@ import {
   PET_STICKER_STATES,
   PET_STICKER_TREATMENTS,
   petStickerFilename,
+  petStickerTrayFilename,
 } from "@/lib/pet-sticker-artifacts";
-import { fetchSpritesheet, renderSticker } from "@/lib/sticker-renderer";
+import {
+  STICKER_PUBLIC_PROFILES,
+  stickerFormatsForProfile,
+} from "@/lib/sticker-export-policy";
+import {
+  fetchSpritesheet,
+  renderSticker,
+  renderWhatsAppTray,
+  STICKER_SIZES,
+} from "@/lib/sticker-renderer";
+import {
+  assertWhatsAppSticker,
+  assertWhatsAppTray,
+} from "@/lib/whatsapp-sticker";
 
 const slug = readArg("slug");
 const collection = readArg("collection");
@@ -69,6 +83,7 @@ for (const pet of pets) {
     state: string;
     treatment: string;
     format: string;
+    profile: string;
     filename: string;
     bytes: number;
     sha256: string;
@@ -76,35 +91,56 @@ for (const pet of pets) {
   const contactTiles: Array<{ input: Buffer; left: number; top: number }> = [];
   let tile = 0;
 
-  for (const treatment of PET_STICKER_TREATMENTS) {
-    for (const state of PET_STICKER_STATES) {
-      for (const format of ["png", "webp"] as const) {
-        const output = await renderSticker(source, {
-          state,
-          format,
-          treatment,
-        });
-        const filename = petStickerFilename(pet.slug, state, format, treatment);
-        await writeFile(join(petDir, filename), output.buffer);
-        files.push({
-          state,
-          treatment,
-          format,
-          filename,
-          bytes: output.buffer.byteLength,
-          sha256: createHash("sha256").update(output.buffer).digest("hex"),
-        });
-        if (format === "png") {
-          contactTiles.push({
-            input: output.buffer,
-            left: (tile % 6) * 240,
-            top: Math.floor(tile / 6) * 240,
+  for (const profile of STICKER_PUBLIC_PROFILES) {
+    for (const treatment of PET_STICKER_TREATMENTS) {
+      for (const state of PET_STICKER_STATES) {
+        for (const format of stickerFormatsForProfile(profile)) {
+          const output = await renderSticker(source, {
+            state,
+            format,
+            treatment,
+            size:
+              profile === "whatsapp"
+                ? STICKER_SIZES.whatsapp
+                : STICKER_SIZES.default,
           });
-          tile += 1;
+          if (profile === "whatsapp") {
+            await assertWhatsAppSticker(output.buffer);
+          }
+          const filename = petStickerFilename(
+            pet.slug,
+            state,
+            format,
+            treatment,
+            profile,
+          );
+          await writeFile(join(petDir, filename), output.buffer);
+          files.push({
+            state,
+            treatment,
+            format,
+            profile,
+            filename,
+            bytes: output.buffer.byteLength,
+            sha256: createHash("sha256").update(output.buffer).digest("hex"),
+          });
+          if (profile === "web" && format === "png") {
+            contactTiles.push({
+              input: output.buffer,
+              left: (tile % 6) * 240,
+              top: Math.floor(tile / 6) * 240,
+            });
+            tile += 1;
+          }
         }
       }
     }
   }
+
+  const tray = await renderWhatsAppTray(source);
+  await assertWhatsAppTray(tray);
+  const trayFilename = petStickerTrayFilename(pet.slug);
+  await writeFile(join(petDir, trayFilename), tray);
 
   const contactSheet = await sharp({
     create: {
@@ -127,6 +163,11 @@ for (const pet of pets) {
         sourceSha256: createHash("sha256").update(source).digest("hex"),
         generatedAt: new Date().toISOString(),
         files,
+        tray: {
+          filename: trayFilename,
+          bytes: tray.byteLength,
+          sha256: createHash("sha256").update(tray).digest("hex"),
+        },
       },
       null,
       2,

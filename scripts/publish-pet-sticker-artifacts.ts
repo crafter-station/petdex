@@ -6,21 +6,21 @@ import {
   PutObjectCommand,
 } from "@aws-sdk/client-s3";
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
-import JSZip from "jszip";
 import sharp from "sharp";
 
 import { db, schema } from "@/lib/db/client";
 import type { PetStateId } from "@/lib/pet-states";
-import { petStates } from "@/lib/pet-states";
 import {
   PET_STICKER_CACHE_HEADER,
   PET_STICKER_STATES,
   type PetStickerFormat,
+  type PetStickerProfile,
   type PetStickerTreatment,
   petStickerFilename,
   petStickerKey,
-  petStickerPackFilename,
-  petStickerPackKey,
+  petStickerTrayFilename,
+  petStickerTrayKey,
+  petStickerTrayUrl,
   petStickerUrl,
 } from "@/lib/pet-sticker-artifacts";
 import { R2_BUCKET, r2 } from "@/lib/r2";
@@ -30,35 +30,41 @@ import {
   STICKER_EXPORT_POLICY_VERSION,
   STICKER_EXPORT_SCOPE,
   STICKER_PUBLIC_FORMATS,
+  STICKER_PUBLIC_PROFILES,
   STICKER_PUBLIC_TREATMENTS,
+  stickerFormatsForProfile,
 } from "@/lib/sticker-export-policy";
 import {
   applyStickerOutline,
   renderSticker,
+  renderWhatsAppTray,
   STICKER_SIZES,
 } from "@/lib/sticker-renderer";
 import { isAllowedAssetUrl } from "@/lib/url-allowlist";
+import {
+  assertWhatsAppSticker,
+  assertWhatsAppTray,
+} from "@/lib/whatsapp-sticker";
 
 type Mode = "check" | "apply";
-type Artifact = "idle-webp" | "all-webp" | "reactions" | "pack";
+type Artifact = "idle-webp" | "all-webp" | "reactions";
 type ArtifactRef =
   | {
       kind: "sticker";
       key: string;
       state: PetStateId;
       format: PetStickerFormat;
+      profile: PetStickerProfile;
       treatment: PetStickerTreatment;
     }
   | {
-      kind: "pack";
+      kind: "whatsapp-tray";
       key: string;
     };
 
 type StickerTask = {
   slug: string;
   id: string;
-  displayName: string;
-  description: string;
   spritesheetPath: string;
   spritesheetKey: string;
   sourceSha256: string;
@@ -89,8 +95,6 @@ const tasks = selectedPets.map((pet) => {
   return {
     slug: pet.slug,
     id: pet.id,
-    displayName: pet.displayName,
-    description: pet.description,
     spritesheetPath: pet.spritesheetUrl,
     spritesheetKey: spritesheetKey ?? "",
     sourceSha256: pet.spriteSha256,
@@ -252,7 +256,13 @@ if (mode === "apply") {
         task.refs
           .filter((ref) => ref.kind === "sticker")
           .map((ref) =>
-            petStickerUrl(task.slug, ref.state, ref.format, ref.treatment),
+            petStickerUrl(
+              task.slug,
+              ref.state,
+              ref.format,
+              ref.treatment,
+              ref.profile,
+            ),
           ),
       ),
     );
@@ -310,11 +320,17 @@ async function publishTask(task: StickerTask): Promise<PublishResult> {
 
 async function purgeReactionTask(task: StickerTask): Promise<PublishResult> {
   try {
-    const urls = task.refs
-      .filter((ref) => ref.kind === "sticker")
-      .map((ref) =>
-        petStickerUrl(task.slug, ref.state, ref.format, ref.treatment),
-      );
+    const urls = task.refs.map((ref) =>
+      ref.kind === "sticker"
+        ? petStickerUrl(
+            task.slug,
+            ref.state,
+            ref.format,
+            ref.treatment,
+            ref.profile,
+          )
+        : petStickerTrayUrl(task.slug),
+    );
     await purgeCdnUrls(urls, true);
     return {
       ok: true,
@@ -376,6 +392,7 @@ async function finalizeReactionPublication(
         artifactVersion: STICKER_ARTIFACT_VERSION,
         states: [...PET_STICKER_STATES],
         formats: [...STICKER_PUBLIC_FORMATS],
+        profiles: [...STICKER_PUBLIC_PROFILES],
         treatments: [...STICKER_PUBLIC_TREATMENTS],
         objectCount: objects.length,
         totalBytes,
@@ -394,6 +411,7 @@ async function finalizeReactionPublication(
           artifactVersion: STICKER_ARTIFACT_VERSION,
           states: [...PET_STICKER_STATES],
           formats: [...STICKER_PUBLIC_FORMATS],
+          profiles: [...STICKER_PUBLIC_PROFILES],
           treatments: [...STICKER_PUBLIC_TREATMENTS],
           objectCount: objects.length,
           totalBytes,
@@ -428,12 +446,13 @@ async function buildArtifact(
   filename: string;
   sha256: string;
 }> {
-  if (ref.kind === "pack") {
-    const body = await buildPack(task, source);
+  if (ref.kind === "whatsapp-tray") {
+    const body = await renderWhatsAppTray(source);
+    await assertWhatsAppTray(body);
     return {
       body,
-      contentType: "application/zip",
-      filename: petStickerPackFilename(task.slug),
+      contentType: "image/png",
+      filename: petStickerTrayFilename(task.slug),
       sha256: createHash("sha256").update(body).digest("hex"),
     };
   }
@@ -447,6 +466,7 @@ async function buildArtifact(
       ref.state,
       ref.format,
       ref.treatment,
+      ref.profile,
     ),
     sha256: createHash("sha256").update(sticker.buffer).digest("hex"),
   };
@@ -457,13 +477,27 @@ async function renderStickerWithFallback(
   ref: Extract<ArtifactRef, { kind: "sticker" }>,
 ) {
   try {
-    return await renderSticker(source, {
+    const output = await renderSticker(source, {
       state: ref.state,
       format: ref.format,
       treatment: ref.treatment,
+      size:
+        ref.profile === "whatsapp"
+          ? STICKER_SIZES.whatsapp
+          : STICKER_SIZES.default,
     });
+    if (ref.profile === "whatsapp") {
+      await assertWhatsAppSticker(output.buffer);
+    }
+    return output;
   } catch (error) {
-    if (ref.format === "gif" || !isExtractAreaError(error)) throw error;
+    if (
+      ref.profile === "whatsapp" ||
+      ref.format === "gif" ||
+      !isExtractAreaError(error)
+    ) {
+      throw error;
+    }
     const size = STICKER_SIZES.default;
     const raw = await sharp(source)
       .extract({ left: 0, top: 0, width: 192, height: 208 })
@@ -501,79 +535,10 @@ async function renderStickerWithFallback(
   }
 }
 
-async function buildPack(task: StickerTask, source: Buffer): Promise<Buffer> {
-  const trayBuf = await buildTrayIcon(source);
-  const stickerBufs = await Promise.all(
-    petStates.map(async (state) => {
-      const out = await renderSticker(source, {
-        state: state.id,
-        size: STICKER_SIZES.whatsappPack,
-      });
-      return { id: state.id, buf: out.buffer };
-    }),
-  );
-  const publisherWebsite =
-    process.env.PETDEX_URL?.trim() || "https://petdex.dev";
-  const stateEmoji: Record<string, string[]> = {
-    idle: ["🙂"],
-    "running-right": ["🏃"],
-    "running-left": ["🏃"],
-    waving: ["👋"],
-    jumping: ["⬆️"],
-    failed: ["😅"],
-    waiting: ["⏳"],
-    running: ["🏃"],
-    review: ["🤔"],
-  };
-  const manifest = {
-    identifier: `petdex.${task.slug}`,
-    name: `${task.displayName} - Petdex`,
-    publisher: "Petdex",
-    tray_image_file: "tray.png",
-    publisher_email: "hello@crafter.run",
-    publisher_website: publisherWebsite,
-    privacy_policy_website: `${publisherWebsite}/legal/privacy`,
-    license_agreement_website: `${publisherWebsite}/legal/terms`,
-    image_data_version: "1",
-    avoid_cache: false,
-    animated_sticker_pack: true,
-    stickers: stickerBufs.map((sticker) => ({
-      image_file: `${sticker.id}.webp`,
-      emojis: stateEmoji[sticker.id] ?? ["🙂"],
-    })),
-  };
-  const zip = new JSZip();
-  zip.file("manifest.json", JSON.stringify(manifest, null, 2));
-  zip.file("contents.json", JSON.stringify(manifest, null, 2));
-  zip.file("tray.png", trayBuf);
-  for (const sticker of stickerBufs) {
-    zip.file(`${sticker.id}.webp`, sticker.buf);
-  }
-  return await zip.generateAsync({
-    type: "nodebuffer",
-    compression: "DEFLATE",
-    compressionOptions: { level: 6 },
-  });
-}
-
-async function buildTrayIcon(sheet: Buffer): Promise<Buffer> {
-  return await sharp(sheet)
-    .extract({ left: 0, top: 0, width: 192, height: 208 })
-    .resize(96, 96, {
-      fit: "contain",
-      kernel: "nearest",
-      background: { r: 0, g: 0, b: 0, alpha: 0 },
-    })
-    .png({ compressionLevel: 9 })
-    .toBuffer();
-}
-
 async function getPublishablePets(collectionSlug: string | null) {
   const columns = {
     id: schema.submittedPets.id,
     slug: schema.submittedPets.slug,
-    displayName: schema.submittedPets.displayName,
-    description: schema.submittedPets.description,
     spritesheetUrl: schema.submittedPets.spritesheetUrl,
     spriteSha256: schema.submittedPets.spriteSha256,
   };
@@ -664,6 +629,7 @@ function refsForArtifacts(slug: string, artifacts: Artifact[]): ArtifactRef[] {
       key,
       state: "idle",
       format: "webp",
+      profile: "web",
       treatment: "clean",
     });
   }
@@ -675,29 +641,31 @@ function refsForArtifacts(slug: string, artifacts: Artifact[]): ArtifactRef[] {
         key,
         state,
         format: "webp",
+        profile: "web",
         treatment: "clean",
       });
     }
   }
   if (artifacts.includes("reactions")) {
-    for (const state of PET_STICKER_STATES) {
-      for (const format of STICKER_PUBLIC_FORMATS) {
-        for (const treatment of STICKER_PUBLIC_TREATMENTS) {
-          const key = petStickerKey(slug, state, format, treatment);
-          refs.set(key, {
-            kind: "sticker",
-            key,
-            state,
-            format,
-            treatment,
-          });
+    for (const profile of STICKER_PUBLIC_PROFILES) {
+      for (const state of PET_STICKER_STATES) {
+        for (const format of stickerFormatsForProfile(profile)) {
+          for (const treatment of STICKER_PUBLIC_TREATMENTS) {
+            const key = petStickerKey(slug, state, format, treatment, profile);
+            refs.set(key, {
+              kind: "sticker",
+              key,
+              state,
+              format,
+              profile,
+              treatment,
+            });
+          }
         }
       }
     }
-  }
-  if (artifacts.includes("pack")) {
-    const key = petStickerPackKey(slug);
-    refs.set(key, { kind: "pack", key });
+    const key = petStickerTrayKey(slug);
+    refs.set(key, { kind: "whatsapp-tray", key });
   }
   return [...refs.values()];
 }
@@ -748,12 +716,7 @@ function parseArtifacts(args: string[]): Artifact[] {
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean);
-  const valid = new Set<Artifact>([
-    "idle-webp",
-    "all-webp",
-    "reactions",
-    "pack",
-  ]);
+  const valid = new Set<Artifact>(["idle-webp", "all-webp", "reactions"]);
   if (
     values.length > 0 &&
     values.every((value) => valid.has(value as Artifact))

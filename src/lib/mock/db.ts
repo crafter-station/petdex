@@ -219,6 +219,7 @@ async function bootstrap(client: PGlite): Promise<void> {
       "artifact_version" text NOT NULL,
       "states" jsonb NOT NULL,
       "formats" jsonb NOT NULL,
+      "profiles" jsonb NOT NULL,
       "treatments" jsonb NOT NULL,
       "object_count" integer NOT NULL,
       "total_bytes" integer NOT NULL,

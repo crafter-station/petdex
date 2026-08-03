@@ -7,6 +7,7 @@ import { withNextDataCache } from "@/lib/next-data-cache";
 import type { PetStateId } from "@/lib/pet-states";
 import type {
   PetStickerFormat,
+  PetStickerProfile,
   PetStickerTreatment,
 } from "@/lib/pet-sticker-artifacts";
 import {
@@ -26,6 +27,7 @@ export type StickerCollectionPet = {
   dominantColor: string | null;
   states: PetStateId[];
   formats: PetStickerFormat[];
+  profiles: PetStickerProfile[];
   treatments: PetStickerTreatment[];
 };
 
@@ -105,6 +107,7 @@ export async function getStickerCollection(
         dominantColor: row.dominantColor,
         states: row.publication?.states as PetStateId[],
         formats: row.publication?.formats as PetStickerFormat[],
+        profiles: row.publication?.profiles as PetStickerProfile[],
         treatments: row.publication?.treatments as PetStickerTreatment[],
       })),
   };
@@ -115,6 +118,7 @@ export async function getStickerArtifactAccess(
   state: PetStateId,
   format: PetStickerFormat,
   treatment: PetStickerTreatment,
+  profile: PetStickerProfile = "web",
 ): Promise<StickerArtifactAccess> {
   if (isStickerExportDisabled()) return { status: "disabled" };
   const loadAccess = withNextDataCache(
@@ -157,7 +161,13 @@ export async function getStickerArtifactAccess(
   if (
     !isCurrentStickerPublication(row.pet, row.publication) ||
     !row.publication ||
-    !hasPublishedStickerArtifact(row.publication, state, format, treatment)
+    !hasPublishedStickerArtifact(
+      row.publication,
+      state,
+      format,
+      treatment,
+      profile,
+    )
   ) {
     return { status: "missing" };
   }

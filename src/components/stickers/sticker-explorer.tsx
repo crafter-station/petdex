@@ -16,6 +16,7 @@ import {
 
 import {
   type PetStickerFormat,
+  type PetStickerProfile,
   petStickerFilename,
 } from "@/lib/pet-sticker-artifacts";
 import {
@@ -37,6 +38,8 @@ type Labels = {
   copy: string;
   copied: string;
   download: string;
+  downloadWhatsApp: string;
+  whatsappNote: string;
   nextPet: string;
   addToDeck: string;
   deck: string;
@@ -192,7 +195,7 @@ export function StickerExplorer({
             {labels.copy}
           </button>
           <a
-            href={downloadUrl(selection, demo)}
+            href={stickerAssetUrl(selection, "webp", demo)}
             download={petStickerFilename(
               selection.pet,
               selection.state,
@@ -203,6 +206,20 @@ export function StickerExplorer({
           >
             <Download className="size-4" />
             {labels.download}
+          </a>
+          <a
+            href={stickerAssetUrl(selection, "webp", demo, "whatsapp")}
+            download={petStickerFilename(
+              selection.pet,
+              selection.state,
+              "webp",
+              selection.treatment,
+              "whatsapp",
+            )}
+            className="inline-flex h-11 items-center gap-2 rounded-full border border-border-base bg-background px-5 text-sm font-semibold transition hover:bg-surface-muted"
+          >
+            <Download className="size-4" />
+            {labels.downloadWhatsApp}
           </a>
           <button
             type="button"
@@ -228,6 +245,9 @@ export function StickerExplorer({
             {labels.nextPet}
             <ChevronRight className="size-4" />
           </button>
+          <p className="w-full text-xs leading-5 text-muted-2">
+            {labels.whatsappNote}
+          </p>
         </div>
       </section>
 
@@ -391,6 +411,7 @@ function stickerAssetUrl(
   item: StickerDeckItem,
   format: PetStickerFormat,
   demo: boolean,
+  profile: PetStickerProfile = "web",
 ): string {
   if (demo) {
     return `/sticker-review/${item.pet}/${petStickerFilename(
@@ -398,6 +419,7 @@ function stickerAssetUrl(
       item.state,
       format,
       item.treatment,
+      profile,
     )}`;
   }
   const params = new URLSearchParams({
@@ -405,9 +427,6 @@ function stickerAssetUrl(
     format,
     treatment: item.treatment,
   });
+  if (profile === "whatsapp") params.set("profile", profile);
   return `/api/pets/${item.pet}/sticker?${params.toString()}`;
-}
-
-function downloadUrl(item: StickerDeckItem, demo: boolean): string {
-  return stickerAssetUrl(item, "webp", demo);
 }

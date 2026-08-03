@@ -8,16 +8,18 @@ import {
   PET_STICKER_STATES,
   PET_STICKER_TREATMENTS,
   petStickerKey,
+  petStickerTrayKey,
 } from "@/lib/pet-sticker-artifacts";
 import { petThumbnailKey } from "@/lib/pet-thumbnail";
 
 describe("pet public artifact keys", () => {
-  it("covers thumbnails, previews, every sticker derivative, and packs", () => {
+  it("covers thumbnails, previews, every sticker derivative, and retired artifacts", () => {
     const keys = petPublicArtifactKeys("cai-chao");
 
     expect(keys).toContain(petThumbnailKey("cai-chao"));
     expect(keys).toContain(petPreviewKey("cai-chao"));
     expect(keys).toContain("pets/cai-chao/wastickers.zip");
+    expect(keys).toContain(petStickerTrayKey("cai-chao"));
 
     for (const state of PET_STICKER_STATES) {
       for (const format of PET_STICKER_FORMATS) {
@@ -26,6 +28,11 @@ describe("pet public artifact keys", () => {
             petStickerKey("cai-chao", state, format, treatment),
           );
         }
+      }
+      for (const treatment of PET_STICKER_TREATMENTS) {
+        expect(keys).toContain(
+          petStickerKey("cai-chao", state, "webp", treatment, "whatsapp"),
+        );
       }
     }
 

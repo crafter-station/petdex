@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS "pet_sticker_publications" (
 	"artifact_version" text NOT NULL,
 	"states" jsonb NOT NULL,
 	"formats" jsonb NOT NULL,
+	"profiles" jsonb NOT NULL,
 	"treatments" jsonb NOT NULL,
 	"object_count" integer NOT NULL,
 	"total_bytes" integer NOT NULL,
@@ -33,6 +34,10 @@ CREATE TABLE IF NOT EXISTS "pet_sticker_publications" (
 	"revoked_at" timestamp with time zone,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
+
+ALTER TABLE "pet_sticker_publications" ADD COLUMN IF NOT EXISTS "profiles" jsonb;
+UPDATE "pet_sticker_publications" SET "profiles" = '["web","whatsapp"]'::jsonb WHERE "profiles" IS NULL;
+ALTER TABLE "pet_sticker_publications" ALTER COLUMN "profiles" SET NOT NULL;
 
 CREATE INDEX IF NOT EXISTS "pet_export_approvals_scope_status_idx" ON "pet_export_approvals" ("scope","status");
 CREATE INDEX IF NOT EXISTS "pet_export_approvals_source_idx" ON "pet_export_approvals" ("pet_id","source_sha256");

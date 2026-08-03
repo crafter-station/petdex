@@ -10,6 +10,7 @@ import {
 } from "@/lib/sticker-export";
 import {
   STICKER_PUBLIC_FORMATS,
+  STICKER_PUBLIC_PROFILES,
   STICKER_PUBLIC_TREATMENTS,
 } from "@/lib/sticker-export-policy";
 
@@ -73,6 +74,8 @@ export default async function StickerCollectionPage({
     copy: t("copy"),
     copied: t("copied"),
     download: t("download"),
+    downloadWhatsApp: t("downloadWhatsApp"),
+    whatsappNote: t("whatsappNote"),
     nextPet: t("nextPet"),
     addToDeck: t("addToDeck"),
     deck: t("deck"),
@@ -135,6 +138,7 @@ function demoCollection(slug: string): StickerCollection | null {
         dominantColor: "#fc7434",
         states: [...PET_STICKER_STATES],
         formats: [...STICKER_PUBLIC_FORMATS],
+        profiles: [...STICKER_PUBLIC_PROFILES],
         treatments: [...STICKER_PUBLIC_TREATMENTS],
       },
       {
@@ -146,6 +150,7 @@ function demoCollection(slug: string): StickerCollection | null {
         dominantColor: "#d79444",
         states: [...PET_STICKER_STATES],
         formats: [...STICKER_PUBLIC_FORMATS],
+        profiles: [...STICKER_PUBLIC_PROFILES],
         treatments: [...STICKER_PUBLIC_TREATMENTS],
       },
       {
@@ -156,6 +161,7 @@ function demoCollection(slug: string): StickerCollection | null {
         dominantColor: "#dc7454",
         states: [...PET_STICKER_STATES],
         formats: [...STICKER_PUBLIC_FORMATS],
+        profiles: [...STICKER_PUBLIC_PROFILES],
         treatments: [...STICKER_PUBLIC_TREATMENTS],
       },
     ],

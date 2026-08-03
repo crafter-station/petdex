@@ -4,7 +4,7 @@ import {
   PET_STICKER_STATES,
   PET_STICKER_TREATMENTS,
   petStickerKey,
-  petStickerPackKey,
+  petStickerTrayKey,
 } from "@/lib/pet-sticker-artifacts";
 import { petThumbnailKey } from "@/lib/pet-thumbnail";
 
@@ -19,6 +19,12 @@ export function petPublicArtifactKeys(slug: string): string[] {
         ),
       ),
     ),
-    petStickerPackKey(slug),
+    ...PET_STICKER_STATES.flatMap((state) =>
+      PET_STICKER_TREATMENTS.map((treatment) =>
+        petStickerKey(slug, state, "webp", treatment, "whatsapp"),
+      ),
+    ),
+    petStickerTrayKey(slug),
+    `pets/${slug}/wastickers.zip`,
   ];
 }

@@ -2,13 +2,15 @@ import type { schema } from "@/lib/db/client";
 import {
   PET_STICKER_STATES,
   type PetStickerFormat,
+  type PetStickerProfile,
   type PetStickerTreatment,
 } from "@/lib/pet-sticker-artifacts";
 
 export const STICKER_EXPORT_SCOPE = "stickers";
 export const STICKER_EXPORT_POLICY_VERSION = "sticker-export-v1";
-export const STICKER_ARTIFACT_VERSION = "petdex-stickers-v1";
+export const STICKER_ARTIFACT_VERSION = "petdex-stickers-v2";
 export const STICKER_PUBLIC_FORMATS = ["webp", "png"] as const;
+export const STICKER_PUBLIC_PROFILES = ["web", "whatsapp"] as const;
 export const STICKER_PUBLIC_TREATMENTS = ["clean", "outline"] as const;
 
 type StickerApproval = typeof schema.petExportApprovals.$inferSelect;
@@ -55,6 +57,7 @@ export function isCurrentStickerPublication(
       publication.artifactVersion === STICKER_ARTIFACT_VERSION &&
       includesAll(publication.states, PET_STICKER_STATES) &&
       includesAll(publication.formats, STICKER_PUBLIC_FORMATS) &&
+      includesAll(publication.profiles, STICKER_PUBLIC_PROFILES) &&
       includesAll(publication.treatments, STICKER_PUBLIC_TREATMENTS),
   );
 }
@@ -64,12 +67,21 @@ export function hasPublishedStickerArtifact(
   state: string,
   format: PetStickerFormat,
   treatment: PetStickerTreatment,
+  profile: PetStickerProfile,
 ): boolean {
   return (
     publication.states.includes(state) &&
     publication.formats.includes(format) &&
-    publication.treatments.includes(treatment)
+    publication.treatments.includes(treatment) &&
+    publication.profiles.includes(profile) &&
+    stickerFormatsForProfile(profile).includes(format as "webp" | "png")
   );
+}
+
+export function stickerFormatsForProfile(
+  profile: PetStickerProfile,
+): readonly ("webp" | "png")[] {
+  return profile === "whatsapp" ? ["webp"] : STICKER_PUBLIC_FORMATS;
 }
 
 function includesAll(actual: string[], required: readonly string[]): boolean {

@@ -229,6 +229,7 @@ export const petStickerPublications = pgTable(
     artifactVersion: text("artifact_version").notNull(),
     states: jsonb("states").$type<string[]>().notNull(),
     formats: jsonb("formats").$type<string[]>().notNull(),
+    profiles: jsonb("profiles").$type<string[]>().notNull(),
     treatments: jsonb("treatments").$type<string[]>().notNull(),
     objectCount: integer("object_count").notNull(),
     totalBytes: integer("total_bytes").notNull(),

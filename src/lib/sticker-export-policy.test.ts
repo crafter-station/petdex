@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
 
 import {
+  hasPublishedStickerArtifact,
   isCurrentStickerExportAllowed,
   isCurrentStickerPublication,
   isStickerExplorerEnabled,
@@ -60,8 +61,9 @@ describe("sticker export policy", () => {
         "review",
       ],
       formats: ["webp", "png"],
+      profiles: ["web", "whatsapp"],
       treatments: ["clean", "outline"],
-      objectCount: 36,
+      objectCount: 55,
       totalBytes: 123,
       manifestSha256: "manifest",
       status: "complete" as const,
@@ -78,6 +80,30 @@ describe("sticker export policy", () => {
         ...publication,
         treatments: ["clean"],
       }),
+    ).toBe(false);
+    expect(
+      isCurrentStickerPublication(pet, {
+        ...publication,
+        profiles: ["web"],
+      }),
+    ).toBe(false);
+    expect(
+      hasPublishedStickerArtifact(
+        publication,
+        "waiting",
+        "webp",
+        "outline",
+        "whatsapp",
+      ),
+    ).toBe(true);
+    expect(
+      hasPublishedStickerArtifact(
+        publication,
+        "waiting",
+        "png",
+        "outline",
+        "whatsapp",
+      ),
     ).toBe(false);
   });
 
