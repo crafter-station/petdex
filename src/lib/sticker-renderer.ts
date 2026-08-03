@@ -15,6 +15,7 @@ import { applyPalette, GIFEncoder, quantize } from "gifenc";
 import sharp from "sharp";
 
 import { defaultPetState, type PetStateId, petStates } from "@/lib/pet-states";
+import type { PetStickerTreatment } from "@/lib/pet-sticker-artifacts";
 import { fetchR2Asset } from "@/lib/r2-fetch";
 
 const FRAME_W = 192;
@@ -38,6 +39,7 @@ export type StickerOptions = {
   state?: PetStateId;
   size?: number;
   format?: StickerFormat;
+  treatment?: PetStickerTreatment;
 };
 
 export type StickerOutput = {
@@ -97,15 +99,14 @@ async function buildAnimatedGif(
   frames: Buffer[],
   size: number,
   delayMs: number,
+  treatment: PetStickerTreatment,
 ): Promise<Buffer> {
   const channels = 4;
   const frameByteLength = size * size * channels;
 
   // Resize each frame to (size × size) and pull raw RGBA.
   const rawFrames = await Promise.all(
-    frames.map((b) =>
-      sharp(b).resize(size, size, RESIZE_OPTS).ensureAlpha().raw().toBuffer(),
-    ),
+    frames.map((frame) => resizeFrame(frame, size, treatment)),
   );
 
   for (const buf of rawFrames) {
@@ -147,11 +148,77 @@ async function gifToAnimatedWebp(gifBuf: Buffer): Promise<Buffer> {
     .toBuffer();
 }
 
-async function buildStaticPng(frame: Buffer, size: number): Promise<Buffer> {
-  return await sharp(frame)
-    .resize(size, size, RESIZE_OPTS)
+async function buildStaticPng(
+  frame: Buffer,
+  size: number,
+  treatment: PetStickerTreatment,
+): Promise<Buffer> {
+  const raw = await resizeFrame(frame, size, treatment);
+  return await sharp(raw, { raw: { width: size, height: size, channels: 4 } })
     .png({ compressionLevel: 9 })
     .toBuffer();
+}
+
+async function resizeFrame(
+  frame: Buffer,
+  size: number,
+  treatment: PetStickerTreatment,
+): Promise<Buffer> {
+  const raw = await sharp(frame)
+    .resize(size, size, RESIZE_OPTS)
+    .ensureAlpha()
+    .raw()
+    .toBuffer();
+  return treatment === "outline"
+    ? applyStickerOutline(raw, size, size, Math.max(2, Math.round(size / 48)))
+    : raw;
+}
+
+export function applyStickerOutline(
+  rgba: Buffer,
+  width: number,
+  height: number,
+  radius: number,
+): Buffer {
+  const sourceAlpha = new Uint8Array(width * height);
+  for (let index = 0; index < sourceAlpha.length; index += 1) {
+    sourceAlpha[index] = rgba[index * 4 + 3] > 0 ? 1 : 0;
+  }
+
+  let expanded = sourceAlpha;
+  for (let step = 0; step < radius; step += 1) {
+    const next = expanded.slice();
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const index = y * width + x;
+        if (expanded[index]) continue;
+        if (
+          (x > 0 && expanded[index - 1]) ||
+          (x + 1 < width && expanded[index + 1]) ||
+          (y > 0 && expanded[index - width]) ||
+          (y + 1 < height && expanded[index + width]) ||
+          (x > 0 && y > 0 && expanded[index - width - 1]) ||
+          (x + 1 < width && y > 0 && expanded[index - width + 1]) ||
+          (x > 0 && y + 1 < height && expanded[index + width - 1]) ||
+          (x + 1 < width && y + 1 < height && expanded[index + width + 1])
+        ) {
+          next[index] = 1;
+        }
+      }
+    }
+    expanded = next;
+  }
+
+  const output = Buffer.from(rgba);
+  for (let index = 0; index < sourceAlpha.length; index += 1) {
+    if (sourceAlpha[index] || !expanded[index]) continue;
+    const offset = index * 4;
+    output[offset] = 255;
+    output[offset + 1] = 255;
+    output[offset + 2] = 255;
+    output[offset + 3] = 255;
+  }
+  return output;
 }
 
 export type StickerInput = string | Buffer;
@@ -163,6 +230,7 @@ export async function renderSticker(
   const state = getStateSpec(options.state);
   const size = options.size ?? OUT_DEFAULT;
   const format: StickerFormat = options.format ?? "webp";
+  const treatment = options.treatment ?? "clean";
 
   // Accept either a URL (fetched once here) or a pre-fetched spritesheet
   // buffer. The pack endpoint fetches once and feeds the same buffer to
@@ -175,7 +243,7 @@ export async function renderSticker(
   // OR the requested state has no animation to extract.
   if (format === "png" || frames.length <= 1) {
     return {
-      buffer: await buildStaticPng(frames[0], size),
+      buffer: await buildStaticPng(frames[0], size, treatment),
       contentType: "image/png",
       isAnimated: false,
       frameCount: 1,
@@ -183,7 +251,7 @@ export async function renderSticker(
   }
 
   const delayMs = Math.round(state.durationMs / state.frames);
-  const gifBuf = await buildAnimatedGif(frames, size, delayMs);
+  const gifBuf = await buildAnimatedGif(frames, size, delayMs, treatment);
 
   if (format === "gif") {
     return {
