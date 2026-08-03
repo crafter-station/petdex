@@ -146,7 +146,7 @@ export async function getStickerArtifactAccess(
         .limit(1);
       return rows[0] ?? null;
     },
-    ["sticker-artifact-access", slug, state, format, treatment],
+    ["sticker-artifact-access", slug],
     { tags: [`pet:${slug}`, `sticker:${slug}`], revalidate: 60 },
   );
   const row = await loadAccess();
