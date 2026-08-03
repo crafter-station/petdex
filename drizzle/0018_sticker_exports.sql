@@ -38,3 +38,43 @@ CREATE INDEX IF NOT EXISTS "pet_export_approvals_scope_status_idx" ON "pet_expor
 CREATE INDEX IF NOT EXISTS "pet_export_approvals_source_idx" ON "pet_export_approvals" ("pet_id","source_sha256");
 CREATE INDEX IF NOT EXISTS "pet_sticker_publications_status_idx" ON "pet_sticker_publications" ("status");
 CREATE INDEX IF NOT EXISTS "pet_sticker_publications_source_idx" ON "pet_sticker_publications" ("pet_id","source_sha256");
+
+INSERT INTO "pet_collections" (
+	"id",
+	"slug",
+	"title",
+	"description",
+	"cover_pet_slug",
+	"featured",
+	"updated_at"
+)
+VALUES (
+	'claude',
+	'claude',
+	'Claude',
+	'Claude Code pets curated for reaction stickers.',
+	'claude-crab',
+	false,
+	now()
+)
+ON CONFLICT ("slug") DO UPDATE SET
+	"title" = excluded."title",
+	"description" = excluded."description",
+	"cover_pet_slug" = excluded."cover_pet_slug",
+	"updated_at" = now();
+
+INSERT INTO "pet_collection_items" ("collection_id", "pet_slug", "position")
+SELECT 'claude', pet."slug", candidate."position"
+FROM (VALUES
+	('claude-crab', 0),
+	('claude-spectacles-3', 1),
+	('claude-spectacles-4', 2),
+	('clawd-music', 3),
+	('clawd-2', 4),
+	('clawd-4', 5),
+	('clawd-3', 6),
+	('clawdex', 7)
+) AS candidate("slug", "position")
+INNER JOIN "submitted_pets" pet ON pet."slug" = candidate."slug" AND pet."status" = 'approved'
+ON CONFLICT ("collection_id", "pet_slug") DO UPDATE SET
+	"position" = excluded."position";
