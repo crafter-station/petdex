@@ -207,6 +207,17 @@ if (mode === "apply") {
 
   if (failed.length > 0) process.exit(1);
 
+  await purgeCdnUrls(
+    pendingTasks.flatMap((task) =>
+      task.refs
+        .filter((ref) => ref.kind === "sticker")
+        .map((ref) =>
+          petStickerUrl(task.slug, ref.state, ref.format, ref.treatment),
+        ),
+    ),
+    artifacts.includes("reactions"),
+  );
+
   if (artifacts.includes("reactions")) {
     const finalized = await mapLimit(
       validTasks,
@@ -224,16 +235,6 @@ if (mode === "apply") {
     }
     if (finalizeFailures.length > 0) process.exit(1);
   }
-
-  await purgeCdnUrls(
-    pendingTasks.flatMap((task) =>
-      task.refs
-        .filter((ref) => ref.kind === "sticker")
-        .map((ref) =>
-          petStickerUrl(task.slug, ref.state, ref.format, ref.treatment),
-        ),
-    ),
-  );
 }
 
 async function publishTask(task: StickerTask): Promise<PublishResult> {
@@ -702,11 +703,12 @@ function parseStringArg(args: string[], key: string): string | null {
   return value?.trim().toLowerCase() || null;
 }
 
-async function purgeCdnUrls(urls: string[]): Promise<void> {
+async function purgeCdnUrls(urls: string[], required = false): Promise<void> {
   if (urls.length === 0) return;
   const zoneId = process.env.CLOUDFLARE_ZONE_ID;
   const token = process.env.CLOUDFLARE_PURGE_TOKEN;
   if (!zoneId || !token) {
+    if (required) throw new Error("cloudflare purge credentials are required");
     console.log(`cloudflare purge skipped (no creds) for ${urls.length} urls`);
     return;
   }
