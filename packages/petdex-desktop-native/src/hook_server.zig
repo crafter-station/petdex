@@ -27,6 +27,7 @@ const Conn = struct {
 };
 
 pub const max_pending = 50;
+const max_active_connections: u32 = 64;
 
 pub const StateEvent = struct {
     state: [16]u8 = @splat(0),
@@ -156,6 +157,8 @@ const Server = struct {
     allocator: std.mem.Allocator,
     runtime_dir: []const u8,
     token: [64]u8,
+    request_lock: SpinMutex = .{},
+    active_connections: std.atomic.Value(u32) = .init(0),
     // Token-bucket limiter, sidecar budget: 30/s shared by state+bubble.
     bucket: f64 = 30,
     bucket_stamp_ms: i64 = 0,
@@ -163,6 +166,8 @@ const Server = struct {
     pid: i32,
 
     fn rateLimitOk(self: *Server) bool {
+        self.request_lock.lock();
+        defer self.request_lock.unlock();
         const now = nowMs();
         if (self.bucket_stamp_ms == 0) self.bucket_stamp_ms = now;
         const elapsed: f64 = @floatFromInt(now - self.bucket_stamp_ms);
@@ -171,6 +176,14 @@ const Server = struct {
         if (self.bucket < 1) return false;
         self.bucket -= 1;
         return true;
+    }
+
+    fn nextRunningState(self: *Server) []const u8 {
+        self.request_lock.lock();
+        defer self.request_lock.unlock();
+        const state = if (self.running_toggle) "running-left" else "running-right";
+        self.running_toggle = !self.running_toggle;
+        return state;
     }
 };
 
@@ -221,10 +234,32 @@ fn run(server: *Server) void {
 
     while (true) {
         const stream = listener.accept(io) catch continue;
-        var conn: Conn = .{ .stream = stream, .io = io };
-        handleConnection(server, &conn);
-        stream.close(io);
+        const active = server.active_connections.fetchAdd(1, .acq_rel);
+        if (active >= max_active_connections) {
+            _ = server.active_connections.fetchSub(1, .release);
+            stream.close(io);
+            continue;
+        }
+        // A client can disappear after sending only part of a request. Keep
+        // that blocking read off the accept loop so later hooks still reach
+        // the server while the abandoned connection drains or closes.
+        const thread = std.Thread.spawn(.{}, handleConnectionThread, .{ server, stream }) catch {
+            _ = server.active_connections.fetchSub(1, .release);
+            stream.close(io);
+            continue;
+        };
+        thread.detach();
     }
+}
+
+fn handleConnectionThread(server: *Server, stream: std.Io.net.Stream) void {
+    defer _ = server.active_connections.fetchSub(1, .release);
+    var scope = plat.Scope.init();
+    defer scope.deinit();
+    const io = scope.io();
+    var conn: Conn = .{ .stream = stream, .io = io };
+    handleConnection(server, &conn);
+    stream.close(io);
 }
 
 fn handleConnection(server: *Server, conn: *Conn) void {
@@ -317,8 +352,7 @@ fn route(server: *Server, conn: *Conn, method: []const u8, path: []const u8, hea
         // left/right per session so consecutive tool calls vary.
         var applied: []const u8 = state_raw;
         if (std.mem.eql(u8, state_raw, "running")) {
-            applied = if (server.running_toggle) "running-left" else "running-right";
-            server.running_toggle = !server.running_toggle;
+            applied = server.nextRunningState();
         }
 
         var event = StateEvent{ .duration_ms = duration };
@@ -456,6 +490,18 @@ fn jsonString(body: []const u8, key: []const u8) ?[]const u8 {
 test "json string scanner preserves escaped multiline content" {
     const body = "{\"last_assistant_message\":\"first\\nsecond third\",\"phase\":\"stop\"}";
     try std.testing.expectEqualStrings("first\\nsecond third", jsonString(body, "last_assistant_message").?);
+}
+
+test "running state alternates without sharing mutable state with callers" {
+    var server = Server{
+        .allocator = std.testing.allocator,
+        .runtime_dir = "",
+        .token = undefined,
+        .pid = 0,
+    };
+    try std.testing.expectEqualStrings("running-right", server.nextRunningState());
+    try std.testing.expectEqualStrings("running-left", server.nextRunningState());
+    try std.testing.expectEqualStrings("running-right", server.nextRunningState());
 }
 
 fn jsonNumber(body: []const u8, key: []const u8) ?f64 {
