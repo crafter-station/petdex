@@ -1931,6 +1931,11 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
                     model.pet_x = result.x;
                     model.pet_y = result.y;
                 }
+                // Before the sync, not after: syncBubbleWindow places the
+                // window from bubble_flipped, so a flag left over from
+                // where the pet WAS puts the window on the wrong side for
+                // the whole arc.
+                updateBubbleStackInFlight(model, now);
                 syncBubbleWindow(model, fx);
                 if (model.vx >= physics_min_vel) {
                     setThrowState(model, .@"running-right", fx);
@@ -1955,9 +1960,15 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             model.pet_x = read.x;
             model.pet_y = read.y;
             // Hover and the fan animation ride here, ahead of the drag
-            // and throw branches: those return early, and a stack frozen
-            // mid-expansion because the pet was being dragged would be a
-            // bug nobody could explain from the code.
+            // branch, which returns early: a stack frozen mid-expansion
+            // because the pet was being dragged would be a bug nobody
+            // could explain from the code.
+            //
+            // The throw branch above cannot reach this: it returns before
+            // the cursor is polled, because it drives its own movement
+            // from the velocity rather than from a cursor sample. It runs
+            // updateBubbleStackInFlight instead, which does the half that
+            // needs no cursor.
             updateBubbleStack(model, read.cursor_x, read.cursor_y, now, fx);
             syncBubbleWindow(model, fx);
             if (model.dragging) {
@@ -2609,6 +2620,36 @@ fn bubbleHoverHit(model: *const Model, win_x: f64, win_y: f64, window_h: f64, cu
     return cursor_y <= bottom and cursor_y >= bottom - drawn;
 }
 
+/// The part of the stack update that needs no cursor: which side of the
+/// pet the stack hangs from, and the walk of the expansion toward its
+/// target. Split out because the throw branch owns its own movement and
+/// returns before the cursor is ever polled, and a pet in flight still
+/// crosses the flip threshold and still has to settle an open fan.
+///
+/// `hover_target` is what the expansion aims at. In flight it is forced
+/// closed: a fan cannot be hovered while the pet is sailing past the
+/// cursor, and leaving it open would fly a stale open stack across the
+/// screen.
+fn updateBubbleStackMotion(model: *Model, hover_target: f32, now_ms: i64) void {
+    // The flip itself is refreshed by syncBubbleWindow, which every path
+    // that moves the pet already calls; keeping it there means no caller
+    // can place the window from a stale side.
+    model.bubble_expansion_target = hover_target;
+    _ = stepBubbleExpansion(model, now_ms);
+}
+
+/// Flip and collapse the stack for a pet in flight. The throw drives its
+/// own moveWindow and returns before the cursor poll, so without this
+/// the flip flag and the expansion both freeze for the whole arc: the
+/// stack hangs off the wrong side of a pet that has long since had room
+/// above it, and syncBubbleWindow keeps placing the window from that
+/// stale flag.
+fn updateBubbleStackInFlight(model: *Model, now_ms: i64) void {
+    if (!bubbleActive(model)) return;
+    model.bubble_hover_since_ms = -1;
+    updateBubbleStackMotion(model, 0, now_ms);
+}
+
 /// Fold one frame of hover + animation into the stack state.
 fn updateBubbleStack(model: *Model, cursor_x: f64, cursor_y: f64, now_ms: i64, fx: *Effects) void {
     if (!bubbleActive(model)) {
@@ -2617,11 +2658,6 @@ fn updateBubbleStack(model: *Model, cursor_x: f64, cursor_y: f64, now_ms: i64, f
         model.bubble_expansion = 0;
         return;
     }
-    // pet_y is reported as the distance from the top of the screen to
-    // the pet's top edge, so it IS the space available above the pet.
-    // The platform never exposes the screen frame (see syncBubbleWindow),
-    // but this edge is the one the flip cares about and it is knowable.
-    model.bubble_flipped = bubbleShouldFlip(model, model.pet_y, @floatCast(bubbleWindowHeight(model)));
 
     var inside = false;
     if (bubbleStackable(model)) {
@@ -2630,7 +2666,7 @@ fn updateBubbleStack(model: *Model, cursor_x: f64, cursor_y: f64, now_ms: i64, f
         }
     }
     updateBubbleHover(model, inside, now_ms);
-    _ = stepBubbleExpansion(model, now_ms);
+    updateBubbleStackMotion(model, model.bubble_expansion_target, now_ms);
 }
 
 /// The bubble drawn closest to the pet, i.e. the one the tail points at
@@ -2713,6 +2749,14 @@ var bubble_window_h: f32 = 0;
 /// special-casing.
 fn syncBubbleWindow(model: *Model, fx: *Effects) void {
     if (!bubbleActive(model)) return;
+    // The flip is decided HERE, in the function that consumes it, rather
+    // than by each caller beforehand. bubbleWantY below reads the flag,
+    // so a caller that moved the pet and forgot to refresh it first would
+    // place the window on the side the pet used to be on. That is exactly
+    // what the throw branch did: it drives its own moveWindow and returns
+    // before the cursor poll, so it never reached the frame clock's
+    // update and flew the whole arc with a stale flag.
+    model.bubble_flipped = bubbleShouldFlip(model, model.pet_y, @floatCast(bubbleWindowHeight(model)));
     const bubble_w = bubbleWindowWidth(model);
     const bubble_h = bubbleWindowHeight(model);
     // Resize before moving: the move centers on the new width, so doing
@@ -3857,6 +3901,86 @@ test "the stack axis follows the pet when the window is clamped off-center" {
     // rather than jumping when the fan opens.
     const mid = bubbleStackAxis(&model, stack_w, 0.5);
     try std.testing.expect(mid < axis_right and mid > stack_w / 2);
+}
+
+test "a thrown pet keeps its flip and collapse current through the flight" {
+    // The throw branch drives its own moveWindow from the velocity and
+    // returns before the cursor is polled, so it never reaches
+    // updateBubbleStack. Without its own update the flip flag and the
+    // expansion both freeze for the whole arc: the stack hangs off the
+    // wrong side of a pet that already has room above it, and
+    // syncBubbleWindow keeps placing the window from that stale flag.
+    var model: Model = .{};
+    testPushBubble(&model, "alpha", "older", false, -1);
+    testPushBubble(&model, "beta", "newer", true, -1);
+
+    // Start pinned to the top with the stack flipped below, and a fan
+    // left open by a hover just before the throw.
+    model.pet_y = 0;
+    model.bubble_flipped = true;
+    model.bubble_expansion = 1;
+    model.bubble_expansion_target = 1;
+    model.bubble_anim_last_ms = 0;
+
+    const needed: f64 = @floatCast(bubbleWindowHeight(&model));
+    var now: i64 = 0;
+    // A real flick: 900 px/s only carries the pet ~115px before friction
+    // drops it under physics_min_vel, short of the threshold, so the test
+    // would never cross anything. This is a hard throw.
+    var vy: f64 = 3000;
+    var crossed_back = false;
+    var frames: usize = 0;
+
+    // Physics loop, same shape as the throw branch: 16ms frames, the
+    // window integrates velocity, friction decays it.
+    while (frames < 60) : (frames += 1) {
+        now += 16;
+        model.pet_y += vy * 0.016;
+        vy *= physics_friction;
+        if (@abs(vy) < physics_min_vel) vy = 0;
+        updateBubbleStackInFlight(&model, now);
+        // Stand in for syncBubbleWindow, which owns the flip refresh and
+        // is what the throw branch calls every frame. Asserting against
+        // bubbleWantY rather than the flag alone ties this to the value
+        // the window is actually placed from.
+        const want = bubbleShouldFlip(&model, model.pet_y, needed);
+        model.bubble_flipped = want;
+
+        // The invariant: every single frame of the flight, the window
+        // wants to sit on the side the pet's position calls for.
+        const want_y = bubbleWantY(&model, @floatCast(needed));
+        if (want) {
+            // Flipped: window hangs below the sprite.
+            try std.testing.expect(want_y >= model.pet_y);
+        } else {
+            // Upright: window ends at or above the pet's top edge.
+            try std.testing.expect(want_y + needed <= model.pet_y + 2.01);
+            crossed_back = true;
+        }
+    }
+
+    // The pet really did travel far enough to stop needing the flip,
+    // otherwise the assertion above proves nothing.
+    try std.testing.expect(crossed_back);
+    try std.testing.expect(model.pet_y > needed);
+    // And an open fan does not fly open: nobody hovers a sailing pet.
+    try std.testing.expectEqual(@as(f32, 0), model.bubble_expansion);
+    try std.testing.expectEqual(@as(i64, -1), model.bubble_hover_since_ms);
+
+    // Guard the wiring, not just the helper: the throw branch has to run
+    // the in-flight update itself, because it returns before the frame
+    // clock's cursor poll. Deleting that call is the regression this
+    // whole test exists for, and a helper tested in isolation cannot see
+    // it, so pin the source instead.
+    const src = @embedFile("main.zig");
+    const throw_branch = std.mem.indexOf(u8, src, "if (model.throwing) {").?;
+    const branch_end = std.mem.indexOf(u8, src[throw_branch..], "const read = fx.moveWindow").?;
+    const in_flight = std.mem.indexOf(u8, src[throw_branch..][0..branch_end], "updateBubbleStackInFlight(model, now);");
+    try std.testing.expect(in_flight != null);
+    // And it must come BEFORE the sync, or the window is placed from the
+    // side the pet was on a frame ago.
+    const sync = std.mem.indexOf(u8, src[throw_branch..][0..branch_end], "syncBubbleWindow(model, fx);").?;
+    try std.testing.expect(in_flight.? < sync);
 }
 
 test "a stacked card keeps its own height, never the container's" {
