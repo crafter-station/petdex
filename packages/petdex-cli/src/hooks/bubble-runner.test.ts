@@ -14,6 +14,7 @@ import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
 
 import {
+  bubbleBody,
   clipPreview,
   clipTitle,
   eventFromArgs,
@@ -339,6 +340,40 @@ describe("tool-failure phase (mirrors hook_runner.zig)", () => {
     );
     expect(JSON.stringify(stateBody("waving", 0, "codex"))).toBe(
       '{"state":"waving","agent_source":"codex"}',
+    );
+  });
+});
+
+describe("bubbleBody", () => {
+  test("carries the session id so the desktop can key one bubble per conversation", () => {
+    expect(
+      bubbleBody(
+        "Reading main.zig",
+        true,
+        "claude-code",
+        "Fix the tail",
+        "abc123",
+      ),
+    ).toEqual({
+      text: "Reading main.zig",
+      busy: true,
+      agent_source: "claude-code",
+      title: "Fix the tail",
+      session_id: "abc123",
+    });
+  });
+
+  test("omits session_id entirely when the payload had none", () => {
+    // Regression guard: an agent that sends no session_id must serialize
+    // exactly what shipped before multi-bubble, so an older desktop and the
+    // MCP path both stay on the server's single-bubble key.
+    expect(
+      JSON.stringify(bubbleBody("Done.", false, "codex", null, null)),
+    ).toBe('{"text":"Done.","busy":false,"agent_source":"codex"}');
+    expect(
+      JSON.stringify(bubbleBody("Done.", false, "codex", "Ship it", null)),
+    ).toBe(
+      '{"text":"Done.","busy":false,"agent_source":"codex","title":"Ship it"}',
     );
   });
 });
