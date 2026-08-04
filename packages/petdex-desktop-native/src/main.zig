@@ -124,7 +124,15 @@ pub const Model = struct {
     // running/idle pinball under heavy tool calls never thrashes.
     shown_at_ms: i64 = 0,
     shown_dwell_ms: u32 = 0,
-    bubble: hook_server.Bubble = .{},
+    /// One bubble per live conversation, mirrored from the mailbox and
+    /// ordered oldest first: the view stacks them in this order, so the
+    /// most recently updated sits at the bottom, next to the tail.
+    bubbles: [hook_server.max_bubbles]hook_server.Bubble = @splat(.{}),
+    bubbles_len: usize = 0,
+    /// Per-bubble deadlines, parallel to `bubbles`. Kept alongside
+    /// rather than inside hook_server.Bubble because expiry is a display
+    /// decision the app owns; the server has no clock for it.
+    bubble_expires_at_ms: [hook_server.max_bubbles]i64 = @splat(-1),
     // Drag + momentum, the old desktop's "Codex parity" physics: the
     // frame clock samples the window origin and the primary button
     // through fx.moveWindow(0,0); a down->up edge computes the release
@@ -176,9 +184,6 @@ pub const Model = struct {
     bubble_lifetime_secs: f32 = bubble_lifetime_default_secs,
     bubble_lifetime_text: [2]u8 = .{ '0', 0 },
     bubble_lifetime_text_len: usize = 1,
-    /// Absolute wall-clock deadline; negative while hidden, busy, or
-    /// configured to remain visible indefinitely.
-    bubble_expires_at_ms: i64 = -1,
     /// Bubble layout is user-controlled on every platform: one title line
     /// plus this many answer lines, each with the configured column budget.
     bubble_columns: u16 = bubble_columns_default,
@@ -1752,8 +1757,12 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
         .bubble_lifetime_input => |edit| {
             if (editUnsignedText(model.bubble_lifetime_text[0..], &model.bubble_lifetime_text_len, edit, 0, 60)) |value| {
                 model.bubble_lifetime_secs = @floatFromInt(value);
-                if (model.bubble.text_len > 0 and !model.bubble.busy) {
-                    model.bubble_expires_at_ms = bubbleDeadlineMs(fx.wallMs(), model.bubble_lifetime_secs);
+                // Every settled bubble restarts on the new lifetime; a
+                // busy one still has no deadline to move.
+                const now = fx.wallMs();
+                for (0..model.bubbles_len) |i| {
+                    if (model.bubbles[i].busy) continue;
+                    model.bubble_expires_at_ms[i] = bubbleDeadlineMs(now, model.bubble_lifetime_secs);
                 }
                 saveSettings(model);
             }
@@ -1817,9 +1826,9 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
         },
         .appearance => |a| {
             model.dark = a.color_scheme == .dark;
-            if (model.bubble.text_len > 0) {
+            if (newestBubble(model)) |newest| {
                 registerTail(model.dark, fx);
-                loadAgentAvatar(model.bubble.agent[0..model.bubble.agent_len], model.dark, fx);
+                loadAgentAvatar(newest.agent[0..newest.agent_len], model.dark, fx);
             }
             if (model.settings_open) loadAgentsAtlas(model.dark, fx);
             model.high_contrast = a.high_contrast;
@@ -1996,18 +2005,27 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             if (!model.sheet_loaded) return;
             if (model.settings_open and thumbs_built < catalog_mod.catalog_len) buildNextThumb(fx);
             const now = fx.wallMs();
-            if (hook_server.mailbox.takeBubble(&model.bubble)) {
-                if (!model.bubbles_enabled or model.focus_mode or model.bubble.text_len == 0) {
+            var drained: [hook_server.max_bubbles]hook_server.Bubble = undefined;
+            if (hook_server.mailbox.takeBubbles(&drained)) |count| {
+                if (!model.bubbles_enabled or model.focus_mode) {
                     clearBubble(model);
                 } else {
-                    loadAgentAvatar(model.bubble.agent[0..model.bubble.agent_len], model.dark, fx);
-                    registerTail(model.dark, fx);
-                    model.bubble_expires_at_ms = bubbleExpiryMs(now, model.bubble_lifetime_secs, model.bubble.busy);
+                    // Deadlines are matched against the outgoing stack,
+                    // so the copy has to happen before it is overwritten.
+                    const previous = model.bubbles;
+                    const previous_deadlines = model.bubble_expires_at_ms;
+                    const previous_len = model.bubbles_len;
+                    @memcpy(model.bubbles[0..count], drained[0..count]);
+                    for (count..hook_server.max_bubbles) |i| model.bubbles[i] = .{};
+                    model.bubbles_len = count;
+                    syncBubbleDeadlines(model, previous[0..previous_len], previous_deadlines[0..previous_len], now);
+                    if (newestBubble(model)) |newest| {
+                        loadAgentAvatar(newest.agent[0..newest.agent_len], model.dark, fx);
+                        registerTail(model.dark, fx);
+                    }
                 }
             }
-            if (bubbleLifetimeExpired(model.bubble_expires_at_ms, now, model.state)) {
-                clearBubble(model);
-            }
+            _ = expireBubbles(model, now);
             if (model.waiting_sound and shouldEscalate(model.state, model.waiting_since_ms, model.waiting_escalated, now)) {
                 model.waiting_escalated = true;
                 playWaitingChime(fx);
@@ -2085,6 +2103,8 @@ const bubble_content_gap: f32 = 8;
 const bubble_card_padding: f32 = 12;
 const bubble_head_gap: f32 = 12;
 const bubble_line_gap: f32 = 2;
+/// Vertical breathing room between stacked conversation cards.
+const bubble_stack_gap: f32 = 6;
 const bubble_canvas_margin: f32 = 16;
 
 const bubble_lifetime_default_secs: f32 = 0;
@@ -2124,8 +2144,14 @@ fn bubbleWindowWidth(model: *const Model) f32 {
     return bubbleMaxCardWidth(model) + bubble_canvas_margin * 2;
 }
 
+/// The window is sized off the worst case, not the text actually in the
+/// cards, so a stack of N reserves N max-height cards and the gaps
+/// between them. At least one: the window exists a frame before the
+/// first bubble lands and must not be born zero-height.
 fn bubbleWindowHeight(model: *const Model) f32 {
-    return bubbleMaxCardHeight(model) + @as(f32, @floatFromInt(tail_h)) + bubble_head_gap + bubble_canvas_margin * 2;
+    const count: f32 = @floatFromInt(@max(model.bubbles_len, 1));
+    const cards = bubbleMaxCardHeight(model) * count + bubble_stack_gap * (count - 1);
+    return cards + @as(f32, @floatFromInt(tail_h)) + bubble_head_gap + bubble_canvas_margin * 2;
 }
 
 fn bubbleFontSize(model: *const Model) f32 {
@@ -2154,8 +2180,11 @@ fn charCount(text: []const u8) usize {
     return n;
 }
 
-var bubble_title_scratch: [280]u8 = undefined;
-var bubble_text_scratch: [280]u8 = undefined;
+// One scratch pair PER stacked card: the view's byte slices must
+// outlive the frame build, so cards cannot share a buffer the way a
+// single bubble could.
+var bubble_title_scratch: [hook_server.max_bubbles][280]u8 = undefined;
+var bubble_text_scratch: [hook_server.max_bubbles][280]u8 = undefined;
 
 /// Clip to `max_chars` on a safe boundary: never mid UTF-8 sequence,
 /// never splitting a JSON escape, preferring the last word boundary
@@ -2219,12 +2248,66 @@ fn splitLines(text: []const u8, max_chars: usize, max_lines: usize) [bubble_answ
     return lines;
 }
 fn bubbleActive(model: *const Model) bool {
-    return model.bubbles_enabled and !model.focus_mode and model.bubble.text_len > 0;
+    return model.bubbles_enabled and !model.focus_mode and model.bubbles_len > 0;
+}
+
+/// The bubble drawn closest to the pet, i.e. the one the tail points at
+/// and the only one the single avatar slot can serve. Null when the
+/// stack is empty.
+fn newestBubble(model: *const Model) ?*const hook_server.Bubble {
+    if (model.bubbles_len == 0) return null;
+    return &model.bubbles[model.bubbles_len - 1];
 }
 
 fn clearBubble(model: *Model) void {
-    model.bubble = .{};
-    model.bubble_expires_at_ms = -1;
+    model.bubbles = @splat(.{});
+    model.bubbles_len = 0;
+    model.bubble_expires_at_ms = @splat(-1);
+    hook_server.mailbox.clearBubbles();
+}
+
+/// Drop every bubble whose deadline has passed, compacting the stack so
+/// the survivors stay dense and ordered. Returns whether anything went,
+/// since an emptied stack has to tear its window down.
+fn expireBubbles(model: *Model, now_ms: i64) bool {
+    var kept: usize = 0;
+    var dropped = false;
+    for (0..model.bubbles_len) |i| {
+        if (bubbleLifetimeExpired(model.bubble_expires_at_ms[i], now_ms, model.state)) {
+            // Tell the server too: a slot the app stopped drawing must
+            // not keep a session alive against the eviction policy.
+            hook_server.mailbox.dropBubble(model.bubbles[i].sessionSlice());
+            dropped = true;
+            continue;
+        }
+        model.bubbles[kept] = model.bubbles[i];
+        model.bubble_expires_at_ms[kept] = model.bubble_expires_at_ms[i];
+        kept += 1;
+    }
+    for (kept..model.bubbles_len) |i| {
+        model.bubbles[i] = .{};
+        model.bubble_expires_at_ms[i] = -1;
+    }
+    model.bubbles_len = kept;
+    return dropped;
+}
+
+/// Re-key the deadlines onto a freshly drained stack. The mailbox owns
+/// membership and order, so a bubble that was already on screen keeps
+/// the deadline it had (re-stamping it on every unrelated update would
+/// make a quiet session immortal), and only new or changed entries get
+/// a fresh one.
+fn syncBubbleDeadlines(model: *Model, previous: []const hook_server.Bubble, previous_deadlines: []const i64, now_ms: i64) void {
+    for (0..model.bubbles_len) |i| {
+        const fresh = bubbleExpiryMs(now_ms, model.bubble_lifetime_secs, model.bubbles[i].busy);
+        model.bubble_expires_at_ms[i] = fresh;
+        for (previous, previous_deadlines) |old, deadline| {
+            if (!std.mem.eql(u8, old.sessionSlice(), model.bubbles[i].sessionSlice())) continue;
+            if (old.counter == model.bubbles[i].counter) model.bubble_expires_at_ms[i] = deadline;
+            break;
+        }
+    }
+    for (model.bubbles_len..hook_server.max_bubbles) |i| model.bubble_expires_at_ms[i] = -1;
 }
 
 /// The window tracks exactly what is drawn: the sprite, plus a band
@@ -2364,13 +2447,18 @@ pub fn rootView(ui: *AppUi, model: *const Model) AppUi.Node {
 
 // ----------------------------------------------------------- bubble window
 
-fn bubbleView(ui: *AppUi, model: *const Model) AppUi.Node {
+/// One conversation's card. `slot` indexes the per-card clip scratch and
+/// decides whether this is the newest bubble, which is the only one the
+/// single avatar registry slot can speak for.
+fn bubbleCard(ui: *AppUi, model: *const Model, slot: usize) AppUi.Node {
+    const bubble = &model.bubbles[slot];
+    const newest = slot + 1 == model.bubbles_len;
     const chars_per_line: usize = model.bubble_columns;
     const answer_lines: usize = model.bubble_answer_lines;
-    const title_raw = model.bubble.title[0..model.bubble.title_len];
-    const text_raw = model.bubble.text[0..model.bubble.text_len];
-    const title_clipped = clipDisplay(title_raw, chars_per_line, &bubble_title_scratch, false);
-    const text_clipped = clipDisplay(text_raw, chars_per_line * answer_lines, &bubble_text_scratch, true);
+    const title_raw = bubble.title[0..bubble.title_len];
+    const text_raw = bubble.text[0..bubble.text_len];
+    const title_clipped = clipDisplay(title_raw, chars_per_line, &bubble_title_scratch[slot], false);
+    const text_clipped = clipDisplay(text_raw, chars_per_line * answer_lines, &bubble_text_scratch[slot], true);
     const text_lines = splitLines(text_clipped, chars_per_line, answer_lines);
 
     const title_fg = if (model.dark) canvas.Color.rgb8(237, 237, 238) else canvas.Color.rgb8(17, 17, 17);
@@ -2394,21 +2482,32 @@ fn bubbleView(ui: *AppUi, model: *const Model) AppUi.Node {
         row_count += 1;
     }
 
-    var avatar = ui.image(.{
-        .width = bubble_avatar_width,
-        .height = bubble_avatar_width,
-        .image = if (avatar_ready) avatar_image_id else 0,
-        .semantics = .{ .label = "Agent avatar" },
-    });
-    avatar.widget.image_fit = .contain;
+    // There is exactly one avatar registry slot, and it holds the newest
+    // bubble's agent. Older cards reserve the same width with an empty
+    // box so every card in the stack lines up rather than showing the
+    // wrong agent's logo. Per-card avatars need their own slots, which
+    // is a later slice.
+    const avatar = if (newest) blk: {
+        var img = ui.image(.{
+            .width = bubble_avatar_width,
+            .height = bubble_avatar_width,
+            .image = if (avatar_ready) avatar_image_id else 0,
+            .semantics = .{ .label = "Agent avatar" },
+        });
+        img.widget.image_fit = .contain;
+        break :blk img;
+    } else ui.el(.stack, .{ .width = bubble_avatar_width, .height = bubble_avatar_width }, .{});
     // Keep a stable trailing slot: active work animates the original
     // spinner, while a waiting permission/input request shows a static
     // marker without waking the frame loop or shifting the bubble text.
     var waiting_marker = ui.text(.{ .size = .heading }, "!");
     waiting_marker.widget.style.foreground = canvas.Color.rgb8(250, 170, 48);
-    const spinner_slot = if (model.bubble.busy)
+    // Busy is per-conversation, but the pet's `waiting` state is global:
+    // it belongs to the newest card only, or every settled card in the
+    // stack would grow a marker for one session's prompt.
+    const spinner_slot = if (bubble.busy)
         ui.el(.spinner, .{ .width = bubble_busy_width, .height = bubble_busy_width, .semantics = .{ .label = "Working" } }, .{})
-    else if (model.state == .waiting)
+    else if (newest and model.state == .waiting)
         ui.el(.stack, .{
             .width = 16,
             .height = 16,
@@ -2442,6 +2541,25 @@ fn bubbleView(ui: *AppUi, model: *const Model) AppUi.Node {
         card.widget.style.border = canvas.Color.rgb8(214, 214, 220);
         card.widget.style.stroke_width = 1;
     }
+    return card;
+}
+
+/// The stack: one card per live conversation, oldest at the top, the
+/// most recently updated at the bottom where the tail is. Only the
+/// bottom card gets a tail, so the group reads as one speech bubble
+/// coming from the pet rather than N arrows fighting for the same spot.
+fn bubbleView(ui: *AppUi, model: *const Model) AppUi.Node {
+    var cards: [1 + hook_server.max_bubbles * 2]AppUi.Node = undefined;
+    var count: usize = 0;
+    for (0..model.bubbles_len) |i| {
+        if (i > 0) {
+            cards[count] = ui.el(.stack, .{ .width = 1, .height = bubble_stack_gap }, .{});
+            count += 1;
+        }
+        cards[count] = bubbleCard(ui, model, i);
+        count += 1;
+    }
+
     var tail = ui.image(.{
         .width = @floatFromInt(tail_w),
         .height = @floatFromInt(tail_h),
@@ -2452,12 +2570,14 @@ fn bubbleView(ui: *AppUi, model: *const Model) AppUi.Node {
     // the tail rides up over the card's bottom hairline, hiding the
     // border segment behind it so bubble and arrow read as one shape.
     tail.widget.transform = canvas.Affine.translate(0, -1.5);
+    cards[count] = tail;
+    count += 1;
+
     // The bottom spacer is an explicit head gap. Keeping the group
     // bottom-aligned avoids turning unused band height into a large,
     // theme- or text-dependent distance from the pet.
     return ui.column(.{ .grow = 1, .main = .end, .cross = .center }, .{
-        card,
-        tail,
+        ui.column(.{ .cross = .center }, @as([]const AppUi.Node, cards[0..count])),
         ui.el(.stack, .{ .width = 1, .height = bubble_head_gap }, .{}),
     });
 }
@@ -2869,13 +2989,77 @@ test "bubble lifetime validates and produces a deadline" {
     try std.testing.expect(bubbleLifetimeExpired(7000, 8000, .idle));
 }
 
+/// Seed the model's stack directly, the shape the poll tick would leave.
+fn testPushBubble(model: *Model, session: []const u8, text: []const u8, busy: bool, deadline: i64) void {
+    const i = model.bubbles_len;
+    var b: hook_server.Bubble = .{ .busy = busy, .counter = @intCast(i + 1) };
+    @memcpy(b.session[0..session.len], session);
+    b.session_len = session.len;
+    @memcpy(b.text[0..text.len], text);
+    b.text_len = text.len;
+    model.bubbles[i] = b;
+    model.bubble_expires_at_ms[i] = deadline;
+    model.bubbles_len = i + 1;
+}
+
 test "clearing a bubble also cancels its lifetime" {
     var model: Model = .{};
-    model.bubble.text_len = 1;
-    model.bubble.busy = true;
-    model.bubble_expires_at_ms = 1234;
+    testPushBubble(&model, "alpha", "x", true, 1234);
     clearBubble(&model);
-    try std.testing.expectEqual(@as(usize, 0), model.bubble.text_len);
-    try std.testing.expect(!model.bubble.busy);
-    try std.testing.expectEqual(@as(i64, -1), model.bubble_expires_at_ms);
+    try std.testing.expectEqual(@as(usize, 0), model.bubbles_len);
+    try std.testing.expect(!bubbleActive(&model));
+    try std.testing.expectEqual(@as(i64, -1), model.bubble_expires_at_ms[0]);
+}
+
+test "two conversations stack and grow the window vertically" {
+    var model: Model = .{};
+    testPushBubble(&model, "alpha", "reading", true, -1);
+    const one_high = bubbleWindowHeight(&model);
+    const one_wide = bubbleWindowWidth(&model);
+    testPushBubble(&model, "beta", "testing", true, -1);
+    try std.testing.expect(bubbleWindowHeight(&model) > one_high);
+    // Only the vertical axis grows: cards keep the configured column
+    // budget, they do not sit side by side.
+    try std.testing.expectEqual(one_wide, bubbleWindowWidth(&model));
+    try std.testing.expectEqualStrings("beta", newestBubble(&model).?.sessionSlice());
+}
+
+test "an empty stack still reserves one card of window height" {
+    var model: Model = .{};
+    const empty = bubbleWindowHeight(&model);
+    testPushBubble(&model, "alpha", "reading", true, -1);
+    try std.testing.expectEqual(empty, bubbleWindowHeight(&model));
+}
+
+test "expiry drops only the bubbles past their deadline" {
+    var model: Model = .{};
+    testPushBubble(&model, "alpha", "settled", false, 5000);
+    testPushBubble(&model, "beta", "busy", true, -1);
+    testPushBubble(&model, "gamma", "settled later", false, 9000);
+
+    try std.testing.expect(expireBubbles(&model, 6000));
+    try std.testing.expectEqual(@as(usize, 2), model.bubbles_len);
+    // The survivors stay dense and keep their own deadlines: a compaction
+    // that shifted bubbles without their deadline would expire the wrong
+    // conversation on the next tick.
+    try std.testing.expectEqualStrings("beta", model.bubbles[0].sessionSlice());
+    try std.testing.expectEqual(@as(i64, -1), model.bubble_expires_at_ms[0]);
+    try std.testing.expectEqualStrings("gamma", model.bubbles[1].sessionSlice());
+    try std.testing.expectEqual(@as(i64, 9000), model.bubble_expires_at_ms[1]);
+    try std.testing.expect(!expireBubbles(&model, 6000));
+}
+
+test "an unchanged bubble keeps its deadline when another one updates" {
+    var model: Model = .{};
+    model.bubble_lifetime_secs = 5;
+    testPushBubble(&model, "alpha", "settled", false, 4000);
+    testPushBubble(&model, "beta", "settled too", false, 4000);
+    const previous = model.bubbles;
+    const previous_deadlines = model.bubble_expires_at_ms;
+
+    // beta gets a new payload (higher counter), alpha is untouched.
+    model.bubbles[1].counter = 99;
+    syncBubbleDeadlines(&model, previous[0..2], previous_deadlines[0..2], 10_000);
+    try std.testing.expectEqual(@as(i64, 4000), model.bubble_expires_at_ms[0]);
+    try std.testing.expectEqual(@as(i64, 15_000), model.bubble_expires_at_ms[1]);
 }
