@@ -2277,6 +2277,20 @@ fn bubbleRenderedCardWidth(model: *const Model, slot: usize) f32 {
     return collapsed + (natural - collapsed) * bubbleExpansionEased(model);
 }
 
+/// Height a card is drawn at.
+///
+/// Explicit for every STACKED card and 0 (intrinsic) for a lone bubble.
+/// In a `.stack` a child with no height of its own inherits the
+/// container's (widget_layout.stackChildFrame), and the container
+/// reserves the whole expanded fan so cards have room to travel, so a
+/// stacked card left at 0 stretches to fan height and draws as a giant
+/// rounded rect. Outside a stack there is nothing to inherit from and
+/// intrinsic sizing is what the single bubble has always wanted.
+fn bubbleRenderedCardHeight(model: *const Model, slot: usize) f32 {
+    _ = slot;
+    return if (bubbleStackable(model)) bubbleMaxCardHeight(model) else 0;
+}
+
 /// The vertical axis the cards center on, in stack-container local
 /// coordinates, for a given expansion.
 ///
@@ -2970,7 +2984,7 @@ fn bubbleCard(ui: *AppUi, model: *const Model, slot: usize) AppUi.Node {
     var card = ui.el(.panel, .{
         .padding = bubble_card_padding,
         .width = card_width,
-        .height = if (clamped) bubbleMaxCardHeight(model) else 0,
+        .height = bubbleRenderedCardHeight(model, slot),
     }, @as([]const AppUi.Node, if (clamped) content[0..0] else content[0..1]));
     card.widget.style.radius = 18;
     if (model.dark) {
@@ -3843,6 +3857,34 @@ test "the stack axis follows the pet when the window is clamped off-center" {
     // rather than jumping when the fan opens.
     const mid = bubbleStackAxis(&model, stack_w, 0.5);
     try std.testing.expect(mid < axis_right and mid > stack_w / 2);
+}
+
+test "a stacked card keeps its own height, never the container's" {
+    // The regression this pins, and the one the containment test below
+    // could NOT see: cards are placed by transform inside a container
+    // that reserves the whole expanded fan, and in a `.stack` a child
+    // with height 0 inherits the container's height
+    // (widget_layout.stackChildFrame). Every card stretched to fan
+    // height and drew as one giant rounded rect with its content pinned
+    // to an edge, while every offset assertion stayed green because the
+    // POSITIONS were all still right.
+    var model: Model = .{};
+    testPushBubble(&model, "alpha", "older", false, -1);
+    testPushBubble(&model, "beta", "newer", true, -1);
+
+    const card_h = bubbleMaxCardHeight(&model);
+    const container = bubbleStackHeightAt(&model, 1);
+    try std.testing.expect(container > card_h);
+    for (0..model.bubbles_len) |i| {
+        try std.testing.expectEqual(card_h, bubbleRenderedCardHeight(&model, i));
+        try std.testing.expect(bubbleRenderedCardHeight(&model, i) < container);
+    }
+
+    // A single bubble has no container to inherit from, so it keeps
+    // sizing itself to its content: height 0 means intrinsic there.
+    var solo: Model = .{};
+    testPushBubble(&solo, "alpha", "solo", false, -1);
+    try std.testing.expectEqual(@as(f32, 0), bubbleRenderedCardHeight(&solo, 0));
 }
 
 test "a flipped stack stays inside its container at both ends" {
