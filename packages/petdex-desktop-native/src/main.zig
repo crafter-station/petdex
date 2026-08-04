@@ -1173,6 +1173,17 @@ fn agentArtBytes(agent: []const u8, dark: bool) []const u8 {
     return agent_fallback_art;
 }
 
+/// Which cell of the packed logo strip belongs to this agent, or null
+/// for a name we ship no glyph for. The strip has exactly one cell per
+/// AgentKind and none for the fallback art, so an unknown agent has no
+/// tile to point at and the caller has to draw nothing.
+fn agentIconIndex(agent: []const u8) ?usize {
+    for (std.enums.values(agent_hooks.AgentKind)) |kind| {
+        if (std.mem.eql(u8, kind.hookAgentName(), agent)) return @intFromEnum(kind);
+    }
+    return null;
+}
+
 fn loadAgentAvatar(agent: []const u8, dark: bool, fx: *Effects) void {
     if (avatar_ready and avatar_theme_dark == dark and std.mem.eql(u8, avatar_agent[0..avatar_agent_len], agent)) return;
     if (agent.len > avatar_agent.len) return;
@@ -1830,7 +1841,9 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
                 registerTail(model.dark, fx);
                 loadAgentAvatar(newest.agent[0..newest.agent_len], model.dark, fx);
             }
-            if (model.settings_open) loadAgentsAtlas(model.dark, fx);
+            // The strip is themed, so a stack drawing from it has to
+            // re-pack on an appearance flip exactly like settings does.
+            if (model.settings_open or model.bubbles_len > 1) loadAgentsAtlas(model.dark, fx);
             model.high_contrast = a.high_contrast;
             model.reduce_motion = a.reduce_motion;
         },
@@ -2023,6 +2036,11 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
                         loadAgentAvatar(newest.agent[0..newest.agent_len], model.dark, fx);
                         registerTail(model.dark, fx);
                     }
+                    // The stacked cards read their logos out of the
+                    // shared strip, which until now only settings ever
+                    // loaded. A second conversation must not have to
+                    // wait for the settings window to get its avatar.
+                    if (model.bubbles_len > 1) loadAgentsAtlas(model.dark, fx);
                 }
             }
             _ = expireBubbles(model, now);
@@ -2140,8 +2158,42 @@ fn bubbleMaxCardHeight(model: *const Model) f32 {
     return @ceil(rows * line_height + (rows - 1) * bubble_line_gap + bubble_card_padding * 2);
 }
 
+/// Widest line a card actually holds, in characters: the title and the
+/// wrapped answer lines are already what the view paints, so measuring
+/// them is measuring the card. Same char-count-times-font-size metric
+/// bubbleMaxCardWidth uses for the column budget, just applied to the
+/// real content instead of the worst case.
+fn bubbleContentChars(model: *const Model, slot: usize) usize {
+    const bubble = &model.bubbles[slot];
+    const chars_per_line: usize = model.bubble_columns;
+    const answer_lines: usize = model.bubble_answer_lines;
+    var widest = charCount(clipDisplay(bubble.title[0..bubble.title_len], chars_per_line, &bubble_title_scratch[slot], false));
+    const text_clipped = clipDisplay(bubble.text[0..bubble.text_len], chars_per_line * answer_lines, &bubble_text_scratch[slot], true);
+    for (splitLines(text_clipped, chars_per_line, answer_lines)) |line| {
+        widest = @max(widest, charCount(line));
+    }
+    return widest;
+}
+
+/// A card hugs its content, capped by the column budget: short bubbles
+/// stop reserving a full-width card, long ones wrap exactly as before.
+fn bubbleCardWidth(model: *const Model, slot: usize) f32 {
+    const text_w = @as(f32, @floatFromInt(bubbleContentChars(model, slot))) * bubbleFontSize(model);
+    const natural = @ceil(text_w + bubble_avatar_width + bubble_busy_width + bubble_content_gap * 2 + bubble_card_padding * 2);
+    return @min(natural, bubbleMaxCardWidth(model));
+}
+
+/// The window fits the widest card in the stack, so narrow cards can
+/// center under it and the tail keeps pointing at the pet.
+fn bubbleStackWidth(model: *const Model) f32 {
+    var widest: f32 = 0;
+    for (0..model.bubbles_len) |i| widest = @max(widest, bubbleCardWidth(model, i));
+    return widest;
+}
+
 fn bubbleWindowWidth(model: *const Model) f32 {
-    return bubbleMaxCardWidth(model) + bubble_canvas_margin * 2;
+    const content = if (model.bubbles_len == 0) bubbleMaxCardWidth(model) else bubbleStackWidth(model);
+    return content + bubble_canvas_margin * 2;
 }
 
 /// The window is sized off the worst case, not the text actually in the
@@ -2482,11 +2534,15 @@ fn bubbleCard(ui: *AppUi, model: *const Model, slot: usize) AppUi.Node {
         row_count += 1;
     }
 
-    // There is exactly one avatar registry slot, and it holds the newest
-    // bubble's agent. Older cards reserve the same width with an empty
-    // box so every card in the stack lines up rather than showing the
-    // wrong agent's logo. Per-card avatars need their own slots, which
-    // is a later slice.
+    // The newest card keeps the dedicated registry slot: it is a
+    // full-resolution decode of the agent's own PNG (fallback art
+    // included), which is strictly better than a strip cell, so the card
+    // Hunter looks at most never degrades. Older cards read their logo
+    // out of the shared strip via image_src, the same addressing
+    // settings_view uses for its rows. An agent with no cell in the
+    // strip draws an empty box of the same width, so the column still
+    // lines up.
+    const agent_name = bubble.agent[0..bubble.agent_len];
     const avatar = if (newest) blk: {
         var img = ui.image(.{
             .width = bubble_avatar_width,
@@ -2494,6 +2550,16 @@ fn bubbleCard(ui: *AppUi, model: *const Model, slot: usize) AppUi.Node {
             .image = if (avatar_ready) avatar_image_id else 0,
             .semantics = .{ .label = "Agent avatar" },
         });
+        img.widget.image_fit = .contain;
+        break :blk img;
+    } else if (agents_icons_ready and agentIconIndex(agent_name) != null) blk: {
+        var img = ui.image(.{
+            .width = bubble_avatar_width,
+            .height = bubble_avatar_width,
+            .image = agent_icon_atlas_id,
+            .semantics = .{ .label = "Agent avatar" },
+        });
+        img.widget.image_src = agentIconRect(agentIconIndex(agent_name).?);
         img.widget.image_fit = .contain;
         break :blk img;
     } else ui.el(.stack, .{ .width = bubble_avatar_width, .height = bubble_avatar_width }, .{});
@@ -2518,12 +2584,17 @@ fn bubbleCard(ui: *AppUi, model: *const Model, slot: usize) AppUi.Node {
     else
         ui.el(.stack, .{ .width = bubble_busy_width, .height = bubble_busy_width }, .{});
 
+    // Explicit width instead of letting the row size itself: the window
+    // is sized off bubbleCardWidth, so the card has to agree with that
+    // number or a stack of mixed lengths drifts against its own window.
+    // The outer column centers whatever is narrower than the widest.
     var card = ui.el(.panel, .{
         .padding = bubble_card_padding,
+        .width = bubbleCardWidth(model, slot),
     }, .{
         ui.row(.{ .gap = bubble_content_gap, .cross = .center }, .{
             avatar,
-            ui.column(.{ .gap = bubble_line_gap, .cross = .start }, @as([]const AppUi.Node, rows[0..row_count])),
+            ui.column(.{ .grow = 1, .gap = bubble_line_gap, .cross = .start }, @as([]const AppUi.Node, rows[0..row_count])),
             spinner_slot,
         }),
     });
@@ -3000,6 +3071,45 @@ fn testPushBubble(model: *Model, session: []const u8, text: []const u8, busy: bo
     model.bubbles[i] = b;
     model.bubble_expires_at_ms[i] = deadline;
     model.bubbles_len = i + 1;
+}
+
+test "a card hugs its content instead of always taking the column budget" {
+    var model: Model = .{};
+    testPushBubble(&model, "alpha", "hi", false, -1);
+    const short = bubbleCardWidth(&model, 0);
+    try std.testing.expect(short < bubbleMaxCardWidth(&model));
+
+    // Longer content widens the card, and the column budget is still the
+    // ceiling: text past it wraps rather than growing the card forever.
+    var long: Model = .{};
+    testPushBubble(&long, "beta", "a much longer line of bubble text", false, -1);
+    try std.testing.expect(bubbleCardWidth(&long, 0) > short);
+
+    var overflow: Model = .{};
+    testPushBubble(&overflow, "gamma", "x" ** 199, false, -1);
+    try std.testing.expectEqual(bubbleMaxCardWidth(&overflow), bubbleCardWidth(&overflow, 0));
+}
+
+test "the window takes the widest card in the stack" {
+    var model: Model = .{};
+    testPushBubble(&model, "alpha", "hi", false, -1);
+    const solo = bubbleWindowWidth(&model);
+    testPushBubble(&model, "beta", "a much longer line of bubble text", false, -1);
+    const widest = bubbleCardWidth(&model, 1);
+    try std.testing.expect(bubbleWindowWidth(&model) > solo);
+    try std.testing.expectEqual(widest + bubble_canvas_margin * 2, bubbleWindowWidth(&model));
+    // The narrow card keeps its own width and gets centered by the view;
+    // it must not be stretched to the window.
+    try std.testing.expect(bubbleCardWidth(&model, 0) < widest);
+}
+
+test "an agent with no strip cell falls back to no tile" {
+    // Every shipped AgentKind has a cell, the fallback art does not: the
+    // strip is packed from agent_art alone.
+    try std.testing.expect(agentIconIndex("claude-code") != null);
+    try std.testing.expect(agentIconIndex("codex") != null);
+    try std.testing.expectEqual(@as(?usize, null), agentIconIndex("some-unknown-agent"));
+    try std.testing.expectEqual(@as(?usize, null), agentIconIndex(""));
 }
 
 test "clearing a bubble also cancels its lifetime" {
