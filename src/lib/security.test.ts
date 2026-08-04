@@ -171,10 +171,23 @@ describe("validateSubmission", () => {
     expect(
       validateSubmission({
         ...BASE_INPUT,
+        spriteVersionNumber: 2,
         spritesheetWidth: 1536,
         spritesheetHeight: 2288,
       }),
     ).toBeNull();
+  });
+
+  it("rejects an unsupported spriteVersionNumber from pet.json", () => {
+    const r = validateSubmission({
+      ...BASE_INPUT,
+      spriteVersionNumber: 3,
+    });
+    expect(r?.ok).toBe(false);
+    if (r && r.ok === false) {
+      expect(r.error).toBe("invalid_sprite_version");
+      expect(r.field).toBe("spriteVersionNumber");
+    }
   });
 
   it("accepts a clean scale of the classic grid (768x936)", () => {

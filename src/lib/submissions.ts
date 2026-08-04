@@ -13,6 +13,7 @@ import { db, schema } from "@/lib/db/client";
 import type { SubmissionReview, SubmittedPet } from "@/lib/db/schema";
 import { renderNewSubmissionEmail } from "@/lib/email-templates/new-submission";
 import { fallbackHandle, handleForUser } from "@/lib/handles";
+import { normalizeSpriteVersionNumber } from "@/lib/sprite-version";
 import {
   deriveSlug,
   type SubmissionInput,
@@ -89,6 +90,7 @@ export async function persistSubmission(
 
   const id = `pet_${crypto.randomUUID().replace(/-/g, "").slice(0, 22)}`;
   const credit = creditFromPrincipal(principal);
+  const spriteVersion = normalizeSpriteVersionNumber(body.spriteVersionNumber);
 
   await db.insert(schema.submittedPets).values({
     id,
@@ -98,6 +100,7 @@ export async function persistSubmission(
     spritesheetUrl: body.spritesheetUrl,
     petJsonUrl: body.petJsonUrl,
     zipUrl: body.zipUrl,
+    spriteVersionNumber: spriteVersion.ok ? spriteVersion.version : 1,
     kind: "creature",
     vibes: [],
     tags: [],

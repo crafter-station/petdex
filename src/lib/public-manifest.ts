@@ -9,6 +9,7 @@ export type LegacyManifestPet = {
   spritesheetUrl: string;
   petJsonUrl: string;
   zipUrl: string | null;
+  spriteVersionNumber: 1 | 2;
 };
 
 export type LegacyManifest = {
@@ -25,6 +26,7 @@ export type CompactManifestPet = [
   spritesheet: string,
   petJson: string,
   zip: string | null,
+  spriteVersionNumber: 1 | 2,
 ];
 
 export type CompactManifest = {
@@ -40,6 +42,7 @@ export type CompactManifest = {
     "spritesheet",
     "petJson",
     "zip",
+    "spriteVersionNumber",
   ];
   pets: CompactManifestPet[];
 };
@@ -54,6 +57,7 @@ export async function buildLegacyManifest(): Promise<LegacyManifest> {
     spritesheetUrl: pet.spritesheetUrl,
     petJsonUrl: pet.petJsonUrl,
     zipUrl: pet.zipUrl ?? null,
+    spriteVersionNumber: pet.spriteVersionNumber,
   }));
 
   return {
@@ -73,6 +77,7 @@ export async function buildCompactManifest(): Promise<CompactManifest> {
     compactRequiredAssetRef(pet.spritesheetUrl),
     compactRequiredAssetRef(pet.petJsonUrl),
     compactOptionalAssetRef(pet.zipUrl),
+    pet.spriteVersionNumber,
   ]);
 
   return {
@@ -88,6 +93,7 @@ export async function buildCompactManifest(): Promise<CompactManifest> {
       "spritesheet",
       "petJson",
       "zip",
+      "spriteVersionNumber",
     ],
     pets: items,
   };

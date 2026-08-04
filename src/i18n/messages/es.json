@@ -321,7 +321,8 @@
         "invalidAssetUrl": "Los assets subidos no pasaron la revisión de hosting.",
         "invalidSlug": "El id de la mascota no pudo convertirse en una URL válida.",
         "unauthorized": "Inicia sesión antes de enviar.",
-        "invalidJson": "No se pudo leer el JSON enviado."
+        "invalidJson": "No se pudo leer el JSON enviado.",
+        "invalidSpriteVersion": "spriteVersionNumber debe omitirse, ser 1 o ser 2."
       },
       "issues": {
         "folderMissingPetJson": "A la carpeta le falta pet.json.",
@@ -331,6 +332,7 @@
         "zipMissingPetJson": "Falta pet.json en la raíz del zip.",
         "zipMissingSpritesheet": "Falta spritesheet.webp (o .png) en la raíz del zip. Encontrado: {present}",
         "invalidJson": "pet.json no es JSON válido.",
+        "invalidSpriteVersion": "pet.json tiene un spriteVersionNumber no compatible: {value}. Usa 1, 2 u omítelo.",
         "unreadableSpritesheet": "No se puede leer la imagen del spritesheet.",
         "tooSmall": "El spritesheet parece muy pequeño ({width}×{height}). Usa una grilla de 8×9 frames (recomendado {recommendedWidth}×{recommendedHeight}).",
         "badGrid": "La grilla del spritesheet es {width}×{height}, que no coincide con la grilla 8×9 (1536×1872) ni la v2 8×11 (1536×2288), así que los frames se verían desalineados.",

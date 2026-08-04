@@ -306,7 +306,15 @@ type ManifestPet = {
   displayName: string;
   spritesheetUrl: string;
   petJsonUrl: string;
+  spriteVersionNumber?: 1 | 2;
 };
+
+function parseSpriteVersionNumber(petJson: Record<string, unknown>): 1 | 2 {
+  const value = petJson.spriteVersionNumber;
+  if (value === undefined || value === 1) return 1;
+  if (value === 2) return 2;
+  throw new Error("spriteVersionNumber must be omitted, 1, or 2");
+}
 
 async function fetchManifest(): Promise<ManifestPet[]> {
   const res = await fetch(`${PETDEX_URL}/api/manifest`);
@@ -792,10 +800,15 @@ async function cmdEdit(args: string[]): Promise<void> {
         const buf = await import("node:fs/promises").then((m) =>
           m.readFile(metaPath),
         );
+        const petJsonObj = JSON.parse(buf.toString("utf8")) as Record<
+          string,
+          unknown
+        >;
         const ms = slot("petjson");
         if (ms) {
           await putR2(ms.uploadUrl, buf, "application/json");
           body.petJsonUrl = ms.publicUrl;
+          body.spriteVersionNumber = parseSpriteVersionNumber(petJsonObj);
         }
       }
       if (zipPath) {
@@ -1056,6 +1069,7 @@ async function submitOne(
       ),
       spritesheetWidth: width,
       spritesheetHeight: height,
+      spriteVersionNumber: parseSpriteVersionNumber(cand.petJsonObj),
     }),
   });
 

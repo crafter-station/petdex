@@ -44,6 +44,7 @@ export type SearchInput = {
   vibes?: PetVibe[];
   colorFamilies?: ColorFamily[];
   batches?: string[];
+  spriteVersions?: Array<PetdexPet["spriteVersionNumber"]>;
   sort?: SortKey;
   cursor?: number;
   limit?: number;
@@ -80,6 +81,7 @@ export type SearchPet = Pick<
   | "submittedBy"
   | "source"
   | "approvedAt"
+  | "spriteVersionNumber"
 > & {
   dexNumber?: number | null;
   metrics: {
@@ -138,7 +140,8 @@ export async function searchPets(
     !(input.kinds && input.kinds.length > 0) &&
     !(input.vibes && input.vibes.length > 0) &&
     !(input.colorFamilies && input.colorFamilies.length > 0) &&
-    !(input.batches && input.batches.length > 0);
+    !(input.batches && input.batches.length > 0) &&
+    !(input.spriteVersions && input.spriteVersions.length > 0);
 
   if (isVibe) {
     const out = await vibeSearch({
@@ -168,6 +171,12 @@ export async function searchPets(
   if (input.batches && input.batches.length > 0) {
     const batchExpr = sql<string>`to_char(date_trunc('month', ${schema.submittedPets.approvedAt} AT TIME ZONE 'UTC'), 'YYYY-MM')`;
     filters.push(inArray(batchExpr, input.batches));
+  }
+
+  if (input.spriteVersions && input.spriteVersions.length > 0) {
+    filters.push(
+      inArray(schema.submittedPets.spriteVersionNumber, input.spriteVersions),
+    );
   }
 
   if (input.colorFamilies && input.colorFamilies.length > 0) {
@@ -231,6 +240,7 @@ export async function searchPets(
       description: schema.submittedPets.description,
       spritesheetUrl: schema.submittedPets.spritesheetUrl,
       zipUrl: schema.submittedPets.zipUrl,
+      spriteVersionNumber: schema.submittedPets.spriteVersionNumber,
       soundUrl: schema.submittedPets.soundUrl,
       featured: schema.submittedPets.featured,
       kind: schema.submittedPets.kind,
@@ -319,7 +329,8 @@ async function vibeSearch(args: {
     )
     SELECT
       sp.id, sp.slug, sp.display_name, sp.description,
-      sp.spritesheet_url, sp.pet_json_url, sp.zip_url, sp.sound_url,
+      sp.spritesheet_url, sp.pet_json_url, sp.zip_url,
+      sp.sprite_version_number, sp.sound_url,
       sp.kind, sp.vibes, sp.tags, sp.dominant_color, sp.color_family,
       sp.featured, sp.dhash, sp.status, sp.source,
       sp.owner_id, sp.owner_email,
@@ -382,6 +393,7 @@ function toSearchPet(
     submittedBy: pet.submittedBy,
     source: pet.source,
     approvedAt: pet.approvedAt,
+    spriteVersionNumber: pet.spriteVersionNumber,
     dexNumber: metrics.dexNumber,
     metrics: {
       installCount: metrics.installCount,
@@ -407,6 +419,7 @@ function toSearchPetFromRow(row: {
   creditImage: string | null;
   source: PetdexPet["source"];
   approvedAt: Date | null;
+  spriteVersionNumber: PetdexPet["spriteVersionNumber"];
   dexNumber: number | null;
   installCount: number | null;
   likeCount: number | null;
@@ -429,6 +442,7 @@ function toSearchPetFromRow(row: {
       : undefined,
     source: row.source,
     approvedAt: row.approvedAt?.toISOString() ?? null,
+    spriteVersionNumber: row.spriteVersionNumber,
     dexNumber: row.dexNumber,
     metrics: {
       installCount: row.installCount ?? 0,
@@ -452,6 +466,8 @@ function rowToSchema(
     spritesheetUrl: row.spritesheet_url as string,
     petJsonUrl: row.pet_json_url as string,
     zipUrl: row.zip_url as string,
+    spriteVersionNumber: ((row.sprite_version_number as number | null) ??
+      1) as PetdexPet["spriteVersionNumber"],
     soundUrl: (row.sound_url as string | null) ?? null,
     kind: row.kind as "creature" | "object" | "character",
     vibes: row.vibes as string[],
@@ -488,6 +504,8 @@ function rowToSchema(
       (row.pending_spritesheet_width as number | null) ?? null,
     pendingSpritesheetHeight:
       (row.pending_spritesheet_height as number | null) ?? null,
+    pendingSpriteVersionNumber:
+      (row.pending_sprite_version_number as number | null) ?? null,
     pendingDhash: (row.pending_dhash as string | null) ?? null,
     pendingReviewId: (row.pending_review_id as string | null) ?? null,
     pendingAutoApprovedAt: row.pending_auto_approved_at
@@ -593,9 +611,23 @@ const computeFacets = withNextDataCache(
       }
     }
 
-    return { kinds, vibes, colors, batches };
+    const versionRows = await db
+      .select({
+        spriteVersionNumber: schema.submittedPets.spriteVersionNumber,
+        n: sql<number>`count(*)::int`,
+      })
+      .from(schema.submittedPets)
+      .where(eq(schema.submittedPets.status, "approved"))
+      .groupBy(schema.submittedPets.spriteVersionNumber);
+
+    const spriteVersions: Record<string, number> = { "1": 0, "2": 0 };
+    for (const row of versionRows) {
+      spriteVersions[String(row.spriteVersionNumber)] = row.n;
+    }
+
+    return { kinds, vibes, colors, batches, spriteVersions };
   },
-  ["petdex-facets"],
+  ["petdex-facets-v2"],
   { tags: ["petdex:facets"], revalidate: 300 },
 );
 

@@ -49,6 +49,7 @@ export const submittedPets = pgTable(
     spritesheetUrl: text("spritesheet_url").notNull(),
     petJsonUrl: text("pet_json_url").notNull(),
     zipUrl: text("zip_url").notNull(),
+    spriteVersionNumber: integer("sprite_version_number").notNull().default(1),
     kind: petKind("kind").notNull().default("creature"),
     vibes: jsonb("vibes").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
     tags: jsonb("tags").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
@@ -93,6 +94,7 @@ export const submittedPets = pgTable(
     pendingZipUrl: text("pending_zip_url"),
     pendingSpritesheetWidth: integer("pending_spritesheet_width"),
     pendingSpritesheetHeight: integer("pending_spritesheet_height"),
+    pendingSpriteVersionNumber: integer("pending_sprite_version_number"),
     pendingDhash: text("pending_dhash"),
     pendingReviewId: text("pending_review_id"),
     pendingAutoApprovedAt: timestamp("pending_auto_approved_at", {
@@ -130,6 +132,9 @@ export const submittedPets = pgTable(
       table.status,
       table.kind,
     ),
+    statusSpriteVersionIdx: index(
+      "submitted_pets_status_sprite_version_idx",
+    ).on(table.status, table.spriteVersionNumber),
     pendingEditIdx: index("submitted_pets_pending_edit_idx").on(
       table.pendingSubmittedAt,
     ),

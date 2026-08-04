@@ -53,6 +53,7 @@ type PetRow = Pick<
   | "spritesheetUrl"
   | "petJsonUrl"
   | "zipUrl"
+  | "spriteVersionNumber"
   | "soundUrl"
   | "featured"
   | "kind"
@@ -76,6 +77,7 @@ const petColumns = {
   spritesheetUrl: true,
   petJsonUrl: true,
   zipUrl: true,
+  spriteVersionNumber: true,
   soundUrl: true,
   featured: true,
   kind: true,
@@ -114,7 +116,7 @@ export const getPet = cache(
         );
         return pet ? normalizePetAssetUrls(pet) : undefined;
       },
-      ["petdex-pet", slug],
+      ["petdex-pet-v2", slug],
       { tags: [`pet:${slug}`, "pet:list"], revalidate: 86400 },
     )();
   },
@@ -158,7 +160,7 @@ export async function getFeaturedPetsWithMetrics(
         metrics: metrics.get(pet.slug) ?? EMPTY_METRICS,
       }));
     },
-    ["petdex-featured-pets-with-metrics", String(limit)],
+    ["petdex-featured-pets-with-metrics-v2", String(limit)],
     { tags: ["pet:list"], revalidate: 86400 },
   )();
 }
@@ -203,7 +205,7 @@ export async function getAllApprovedPets(): Promise<PetdexPet[]> {
       );
       return pets.map(normalizePetAssetUrls);
     },
-    ["petdex-all-approved-pets"],
+    ["petdex-all-approved-pets-v2"],
     { tags: ["pet:list"], revalidate: 86400 },
   )();
 }
@@ -241,6 +243,7 @@ export type ApprovedPetSlim = {
   spritesheetUrl: string;
   petJsonUrl: string;
   zipUrl: string | null;
+  spriteVersionNumber: PetdexPet["spriteVersionNumber"];
   creditName: string | null;
 };
 
@@ -260,6 +263,7 @@ export async function getApprovedPetsForManifest(): Promise<ApprovedPetSlim[]> {
           spritesheetUrl: schema.submittedPets.spritesheetUrl,
           petJsonUrl: schema.submittedPets.petJsonUrl,
           zipUrl: schema.submittedPets.zipUrl,
+          spriteVersionNumber: schema.submittedPets.spriteVersionNumber,
           creditName: schema.submittedPets.creditName,
         })
         .from(schema.submittedPets)
@@ -271,6 +275,8 @@ export async function getApprovedPetsForManifest(): Promise<ApprovedPetSlim[]> {
         spritesheetUrl: toCurrentR2PublicUrl(row.spritesheetUrl),
         petJsonUrl: toCurrentR2PublicUrl(row.petJsonUrl),
         zipUrl: toCurrentR2PublicUrl(row.zipUrl),
+        spriteVersionNumber:
+          row.spriteVersionNumber as PetdexPet["spriteVersionNumber"],
         creditName: row.creditName,
       }));
     },
@@ -317,7 +323,7 @@ export async function getApprovedPetsWithMetrics(): Promise<PetWithMetrics[]> {
         metrics: metrics.get(p.slug) ?? EMPTY_METRICS,
       }));
     },
-    ["petdex-approved-pets-with-metrics"],
+    ["petdex-approved-pets-with-metrics-v2"],
     { tags: ["pet:list"], revalidate: 86400 },
   )();
 }
@@ -352,6 +358,8 @@ export function rowToPet(row: PetRow): PetdexPet {
     spritesheetPath: toCurrentR2PublicUrl(row.spritesheetUrl),
     petJsonPath: toCurrentR2PublicUrl(row.petJsonUrl),
     zipUrl: toCurrentR2PublicUrl(row.zipUrl),
+    spriteVersionNumber:
+      row.spriteVersionNumber as PetdexPet["spriteVersionNumber"],
     soundUrl: toCurrentR2PublicUrl(row.soundUrl),
     approvalState: "approved",
     featured: row.featured,

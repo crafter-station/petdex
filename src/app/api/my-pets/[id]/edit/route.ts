@@ -18,6 +18,7 @@ import { createNotification } from "@/lib/notifications";
 import { editRatelimit } from "@/lib/ratelimit";
 import { requireSameOrigin } from "@/lib/same-origin";
 import { refreshSimilarityFor } from "@/lib/similarity";
+import { normalizeSpriteVersionNumber } from "@/lib/sprite-version";
 import { isAllowedAssetUrl } from "@/lib/url-allowlist";
 import { containsUrl, URL_BLOCKED_REASON } from "@/lib/url-blocklist";
 
@@ -33,6 +34,7 @@ type PatchBody = {
   spritesheetWidth?: number;
   spritesheetHeight?: number;
   petJsonUrl?: string;
+  spriteVersionNumber?: 1 | 2;
   zipUrl?: string;
 };
 
@@ -121,6 +123,7 @@ export async function PATCH(
     pendingZipUrl: string | null;
     pendingSpritesheetWidth: number | null;
     pendingSpritesheetHeight: number | null;
+    pendingSpriteVersionNumber: number | null;
   } = {
     pendingDisplayName: null,
     pendingDescription: null,
@@ -132,6 +135,7 @@ export async function PATCH(
     pendingZipUrl: null,
     pendingSpritesheetWidth: null,
     pendingSpritesheetHeight: null,
+    pendingSpriteVersionNumber: null,
   };
 
   if (typeof body.displayName === "string") {
@@ -201,7 +205,21 @@ export async function PATCH(
       );
     }
     if (body.petJsonUrl !== row.petJsonUrl) {
+      const spriteVersion = normalizeSpriteVersionNumber(
+        body.spriteVersionNumber,
+      );
+      if (!spriteVersion.ok) {
+        return NextResponse.json(
+          {
+            error: "invalid_sprite_version",
+            field: "spriteVersionNumber",
+            message: "spriteVersionNumber must be omitted, 1, or 2.",
+          },
+          { status: 400 },
+        );
+      }
       patch.pendingPetJsonUrl = body.petJsonUrl;
+      patch.pendingSpriteVersionNumber = spriteVersion.version;
     }
   }
 
@@ -256,6 +274,7 @@ export async function PATCH(
     patch.pendingTags === null &&
     patch.pendingSpritesheetUrl === null &&
     patch.pendingPetJsonUrl === null &&
+    patch.pendingSpriteVersionNumber === null &&
     patch.pendingZipUrl === null;
   if (noOp) {
     return NextResponse.json({ error: "nothing_changed" }, { status: 400 });
@@ -296,6 +315,7 @@ export async function PATCH(
       pendingSpritesheetUrl: null,
       pendingPetJsonUrl: null,
       pendingZipUrl: null,
+      pendingSpriteVersionNumber: null,
 
       editCountLast24h,
     });
@@ -404,6 +424,7 @@ export async function DELETE(
       pendingZipUrl: null,
       pendingSpritesheetWidth: null,
       pendingSpritesheetHeight: null,
+      pendingSpriteVersionNumber: null,
     })
     .where(eq(schema.submittedPets.id, id));
 

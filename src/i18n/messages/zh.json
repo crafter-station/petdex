@@ -348,7 +348,8 @@
         "invalidAssetUrl": "上传的资源没有通过托管检查。",
         "invalidSlug": "宠物 id 无法转换成有效的 URL slug。",
         "unauthorized": "请先登录再提交。",
-        "invalidJson": "无法读取提交的 JSON。"
+        "invalidJson": "无法读取提交的 JSON。",
+        "invalidSpriteVersion": "spriteVersionNumber 必须省略，或为 1 / 2。"
       },
       "issues": {
         "folderMissingPetJson": "文件夹缺少 pet.json。",
@@ -358,6 +359,7 @@
         "zipMissingPetJson": "zip 根目录缺少 pet.json。",
         "zipMissingSpritesheet": "zip 根目录缺少精灵图集文件 spritesheet.webp（或 .png）。找到的文件：{present}",
         "invalidJson": "pet.json 不是有效的 JSON。",
+        "invalidSpriteVersion": "pet.json 中的 spriteVersionNumber 不受支持：{value}。请使用 1、2，或省略该字段。",
         "unreadableSpritesheet": "无法读取精灵图集 Spritesheet 图片。",
         "tooSmall": "精灵图集 Spritesheet 看起来太小（{width}×{height}）。请使用 8×9 帧网格（推荐 {recommendedWidth}×{recommendedHeight}）。",
         "badGrid": "精灵图集 Spritesheet 网格为 {width}×{height}，不符合 8×9（1536×1872）或 v2 8×11（1536×2288）帧网格，帧会错位显示。",

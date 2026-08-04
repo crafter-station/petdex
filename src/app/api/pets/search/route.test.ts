@@ -17,6 +17,7 @@ const calls: Array<{
     q?: string;
     shuffleSeed?: string;
     sort?: string;
+    spriteVersions?: number[];
   };
   options: { includeTotal?: boolean; includeFacets?: boolean };
 }> = [];
@@ -30,6 +31,7 @@ testMock.module("@/lib/pet-search", () => ({
       q?: string;
       shuffleSeed?: string;
       sort?: string;
+      spriteVersions?: number[];
     },
     options: { includeTotal?: boolean; includeFacets?: boolean },
   ) => {
@@ -160,5 +162,17 @@ describe("GET /api/pets/search", () => {
       includeTotal: false,
       includeFacets: false,
     });
+  });
+
+  it("passes only v1/v2 sprite version filters to search", async () => {
+    const response = await search(
+      "https://petdex.local/api/pets/search?spriteVersions=1,2,3,x&sort=alpha",
+    );
+    const call = calls[0];
+
+    expect(response.headers.get("Cache-Control")).toBe(
+      DETERMINISTIC_CACHE_CONTROL,
+    );
+    expect(call?.input.spriteVersions).toEqual([1, 2]);
   });
 });

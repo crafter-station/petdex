@@ -2,6 +2,7 @@ import {
   BLOCKED_KEYWORD_REASON,
   findBlockedKeyword,
 } from "@/lib/keyword-blocklist";
+import { normalizeSpriteVersionNumber } from "@/lib/sprite-version";
 import { isAllowedAssetUrl } from "@/lib/url-allowlist";
 import { containsUrl, URL_BLOCKED_REASON } from "@/lib/url-blocklist";
 
@@ -14,6 +15,7 @@ export type SubmissionInput = {
   petId: string;
   spritesheetWidth: number;
   spritesheetHeight: number;
+  spriteVersionNumber?: 1 | 2;
 };
 
 export type SubmissionResult =
@@ -88,6 +90,17 @@ export function validateSubmission(
       error: "invalid_spritesheet",
       message: `Spritesheet must be an 8x9 grid (1536x1872) or a v2 8x11 grid (1536x2288). Got ${body.spritesheetWidth}x${body.spritesheetHeight}, which the pet viewer would squash and misalign.`,
       got: { width: body.spritesheetWidth, height: body.spritesheetHeight },
+    };
+  }
+  const spriteVersion = normalizeSpriteVersionNumber(body.spriteVersionNumber);
+  if (!spriteVersion.ok) {
+    return {
+      ok: false,
+      status: 400,
+      error: "invalid_sprite_version",
+      field: "spriteVersionNumber",
+      message: "spriteVersionNumber must be omitted, 1, or 2.",
+      got: spriteVersion.value,
     };
   }
   // Reject any URL outside the allowlist. Without this, a malicious

@@ -65,6 +65,7 @@ type Facets = {
   vibes: Record<string, number>;
   colors: Record<ColorFamily, number>;
   batches: Array<{ key: string; label: string; count: number }>;
+  spriteVersions?: Record<string, number>;
 };
 
 type SearchMode = "vibe" | "keyword" | "all";
@@ -130,6 +131,9 @@ export function PetGallery({
   const [activeVibes, setActiveVibes] = useState<Set<PetVibe>>(new Set());
   const [activeColors, setActiveColors] = useState<Set<ColorFamily>>(new Set());
   const [activeBatches, setActiveBatches] = useState<Set<string>>(new Set());
+  const [activeSpriteVersions, setActiveSpriteVersions] = useState<Set<string>>(
+    new Set(),
+  );
   const [sort, setSort] = useState<SortKey>("installed");
   const [sortTouched, setSortTouched] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -162,6 +166,9 @@ export function PetGallery({
       if (activeBatches.size > 0) {
         p.set("batches", [...activeBatches].join(","));
       }
+      if (activeSpriteVersions.size > 0) {
+        p.set("spriteVersions", [...activeSpriteVersions].join(","));
+      }
       if (sort === "curated") {
         p.set("sort", sort);
         if (shuffleSeedRef.current) {
@@ -175,7 +182,15 @@ export function PetGallery({
       if (!includeMeta) p.set("includeMeta", "0");
       return p;
     },
-    [trimmedQuery, activeKinds, activeVibes, activeColors, activeBatches, sort],
+    [
+      trimmedQuery,
+      activeKinds,
+      activeVibes,
+      activeColors,
+      activeBatches,
+      activeSpriteVersions,
+      sort,
+    ],
   );
 
   useEffect(() => {
@@ -267,12 +282,15 @@ export function PetGallery({
     setActiveColors((c) => toggleSet(c, color));
   const toggleBatch = (batch: string) =>
     setActiveBatches((c) => toggleSet(c, batch));
+  const toggleSpriteVersion = (version: string) =>
+    setActiveSpriteVersions((c) => toggleSet(c, version));
 
   const clearFilters = () => {
     setActiveKinds(new Set());
     setActiveVibes(new Set());
     setActiveColors(new Set());
     setActiveBatches(new Set());
+    setActiveSpriteVersions(new Set());
     setQuery("");
   };
 
@@ -281,12 +299,16 @@ export function PetGallery({
     activeVibes.size > 0 ||
     activeColors.size > 0 ||
     activeBatches.size > 0 ||
+    activeSpriteVersions.size > 0 ||
     query.length > 0;
   const activeFilterCount =
     activeKinds.size +
     activeVibes.size +
     activeColors.size +
-    activeBatches.size;
+    activeBatches.size +
+    activeSpriteVersions.size;
+  const spriteVersionCounts = facets.spriteVersions ?? { "1": 0, "2": 0 };
+  const spriteVersionLabels = { "1": "v1", "2": "v2" };
 
   return (
     <section className="space-y-5">
@@ -428,6 +450,17 @@ export function PetGallery({
                   />
                 </FilterGroup>
                 <Separator className="bg-border-base" />
+                <FilterGroup label="Version">
+                  <FilterChips
+                    options={["1", "2"]}
+                    counts={spriteVersionCounts}
+                    labels={spriteVersionLabels}
+                    active={activeSpriteVersions}
+                    onToggle={toggleSpriteVersion}
+                    tone="version"
+                  />
+                </FilterGroup>
+                <Separator className="bg-border-base" />
                 <FilterGroup label="Vibe">
                   <FilterChips
                     options={PET_VIBES}
@@ -529,6 +562,14 @@ export function PetGallery({
               onToggle={toggleBatch}
               tone="batch"
             />
+            <FilterChips
+              options={[...activeSpriteVersions]}
+              counts={spriteVersionCounts}
+              labels={spriteVersionLabels}
+              active={activeSpriteVersions}
+              onToggle={toggleSpriteVersion}
+              tone="version"
+            />
           </div>
         ) : null}
         <div
@@ -554,6 +595,16 @@ export function PetGallery({
               onToggle={(v) => toggleVibe(v as PetVibe)}
               tone="vibe"
               max={8}
+            />
+          </FilterRow>
+          <FilterRow label="Version">
+            <FilterChips
+              options={["1", "2"]}
+              counts={spriteVersionCounts}
+              labels={spriteVersionLabels}
+              active={activeSpriteVersions}
+              onToggle={toggleSpriteVersion}
+              tone="version"
             />
           </FilterRow>
           <FilterRow label="Color">
@@ -663,7 +714,7 @@ type FilterChipsProps = {
   labels?: Record<string, string>;
   active: Set<string>;
   onToggle: (value: string) => void;
-  tone: "kind" | "vibe" | "color" | "batch";
+  tone: "kind" | "vibe" | "color" | "batch" | "version";
   max?: number;
   dotColors?: Partial<Record<string, string>>;
 };
@@ -703,7 +754,9 @@ function FilterChips({
               ? "bg-brand"
               : tone === "color"
                 ? ""
-                : "bg-sky-500";
+                : tone === "batch"
+                  ? "bg-sky-500"
+                  : "bg-foreground";
         const dotColor = dotColors?.[value];
         const label = labels?.[value] ?? value;
         return (
@@ -994,11 +1047,16 @@ function PetCardImpl({
                 </span>
               ) : null}
             </h3>
-            {installCount > 0 ? (
-              <span className="shrink-0 font-mono text-[10px] tracking-[0.12em] text-muted-4">
-                ↓ {formattedInstallCount}
+            <div className="flex shrink-0 items-center gap-1.5">
+              <span className="rounded-full bg-black px-2 py-1 font-mono text-[10px] leading-none font-semibold tracking-[0.06em] text-white shadow-sm">
+                v{pet.spriteVersionNumber}
               </span>
-            ) : null}
+              {installCount > 0 ? (
+                <span className="font-mono text-[10px] tracking-[0.12em] text-muted-4">
+                  ↓ {formattedInstallCount}
+                </span>
+              ) : null}
+            </div>
           </div>
           <p
             className={cn(

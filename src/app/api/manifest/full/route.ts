@@ -55,6 +55,7 @@ export async function GET(req: Request): Promise<Response> {
     spritesheetUrl: pet.spritesheetPath,
     petJsonUrl: pet.petJsonPath,
     zipUrl: pet.zipUrl ?? null,
+    spriteVersionNumber: pet.spriteVersionNumber,
   }));
 
   return NextResponse.json(

@@ -326,6 +326,9 @@ export default async function PetPage({ params }: PageProps) {
                 <p className="font-mono text-xs tracking-[0.22em] text-muted-3 uppercase">
                   {pet.kind}
                 </p>
+                <p className="rounded-full bg-black px-2.5 py-1 font-mono text-xs font-semibold tracking-[0.08em] text-white shadow-sm">
+                  v{pet.spriteVersionNumber}
+                </p>
               </div>
 
               <div className="flex flex-wrap items-start justify-between gap-4">

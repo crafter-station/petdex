@@ -45,6 +45,7 @@ export async function GET(req: Request): Promise<Response> {
     COLOR_SET.has(family),
   ) as ColorFamily[];
   const batches = parseBatchList(params.get("batches"));
+  const spriteVersions = parseSpriteVersionList(params.get("spriteVersions"));
 
   const defaultSort: SortKey = q ? "curated" : "alpha";
   const sortRaw = (params.get("sort") ?? defaultSort).toLowerCase();
@@ -75,6 +76,7 @@ export async function GET(req: Request): Promise<Response> {
       vibes,
       colorFamilies: colors,
       batches,
+      spriteVersions,
       sort,
       cursor,
       limit,
@@ -124,4 +126,13 @@ function parseBatchList(raw: string | null): string[] {
     .split(",")
     .map((value) => value.trim())
     .filter((value) => BATCH_KEY_RE.test(value));
+}
+
+function parseSpriteVersionList(raw: string | null): Array<1 | 2> {
+  const out: Array<1 | 2> = [];
+  for (const value of parseList(raw)) {
+    if (value === "1" && !out.includes(1)) out.push(1);
+    if (value === "2" && !out.includes(2)) out.push(2);
+  }
+  return out;
 }

@@ -36,22 +36,22 @@ export async function cachedAggregate<T>(
 }
 
 export const AGGREGATE_KEYS = {
-  facets: "petdex:agg:facets:v1",
+  facets: "petdex:agg:facets:v2",
   approvedCount: "petdex:agg:approved-count:v1",
   metricsSummary: "petdex:agg:metrics-summary:v1",
   batches: "petdex:agg:batches:v1",
   variantIndex: "petdex:agg:variant-index:v1",
-  approvedCatalog: "petdex:agg:approved-catalog:v1",
-  slimManifest: "petdex:agg:slim-manifest:v1",
+  approvedCatalog: "petdex:agg:approved-catalog:v2",
+  slimManifest: "petdex:agg:slim-manifest:v2",
   metricsIndex: "petdex:agg:metrics-index:v1",
-  featuredPets: "petdex:agg:featured-pets:v1",
+  featuredPets: "petdex:agg:featured-pets:v2",
   dexNumbers: "petdex:agg:dex-numbers:v2",
-  randomPetPool: "petdex:agg:random-pet-pool:v1",
-  latestApprovedPets: "petdex:agg:latest-approved-pets:v1",
+  randomPetPool: "petdex:agg:random-pet-pool:v2",
+  latestApprovedPets: "petdex:agg:latest-approved-pets:v2",
 } as const;
 
 export function petCacheKey(slug: string): string {
-  return `petdex:pet:${slug}:v1`;
+  return `petdex:pet:${slug}:v2`;
 }
 
 export function collectionBacklinksCacheKey(slug: string): string {

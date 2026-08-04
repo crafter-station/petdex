@@ -6,6 +6,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { Loader2, Pencil, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 
+import { parseSpriteVersionNumber } from "@/lib/sprite-version";
 import { PET_ASSET_MAX_BYTES } from "@/lib/upload-limits";
 
 type Pending = {
@@ -46,6 +47,20 @@ function readImageDims(file: File): Promise<{ width: number; height: number }> {
     };
     img.src = url;
   });
+}
+
+async function readSpriteVersionFromPetJson(file: File): Promise<1 | 2> {
+  let petJson: Record<string, unknown>;
+  try {
+    petJson = JSON.parse(await file.text()) as Record<string, unknown>;
+  } catch {
+    throw new Error("Invalid JSON file");
+  }
+  const parsed = parseSpriteVersionNumber(petJson);
+  if (!parsed.ok) {
+    throw new Error("spriteVersionNumber must be omitted, 1, or 2");
+  }
+  return parsed.version;
 }
 
 const MAX_SPRITE_BYTES = PET_ASSET_MAX_BYTES;
@@ -243,6 +258,8 @@ export function OwnerEditPanel({
         if (metaFile) {
           const ms = slot("petjson");
           if (!ms) throw new Error("Missing petjson slot in presign response");
+          const spriteVersionNumber =
+            await readSpriteVersionFromPetJson(metaFile);
           const putRes = await fetch(ms.uploadUrl, {
             method: "PUT",
             headers: { "content-type": "application/json" },
@@ -250,6 +267,7 @@ export function OwnerEditPanel({
           });
           if (!putRes.ok) throw new Error("Metadata upload failed");
           extraBody.petJsonUrl = ms.publicUrl;
+          extraBody.spriteVersionNumber = spriteVersionNumber;
         }
       }
 

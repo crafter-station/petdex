@@ -18,6 +18,7 @@ import { useTranslations } from "next-intl";
 
 import { petStates } from "@/lib/pet-states";
 import { deriveSlug } from "@/lib/slug";
+import { parseSpriteVersionNumber } from "@/lib/sprite-version";
 import { PET_ASSET_MAX_BYTES } from "@/lib/upload-limits";
 
 import { Input } from "@/components/ui/input";
@@ -36,6 +37,7 @@ type ParsedPet = {
   spritesheetUrl: string;
   spritesheetWidth: number;
   spritesheetHeight: number;
+  spriteVersionNumber: 1 | 2;
   issues: string[];
   source: "folder" | "zip" | "spritesheet";
 };
@@ -292,6 +294,14 @@ export function PetSubmitForm() {
           issues.push(t("issues.invalidJson"));
         }
       }
+      const spriteVersion = parseSpriteVersionNumber(petJson);
+      if (!spriteVersion.ok) {
+        issues.push(
+          t("issues.invalidSpriteVersion", {
+            value: String(spriteVersion.value),
+          }),
+        );
+      }
 
       const spritesheetUrl = spritesheetBlob.size
         ? URL.createObjectURL(spritesheetBlob)
@@ -347,6 +357,7 @@ export function PetSubmitForm() {
         spritesheetUrl,
         spritesheetWidth: width,
         spritesheetHeight: height,
+        spriteVersionNumber: spriteVersion.ok ? spriteVersion.version : 1,
         issues,
         source,
       });
@@ -541,6 +552,7 @@ export function PetSubmitForm() {
         petId: parsed.petId,
         spritesheetWidth: parsed.spritesheetWidth,
         spritesheetHeight: parsed.spritesheetHeight,
+        spriteVersionNumber: parsed.spriteVersionNumber,
       }),
     });
 
@@ -880,6 +892,8 @@ function submissionErrorMessage(
       return t("errors.unauthorized");
     case "invalid_json":
       return t("errors.invalidJson");
+    case "invalid_sprite_version":
+      return t("errors.invalidSpriteVersion");
     case "unknown":
       return t("errors.submissionFailed");
     default:

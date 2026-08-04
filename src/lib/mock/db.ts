@@ -41,6 +41,7 @@ const MOCK_CURATED_ASSET_SLUGS = new Set([
   "scoop",
   "byte-bunny",
 ]);
+const MOCK_V2_SAMPLE_SLUGS = new Set(["captain-quack"]);
 
 async function bootstrap(client: PGlite): Promise<void> {
   // Drizzle migrations are SQL files. We run them in order, tolerating
@@ -169,6 +170,8 @@ async function bootstrap(client: PGlite): Promise<void> {
     `ALTER TABLE "submitted_pets" ADD COLUMN IF NOT EXISTS "pending_tags" jsonb`,
     `ALTER TABLE "submitted_pets" ADD COLUMN IF NOT EXISTS "pending_submitted_at" timestamp with time zone`,
     `ALTER TABLE "submitted_pets" ADD COLUMN IF NOT EXISTS "pending_rejection_reason" text`,
+    `ALTER TABLE "submitted_pets" ADD COLUMN IF NOT EXISTS "sprite_version_number" integer NOT NULL DEFAULT 1`,
+    `ALTER TABLE "submitted_pets" ADD COLUMN IF NOT EXISTS "pending_sprite_version_number" integer`,
     // Denormalize metric columns onto submitted_pets so drizzle's
     // coalesce-without-table-prefix queries (pet-search.ts:135) don't
     // 42703 in PGlite. Real Postgres handles the same query via the
@@ -241,7 +244,12 @@ async function seed(client: PGlite): Promise<void> {
     const id = `pet_mock_${i.toString().padStart(3, "0")}`;
     const assetBase = `${MOCK_R2_PUBLIC_BASE}/curated/${slug}`;
     const isCurated = MOCK_CURATED_ASSET_SLUGS.has(slug);
-    const fallbackSpritesheet = mockSpritesheetDataUri(idea.name, slug);
+    const spriteVersionNumber = MOCK_V2_SAMPLE_SLUGS.has(slug) ? 2 : 1;
+    const fallbackSpritesheet = mockSpritesheetDataUri(
+      idea.name,
+      slug,
+      spriteVersionNumber,
+    );
     const spritesheetUrl = isCurated
       ? `${assetBase}/spritesheet.webp`
       : fallbackSpritesheet;
@@ -258,13 +266,13 @@ async function seed(client: PGlite): Promise<void> {
     await client.query(
       `INSERT INTO submitted_pets (
         id, slug, display_name, description, spritesheet_url,
-        pet_json_url, zip_url, kind, vibes, tags,
+        pet_json_url, zip_url, sprite_version_number, kind, vibes, tags,
         status, source, owner_id, owner_email, credit_name,
         approved_at
       ) VALUES (
         $1, $2, $3, $4, $5,
-        $6, $7, 'creature', '[]'::jsonb, $8::jsonb,
-        'approved', 'submit', $9, $10, $11,
+        $6, $7, $8, 'creature', '[]'::jsonb, $9::jsonb,
+        'approved', 'submit', $10, $11, $12,
         now()
       )
       ON CONFLICT (slug) DO NOTHING`,
@@ -276,6 +284,7 @@ async function seed(client: PGlite): Promise<void> {
         spritesheetUrl,
         petJsonUrl,
         zipUrl,
+        spriteVersionNumber,
         JSON.stringify(idea.tags ?? []),
         MOCK_USER.userId,
         MOCK_USER.email,
@@ -298,8 +307,14 @@ async function seed(client: PGlite): Promise<void> {
   );
 }
 
-function mockSpritesheetDataUri(name: string, slug: string): string {
+function mockSpritesheetDataUri(
+  name: string,
+  slug: string,
+  spriteVersionNumber: 1 | 2,
+): string {
   const accent = colorFromSlug(slug);
+  const rows = spriteVersionNumber === 2 ? 11 : 9;
+  const height = rows * 208;
   const initials = name
     .split(/\s+/)
     .map((part) => part[0])
@@ -308,7 +323,7 @@ function mockSpritesheetDataUri(name: string, slug: string): string {
     .toUpperCase();
   const safeName = escapeSvgText(name);
   const safeInitials = escapeSvgText(initials);
-  const frames = Array.from({ length: 9 }, (_, row) =>
+  const frames = Array.from({ length: rows }, (_, row) =>
     Array.from({ length: 8 }, (_, col) => {
       const x = col * 192;
       const y = row * 208;
@@ -326,7 +341,7 @@ function mockSpritesheetDataUri(name: string, slug: string): string {
       </g>`;
     }).join(""),
   ).join("");
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1536" height="1872" viewBox="0 0 1536 1872">${frames}</svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1536" height="${height}" viewBox="0 0 1536 ${height}">${frames}</svg>`;
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)
     .replaceAll("'", "%27")
     .replaceAll("(", "%28")

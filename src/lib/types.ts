@@ -25,6 +25,7 @@ export type PetCredit = {
 };
 
 export type PetSource = "submit" | "discover" | "claimed";
+export type SpriteVersionNumber = 1 | 2;
 
 export type PetdexPet = {
   id: string;
@@ -35,6 +36,7 @@ export type PetdexPet = {
   petJsonPath: string;
   /** R2 URL to the pet's zip pack (always set after the curated backfill). */
   zipUrl?: string;
+  spriteVersionNumber: SpriteVersionNumber;
   soundUrl: string | null;
   approvalState: ApprovalState;
   featured?: boolean;
