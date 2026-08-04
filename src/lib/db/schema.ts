@@ -76,10 +76,10 @@ export const submittedPets = pgTable(
     approvedAt: timestamp("approved_at", { withTimezone: true }),
     rejectedAt: timestamp("rejected_at", { withTimezone: true }),
     rejectionReason: text("rejection_reason"),
-    // Owner-submitted text edits awaiting admin re-approval. Sprites/zip
-    // are not editable here — those changes require a fresh /submit so
-    // the dedup + virus-scan + dhash pipeline runs again. When all three
-    // pendingX fields are null the pet has no edit in flight.
+    // Owner-submitted text and asset edits awaiting admin re-approval. Asset
+    // swaps are uploaded under a strict pending key and must run the full
+    // validation, dedup, virus-scan, and dHash pipeline before going live.
+    // When pendingSubmittedAt is null the pet has no edit in flight.
     pendingDisplayName: text("pending_display_name"),
     pendingDescription: text("pending_description"),
     pendingTags: jsonb("pending_tags").$type<string[] | null>(),
@@ -143,6 +143,21 @@ export const submittedPets = pgTable(
       table.vibes,
     ),
     tagsGinIdx: index("submitted_pets_tags_gin_idx").using("gin", table.tags),
+  }),
+);
+
+// GC claims make pending R2 cleanup irreversible from an owner edit's point
+// of view. A claimed key is never accepted as a new pending asset reference.
+export const pendingAssetGcClaims = pgTable(
+  "pending_asset_gc_claims",
+  {
+    key: text("key").primaryKey(),
+    claimedAt: timestamp("claimed_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    claimedAtIdx: index("pending_asset_gc_claimed_at_idx").on(table.claimedAt),
   }),
 );
 

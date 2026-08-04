@@ -6,8 +6,9 @@
 
 import { NextResponse } from "next/server";
 
+import { isAdmin } from "@/lib/admin";
 import { verifyCliBearer } from "@/lib/cli-auth";
-import { cliVerifyRatelimit } from "@/lib/ratelimit";
+import { cliVerifyRatelimit, submitRatelimit } from "@/lib/ratelimit";
 import {
   persistSubmission,
   type SubmissionInput,
@@ -31,6 +32,20 @@ export async function POST(req: Request): Promise<Response> {
   const principal = await verifyCliBearer(req.headers.get("authorization"));
   if (!principal) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+
+  if (!isAdmin(principal.userId)) {
+    const submitLim = await submitRatelimit.limit(principal.userId);
+    if (!submitLim.success) {
+      return NextResponse.json(
+        {
+          error: "rate_limited",
+          message: "Limit reached: 10 submissions / 24h.",
+          retryAfter: submitLim.reset,
+        },
+        { status: 429 },
+      );
+    }
   }
 
   let body: SubmissionInput;

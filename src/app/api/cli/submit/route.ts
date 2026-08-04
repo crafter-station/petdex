@@ -9,13 +9,14 @@ import { NextResponse } from "next/server";
 import { isAdmin } from "@/lib/admin";
 import { verifyCliBearer } from "@/lib/cli-auth";
 import { presignPut } from "@/lib/r2";
-import { cliVerifyRatelimit, submitRatelimit } from "@/lib/ratelimit";
+import { cliPresignRatelimit, cliVerifyRatelimit } from "@/lib/ratelimit";
 import { deriveSlug } from "@/lib/slug";
+import { buildSubmissionAssetKey } from "@/lib/submission-asset-key";
 import { PET_ASSET_MAX_BYTES } from "@/lib/upload-limits";
 
 export const runtime = "nodejs";
 
-const MAX_KEY_LEN = 80;
+const MAX_SLUG_LEN = 80;
 const MAX_BYTES = PET_ASSET_MAX_BYTES;
 
 type Body = {
@@ -43,15 +44,14 @@ export async function POST(req: Request): Promise<Response> {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  // Same rate limit bucket as web — bulk CLI uploads count against the user.
   if (!isAdmin(principal.userId)) {
-    const lim = await submitRatelimit.limit(principal.userId);
-    if (!lim.success) {
+    const presignLim = await cliPresignRatelimit.limit(principal.userId);
+    if (!presignLim.success) {
       return NextResponse.json(
         {
           error: "rate_limited",
-          message: "Limit reached: 10 submissions / 24h.",
-          retryAfter: lim.reset,
+          message: "Limit reached: 20 CLI presign requests / 1h.",
+          retryAfter: presignLim.reset,
         },
         { status: 429 },
       );
@@ -82,10 +82,7 @@ export async function POST(req: Request): Promise<Response> {
 
   const presigned = await Promise.all(
     files.map(async (f) => {
-      const key = `pets/${slugHint}-${uploadId}/${f.role}.${f.ext}`.slice(
-        0,
-        MAX_KEY_LEN + 32,
-      );
+      const key = buildSubmissionAssetKey(slugHint, uploadId, f.role, f.ext);
       const result = await presignPut(key, f.ct);
       return { role: f.role, ...result };
     }),
@@ -100,5 +97,5 @@ function sanitizeSlug(value: string): string {
     .trim()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
-    .slice(0, MAX_KEY_LEN);
+    .slice(0, MAX_SLUG_LEN);
 }

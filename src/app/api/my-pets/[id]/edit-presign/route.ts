@@ -8,8 +8,12 @@ import { auth } from "@clerk/nextjs/server";
 import { and, eq } from "drizzle-orm";
 
 import { db, schema } from "@/lib/db/client";
+import {
+  buildPendingAssetKey,
+  type PendingAssetRole,
+} from "@/lib/pending-asset";
 import { presignPut } from "@/lib/r2";
-import { editRatelimit } from "@/lib/ratelimit";
+import { editPresignRatelimit } from "@/lib/ratelimit";
 import { requireSameOrigin } from "@/lib/same-origin";
 
 export const runtime = "nodejs";
@@ -54,12 +58,12 @@ export async function POST(
     );
   }
 
-  const lim = await editRatelimit.limit(`${userId}:${row.id}`);
+  const lim = await editPresignRatelimit.limit(`${userId}:${row.id}`);
   if (!lim.success) {
     return NextResponse.json(
       {
         error: "rate_limited",
-        message: "Limit reached: 5 edits per pet / 24h.",
+        message: "Limit reached: 20 asset presign requests per hour.",
         retryAfter: lim.reset,
       },
       { status: 429 },
@@ -93,11 +97,23 @@ export async function POST(
     return NextResponse.json({ error: "no_assets_requested" }, { status: 400 });
   }
 
+  const keyedSlots = slots.map((slot) => ({
+    slot,
+    key: buildPendingAssetKey(
+      row.slug,
+      uploadId,
+      slot.role as PendingAssetRole,
+      slot.ext,
+    ),
+  }));
+  if (keyedSlots.some(({ key }) => key === null)) {
+    return NextResponse.json({ error: "invalid_pet_slug" }, { status: 500 });
+  }
+
   const presigned = await Promise.all(
-    slots.map(async (s) => {
-      const key = `pets/${row.slug}-pending-${uploadId}/${s.role}.${s.ext}`;
-      const result = await presignPut(key, s.ct);
-      return { role: s.role, ...result };
+    keyedSlots.map(async ({ slot, key }) => {
+      const result = await presignPut(key as string, slot.ct);
+      return { role: slot.role, ...result };
     }),
   );
 

@@ -1,5 +1,6 @@
 import {
   DeleteObjectsCommand,
+  type DeleteObjectsCommandOutput,
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
@@ -76,18 +77,71 @@ export function keyFromR2Url(url: string | null | undefined): string | null {
   return keyFromR2PublicUrl(url);
 }
 
-// Bulk-delete R2 objects. Silently ignores missing keys; throws only on
-// transport-level errors so callers can decide whether the takedown
-// should still succeed if the bucket is briefly unreachable.
-export async function deleteR2Objects(keys: string[]): Promise<void> {
+export type R2DeleteFailure = {
+  key: string;
+  code: string;
+  message: string;
+};
+
+export type R2DeleteBatchResult = {
+  deletedKeys: string[];
+  failures: R2DeleteFailure[];
+};
+
+// Convert a non-quiet S3 response into an explicit outcome. Missing keys are
+// unconfirmed so callers do not log a deletion that R2 did not acknowledge.
+export function summarizeR2DeleteBatch(
+  keys: readonly string[],
+  result: DeleteObjectsCommandOutput | null,
+): R2DeleteBatchResult {
+  const requested = Array.from(new Set(keys.filter((key) => key.length > 0)));
+  const errorsByKey = new Map<string, { code?: string; message?: string }>();
+  for (const error of result?.Errors ?? []) {
+    if (typeof error.Key === "string" && error.Key.length > 0) {
+      errorsByKey.set(error.Key, {
+        code: error.Code,
+        message: error.Message,
+      });
+    }
+  }
+
+  const deleted = new Set<string>();
+  for (const entry of result?.Deleted ?? []) {
+    if (typeof entry.Key === "string") deleted.add(entry.Key);
+  }
+
+  const failures = requested
+    .filter((key) => !deleted.has(key) || errorsByKey.has(key))
+    .map((key) => {
+      const error = errorsByKey.get(key);
+      return {
+        key,
+        code: error?.code ?? "not_confirmed",
+        message: error?.message ?? "R2 did not confirm deletion",
+      };
+    });
+
+  return {
+    deletedKeys: requested.filter(
+      (key) => deleted.has(key) && !errorsByKey.has(key),
+    ),
+    failures,
+  };
+}
+
+// Bulk-delete R2 objects. R2 responds with both confirmed deletions and
+// per-key errors; transport-level errors are still thrown to the caller.
+export async function deleteR2Objects(
+  keys: string[],
+): Promise<DeleteObjectsCommandOutput | null> {
   const unique = Array.from(new Set(keys.filter((k) => k && k.length > 0)));
-  if (unique.length === 0) return;
-  await r2.send(
+  if (unique.length === 0) return null;
+  return r2.send(
     new DeleteObjectsCommand({
       Bucket: BUCKET,
       Delete: {
         Objects: unique.map((Key) => ({ Key })),
-        Quiet: true,
+        Quiet: false,
       },
     }),
   );

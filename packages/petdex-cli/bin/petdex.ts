@@ -10,6 +10,12 @@ import pkg from "../package.json";
 import { isTrustedAssetUrl } from "../src/asset-hosts.js";
 import { ClerkCliAuth } from "../src/cli-auth/index.js";
 import {
+  parseImageDims,
+  readEditMetadataAsset,
+  readEditSpriteAsset,
+  readEditZipAsset,
+} from "../src/edit-assets.js";
+import {
   emit,
   getStatus,
   maybeShowFirstRunNotice,
@@ -765,6 +771,20 @@ async function cmdEdit(args: string[]): Promise<void> {
 
   if (spritePath || metaPath || zipPath) {
     s.start("Uploading assets");
+    let spriteAsset: Awaited<ReturnType<typeof readEditSpriteAsset>> | null =
+      null;
+    let metaBuffer: Buffer | null = null;
+    let zipBuffer: Buffer | null = null;
+    try {
+      spriteAsset = spritePath ? await readEditSpriteAsset(spritePath) : null;
+      metaBuffer = metaPath ? await readEditMetadataAsset(metaPath) : null;
+      zipBuffer = zipPath ? await readEditZipAsset(zipPath) : null;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      s.stop(pc.red("asset validation failed"));
+      p.cancel(message);
+      process.exit(1);
+    }
     const presignRes = await fetch(`${PETDEX_URL}/api/cli/edit-presign`, {
       method: "POST",
       headers: {
@@ -773,65 +793,61 @@ async function cmdEdit(args: string[]): Promise<void> {
       },
       body: JSON.stringify({
         petId,
-        hasSprite: Boolean(spritePath),
-        hasMeta: Boolean(metaPath),
-        hasZip: Boolean(zipPath),
+        hasSprite: Boolean(spriteAsset),
+        hasMeta: Boolean(metaBuffer),
+        hasZip: Boolean(zipBuffer),
+        spritesheetExt: spriteAsset?.format,
       }),
     });
-    if (presignRes.ok) {
-      const presigned = (await presignRes.json()) as {
-        files?: Array<{
-          role: "sprite" | "petjson" | "zip";
-          uploadUrl: string;
-          publicUrl: string;
-        }>;
-      };
-      const slot = (role: "sprite" | "petjson" | "zip") =>
-        presigned.files?.find((f) => f.role === role) ?? null;
-
-      if (spritePath) {
-        const buf = await import("node:fs/promises").then((m) =>
-          m.readFile(spritePath),
-        );
-        const ext = spritePath.endsWith(".png") ? "image/png" : "image/webp";
-        const ss = slot("sprite");
-        if (ss) {
-          await putR2(ss.uploadUrl, buf, ext);
-          const { width, height } = parseImageDims(buf);
-          body.spritesheetUrl = ss.publicUrl;
-          if (width) body.spritesheetWidth = width;
-          if (height) body.spritesheetHeight = height;
-        }
-      }
-      if (metaPath) {
-        const buf = await import("node:fs/promises").then((m) =>
-          m.readFile(metaPath),
-        );
-        const petJsonObj = JSON.parse(buf.toString("utf8")) as Record<
-          string,
-          unknown
-        >;
-        const ms = slot("petjson");
-        if (ms) {
-          await putR2(ms.uploadUrl, buf, "application/json");
-          body.petJsonUrl = ms.publicUrl;
-          body.spriteVersionNumber = parseSpriteVersionNumber(petJsonObj);
-        }
-      }
-      if (zipPath) {
-        const buf = await import("node:fs/promises").then((m) =>
-          m.readFile(zipPath),
-        );
-        const zs = slot("zip");
-        if (zs) {
-          await putR2(zs.uploadUrl, buf, "application/zip");
-          body.zipUrl = zs.publicUrl;
-        }
-      }
-      s.stop("Assets uploaded");
-    } else {
-      s.stop(pc.yellow("presign endpoint unavailable, skipping asset upload"));
+    if (!presignRes.ok) {
+      const text = await presignRes.text().catch(() => "");
+      s.stop(pc.red(`asset presign failed: ${presignRes.status}`));
+      p.cancel(text.slice(0, 120));
+      process.exit(1);
     }
+
+    const presigned = (await presignRes.json()) as {
+      files?: Array<{
+        role: "sprite" | "petjson" | "zip";
+        uploadUrl: string;
+        publicUrl: string;
+      }>;
+    };
+    if (!Array.isArray(presigned.files)) {
+      s.stop(pc.red("asset presign returned no files"));
+      process.exit(1);
+    }
+    const slot = (role: "sprite" | "petjson" | "zip") => {
+      const file = presigned.files?.find((f) => f.role === role);
+      if (!file) {
+        s.stop(pc.red(`asset presign missing ${role}`));
+        process.exit(1);
+      }
+      return file;
+    };
+
+    if (spriteAsset) {
+      const ss = slot("sprite");
+      await putR2(ss.uploadUrl, spriteAsset.buffer, spriteAsset.contentType);
+      const { width, height } = spriteAsset;
+      body.spritesheetUrl = ss.publicUrl;
+      body.spritesheetWidth = width;
+      body.spritesheetHeight = height;
+    }
+    if (metaPath && metaBuffer) {
+      const ms = slot("petjson");
+      await putR2(ms.uploadUrl, metaBuffer, "application/json");
+      body.petJsonUrl = ms.publicUrl;
+      body.spriteVersionNumber = parseSpriteVersionNumber(
+        JSON.parse(metaBuffer.toString("utf8")) as Record<string, unknown>,
+      );
+    }
+    if (zipPath && zipBuffer) {
+      const zs = slot("zip");
+      await putR2(zs.uploadUrl, zipBuffer, "application/zip");
+      body.zipUrl = zs.publicUrl;
+    }
+    s.stop("Assets uploaded");
   }
 
   s.start("Submitting edit");
@@ -1286,53 +1302,6 @@ function deriveSlug(petId: string): string {
     hash = Math.imul(hash, 0x01000193) >>> 0;
   }
   return `pet-${hash.toString(36).padStart(7, "0")}`;
-}
-
-function parseImageDims(buf: Buffer): { width: number; height: number } {
-  // PNG
-  if (
-    buf.length > 24 &&
-    buf[0] === 0x89 &&
-    buf[1] === 0x50 &&
-    buf[2] === 0x4e &&
-    buf[3] === 0x47
-  ) {
-    return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
-  }
-  // WebP
-  if (
-    buf.length > 30 &&
-    buf.slice(0, 4).toString() === "RIFF" &&
-    buf.slice(8, 12).toString() === "WEBP"
-  ) {
-    const fourcc = buf.slice(12, 16).toString();
-    if (fourcc === "VP8X") {
-      return {
-        width: ((buf[24] | (buf[25] << 8) | (buf[26] << 16)) >>> 0) + 1,
-        height: ((buf[27] | (buf[28] << 8) | (buf[29] << 16)) >>> 0) + 1,
-      };
-    }
-    if (fourcc === "VP8L") {
-      const b1 = buf[22];
-      const b2 = buf[23];
-      const b3 = buf[24];
-      return {
-        width: ((buf[21] | ((b1 & 0x3f) << 8)) >>> 0) + 1,
-        height: (((b1 >> 6) | (b2 << 2) | ((b3 & 0x0f) << 10)) >>> 0) + 1,
-      };
-    }
-    if (fourcc === "VP8 ") {
-      for (let i = 23; i < Math.min(60, buf.length - 7); i++) {
-        if (buf[i] === 0x9d && buf[i + 1] === 0x01 && buf[i + 2] === 0x2a) {
-          return {
-            width: (buf[i + 3] | (buf[i + 4] << 8)) & 0x3fff,
-            height: (buf[i + 5] | (buf[i + 6] << 8)) & 0x3fff,
-          };
-        }
-      }
-    }
-  }
-  return { width: 0, height: 0 };
 }
 
 // ─── telemetry ─────────────────────────────────────────────────────────────

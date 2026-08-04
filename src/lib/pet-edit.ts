@@ -2,7 +2,7 @@ import "server-only";
 
 import { NextResponse } from "next/server";
 
-import { and, eq, gte, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 import {
   AGGREGATE_KEYS,
@@ -17,9 +17,18 @@ import {
   containsBlockedKeyword,
 } from "@/lib/keyword-blocklist";
 import { createNotification } from "@/lib/notifications";
+import { isPendingAssetUrl, type PendingAssetRole } from "@/lib/pending-asset";
+import {
+  PENDING_ASSET_GC_LOCK_KEY,
+  pendingAssetKeysFromUrls,
+} from "@/lib/pending-asset-gc";
+import {
+  buildPendingEditPatch,
+  type PendingEditPatch,
+  pendingEditIsNoOp,
+} from "@/lib/pet-edit-state";
 import { editRatelimit } from "@/lib/ratelimit";
 import { refreshSimilarityFor } from "@/lib/similarity";
-import { isAllowedAssetUrl } from "@/lib/url-allowlist";
 import { containsUrl, URL_BLOCKED_REASON } from "@/lib/url-blocklist";
 
 export type PatchBody = {
@@ -37,17 +46,10 @@ const TAG_RE = /^[a-z0-9][a-z0-9-]{0,30}$/;
 const MAX_TAGS = 8;
 const DESC_MAX = 280;
 
-type PendingPatch = {
-  pendingDisplayName: string | null;
-  pendingDescription: string | null;
-  pendingTags: string[] | null;
-  pendingSubmittedAt: Date;
-  pendingRejectionReason: null;
-  pendingSpritesheetUrl: string | null;
-  pendingPetJsonUrl: string | null;
-  pendingZipUrl: string | null;
-  pendingSpritesheetWidth: number | null;
-  pendingSpritesheetHeight: number | null;
+type PendingPatch = PendingEditPatch;
+
+type EditFlags = {
+  assetTouched: boolean;
 };
 
 function normalizeTags(input: unknown): string[] | null {
@@ -72,21 +74,6 @@ function sameArray(a: string[], b: string[]): boolean {
   return sa.every((v, i) => v === sb[i]);
 }
 
-function emptyPendingPatch(): PendingPatch {
-  return {
-    pendingDisplayName: null,
-    pendingDescription: null,
-    pendingTags: null,
-    pendingSubmittedAt: new Date(),
-    pendingRejectionReason: null,
-    pendingSpritesheetUrl: null,
-    pendingPetJsonUrl: null,
-    pendingZipUrl: null,
-    pendingSpritesheetWidth: null,
-    pendingSpritesheetHeight: null,
-  };
-}
-
 function applyTextFields(
   row: SubmittedPet,
   body: PatchBody,
@@ -100,7 +87,7 @@ function applyTextFields(
         { status: 400 },
       );
     }
-    if (value !== row.displayName) patch.pendingDisplayName = value;
+    patch.pendingDisplayName = value === row.displayName ? null : value;
   }
 
   if (typeof body.description === "string") {
@@ -120,7 +107,7 @@ function applyTextFields(
         { status: 400 },
       );
     }
-    if (value !== row.description) patch.pendingDescription = value;
+    patch.pendingDescription = value === row.description ? null : value;
   }
 
   if (body.tags !== undefined) {
@@ -129,7 +116,7 @@ function applyTextFields(
       return NextResponse.json({ error: "invalid_tags" }, { status: 400 });
     }
     const currentTags = row.tags ?? [];
-    if (!sameArray(tags, currentTags)) patch.pendingTags = tags;
+    patch.pendingTags = sameArray(tags, currentTags) ? null : tags;
   }
 
   return null;
@@ -139,47 +126,91 @@ function applyAssetFields(
   row: SubmittedPet,
   body: PatchBody,
   patch: PendingPatch,
+  flags: EditFlags,
 ): Response | null {
-  if (typeof body.spritesheetUrl === "string") {
-    if (!isAllowedAssetUrl(body.spritesheetUrl)) {
+  const setAsset = (
+    role: PendingAssetRole,
+    value: string,
+    currentValue: string,
+    field: "spritesheetUrl" | "petJsonUrl" | "zipUrl",
+    pendingField:
+      | "pendingSpritesheetUrl"
+      | "pendingPetJsonUrl"
+      | "pendingZipUrl",
+  ): Response | null => {
+    const target = value === currentValue ? null : value;
+    if (target !== null && !isPendingAssetUrl(target, row.slug, role)) {
       return NextResponse.json(
-        { error: "invalid_asset_url", field: "spritesheetUrl" },
+        { error: "invalid_asset_url", field },
         { status: 400 },
       );
     }
-    if (body.spritesheetUrl !== row.spritesheetUrl) {
-      patch.pendingSpritesheetUrl = body.spritesheetUrl;
-      patch.pendingSpritesheetWidth =
-        typeof body.spritesheetWidth === "number"
-          ? body.spritesheetWidth
-          : null;
-      patch.pendingSpritesheetHeight =
-        typeof body.spritesheetHeight === "number"
-          ? body.spritesheetHeight
-          : null;
+
+    if (patch[pendingField] !== target) {
+      patch[pendingField] = target;
+      patch.pendingDhash = null;
+      patch.pendingReviewId = null;
+      flags.assetTouched = true;
+    }
+    return null;
+  };
+
+  if (typeof body.spritesheetUrl === "string") {
+    const previousUrl = patch.pendingSpritesheetUrl;
+    const previousWidth = patch.pendingSpritesheetWidth;
+    const previousHeight = patch.pendingSpritesheetHeight;
+    const error = setAsset(
+      "sprite",
+      body.spritesheetUrl,
+      row.spritesheetUrl,
+      "spritesheetUrl",
+      "pendingSpritesheetUrl",
+    );
+    if (error) return error;
+    if (patch.pendingSpritesheetUrl !== null) {
+      if (typeof body.spritesheetWidth === "number") {
+        patch.pendingSpritesheetWidth = body.spritesheetWidth;
+      } else if (previousUrl !== patch.pendingSpritesheetUrl) {
+        patch.pendingSpritesheetWidth = null;
+      }
+      if (typeof body.spritesheetHeight === "number") {
+        patch.pendingSpritesheetHeight = body.spritesheetHeight;
+      } else if (previousUrl !== patch.pendingSpritesheetUrl) {
+        patch.pendingSpritesheetHeight = null;
+      }
+    } else {
+      patch.pendingSpritesheetWidth = null;
+      patch.pendingSpritesheetHeight = null;
+    }
+    if (
+      patch.pendingSpritesheetWidth !== previousWidth ||
+      patch.pendingSpritesheetHeight !== previousHeight
+    ) {
+      patch.pendingDhash = null;
+      patch.pendingReviewId = null;
     }
   }
 
   if (typeof body.petJsonUrl === "string") {
-    if (!isAllowedAssetUrl(body.petJsonUrl)) {
-      return NextResponse.json(
-        { error: "invalid_asset_url", field: "petJsonUrl" },
-        { status: 400 },
-      );
-    }
-    if (body.petJsonUrl !== row.petJsonUrl) {
-      patch.pendingPetJsonUrl = body.petJsonUrl;
-    }
+    const error = setAsset(
+      "petjson",
+      body.petJsonUrl,
+      row.petJsonUrl,
+      "petJsonUrl",
+      "pendingPetJsonUrl",
+    );
+    if (error) return error;
   }
 
   if (typeof body.zipUrl === "string") {
-    if (!isAllowedAssetUrl(body.zipUrl)) {
-      return NextResponse.json(
-        { error: "invalid_asset_url", field: "zipUrl" },
-        { status: 400 },
-      );
-    }
-    if (body.zipUrl !== row.zipUrl) patch.pendingZipUrl = body.zipUrl;
+    const error = setAsset(
+      "zip",
+      body.zipUrl,
+      row.zipUrl,
+      "zipUrl",
+      "pendingZipUrl",
+    );
+    if (error) return error;
   }
 
   return null;
@@ -219,17 +250,6 @@ function validatePatchContent(patch: PendingPatch): Response | null {
   }
 
   return null;
-}
-
-function isNoOp(patch: PendingPatch): boolean {
-  return (
-    patch.pendingDisplayName === null &&
-    patch.pendingDescription === null &&
-    patch.pendingTags === null &&
-    patch.pendingSpritesheetUrl === null &&
-    patch.pendingPetJsonUrl === null &&
-    patch.pendingZipUrl === null
-  );
 }
 
 function hasAssetEdit(patch: PendingPatch): boolean {
@@ -288,20 +308,24 @@ async function tryAutoAccept(
   id: string,
   row: SubmittedPet,
   patch: PendingPatch,
+  flags: EditFlags,
 ): Promise<Response | null> {
-  if (hasAssetEdit(patch)) return null;
+  if (
+    row.pendingSubmittedAt !== null ||
+    flags.assetTouched ||
+    hasAssetEdit(patch)
+  ) {
+    return null;
+  }
 
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const recentRows = await db
-    .select({ editCount: sql<number>`count(*)` })
-    .from(schema.submittedPets)
-    .where(
-      and(
-        eq(schema.submittedPets.id, id),
-        gte(schema.submittedPets.lastEditAt, since),
-      ),
-    );
-  const editCountLast24h = Number(recentRows[0]?.editCount ?? 0);
+  // submitted_pets stores a cumulative edit counter, not an edit history.
+  // Treat the counter as the recent count while lastEditAt is inside the
+  // window; after the window expires the counter is no longer evidence of a
+  // recent edit. This is conservative and avoids the old count(*) query,
+  // which always returned one row for the pet itself.
+  const editCountLast24h =
+    row.lastEditAt && row.lastEditAt >= since ? (row.editCount ?? 0) : 0;
 
   const decision = await decideAutoAccept({
     currentDisplayName: row.displayName,
@@ -325,12 +349,37 @@ async function tryAutoAccept(
   return NextResponse.json({ status: "auto_approved" });
 }
 
+type QueuedEditRow = Pick<
+  SubmittedPet,
+  | "pendingDisplayName"
+  | "pendingDescription"
+  | "pendingTags"
+  | "pendingSubmittedAt"
+>;
+
 async function queueEdit(id: string, patch: PendingPatch): Promise<Response> {
-  const [updated] = await db
-    .update(schema.submittedPets)
-    .set(patch)
-    .where(eq(schema.submittedPets.id, id))
-    .returning();
+  const assetKeys = pendingAssetKeysFromUrls([
+    patch.pendingSpritesheetUrl,
+    patch.pendingPetJsonUrl,
+    patch.pendingZipUrl,
+  ]);
+  const hasAssetKeys = assetKeys.length > 0;
+  const updated = hasAssetKeys
+    ? await queueAssetEditWithClaimGuard(id, patch, assetKeys)
+    : await queueTextEdit(id, patch);
+
+  if (!updated) {
+    if (!hasAssetKeys) {
+      return NextResponse.json({ error: "not_found" }, { status: 404 });
+    }
+    return NextResponse.json(
+      {
+        error: "asset_no_longer_available",
+        message: "One of the pending assets is no longer available.",
+      },
+      { status: 409 },
+    );
+  }
 
   return NextResponse.json({
     status: "queued",
@@ -341,6 +390,69 @@ async function queueEdit(id: string, patch: PendingPatch): Promise<Response> {
       submittedAt: updated.pendingSubmittedAt,
     },
   });
+}
+
+async function queueTextEdit(
+  id: string,
+  patch: PendingPatch,
+): Promise<QueuedEditRow | null> {
+  const [updated] = await db
+    .update(schema.submittedPets)
+    .set(patch)
+    .where(eq(schema.submittedPets.id, id))
+    .returning({
+      pendingDisplayName: schema.submittedPets.pendingDisplayName,
+      pendingDescription: schema.submittedPets.pendingDescription,
+      pendingTags: schema.submittedPets.pendingTags,
+      pendingSubmittedAt: schema.submittedPets.pendingSubmittedAt,
+    });
+  return updated ?? null;
+}
+
+async function queueAssetEditWithClaimGuard(
+  id: string,
+  patch: PendingPatch,
+  assetKeys: string[],
+): Promise<QueuedEditRow | null> {
+  const keyList = sql.join(
+    assetKeys.map((key) => sql`${key}`),
+    sql`, `,
+  );
+  const pendingTags =
+    patch.pendingTags === null
+      ? sql`NULL::jsonb`
+      : sql`${JSON.stringify(patch.pendingTags)}::jsonb`;
+  const result = (await db.execute(sql`
+    WITH lock AS MATERIALIZED (
+      SELECT pg_advisory_xact_lock(${PENDING_ASSET_GC_LOCK_KEY}) AS acquired
+    )
+    UPDATE submitted_pets AS pet
+    SET pending_display_name = ${patch.pendingDisplayName},
+        pending_description = ${patch.pendingDescription},
+        pending_tags = ${pendingTags},
+        pending_submitted_at = ${patch.pendingSubmittedAt},
+        pending_rejection_reason = ${patch.pendingRejectionReason},
+        pending_spritesheet_url = ${patch.pendingSpritesheetUrl},
+        pending_pet_json_url = ${patch.pendingPetJsonUrl},
+        pending_zip_url = ${patch.pendingZipUrl},
+        pending_spritesheet_width = ${patch.pendingSpritesheetWidth},
+        pending_spritesheet_height = ${patch.pendingSpritesheetHeight},
+        pending_dhash = ${patch.pendingDhash},
+        pending_review_id = ${patch.pendingReviewId}
+    FROM lock
+    WHERE pet.id = ${id}
+      AND NOT EXISTS (
+        SELECT 1
+        FROM pending_asset_gc_claims AS claim
+        WHERE claim.key IN (${keyList})
+      )
+    RETURNING
+      pet.pending_display_name AS "pendingDisplayName",
+      pet.pending_description AS "pendingDescription",
+      pet.pending_tags AS "pendingTags",
+      pet.pending_submitted_at AS "pendingSubmittedAt"
+  `)) as unknown as { rows?: QueuedEditRow[] };
+  return result.rows?.[0] ?? null;
 }
 
 export async function applyPetEdit(input: {
@@ -373,17 +485,20 @@ export async function applyPetEdit(input: {
     );
   }
 
-  const patch = emptyPendingPatch();
+  const patch = buildPendingEditPatch(row);
+  const flags: EditFlags = { assetTouched: false };
   const textError = applyTextFields(row, body, patch);
   if (textError) return textError;
-  const assetError = applyAssetFields(row, body, patch);
+  const assetError = applyAssetFields(row, body, patch, flags);
   if (assetError) return assetError;
   const contentError = validatePatchContent(patch);
   if (contentError) return contentError;
-  if (isNoOp(patch)) {
+  if (pendingEditIsNoOp(row, patch)) {
     return NextResponse.json({ error: "nothing_changed" }, { status: 400 });
   }
 
-  const autoAccepted = await tryAutoAccept(id, row, patch);
+  patch.pendingSubmittedAt = new Date();
+  patch.pendingRejectionReason = null;
+  const autoAccepted = await tryAutoAccept(id, row, patch, flags);
   return autoAccepted ?? queueEdit(id, patch);
 }

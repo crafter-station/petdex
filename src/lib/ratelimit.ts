@@ -29,6 +29,16 @@ export const submitRatelimit = createRatelimit({
   analytics: true,
 });
 
+// CLI presign requests are separate from persisted submissions. Keeping a
+// dedicated bucket prevents abandoned uploads from consuming the submission
+// quota while still bounding R2 orphan creation.
+export const cliPresignRatelimit = createRatelimit({
+  redis,
+  limiter: Ratelimit.slidingWindow(20, "1 h"),
+  prefix: "petdex:cli-presign",
+  analytics: true,
+});
+
 // Withdrawals from /my-pets — generous so retries don't lock you out, but
 // stops a malicious automated loop.
 export const withdrawRatelimit = createRatelimit({
@@ -155,6 +165,15 @@ export const editRatelimit = createRatelimit({
   redis,
   limiter: Ratelimit.slidingWindow(5, "24 h"),
   prefix: "petdex:edit",
+});
+
+// Asset presigns can be retried without creating a submitted edit. Keep that
+// transport budget separate so an upload retry does not consume the actual
+// edit quota enforced by applyPetEdit.
+export const editPresignRatelimit = createRatelimit({
+  redis,
+  limiter: Ratelimit.slidingWindow(20, "1 h"),
+  prefix: "petdex:edit-presign",
 });
 
 // User profile identity edits (display name, handle, bio, locale).

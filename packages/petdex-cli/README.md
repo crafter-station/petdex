@@ -122,7 +122,8 @@ The full step-by-step (with tips on what makes a great pet) lives at <https://pe
 | --- | --- | --- |
 | `Not signed in` | No tokens or session expired | `petdex login` |
 | `presign 401` | Bearer rejected by Clerk userinfo | `petdex logout && petdex login` |
-| `presign 429` | 10/24h rate limit hit | Wait 24h or open a [submit-fallback issue](https://github.com/crafter-station/petdex/issues/new?labels=submit-fallback) |
+| `presign 429` | 20 CLI presign requests/hour exceeded | Wait for the retry window and retry the command |
+| `register 429` | 10 persisted submissions/24h exceeded | Wait 24h before submitting again |
 | `register 400 invalid_spritesheet` | Not an 8x9 or 8x11 grid | Re-export at 1536x1872 or 1536x2288 |
 | `register 400 missing_field` | Folder missing `pet.json` or `spritesheet.{webp,png}` | Inspect folder contents, re-export the pet if needed |
 | `R2 PUT 403` | Presigned URL expired (60s TTL) | Retry the failed submission. CLI auto-presigns fresh URLs |
