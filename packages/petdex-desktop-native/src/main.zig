@@ -146,6 +146,13 @@ pub const Model = struct {
     /// Leaving drops it to 0 with no delay: sticky is worse than eager.
     bubble_expansion_target: f32 = 0,
     bubble_anim_last_ms: i64 = 0,
+    /// Where the pet's center falls inside the bubble window, in the
+    /// stack container's local coordinates. The window is centered on
+    /// the pet until the screen edge clamps it; from then on the two
+    /// diverge, and the cards follow this rather than the window so the
+    /// stack stays anchored to the pet. Updated every frame from the real
+    /// window origin the platform reports.
+    bubble_pet_center_local: f32 = 0,
     /// Popover-style vertical flip: false puts the stack above the pet
     /// (the default), true below it, for when the pet sits too close to
     /// the top of the screen for the expanded height to fit. Flipped,
@@ -2270,16 +2277,42 @@ fn bubbleRenderedCardWidth(model: *const Model, slot: usize) f32 {
     return collapsed + (natural - collapsed) * bubbleExpansionEased(model);
 }
 
-/// Horizontal shift that centers a card inside the stack container.
+/// The vertical axis the cards center on, in stack-container local
+/// coordinates, for a given expansion.
+///
+/// NOT the container's center. The window is sized to the widest card
+/// the stack could ever show and then clamped on-screen, so near a
+/// screen edge the window slides inward. With a narrow front card and a
+/// wide hidden peek that left the only VISIBLE card floating far from
+/// the pet: the window had moved, and the card sat in its middle.
+///
+/// The axis therefore tracks the pet, clamped only by what has to fit:
+/// collapsed that is the front card (the only one drawn at full alpha),
+/// expanded it is the widest card in the fan. Against a screen edge the
+/// clamp pushes the fan inward while the stack stays as close to the pet
+/// as it can, which is the popover rule: the content shifts, the anchor
+/// keeps pointing at its target.
+fn bubbleStackAxis(model: *const Model, pet_center_local: f32, expansion: f32) f32 {
+    const stack_w = bubbleStackWidth(model);
+    // Widest card that must fit at this expansion: the front card alone
+    // while collapsed, the whole fan once open.
+    const front = bubbleCardWidth(model, model.bubbles_len - 1);
+    const needed = front + (stack_w - front) * expansion;
+    const half = needed / 2;
+    if (stack_w <= needed) return stack_w / 2;
+    return std.math.clamp(pet_center_local, half, stack_w - half);
+}
+
+/// Horizontal shift that puts a card on the stack axis.
 ///
 /// `stackChildFrame` places every overlay child at the container's
 /// origin with no cross-axis alignment, so cards of different widths
 /// would all pin to the left edge and fan out to the right. Centering
-/// each one keeps the stack on a single vertical axis, which is also
-/// what keeps the tail (drawn centered in the window) touching the
-/// front card instead of floating beside it.
+/// each one on the shared axis keeps the stack on a single vertical
+/// line, anchored near the pet.
 fn bubbleCardCenterDx(model: *const Model, slot: usize) f32 {
-    return (bubbleStackWidth(model) - bubbleRenderedCardWidth(model, slot)) / 2;
+    const axis = bubbleStackAxis(model, model.bubble_pet_center_local, bubbleExpansionEased(model));
+    return axis - bubbleRenderedCardWidth(model, slot) / 2;
 }
 
 fn bubbleWindowWidth(model: *const Model) f32 {
@@ -2342,7 +2375,12 @@ fn bubbleCardOffset(model: *const Model, slot: usize) f32 {
     const collapsed = bubble_peek_offset * @min(from_front, bubble_peek_max_depth);
     const expanded = (bubbleMaxCardHeight(model) + bubble_stack_gap) * from_front;
     const magnitude = collapsed + (expanded - collapsed) * bubbleExpansionEased(model);
-    return if (model.bubble_flipped) magnitude else -magnitude;
+    if (model.bubble_flipped) return magnitude;
+    // Unflipped, the container reserves the whole fan but the front card
+    // belongs at its BOTTOM edge (nearest the pet), so every card starts
+    // from there and the others stack upward from it.
+    const slack = bubbleStackHeightAt(model, 1) - bubbleMaxCardHeight(model);
+    return slack - magnitude;
 }
 
 /// Height the window needs at a given expansion. Collapsed only has to
@@ -2659,7 +2697,7 @@ var bubble_window_h: f32 = 0;
 /// read both origins and close the gap. Self-correcting, so drags,
 /// throws, scale changes, and text-size changes all need no
 /// special-casing.
-fn syncBubbleWindow(model: *const Model, fx: *Effects) void {
+fn syncBubbleWindow(model: *Model, fx: *Effects) void {
     if (!bubbleActive(model)) return;
     const bubble_w = bubbleWindowWidth(model);
     const bubble_h = bubbleWindowHeight(model);
@@ -2684,8 +2722,26 @@ fn syncBubbleWindow(model: *const Model, fx: *Effects) void {
         // never returns the frame itself), so a wide stack next to a
         // corner is kept on-screen by asking for the move and letting
         // the host trim it, rather than by math we cannot do here.
-        _ = fx.moveWindow("bubble", dx, dy, true);
+        if (fx.moveWindow("bubble", dx, dy, true)) |moved| {
+            recordPetCenterLocal(model, moved.x);
+            return;
+        }
     }
+    recordPetCenterLocal(model, cur.x);
+}
+
+/// Project the pet's center into the stack container's coordinates.
+///
+/// `window_x` is where the window ACTUALLY landed, which after an edge
+/// clamp is not where it was asked to go. Deriving the axis from the
+/// real origin is the whole point: it is the difference between the two
+/// that used to leave a narrow card stranded in the middle of a window
+/// that had slid away from the pet.
+fn recordPetCenterLocal(model: *Model, window_x: f64) void {
+    const pet_center = model.pet_x + (frame_w * model.scale) / 2.0;
+    // The container sits inside the canvas margin, so strip it to land
+    // in the same space bubbleCardCenterDx works in.
+    model.bubble_pet_center_local = @floatCast(pet_center - window_x - bubble_canvas_margin);
 }
 
 /// Where the top of the bubble window wants to sit for the current flip.
@@ -2976,7 +3032,15 @@ fn bubbleView(ui: *AppUi, model: *const Model) AppUi.Node {
         for (0..model.bubbles_len) |i| overlay[i] = bubbleCard(ui, model, i);
         cards[count] = ui.el(.stack, .{
             .width = bubbleStackWidth(model),
-            .height = bubbleMaxCardHeight(model),
+            // The container has to reserve the FULL fan, not one card.
+            // Cards are placed by transform, and `.stack` does not clip
+            // (widget_tree.widgetClipsContent covers scroll_view and an
+            // explicit clip_content only), so a one-card box let the
+            // expanded fan spill past its own bounds. Unflipped that
+            // overflow went upward into empty window band and looked
+            // fine; flipped it ran downward off the bottom edge and the
+            // wide card came out cut in half.
+            .height = bubbleStackHeightAt(model, 1),
         }, @as([]const AppUi.Node, overlay[0..model.bubbles_len]));
         count += 1;
     } else {
@@ -3527,12 +3591,14 @@ test "collapsed cards recede behind the front one" {
     // full size, fully opaque, and the one the tail points at.
     try std.testing.expectEqual(@as(f32, 1), bubbleCardScale(&model, 1));
     try std.testing.expectEqual(@as(f32, 1), bubbleCardAlpha(&model, 1));
-    try std.testing.expectEqual(@as(f32, 0), bubbleCardOffset(&model, 1));
+    // The container reserves the whole fan, and unflipped the front card
+    // sits at its bottom edge, nearest the pet.
+    try std.testing.expectEqual(bubbleStackHeightAt(&model, 1) - bubbleMaxCardHeight(&model), bubbleCardOffset(&model, 1));
 
     // The one behind is smaller, dimmer and pushed up by the peek offset.
     try std.testing.expect(bubbleCardScale(&model, 0) < 1);
     try std.testing.expect(bubbleCardAlpha(&model, 0) < 1);
-    try std.testing.expectEqual(-bubble_peek_offset, bubbleCardOffset(&model, 0));
+    try std.testing.expectEqual(bubble_peek_offset, bubbleCardOffset(&model, 1) - bubbleCardOffset(&model, 0));
 
     // Collapsed is much shorter than the fan it opens into.
     const collapsed = bubbleStackHeightAt(&model, 0);
@@ -3552,8 +3618,8 @@ test "expanded restores the slice 1 column" {
         try std.testing.expectEqual(@as(f32, 1), bubbleCardScale(&model, i));
         try std.testing.expectEqual(@as(f32, 1), bubbleCardAlpha(&model, i));
     }
-    try std.testing.expectEqual(@as(f32, 0), bubbleCardOffset(&model, 1));
-    try std.testing.expectEqual(-(bubbleMaxCardHeight(&model) + bubble_stack_gap), bubbleCardOffset(&model, 0));
+    try std.testing.expectEqual(bubbleStackHeightAt(&model, 1) - bubbleMaxCardHeight(&model), bubbleCardOffset(&model, 1));
+    try std.testing.expectEqual(bubbleMaxCardHeight(&model) + bubble_stack_gap, bubbleCardOffset(&model, 1) - bubbleCardOffset(&model, 0));
 }
 
 test "hover waits out the delay, and leaving collapses at once" {
@@ -3649,14 +3715,16 @@ test "collapsed peeks are clamped to the front card and centered" {
     try std.testing.expectEqual(front, bubbleRenderedCardWidth(&model, 0));
     try std.testing.expectEqual(front, bubbleRenderedCardWidth(&model, 1));
 
-    // Every card centers on the same vertical axis: stackChildFrame
-    // pins overlay children to the container's left edge, so without
-    // this the narrow card sat left and the wide ones fanned right.
-    const stack_w = bubbleStackWidth(&model);
+    // Every card centers on the SAME axis: stackChildFrame pins overlay
+    // children to the container's left edge, so without this the narrow
+    // card sat left and the wide ones fanned right. The axis itself
+    // tracks the pet rather than the container center, so this compares
+    // the cards against each other, not against a fixed midpoint.
+    const axis = bubbleCardCenterDx(&model, 0) + bubbleRenderedCardWidth(&model, 0) / 2;
     for (0..model.bubbles_len) |i| {
         const dx = bubbleCardCenterDx(&model, i);
         const w = bubbleRenderedCardWidth(&model, i);
-        try std.testing.expect(@abs((dx + w / 2) - stack_w / 2) < 0.01);
+        try std.testing.expect(@abs((dx + w / 2) - axis) < 0.01);
     }
 
     // Expanded, each card is back to its own natural width.
@@ -3720,10 +3788,10 @@ test "a flipped stack grows downward and is hit tested from the top" {
     testPushBubble(&model, "beta", "newer", true, -1);
 
     // Unflipped the cards behind sit ABOVE the front one.
-    try std.testing.expect(bubbleCardOffset(&model, 0) < 0);
+    try std.testing.expect(bubbleCardOffset(&model, 0) < bubbleCardOffset(&model, 1));
     model.bubble_flipped = true;
-    // Flipped they hang BELOW it, same magnitude.
-    try std.testing.expect(bubbleCardOffset(&model, 0) > 0);
+    // Flipped they hang BELOW it, and the front card leads at the top.
+    try std.testing.expect(bubbleCardOffset(&model, 0) > bubbleCardOffset(&model, 1));
     try std.testing.expectEqual(@as(f32, 0), bubbleCardOffset(&model, 1));
 
     const win_x: f64 = 100;
@@ -3736,6 +3804,87 @@ test "a flipped stack grows downward and is hit tested from the top" {
     // The empty band is at the BOTTOM of a flipped window, and must not
     // count as hover.
     try std.testing.expect(!bubbleHoverHit(&model, win_x, win_y, win_height, win_x + 20, win_y + win_height - 2));
+}
+
+test "the stack axis follows the pet when the window is clamped off-center" {
+    // Hunter's screen-edge case: narrow front card, wide hidden peek.
+    // The window is sized for the wide one and then clamped inward by
+    // the screen edge, so the window center is nowhere near the pet.
+    var model: Model = .{};
+    testPushBubble(&model, "alpha", "a much longer line of bubble text", false, -1);
+    testPushBubble(&model, "beta", "eve", true, -1);
+
+    const stack_w = bubbleStackWidth(&model);
+    const front = bubbleCardWidth(&model, 1);
+    try std.testing.expect(front < stack_w);
+
+    // Pet hard against the right edge of the window's content box: the
+    // collapsed axis must follow it, NOT sit at the container center,
+    // which is what left the only visible card stranded mid-window.
+    const axis_right = bubbleStackAxis(&model, stack_w, 0);
+    try std.testing.expect(axis_right > stack_w / 2);
+    // Clamped so the front card still fits inside the container.
+    try std.testing.expectEqual(stack_w - front / 2, axis_right);
+
+    // Same on the other side.
+    const axis_left = bubbleStackAxis(&model, 0, 0);
+    try std.testing.expect(axis_left < stack_w / 2);
+    try std.testing.expectEqual(front / 2, axis_left);
+
+    // A pet comfortably inside gets its exact center, no clamp.
+    try std.testing.expectEqual(stack_w / 2, bubbleStackAxis(&model, stack_w / 2, 0));
+
+    // Expanded the clamp has to fit the WIDEST card, so a pet at the
+    // edge pushes the fan inward: the axis lands at the container
+    // center because the widest card fills it.
+    try std.testing.expectEqual(stack_w / 2, bubbleStackAxis(&model, stack_w, 1));
+
+    // The axis therefore slides between the two during the animation
+    // rather than jumping when the fan opens.
+    const mid = bubbleStackAxis(&model, stack_w, 0.5);
+    try std.testing.expect(mid < axis_right and mid > stack_w / 2);
+}
+
+test "a flipped stack stays inside its container at both ends" {
+    // The second screenshot: flipped, mid-hover, the wide card cut off
+    // against the bottom. The container reserves one card height while
+    // the fan needs the full expanded extent, so cards placed by
+    // transform ran past its bounds and the window edge clipped them.
+    var model: Model = .{};
+    testPushBubble(&model, "alpha", "a much longer line of bubble text", false, -1);
+    testPushBubble(&model, "beta", "another wide line of bubble text", false, -1);
+    testPushBubble(&model, "gamma", "eve", true, -1);
+    model.bubble_flipped = true;
+
+    const container = bubbleStackHeightAt(&model, 1);
+    const card_h = bubbleMaxCardHeight(&model);
+
+    // Every card, at every point of the animation, must sit fully
+    // inside the container: top edge at or below 0, bottom edge at or
+    // above the container height.
+    for ([_]f32{ 0, 0.25, 0.5, 0.75, 1 }) |expansion| {
+        model.bubble_expansion = expansion;
+        for (0..model.bubbles_len) |i| {
+            const top = bubbleCardOffset(&model, i);
+            try std.testing.expect(top >= -0.01);
+            try std.testing.expect(top + card_h <= container + 0.01);
+        }
+        // Flipped, the FRONT card leads at the top, hard against the
+        // head gap, and the rest hang below it.
+        try std.testing.expectEqual(@as(f32, 0), bubbleCardOffset(&model, model.bubbles_len - 1));
+    }
+
+    // Unflipped the same containment holds, with the front card last.
+    model.bubble_flipped = false;
+    for ([_]f32{ 0, 0.5, 1 }) |expansion| {
+        model.bubble_expansion = expansion;
+        for (0..model.bubbles_len) |i| {
+            const top = bubbleCardOffset(&model, i);
+            try std.testing.expect(top >= -0.01);
+            try std.testing.expect(top + card_h <= container + 0.01);
+        }
+        try std.testing.expectEqual(container - card_h, bubbleCardOffset(&model, model.bubbles_len - 1));
+    }
 }
 
 test "an agent with no strip cell falls back to no tile" {
