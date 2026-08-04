@@ -2593,31 +2593,66 @@ fn bubbleExpansionEased(model: *const Model) f32 {
     return easeOutCubic(model.bubble_expansion);
 }
 
+/// Grace band around the visible cards, in points. Hitting a rounded
+/// corner exactly is not a skill anyone should have to demonstrate.
+const bubble_hover_slop: f32 = 4;
+
+/// A rectangle in bubble-window local coordinates.
+const BubbleRect = struct { x: f32, y: f32, w: f32, h: f32 };
+
+/// The union of the cards as they are ACTUALLY DRAWN, in window-local
+/// coordinates.
+///
+/// Derived from the same three functions the renderer transforms each
+/// card by — bubbleCardCenterDx for x, bubbleCardOffset for y,
+/// bubbleRenderedCardWidth for width — so the hit region cannot drift
+/// from the pixels. It used to be re-derived from the window edges and
+/// the layout constants, which is how it ended up offset from the cards:
+/// a band running up from the window bottom while the cards sit on an
+/// axis that tracks the pet and an offset that reserves the whole fan.
+/// The visible-but-dead margins around the card were the bug Hunter hit,
+/// where only the middle of the card (the text) reliably answered.
+fn bubbleCardsRect(model: *const Model) BubbleRect {
+    const origin = bubble_canvas_margin;
+    const front = model.bubbles_len - 1;
+    var min_x = bubbleCardCenterDx(model, front);
+    var max_x = min_x + bubbleRenderedCardWidth(model, front);
+    var min_y = bubbleCardOffset(model, front);
+    var max_y = min_y + bubbleMaxCardHeight(model);
+    // The peeks behind the front card stick out; they are visible and so
+    // they are hoverable.
+    if (bubbleStackable(model)) {
+        for (0..model.bubbles_len) |slot| {
+            const x0 = bubbleCardCenterDx(model, slot);
+            const y0 = bubbleCardOffset(model, slot);
+            min_x = @min(min_x, x0);
+            max_x = @max(max_x, x0 + bubbleRenderedCardWidth(model, slot));
+            min_y = @min(min_y, y0);
+            max_y = @max(max_y, y0 + bubbleMaxCardHeight(model));
+        }
+    }
+    return .{
+        .x = origin + min_x - bubble_hover_slop,
+        .y = origin + min_y - bubble_hover_slop,
+        .w = (max_x - min_x) + bubble_hover_slop * 2,
+        .h = (max_y - min_y) + bubble_hover_slop * 2,
+    };
+}
+
 /// Whether a screen-space cursor sample lands on the bubble stack.
 ///
 /// Tested against the CARDS, not the whole window: the window is sized
-/// to the expanded height even while collapsed (see bubbleWindowHeight),
-/// so its rect includes a tall transparent band that would otherwise
-/// expand the stack from far away from the visible cards.
-///
-/// The band is measured from whichever window edge faces the pet, so a
-/// flipped stack (cards hanging below) is tested downward from the top
-/// rather than upward from the bottom.
+/// to the expanded height even while collapsed (see bubbleWindowHeight)
+/// and to the widest card the stack could ever show, so its rect is
+/// mostly transparent space that must not answer to the cursor.
 fn bubbleHoverHit(model: *const Model, win_x: f64, win_y: f64, window_h: f64, cursor_x: f64, cursor_y: f64) bool {
     if (!bubbleActive(model)) return false;
-    const w: f64 = @floatCast(bubbleWindowWidth(model));
-    if (cursor_x < win_x or cursor_x > win_x + w) return false;
-    const drawn: f64 = @floatCast(bubbleStackHeightAt(model, bubbleExpansionEased(model)));
-    if (model.bubble_flipped) {
-        // Cards hang from the top edge, below the head gap. No tail is
-        // drawn in a flipped stack (it is always multi-bubble).
-        const top = win_y + @as(f64, @floatCast(bubble_canvas_margin + bubble_head_gap));
-        return cursor_y >= top and cursor_y <= top + drawn;
-    }
-    // Cards are bottom-anchored in the window, above the tail and the
-    // head gap, so the live band runs upward from there.
-    const bottom = win_y + window_h - @as(f64, @floatCast(bubble_canvas_margin + bubble_head_gap + @as(f32, @floatFromInt(tail_h))));
-    return cursor_y <= bottom and cursor_y >= bottom - drawn;
+    _ = window_h;
+    const r = bubbleCardsRect(model);
+    const x0 = win_x + @as(f64, @floatCast(r.x));
+    const y0 = win_y + @as(f64, @floatCast(r.y));
+    return cursor_x >= x0 and cursor_x <= x0 + @as(f64, @floatCast(r.w)) and
+        cursor_y >= y0 and cursor_y <= y0 + @as(f64, @floatCast(r.h));
 }
 
 /// The part of the stack update that needs no cursor: which side of the
@@ -3901,6 +3936,112 @@ test "the stack axis follows the pet when the window is clamped off-center" {
     // rather than jumping when the fan opens.
     const mid = bubbleStackAxis(&model, stack_w, 0.5);
     try std.testing.expect(mid < axis_right and mid > stack_w / 2);
+}
+
+test "the hover rect covers the whole visible card, not just its text" {
+    // Hunter hit this live: the fan only opened over the TEXT. The hit
+    // region was re-derived from the window edges and layout constants
+    // while the cards are placed by bubbleCardCenterDx/bubbleCardOffset,
+    // so the two drifted: a band running up from the window bottom, and
+    // cards sitting on an axis that tracks the pet. The overlap was the
+    // middle of the card, which is where the text is.
+    var model: Model = .{};
+    testPushBubble(&model, "alpha", "older", false, -1);
+    testPushBubble(&model, "beta", "newer", true, -1);
+    testPushBubble(&model, "eve", "ok, shipped", false, -1);
+    model.bubble_expansion = 0;
+    model.bubble_expansion_target = 0;
+    model.bubble_pet_center_local = 120;
+
+    for ([_]bool{ false, true }) |flipped| {
+        model.bubble_flipped = flipped;
+        const r = bubbleCardsRect(&model);
+
+        // Every card that is drawn must sit inside the hit rect: this is
+        // the property that was violated, and it is checked against the
+        // SAME functions the renderer transforms by.
+        for (0..model.bubbles_len) |slot| {
+            const cx = bubble_canvas_margin + bubbleCardCenterDx(&model, slot);
+            const cy = bubble_canvas_margin + bubbleCardOffset(&model, slot);
+            const cw = bubbleRenderedCardWidth(&model, slot);
+            const chh = bubbleMaxCardHeight(&model);
+            try std.testing.expect(r.x <= cx);
+            try std.testing.expect(r.y <= cy);
+            try std.testing.expect(r.x + r.w >= cx + cw);
+            try std.testing.expect(r.y + r.h >= cy + chh);
+        }
+
+        // And it must not balloon to the whole window: a rect that always
+        // said yes would pass the loop above while making the collapsed
+        // stack expand from anywhere in the transparent canvas. Collapsed,
+        // the widest thing drawn is the front card, so the rect is that
+        // plus slop — NOT the full stack width, which is reserved for the
+        // widest hidden card and is mostly transparent while collapsed.
+        try std.testing.expectApproxEqAbs(
+            bubbleRenderedCardWidth(&model, model.bubbles_len - 1) + bubble_hover_slop * 2,
+            r.w,
+            0.01,
+        );
+        try std.testing.expect(r.w < bubbleWindowWidth(&model));
+        try std.testing.expect(r.h < bubbleWindowHeight(&model));
+
+        // The corners of the front card answer, which is the actual
+        // complaint: not just the text in the middle.
+        const fx0 = bubble_canvas_margin + bubbleCardCenterDx(&model, model.bubbles_len - 1);
+        const fy0 = bubble_canvas_margin + bubbleCardOffset(&model, model.bubbles_len - 1);
+        const fw = bubbleRenderedCardWidth(&model, model.bubbles_len - 1);
+        const fh = bubbleMaxCardHeight(&model);
+        const wh: f64 = @floatCast(bubbleWindowHeight(&model));
+        for ([_][2]f32{
+            .{ fx0 + 1, fy0 + 1 },
+            .{ fx0 + fw - 1, fy0 + 1 },
+            .{ fx0 + 1, fy0 + fh - 1 },
+            .{ fx0 + fw - 1, fy0 + fh - 1 },
+        }) |pt| {
+            try std.testing.expect(bubbleHoverHit(&model, 0, 0, wh, pt[0], pt[1]));
+        }
+
+        // Well outside the cards still says no.
+        try std.testing.expect(!bubbleHoverHit(&model, 0, 0, wh, fx0 - 40, fy0 + fh / 2));
+        try std.testing.expect(!bubbleHoverHit(&model, 0, 0, wh, fx0 + fw + 40, fy0 + fh / 2));
+    }
+}
+
+test "the hover rect tracks the cards when a screen edge shifts the axis" {
+    // The clamp case: pet near a screen edge slides the stack axis off
+    // the window center. A hit rect centered on the window would only
+    // partly overlap the cards, which is hypothesis (a) for the same bug.
+    var model: Model = .{};
+    testPushBubble(&model, "alpha", "a much wider card than the front one", false, -1);
+    testPushBubble(&model, "eve", "ok", false, -1);
+    model.bubble_expansion = 0;
+    model.bubble_expansion_target = 0;
+
+    // Pet hard against the left edge, then hard against the right. The
+    // expected x is computed HERE from the clamp rule rather than by
+    // calling the same helper the implementation uses, so a rect that
+    // ignored the axis and centered on the window would not be able to
+    // agree with it.
+    const front = model.bubbles_len - 1;
+    const stack_w = bubbleStackWidth(&model);
+    const front_w = bubbleRenderedCardWidth(&model, front);
+    for ([_]f32{ 0, stack_w }) |center| {
+        model.bubble_pet_center_local = center;
+        const r = bubbleCardsRect(&model);
+        // Collapsed, only the front card has to fit, so the axis is the
+        // pet center clamped into [front_w/2, stack_w - front_w/2].
+        const axis = std.math.clamp(center, front_w / 2, stack_w - front_w / 2);
+        const want_x = bubble_canvas_margin + axis - front_w / 2 - bubble_hover_slop;
+        try std.testing.expectApproxEqAbs(want_x, r.x, 0.01);
+        try std.testing.expectApproxEqAbs(front_w + bubble_hover_slop * 2, r.w, 0.01);
+    }
+
+    // The two edges must actually land the rect in different places,
+    // otherwise the clamp was never exercised.
+    model.bubble_pet_center_local = 0;
+    const left = bubbleCardsRect(&model).x;
+    model.bubble_pet_center_local = stack_w;
+    try std.testing.expect(bubbleCardsRect(&model).x > left + 1);
 }
 
 test "a thrown pet keeps its flip and collapse current through the flight" {
