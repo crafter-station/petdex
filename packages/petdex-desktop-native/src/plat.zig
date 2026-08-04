@@ -23,6 +23,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+var write_sequence: std.atomic.Value(u64) = .init(0);
+
 /// One Io per calling thread. Cheap to build (no worker threads spin
 /// up until an async call asks for them) and never shared, so the
 /// blocking helpers below are safe from any thread.
@@ -122,16 +124,48 @@ pub fn writeFileMode(path: []const u8, bytes: []const u8, mode: u16) bool {
 }
 
 fn writeFileIo(io: std.Io, path: []const u8, bytes: []const u8, mode: ?u16) bool {
-    var file = std.Io.Dir.cwd().createFile(io, path, .{
-        .truncate = true,
-        .permissions = permissionsFromMode(mode),
-    }) catch return false;
-    defer file.close(io);
-    var write_buf: [4096]u8 = undefined;
-    var writer = file.writer(io, &write_buf);
-    writer.interface.writeAll(bytes) catch return false;
-    writer.interface.flush() catch return false;
-    return true;
+    var temp_path_buf: [768]u8 = undefined;
+    const sequence = write_sequence.fetchAdd(1, .monotonic);
+    const temp_path = std.fmt.bufPrint(
+        &temp_path_buf,
+        "{s}.tmp-{d}-{d}",
+        .{ path, std.Thread.getCurrentId(), sequence },
+    ) catch return false;
+
+    var write_ok = true;
+    {
+        var file = std.Io.Dir.cwd().createFile(io, temp_path, .{
+            .truncate = true,
+            .permissions = permissionsFromMode(mode),
+        }) catch return false;
+        defer file.close(io);
+        var write_buf: [4096]u8 = undefined;
+        var writer = file.writer(io, &write_buf);
+        writer.interface.writeAll(bytes) catch {
+            write_ok = false;
+        };
+        if (write_ok) {
+            writer.interface.flush() catch {
+                write_ok = false;
+            };
+        }
+    }
+    if (!write_ok) {
+        std.Io.Dir.cwd().deleteFile(io, temp_path) catch {};
+        return false;
+    }
+
+    const cwd = std.Io.Dir.cwd();
+    const renamed = if (std.fs.path.isAbsolute(path))
+        std.Io.Dir.renameAbsolute(temp_path, path, io)
+    else
+        cwd.rename(temp_path, cwd, path, io);
+    if (renamed) |_| {
+        return true;
+    } else |_| {
+        cwd.deleteFile(io, temp_path) catch {};
+        return false;
+    }
 }
 
 /// On Windows `Permissions` is a readonly-attribute enum with no mode

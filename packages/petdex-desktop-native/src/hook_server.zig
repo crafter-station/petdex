@@ -28,6 +28,8 @@ const Conn = struct {
 
 pub const max_pending = 50;
 const max_active_connections: u32 = 64;
+const max_request_bytes: usize = 8192;
+const connection_timeout_ms: i64 = 5_000;
 
 pub const StateEvent = struct {
     state: [16]u8 = @splat(0),
@@ -74,20 +76,33 @@ pub const Mailbox = struct {
     bubble_dirty: bool = false,
     state_counter: u64 = 0,
 
+    pub const EnqueueResult = struct {
+        queued: bool,
+        counter: u64,
+    };
+
     /// Coalesce + append, sidecar semantics: consecutive identical
     /// states collapse. Returns whether the event was queued.
     pub fn enqueue(self: *Mailbox, event: StateEvent) bool {
+        return self.enqueueWithCounter(event).queued;
+    }
+
+    pub fn enqueueWithCounter(self: *Mailbox, event: StateEvent) EnqueueResult {
         self.mutex.lock();
         defer self.mutex.unlock();
         if (self.pending_len > 0 or self.last_enqueued.state_len > 0) {
-            if (std.mem.eql(u8, self.last_enqueued.slice(), event.slice())) return false;
+            if (std.mem.eql(u8, self.last_enqueued.slice(), event.slice())) {
+                return .{ .queued = false, .counter = self.state_counter };
+            }
         }
-        if (self.pending_len >= max_pending) return false;
+        if (self.pending_len >= max_pending) {
+            return .{ .queued = false, .counter = self.state_counter };
+        }
         self.pending[self.pending_len] = event;
         self.pending_len += 1;
         self.last_enqueued = event;
         self.state_counter += 1;
-        return true;
+        return .{ .queued = true, .counter = self.state_counter };
     }
 
     pub fn pop(self: *Mailbox) ?StateEvent {
@@ -158,6 +173,9 @@ const Server = struct {
     runtime_dir: []const u8,
     token: [64]u8,
     request_lock: SpinMutex = .{},
+    mirror_lock: SpinMutex = .{},
+    last_state_mirror: u64 = 0,
+    last_bubble_mirror: u64 = 0,
     active_connections: std.atomic.Value(u32) = .init(0),
     // Token-bucket limiter, sidecar budget: 30/s shared by state+bubble.
     bucket: f64 = 30,
@@ -263,40 +281,44 @@ fn handleConnectionThread(server: *Server, stream: std.Io.net.Stream) void {
 }
 
 fn handleConnection(server: *Server, conn: *Conn) void {
-    var buf: [8192]u8 = undefined;
-    var read_buf: [8192]u8 = undefined;
-    var reader = conn.stream.reader(conn.io, &read_buf);
-    const r = &reader.interface;
-
-    // Headers line by line: a sized read would block waiting for bytes
-    // the client will not send until it sees a response (the old
-    // std.c.read returned whatever one syscall had, this does not).
+    var buf: [max_request_bytes]u8 = undefined;
     var total: usize = 0;
-    while (true) {
-        // Inclusive, not exclusive: the exclusive form leaves the '\n'
-        // in the stream, so the next line would start with it and read
-        // back as empty, ending the loop after the request line.
-        const line = r.takeDelimiterInclusive('\n') catch return;
-        const trimmed = std.mem.trimEnd(u8, line, "\r\n");
-        if (total + trimmed.len + 2 > buf.len) return;
-        @memcpy(buf[total..][0..trimmed.len], trimmed);
-        buf[total + trimmed.len] = '\r';
-        buf[total + trimmed.len + 1] = '\n';
-        total += trimmed.len + 2;
-        if (trimmed.len == 0) break;
-    }
-    if (total == 0) return;
-    const head = buf[0..total];
+    var header_end: ?usize = null;
+    const timeout = (std.Io.Timeout{ .duration = .{
+        .raw = std.Io.Duration.fromMilliseconds(connection_timeout_ms),
+        .clock = .awake,
+    } }).toDeadline(conn.io);
 
-    const content_length = headerValueInt(head, "content-length") orelse 0;
-    if (content_length > buf.len - total) {
+    // Read the complete header with a bounded deadline. A hook host can
+    // disappear after opening a socket, so no connection may wait forever.
+    while (header_end == null) {
+        if (total == buf.len) {
+            respond(conn, 413, "{\"ok\":false,\"error\":\"headers_too_large\"}");
+            return;
+        }
+        const got = receiveWithTimeout(conn, buf[total..], timeout) catch return;
+        if (got == 0) return;
+        total += got;
+        header_end = if (std.mem.indexOf(u8, buf[0..total], "\r\n\r\n")) |at| at + 4 else null;
+    }
+
+    const head_len = header_end.?;
+    const head = buf[0..head_len];
+    const content_length = if (headerValue(head, "content-length")) |raw| std.fmt.parseInt(usize, raw, 10) catch {
+        respond(conn, 400, "{\"ok\":false,\"error\":\"invalid_content_length\"}");
+        return;
+    } else 0;
+    if (content_length > buf.len - head_len) {
         respond(conn, 413, "{\"ok\":false,\"error\":\"body_too_large\"}");
         return;
     }
-    const body = if (content_length == 0) buf[total..total] else blk: {
-        const got = r.readSliceShort(buf[total..][0..content_length]) catch break :blk buf[total..total];
-        break :blk buf[total..][0..got];
-    };
+    const request_len = head_len + content_length;
+    while (total < request_len) {
+        const got = receiveWithTimeout(conn, buf[total..request_len], timeout) catch return;
+        if (got == 0) return;
+        total += got;
+    }
+    const body = buf[head_len..request_len];
 
     var line_it = std.mem.splitSequence(u8, head, "\r\n");
     const request_line = line_it.next() orelse return;
@@ -306,6 +328,11 @@ fn handleConnection(server: *Server, conn: *Conn) void {
     const path = if (std.mem.indexOfScalar(u8, target, '?')) |q| target[0..q] else target;
 
     route(server, conn, method, path, head, body);
+}
+
+fn receiveWithTimeout(conn: *Conn, buffer: []u8, timeout: std.Io.Timeout) !usize {
+    const message = try conn.stream.socket.receiveTimeout(conn.io, buffer, timeout);
+    return message.data.len;
 }
 
 fn route(server: *Server, conn: *Conn, method: []const u8, path: []const u8, head: []const u8, body: []const u8) void {
@@ -346,7 +373,12 @@ fn route(server: *Server, conn: *Conn, method: []const u8, path: []const u8, hea
             return respond(conn, 400, "{\"ok\":false,\"error\":\"invalid_state\"}");
         }
         var duration: u32 = 0;
-        if (jsonNumber(body, "duration")) |d| duration = @intFromFloat(@min(d, 30_000));
+        if (jsonNumber(body, "duration")) |d| {
+            if (!std.math.isFinite(d) or d < 0) {
+                return respond(conn, 400, "{\"ok\":false,\"error\":\"invalid_duration\"}");
+            }
+            duration = @intFromFloat(@min(d, 30_000));
+        }
 
         // Sidecar's sprite variation: bare "running" alternates
         // left/right per session so consecutive tool calls vary.
@@ -358,14 +390,14 @@ fn route(server: *Server, conn: *Conn, method: []const u8, path: []const u8, hea
         var event = StateEvent{ .duration_ms = duration };
         event.state_len = applied.len;
         @memcpy(event.state[0..applied.len], applied);
-        const queued = mailbox.enqueue(event);
-        mirrorState(server, applied, mailbox.state_counter) catch {};
+        const enqueue_result = mailbox.enqueueWithCounter(event);
+        mirrorState(server, applied, enqueue_result.counter) catch {};
 
         const dur_out: i64 = if (duration == 0) -1 else @intCast(duration);
         const out = if (dur_out < 0)
-            std.fmt.bufPrint(&scratch, "{{\"ok\":true,\"state\":\"{s}\",\"duration\":null,\"queued\":{}}}", .{ state_raw, queued }) catch return
+            std.fmt.bufPrint(&scratch, "{{\"ok\":true,\"state\":\"{s}\",\"duration\":null,\"queued\":{}}}", .{ state_raw, enqueue_result.queued }) catch return
         else
-            std.fmt.bufPrint(&scratch, "{{\"ok\":true,\"state\":\"{s}\",\"duration\":{d},\"queued\":{}}}", .{ state_raw, dur_out, queued }) catch return;
+            std.fmt.bufPrint(&scratch, "{{\"ok\":true,\"state\":\"{s}\",\"duration\":{d},\"queued\":{}}}", .{ state_raw, dur_out, enqueue_result.queued }) catch return;
         return respond(conn, 200, out);
     }
 
@@ -476,20 +508,56 @@ fn jsonString(body: []const u8, key: []const u8) ?[]const u8 {
     if (i >= body.len or body[i] != '"') return null;
     i += 1;
     const val_start = i;
+    var closed = false;
     while (i < body.len) {
         if (body[i] == '\\') {
-            i += @min(@as(usize, 2), body.len - i);
+            if (i + 1 >= body.len) return null;
+            switch (body[i + 1]) {
+                '"', '\\', '/', 'b', 'f', 'n', 'r', 't' => i += 2,
+                'u' => {
+                    if (i + 6 > body.len) return null;
+                    for (body[i + 2 .. i + 6]) |digit| {
+                        if (!std.ascii.isHex(digit)) return null;
+                    }
+                    i += 6;
+                },
+                else => return null,
+            }
             continue;
         }
-        if (body[i] == '"') break;
+        if (body[i] == '"') {
+            closed = true;
+            break;
+        }
+        if (body[i] < 0x20) return null;
         i += 1;
     }
+    if (!closed) return null;
     return body[val_start..i];
 }
 
 test "json string scanner preserves escaped multiline content" {
     const body = "{\"last_assistant_message\":\"first\\nsecond third\",\"phase\":\"stop\"}";
     try std.testing.expectEqualStrings("first\\nsecond third", jsonString(body, "last_assistant_message").?);
+}
+
+test "json string scanner rejects malformed mirror input" {
+    try std.testing.expect(jsonString("{\"text\":\"unterminated}", "text") == null);
+    try std.testing.expect(jsonString("{\"text\":\"bad\\x\"}", "text") == null);
+    try std.testing.expect(jsonString("{\"text\":\"bad\nline\"}", "text") == null);
+}
+
+test "mailbox returns the counter while holding its lock" {
+    var box: Mailbox = .{};
+    var event = StateEvent{};
+    event.state_len = 4;
+    @memcpy(event.state[0..4], "idle");
+    const first = box.enqueueWithCounter(event);
+    try std.testing.expect(first.queued);
+    try std.testing.expectEqual(@as(u64, 1), first.counter);
+    const duplicate = box.enqueueWithCounter(event);
+    try std.testing.expect(!duplicate.queued);
+    try std.testing.expectEqual(@as(u64, 1), duplicate.counter);
 }
 
 test "running state alternates without sharing mutable state with callers" {
@@ -528,13 +596,21 @@ fn writeRuntimeFile(server: *Server, name: []const u8, bytes: []const u8, mode: 
 }
 
 fn mirrorState(server: *Server, state: []const u8, counter: u64) !void {
+    server.mirror_lock.lock();
+    defer server.mirror_lock.unlock();
+    if (counter < server.last_state_mirror) return;
     var buf: [128]u8 = undefined;
     const json = try std.fmt.bufPrint(&buf, "{{\"state\":\"{s}\",\"counter\":{d}}}", .{ state, counter });
     try writeRuntimeFile(server, "state.json", json, 0o644);
+    server.last_state_mirror = counter;
 }
 
 fn mirrorBubble(server: *Server, text: []const u8, counter: u64, title: []const u8, agent: []const u8, busy: bool) !void {
+    server.mirror_lock.lock();
+    defer server.mirror_lock.unlock();
+    if (counter < server.last_bubble_mirror) return;
     var buf: [1024]u8 = undefined;
     const json = try std.fmt.bufPrint(&buf, "{{\"text\":\"{s}\",\"title\":\"{s}\",\"agent_source\":\"{s}\",\"busy\":{},\"counter\":{d},\"at\":{d}}}", .{ text, title, agent, busy, counter, nowMs() });
     try writeRuntimeFile(server, "bubble.json", json, 0o644);
+    server.last_bubble_mirror = counter;
 }

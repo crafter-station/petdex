@@ -235,6 +235,8 @@ function preflightTree(): void {
       "packages/petdex-desktop-native/src",
       "packages/petdex-desktop-native/app.zon",
       "packages/petdex-desktop-native/assets",
+      "scripts/release-desktop.ts",
+      "scripts/sign-macos.sh",
     ],
     { allowFail: true },
   );
