@@ -1,0 +1,14 @@
+diff --git a/build/app.zig b/build/app.zig
+--- a/build/app.zig
++++ b/build/app.zig
+@@ -560,5 +560,10 @@
+     const exe = b.addExecutable(.{
+         .name = app_options.name,
+         .root_module = app_mod,
+     });
++    // Reserve room for LC_CODE_SIGNATURE so ad-hoc or Developer ID signing
++    // cannot overwrite instructions near the Mach-O header.
++    if (target.result.os.tag == .macos) {
++        exe.headerpad_size = 0x4000;
++    }
+     // Windows subsystem posture: release-shaped exes (`native build`,

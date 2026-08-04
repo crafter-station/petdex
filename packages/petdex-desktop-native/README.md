@@ -25,3 +25,8 @@ native automate screenshot pet-canvas
 ```
 
 Requires the `@native-sdk/cli` global (`bun add -g @native-sdk/cli`).
+
+For the pinned desktop build, set `NATIVE_CLI` and `NATIVE_SDK_PATH` to the
+CLI and SDK checkout used by the matching release workflow. The build scripts
+apply the Petdex-owned macOS Mach-O headerpad patch before compiling; they
+fail if the SDK source no longer matches the pinned patch.

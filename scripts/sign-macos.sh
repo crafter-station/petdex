@@ -44,6 +44,8 @@ KEY="$APPLE_API_KEY"
 : "${NATIVE_CLI:?set NATIVE_CLI to the native CLI built from the pinned SDK}"
 : "${NATIVE_SDK_PATH:?set NATIVE_SDK_PATH to the pinned SDK checkout}"
 
+"$(dirname "${BASH_SOURCE[0]}")/patch-native-sdk.sh"
+
 mkdir -p "$OUT"
 # Only this arch's outputs: a second run for the other arch must not
 # delete what the first one produced.

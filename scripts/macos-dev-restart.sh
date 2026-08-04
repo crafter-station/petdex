@@ -8,11 +8,18 @@ DESKTOP_DIR="$ROOT/packages/petdex-desktop-native"
 EXECUTABLE="$DESKTOP_DIR/zig-out/bin/petdex-desktop-native"
 APP_PATH="${PETDEX_DEV_APP_PATH:-$HOME/Applications/Petdex Dev.app}"
 NATIVE_CLI="${NATIVE_CLI:-$(command -v native || true)}"
+NATIVE_SDK_PATH="${NATIVE_SDK_PATH:-}"
 
 if [[ -z "$NATIVE_CLI" || ! -x "$NATIVE_CLI" ]]; then
   echo "macos-dev-restart: native CLI not found. Set NATIVE_CLI=/path/to/native" >&2
   exit 1
 fi
+if [[ -z "$NATIVE_SDK_PATH" ]]; then
+  echo "macos-dev-restart: NATIVE_SDK_PATH is required for the pinned SDK" >&2
+  exit 1
+fi
+
+"$ROOT/scripts/patch-native-sdk.sh"
 
 echo "==> Build native desktop"
 (cd "$DESKTOP_DIR" && "$NATIVE_CLI" build -Dcpu=baseline)

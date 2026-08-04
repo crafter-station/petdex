@@ -114,6 +114,10 @@ jobs:
           git -C "$GITHUB_WORKSPACE/native-sdk" checkout --detach "$NATIVE_SDK_REF"
           echo "NATIVE_SDK_PATH=$GITHUB_WORKSPACE/native-sdk" >> "$GITHUB_ENV"
 
+      - name: Apply Petdex Native SDK patches
+        shell: bash
+        run: scripts/patch-native-sdk.sh
+
       - name: Install Zig 0.16.0
         uses: mlugg/setup-zig@v2
         with:
