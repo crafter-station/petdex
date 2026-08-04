@@ -86,6 +86,7 @@ pub const Msg = union(enum) {
     open_pet_page: u32,
     appearance: native_sdk.platform.Appearance,
     toggle_bubbles,
+    toggle_bubbles_per_conversation,
     toggle_waiting_sound,
     chime_done: native_sdk.EffectExit,
     set_bubble_text_size: f32,
@@ -192,6 +193,16 @@ pub const Model = struct {
     active_pet: u32 = 0,
     window_fitted: bool = false,
     bubbles_enabled: bool = true,
+    /// Whether each conversation gets its own bubble in a stack, or every
+    /// agent shares one card the way it worked before the stack existed.
+    ///
+    /// On by default, and default-true when the key is missing, so an
+    /// install that predates the setting rolls forward into the stack
+    /// rather than silently opting out of it. Off restores the classic
+    /// single bubble exactly: one card, newest update wins, with the
+    /// tail, which is the path `bubbleStackable` already takes for a
+    /// stack of one.
+    bubbles_per_conversation: bool = true,
     /// Opt-in chime on the transition into `waiting`. Off by default,
     /// unlike the toggles around it: sound is intrusive in a way
     /// passive UI never is, so it has to be an explicit opt-in.
@@ -870,7 +881,8 @@ fn saveSettings(model: *const Model) void {
     // Headroom check (a bufPrint overflow here fails silently and
     // drops the whole save): keep room for the configurable bubble
     // fields, rotation state, a long slug, and negative coordinates.
-    var buf: [1536]u8 = undefined;
+    // Grown with every key added; `font_path` alone can escape to 1024.
+    var buf: [1792]u8 = undefined;
     const active = if (model.active_pet < catalog_mod.catalog_len) catalog[model.active_pet].slice() else "";
     // The position keys only exist once the window has been fitted and
     // read: a save fired on the very first frame would otherwise
@@ -884,7 +896,7 @@ fn saveSettings(model: *const Model) void {
     var escaped_font_buf: [1024]u8 = undefined;
     const font_path = std.mem.trim(u8, model.font_path[0..model.font_path_len], " \t\r\n");
     const escaped_font = jsonEscapeString(font_path, &escaped_font_buf) orelse return;
-    const json = std.fmt.bufPrint(&buf, "{{\"active_pet\":\"{s}\",\"scale\":{d:.2},\"bubbles\":{},\"waiting_sound\":{},\"bubble_text\":{d:.1},\"bubble_lifetime\":{d:.0},\"bubble_columns\":{},\"bubble_answer_lines\":{},\"font_path\":\"{s}\",\"hide_dock\":{},\"rotate_pets\":{},\"rotation_day\":{d}{s},\"agents_prompted\":{}}}", .{ active, model.scale, model.bubbles_enabled, model.waiting_sound, model.bubble_text_px, model.bubble_lifetime_secs, model.bubble_columns, model.bubble_answer_lines, escaped_font, model.hide_dock, model.rotate_pets, model.rotation_day, pos, model.agents_prompted }) catch return;
+    const json = std.fmt.bufPrint(&buf, "{{\"active_pet\":\"{s}\",\"scale\":{d:.2},\"bubbles\":{},\"bubbles_per_conversation\":{},\"waiting_sound\":{},\"bubble_text\":{d:.1},\"bubble_lifetime\":{d:.0},\"bubble_columns\":{},\"bubble_answer_lines\":{},\"font_path\":\"{s}\",\"hide_dock\":{},\"rotate_pets\":{},\"rotation_day\":{d}{s},\"agents_prompted\":{}}}", .{ active, model.scale, model.bubbles_enabled, model.bubbles_per_conversation, model.waiting_sound, model.bubble_text_px, model.bubble_lifetime_secs, model.bubble_columns, model.bubble_answer_lines, escaped_font, model.hide_dock, model.rotate_pets, model.rotation_day, pos, model.agents_prompted }) catch return;
     cWriteFile(path, json);
 }
 
@@ -1024,6 +1036,7 @@ fn freeSheet(s: *Sheet) void {
 var initial_scale: f32 = 0.7;
 var initial_pet: u32 = 0;
 var initial_bubbles: bool = true;
+var initial_bubbles_per_conversation: bool = true;
 var initial_waiting_sound: bool = false;
 var initial_bubble_text_px: f32 = bubble_text_default_px;
 var initial_bubble_lifetime_secs: f32 = bubble_lifetime_default_secs;
@@ -1308,6 +1321,15 @@ fn resolveInitialPet(io: std.Io, allocator: std.mem.Allocator, environ_map: *std
             if (hook_server.jsonStringPub(json, "bubbles")) |_| {} else if (std.mem.indexOf(u8, json, "\"bubbles\":false") != null) {
                 initial_bubbles = false;
             }
+            // Default-true like `bubbles` above, and for the same reason:
+            // a settings file written before this key existed must roll
+            // forward into the stack, so only an explicit false opts out.
+            // Note this has to be checked BEFORE the substring above
+            // would match it: "bubbles_per_conversation":false does not
+            // contain "bubbles":false, so the two cannot collide.
+            if (std.mem.indexOf(u8, json, "\"bubbles_per_conversation\":false") != null) {
+                initial_bubbles_per_conversation = false;
+            }
             if (std.mem.indexOf(u8, json, "\"agents_prompted\":true") != null) {
                 initial_agents_prompted = true;
             }
@@ -1498,6 +1520,7 @@ pub fn boot(model: *Model, fx: *Effects) void {
     // Agents section.
     model.scale = initial_scale;
     model.bubbles_enabled = initial_bubbles;
+    model.bubbles_per_conversation = initial_bubbles_per_conversation;
     model.waiting_sound = initial_waiting_sound;
     model.bubble_text_px = initial_bubble_text_px;
     model.bubble_lifetime_secs = initial_bubble_lifetime_secs;
@@ -1773,6 +1796,22 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
         .toggle_bubbles => {
             model.bubbles_enabled = !model.bubbles_enabled;
             if (!model.bubbles_enabled) clearBubble(model);
+            saveSettings(model);
+        },
+        .toggle_bubbles_per_conversation => {
+            model.bubbles_per_conversation = !model.bubbles_per_conversation;
+            // Turning it off has to act on what is ALREADY on screen, not
+            // just on the next event: a visible stack would otherwise sit
+            // there fanned out until some agent happened to speak. Fold
+            // it now, close the fan, and resize the window to the single
+            // card the view will draw.
+            if (!model.bubbles_per_conversation and model.bubbles_len > 1) {
+                collapseModelToNewest(model);
+                // The stacked view draws no tail, so switching to the
+                // single card is the first moment this run may need one.
+                registerTail(model.dark, fx);
+                syncBubbleWindow(model, fx);
+            }
             saveSettings(model);
         },
         .toggle_waiting_sound => {
@@ -2060,10 +2099,18 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             if (model.settings_open and thumbs_built < catalog_mod.catalog_len) buildNextThumb(fx);
             const now = fx.wallMs();
             var drained: [hook_server.max_bubbles]hook_server.Bubble = undefined;
-            if (hook_server.mailbox.takeBubbles(&drained)) |count| {
+            if (hook_server.mailbox.takeBubbles(&drained)) |raw_count| {
                 if (!model.bubbles_enabled or model.focus_mode) {
                     clearBubble(model);
                 } else {
+                    // With per-conversation bubbles off, every session
+                    // folds into one slot before the model ever sees the
+                    // set, so the rest of the pipeline (deadlines, view,
+                    // hover) runs the single-bubble path unchanged.
+                    const count = if (model.bubbles_per_conversation)
+                        raw_count
+                    else
+                        collapseToNewest(&drained, raw_count);
                     // Deadlines are matched against the outgoing stack,
                     // so the copy has to happen before it is overwritten.
                     const previous = model.bubbles;
@@ -2749,6 +2796,65 @@ fn clearBubble(model: *Model) void {
     model.bubbles_len = 0;
     model.bubble_expires_at_ms = @splat(-1);
     hook_server.mailbox.clearBubbles();
+}
+
+/// Index of the most recently updated bubble in `drained`.
+///
+/// By `counter`, NOT by position: the mailbox keeps its slots in
+/// insertion order and a repeat session overwrites its own entry in
+/// place (see hook_server.setBubble), so the last slot is the session
+/// that FIRST appeared, not the one that spoke last. Only the counter
+/// tracks recency.
+fn newestOf(bubbles: []const hook_server.Bubble) usize {
+    var newest: usize = 0;
+    for (bubbles, 0..) |*b, i| {
+        if (b.counter > bubbles[newest].counter) newest = i;
+    }
+    return newest;
+}
+
+/// Fold a drained multi-conversation set down to the single newest
+/// bubble, which is the classic pre-stack behaviour: one card, newest
+/// update wins, with the tail.
+///
+/// Done here in the CONSUMER rather than in the mailbox on purpose. The
+/// protocol does not change: the CLI keeps sending session_id, the
+/// server keeps one slot per conversation, and flipping the setting
+/// needs no session restart. It only changes how many of those slots
+/// reach the model. Turning the setting back on therefore costs nothing
+/// but the next event from each live session, which repopulates its own
+/// slot.
+fn collapseToNewest(drained: []hook_server.Bubble, count: usize) usize {
+    if (count <= 1) return count;
+    const newest = newestOf(drained[0..count]);
+    if (newest != 0) drained[0] = drained[newest];
+    for (1..count) |i| drained[i] = .{};
+    return 1;
+}
+
+/// The same fold applied to a stack that is ALREADY on screen, for the
+/// moment the setting is switched off mid-flight.
+///
+/// Carries the surviving bubble's deadline across with it, so a card
+/// that was two seconds from expiring does not get a fresh lease just
+/// for being the survivor, and resets the hover state: the fan has no
+/// meaning once there is one card, and leaving a half-open expansion
+/// behind would draw the lone bubble mid-animation.
+fn collapseModelToNewest(model: *Model) void {
+    if (model.bubbles_len <= 1) return;
+    const newest = newestOf(model.bubbles[0..model.bubbles_len]);
+    if (newest != 0) {
+        model.bubbles[0] = model.bubbles[newest];
+        model.bubble_expires_at_ms[0] = model.bubble_expires_at_ms[newest];
+    }
+    for (1..model.bubbles_len) |i| {
+        model.bubbles[i] = .{};
+        model.bubble_expires_at_ms[i] = -1;
+    }
+    model.bubbles_len = 1;
+    model.bubble_hover_since_ms = -1;
+    model.bubble_expansion = 0;
+    model.bubble_expansion_target = 0;
 }
 
 /// Drop every bubble whose deadline has passed, compacting the stack so
@@ -3622,6 +3728,123 @@ fn testPushBubble(model: *Model, session: []const u8, text: []const u8, busy: bo
     model.bubbles[i] = b;
     model.bubble_expires_at_ms[i] = deadline;
     model.bubbles_len = i + 1;
+}
+
+test "bubbles per conversation defaults on, and only an explicit false opts out" {
+    // The rollout rule: the stack ships enabled, so a settings file
+    // written before this key existed has to roll FORWARD into it. Only
+    // a user who deliberately turned it off gets the classic bubble.
+    try std.testing.expect((Model{}).bubbles_per_conversation);
+
+    const missing = "{\"active_pet\":\"boba\",\"scale\":0.70,\"bubbles\":true}";
+    const explicit_false = "{\"active_pet\":\"boba\",\"bubbles\":true,\"bubbles_per_conversation\":false}";
+    const explicit_true = "{\"active_pet\":\"boba\",\"bubbles\":true,\"bubbles_per_conversation\":true}";
+
+    // This is the exact predicate settingsLoad runs, kept in one place
+    // so the test cannot drift into asserting a different rule.
+    const optedOut = struct {
+        fn f(json: []const u8) bool {
+            return std.mem.indexOf(u8, json, "\"bubbles_per_conversation\":false") != null;
+        }
+    }.f;
+    try std.testing.expect(!optedOut(missing));
+    try std.testing.expect(optedOut(explicit_false));
+    try std.testing.expect(!optedOut(explicit_true));
+
+    // The two keys share a prefix, so the older `bubbles` probe must not
+    // read the new key's value as its own. A settings file with the
+    // stack turned off and messages left on would otherwise hide every
+    // bubble, which is a far worse failure than the one being fixed.
+    const bubblesOff = struct {
+        fn f(json: []const u8) bool {
+            return std.mem.indexOf(u8, json, "\"bubbles\":false") != null;
+        }
+    }.f;
+    try std.testing.expect(!bubblesOff(explicit_false));
+    try std.testing.expect(bubblesOff("{\"bubbles\":false,\"bubbles_per_conversation\":false}"));
+}
+
+test "with per-conversation bubbles off, two sessions collapse to the newest one" {
+    // The classic behaviour, reproduced at the consumer: the protocol is
+    // untouched (the CLI still sends session_id and the mailbox still
+    // keeps a slot each), only the number of slots that reach the model
+    // changes.
+    var drained: [hook_server.max_bubbles]hook_server.Bubble = undefined;
+    for (&drained) |*b| b.* = .{};
+
+    // Two conversations, and the SECOND session to arrive spoke first:
+    // the mailbox keeps insertion order, so recency lives in `counter`
+    // and the newest is not the last slot. A fold that took
+    // `drained[count - 1]` would pick the wrong card here.
+    drained[0] = .{ .counter = 9 };
+    @memcpy(drained[0].text[0.."newest".len], "newest");
+    drained[0].text_len = "newest".len;
+    drained[1] = .{ .counter = 4 };
+    @memcpy(drained[1].text[0.."older".len], "older");
+    drained[1].text_len = "older".len;
+
+    const count = collapseToNewest(&drained, 2);
+    try std.testing.expectEqual(@as(usize, 1), count);
+    try std.testing.expectEqualStrings("newest", drained[0].text[0..drained[0].text_len]);
+    // The vacated slot is cleared, not left holding a stale copy that a
+    // later drain of a bigger set could resurrect.
+    try std.testing.expectEqual(@as(usize, 0), drained[1].text_len);
+
+    // One card means the single-bubble path: no stack, so a tail and no
+    // hover fan, which is what "classic" means on screen.
+    var model: Model = .{};
+    model.bubbles_per_conversation = false;
+    testPushBubble(&model, "alpha", "newest", false, -1);
+    try std.testing.expect(!bubbleStackable(&model));
+
+    // And with the setting ON the same two slots survive as a stack.
+    var stacked: Model = .{};
+    testPushBubble(&stacked, "alpha", "older", false, -1);
+    testPushBubble(&stacked, "beta", "newest", false, -1);
+    try std.testing.expectEqual(@as(usize, 2), stacked.bubbles_len);
+    try std.testing.expect(bubbleStackable(&stacked));
+    // A single bubble is already collapsed and must pass through
+    // unchanged rather than being rewritten.
+    var lone: [hook_server.max_bubbles]hook_server.Bubble = undefined;
+    for (&lone) |*b| b.* = .{};
+    lone[0] = .{ .counter = 3 };
+    try std.testing.expectEqual(@as(usize, 1), collapseToNewest(&lone, 1));
+    try std.testing.expectEqual(@as(u64, 3), lone[0].counter);
+}
+
+test "switching per-conversation bubbles off collapses the stack already on screen" {
+    // Requirement 4: flipping the toggle with a fan open must not leave
+    // the stack sitting there until some agent happens to speak.
+    var model: Model = .{};
+    testPushBubble(&model, "alpha", "older", false, 5_000);
+    testPushBubble(&model, "beta", "newest", false, 9_000);
+    // Pretend the fan was open and mid-hover when the switch was flipped.
+    model.bubble_expansion = 1;
+    model.bubble_expansion_target = 1;
+    model.bubble_hover_since_ms = 1234;
+
+    collapseModelToNewest(&model);
+
+    try std.testing.expectEqual(@as(usize, 1), model.bubbles_len);
+    try std.testing.expectEqualStrings("newest", model.bubbles[0].text[0..model.bubbles[0].text_len]);
+    // The survivor keeps ITS deadline: being the last one standing is
+    // not a reason to get a fresh lease.
+    try std.testing.expectEqual(@as(i64, 9_000), model.bubble_expires_at_ms[0]);
+    try std.testing.expectEqual(@as(i64, -1), model.bubble_expires_at_ms[1]);
+    try std.testing.expectEqual(@as(usize, 0), model.bubbles[1].text_len);
+    // The fan has no meaning with one card, and a half-open expansion
+    // would draw the lone bubble mid-animation.
+    try std.testing.expectEqual(@as(f32, 0), model.bubble_expansion);
+    try std.testing.expectEqual(@as(f32, 0), model.bubble_expansion_target);
+    try std.testing.expectEqual(@as(i64, -1), model.bubble_hover_since_ms);
+    // Which is exactly the single-bubble render path: tail, no stack.
+    try std.testing.expect(!bubbleStackable(&model));
+
+    // Idempotent: flipping the switch twice, or collapsing an already
+    // single bubble, must not clear the last card off the screen.
+    collapseModelToNewest(&model);
+    try std.testing.expectEqual(@as(usize, 1), model.bubbles_len);
+    try std.testing.expectEqualStrings("newest", model.bubbles[0].text[0..model.bubbles[0].text_len]);
 }
 
 test "a card hugs its content instead of always taking the column budget" {
