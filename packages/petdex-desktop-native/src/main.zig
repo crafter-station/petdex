@@ -2600,6 +2600,34 @@ const bubble_hover_slop: f32 = 4;
 /// A rectangle in bubble-window local coordinates.
 const BubbleRect = struct { x: f32, y: f32, w: f32, h: f32 };
 
+/// Top of the stack CONTAINER inside the window, in window-local points.
+///
+/// `bubbleCardOffset` is relative to that container, not to the window,
+/// so anything turning a card offset into window space has to add this
+/// first. The two are not the same number, and the gap between them is
+/// not decoration.
+///
+/// `bubbleWindowHeight` reserves `tail_h + head_gap` beyond the cards,
+/// while the stack container is only `bubbleStackHeightAt(model, 1)`
+/// tall, i.e. cards and nothing else. The root column in `bubbleView`
+/// parks the group against the edge nearest the pet, so that whole
+/// reserve lands on the far side of the cards, and which side that is
+/// follows the flip:
+///
+///   unflipped (`main = .end`, `.{ group, gap }`): cards hug the bottom,
+///   so the entire reserve sits above them;
+///   flipped (`main = .start`, `.{ gap, group }`): the spacer leads and
+///   the tail's share falls off the bottom, so only `head_gap` is above.
+///
+/// Both branches were measured against a live instance with a real
+/// cursor, not derived: reading this as a plain `bubble_canvas_margin`
+/// put the hit region 21pt above the drawing, and the intermediate guess
+/// of `tail_h` alone still left 12pt of the card's bottom dead.
+fn bubbleStackOriginY(model: *const Model) f32 {
+    if (model.bubble_flipped) return bubble_canvas_margin + bubble_head_gap;
+    return bubble_canvas_margin + bubble_head_gap + @as(f32, @floatFromInt(tail_h));
+}
+
 /// The union of the cards as they are ACTUALLY DRAWN, in window-local
 /// coordinates.
 ///
@@ -2613,7 +2641,11 @@ const BubbleRect = struct { x: f32, y: f32, w: f32, h: f32 };
 /// The visible-but-dead margins around the card were the bug Hunter hit,
 /// where only the middle of the card (the text) reliably answered.
 fn bubbleCardsRect(model: *const Model) BubbleRect {
-    const origin = bubble_canvas_margin;
+    // The container is centered horizontally inside the margin, so x
+    // only has to clear the margin; y has a flip-dependent band to clear
+    // as well (see bubbleStackOriginY).
+    const origin_x = bubble_canvas_margin;
+    const origin_y = bubbleStackOriginY(model);
     const front = model.bubbles_len - 1;
     var min_x = bubbleCardCenterDx(model, front);
     var max_x = min_x + bubbleRenderedCardWidth(model, front);
@@ -2632,8 +2664,8 @@ fn bubbleCardsRect(model: *const Model) BubbleRect {
         }
     }
     return .{
-        .x = origin + min_x - bubble_hover_slop,
-        .y = origin + min_y - bubble_hover_slop,
+        .x = origin_x + min_x - bubble_hover_slop,
+        .y = origin_y + min_y - bubble_hover_slop,
         .w = (max_x - min_x) + bubble_hover_slop * 2,
         .h = (max_y - min_y) + bubble_hover_slop * 2,
     };
@@ -3962,7 +3994,7 @@ test "the hover rect covers the whole visible card, not just its text" {
         // SAME functions the renderer transforms by.
         for (0..model.bubbles_len) |slot| {
             const cx = bubble_canvas_margin + bubbleCardCenterDx(&model, slot);
-            const cy = bubble_canvas_margin + bubbleCardOffset(&model, slot);
+            const cy = bubbleStackOriginY(&model) + bubbleCardOffset(&model, slot);
             const cw = bubbleRenderedCardWidth(&model, slot);
             const chh = bubbleMaxCardHeight(&model);
             try std.testing.expect(r.x <= cx);
@@ -3988,7 +4020,7 @@ test "the hover rect covers the whole visible card, not just its text" {
         // The corners of the front card answer, which is the actual
         // complaint: not just the text in the middle.
         const fx0 = bubble_canvas_margin + bubbleCardCenterDx(&model, model.bubbles_len - 1);
-        const fy0 = bubble_canvas_margin + bubbleCardOffset(&model, model.bubbles_len - 1);
+        const fy0 = bubbleStackOriginY(&model) + bubbleCardOffset(&model, model.bubbles_len - 1);
         const fw = bubbleRenderedCardWidth(&model, model.bubbles_len - 1);
         const fh = bubbleMaxCardHeight(&model);
         const wh: f64 = @floatCast(bubbleWindowHeight(&model));
@@ -4004,6 +4036,99 @@ test "the hover rect covers the whole visible card, not just its text" {
         // Well outside the cards still says no.
         try std.testing.expect(!bubbleHoverHit(&model, 0, 0, wh, fx0 - 40, fy0 + fh / 2));
         try std.testing.expect(!bubbleHoverHit(&model, 0, 0, wh, fx0 + fw + 40, fy0 + fh / 2));
+    }
+}
+
+test "the hover rect starts at the stack container, not at the canvas margin" {
+    // Measured with a real cursor against a live instance, twice.
+    //
+    // Before: the front card was drawn down to screen y 327.5 and the fan
+    // stopped answering at y 317.5, so the bottom of a card everyone
+    // could see was dead while a band of empty air above the stack was
+    // live. After: live through y 352 against a card drawn to y 352.5,
+    // dead by y 354.
+    //
+    // The cause is that `bubbleCardOffset` is relative to the stack
+    // CONTAINER while `bubbleCardsRect` added a bare canvas margin, as
+    // if the container were pinned to the top of the window. It is not.
+    // `bubbleWindowHeight` reserves `tail_h + head_gap` past the cards,
+    // the stack container is only `bubbleStackHeightAt(model, 1)` tall,
+    // and the root column in bubbleView parks the group against the
+    // pet's edge. Unflipped (`main = .end`, `.{ group, gap }`) the whole
+    // reserve therefore sits ABOVE the cards; flipped (`main = .start`,
+    // `.{ gap, group }`) only the head gap leads and the tail's share
+    // falls off the bottom.
+    //
+    // The expected origins are written out from the layout constants
+    // here rather than by calling bubbleStackOriginY, so dropping a term
+    // from that helper cannot keep this test green.
+    var model: Model = .{};
+    testPushBubble(&model, "alpha", "older", false, -1);
+    testPushBubble(&model, "beta", "newer", true, -1);
+    testPushBubble(&model, "eve", "ok, shipped", false, -1);
+    model.bubble_expansion = 0;
+    model.bubble_expansion_target = 0;
+    model.bubble_pet_center_local = 120;
+
+    // The reserve the window carries beyond the cards themselves. This is
+    // the band the old rect ignored, and its magnitude (21) is exactly
+    // the offset measured on screen.
+    const reserve = bubble_head_gap + @as(f32, @floatFromInt(tail_h));
+    const content_h = bubbleWindowHeight(&model) - bubble_canvas_margin * 2;
+    try std.testing.expectApproxEqAbs(
+        bubbleStackHeightAt(&model, 1) + reserve,
+        content_h,
+        0.01,
+    );
+
+    const unflipped_origin = bubble_canvas_margin + reserve;
+    const flipped_origin = bubble_canvas_margin + bubble_head_gap;
+
+    model.bubble_flipped = false;
+    try std.testing.expectApproxEqAbs(unflipped_origin, bubbleStackOriginY(&model), 0.01);
+    model.bubble_flipped = true;
+    try std.testing.expectApproxEqAbs(flipped_origin, bubbleStackOriginY(&model), 0.01);
+
+    // Both branches sit strictly below the bare margin, so a helper that
+    // returned `bubble_canvas_margin` fails both rather than sliding
+    // through one of them.
+    try std.testing.expect(unflipped_origin > bubble_canvas_margin);
+    try std.testing.expect(flipped_origin > bubble_canvas_margin);
+    // And they differ from each other, so a helper that dropped the flip
+    // and returned one constant for both fails too.
+    try std.testing.expect(unflipped_origin != flipped_origin);
+
+    // The consequence Hunter felt: the BOTTOM edge of the front card is
+    // inside the rect on both flips. This is what failed on screen.
+    for ([_]bool{ false, true }) |flipped| {
+        model.bubble_flipped = flipped;
+        const origin_y = if (flipped) flipped_origin else unflipped_origin;
+        const front = model.bubbles_len - 1;
+        const fy0 = origin_y + bubbleCardOffset(&model, front);
+        const fx = bubble_canvas_margin + bubbleCardCenterDx(&model, front) + 4;
+        const bottom = fy0 + bubbleMaxCardHeight(&model);
+        const wh: f64 = @floatCast(bubbleWindowHeight(&model));
+        // One point inside the bottom edge: live.
+        try std.testing.expect(bubbleHoverHit(&model, 0, 0, wh, fx, bottom - 1));
+        // The bottom edge itself, within the grace band: still live.
+        try std.testing.expect(bubbleHoverHit(&model, 0, 0, wh, fx, bottom + bubble_hover_slop - 1));
+        // The live band ends at the LOWEST drawn edge, which is the front
+        // card unflipped and the deepest peek once flipped: the peeks are
+        // drawn, so they are hoverable, and the rect is their union.
+        var drawn_top = origin_y + bubbleCardOffset(&model, 0);
+        var drawn_bottom = drawn_top + bubbleMaxCardHeight(&model);
+        for (0..model.bubbles_len) |slot| {
+            const top = origin_y + bubbleCardOffset(&model, slot);
+            drawn_top = @min(drawn_top, top);
+            drawn_bottom = @max(drawn_bottom, top + bubbleMaxCardHeight(&model));
+        }
+        // Well past the slop below everything drawn: dead, so the fix
+        // widened the rect onto the cards rather than onto the window.
+        try std.testing.expect(!bubbleHoverHit(&model, 0, 0, wh, fx, drawn_bottom + bubble_hover_slop + 8));
+        // Symmetrically, the air above the topmost card stays dead. This
+        // is the half the old rect got wrong in the other direction: it
+        // answered live in a band above the stack.
+        try std.testing.expect(!bubbleHoverHit(&model, 0, 0, wh, fx, drawn_top - bubble_hover_slop - 8));
     }
 }
 
