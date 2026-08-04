@@ -2158,19 +2158,33 @@ fn bubbleMaxCardHeight(model: *const Model) f32 {
     return @ceil(rows * line_height + (rows - 1) * bubble_line_gap + bubble_card_padding * 2);
 }
 
-/// Widest line a card actually holds, in characters: the title and the
-/// wrapped answer lines are already what the view paints, so measuring
-/// them is measuring the card. Same char-count-times-font-size metric
-/// bubbleMaxCardWidth uses for the column budget, just applied to the
-/// real content instead of the worst case.
-fn bubbleContentChars(model: *const Model, slot: usize) usize {
+/// Painted width of the widest line a card holds. The strings are the
+/// ones bubbleCard hands to the view, and the font ids come from
+/// textSpanFontId over the same tokens, which is the SDK's measurement
+/// seam: carry the id the span draws with and measured equals painted.
+///
+/// Character counts cannot stand in here. The column budget uses one em
+/// per character because it only ever had to bound a fixed-width card,
+/// but the sans faces average about half that, so a hugging card built
+/// on the count came out near twice its own text and left the spinner
+/// stranded to the right.
+fn bubbleContentWidth(model: *const Model, slot: usize) f32 {
     const bubble = &model.bubbles[slot];
     const chars_per_line: usize = model.bubble_columns;
     const answer_lines: usize = model.bubble_answer_lines;
-    var widest = charCount(clipDisplay(bubble.title[0..bubble.title_len], chars_per_line, &bubble_title_scratch[slot], false));
+    const tokens = petdexTokens(model);
+    const size = bubbleFontSize(model);
+    // The title paints bold and the answer lines regular, and bold is
+    // the wider face, so they cannot share one id.
+    const title_font = canvas.textSpanFontId(.{ .text = "", .weight = .bold }, tokens.typography);
+    const text_font = canvas.textSpanFontId(.{ .text = "" }, tokens.typography);
+
+    const title = clipDisplay(bubble.title[0..bubble.title_len], chars_per_line, &bubble_title_scratch[slot], false);
+    var widest = canvas.measureTextWidthForFont(tokens.text_measure, title_font, title, size);
     const text_clipped = clipDisplay(bubble.text[0..bubble.text_len], chars_per_line * answer_lines, &bubble_text_scratch[slot], true);
     for (splitLines(text_clipped, chars_per_line, answer_lines)) |line| {
-        widest = @max(widest, charCount(line));
+        if (line.len == 0) continue;
+        widest = @max(widest, canvas.measureTextWidthForFont(tokens.text_measure, text_font, line, size));
     }
     return widest;
 }
@@ -2178,7 +2192,7 @@ fn bubbleContentChars(model: *const Model, slot: usize) usize {
 /// A card hugs its content, capped by the column budget: short bubbles
 /// stop reserving a full-width card, long ones wrap exactly as before.
 fn bubbleCardWidth(model: *const Model, slot: usize) f32 {
-    const text_w = @as(f32, @floatFromInt(bubbleContentChars(model, slot))) * bubbleFontSize(model);
+    const text_w = bubbleContentWidth(model, slot);
     const natural = @ceil(text_w + bubble_avatar_width + bubble_busy_width + bubble_content_gap * 2 + bubble_card_padding * 2);
     return @min(natural, bubbleMaxCardWidth(model));
 }
@@ -3085,9 +3099,47 @@ test "a card hugs its content instead of always taking the column budget" {
     testPushBubble(&long, "beta", "a much longer line of bubble text", false, -1);
     try std.testing.expect(bubbleCardWidth(&long, 0) > short);
 
+    // The column budget stays a ceiling no card can cross. It is not an
+    // equality: the budget reserves one em per character and real text
+    // paints narrower, so even a full card measures under it.
     var overflow: Model = .{};
     testPushBubble(&overflow, "gamma", "x" ** 199, false, -1);
-    try std.testing.expectEqual(bubbleMaxCardWidth(&overflow), bubbleCardWidth(&overflow, 0));
+    try std.testing.expect(bubbleCardWidth(&overflow, 0) <= bubbleMaxCardWidth(&overflow));
+    try std.testing.expect(bubbleCardWidth(&overflow, 0) > bubbleCardWidth(&long, 0));
+}
+
+test "a wrapping card measures its painted line, not its character count" {
+    // The regression this pins: width came from charCount * font size,
+    // one em per character, while the sans faces paint about half that.
+    // A card that wraps was coming out near twice its own text, which is
+    // what left the spinner stranded far to the right of the last word.
+    var model: Model = .{};
+    const text = "a much longer line of bubble text that has to wrap across lines";
+    testPushBubble(&model, "alpha", text, false, -1);
+
+    const tokens = petdexTokens(&model);
+    const size = bubbleFontSize(&model);
+    const chrome = bubble_avatar_width + bubble_busy_width + bubble_content_gap * 2 + bubble_card_padding * 2;
+
+    // Widest line the view actually paints, measured the way it paints.
+    const clipped = clipDisplay(text, model.bubble_columns * model.bubble_answer_lines, &bubble_text_scratch[0], true);
+    var painted: f32 = 0;
+    var chars: usize = 0;
+    for (splitLines(clipped, model.bubble_columns, model.bubble_answer_lines)) |line| {
+        if (line.len == 0) continue;
+        painted = @max(painted, canvas.measureTextWidthForFont(tokens.text_measure, canvas.textSpanFontId(.{ .text = "" }, tokens.typography), line, size));
+        chars = @max(chars, charCount(line));
+    }
+    try std.testing.expect(painted > 0);
+
+    // Within a pixel of the painted line plus the fixed chrome.
+    const got = bubbleCardWidth(&model, 0);
+    try std.testing.expect(@abs(got - @ceil(painted + chrome)) <= 1);
+
+    // And meaningfully narrower than the old count-based number, which
+    // is the whole point: proportional text is not one em per glyph.
+    const naive = @ceil(@as(f32, @floatFromInt(chars)) * size + chrome);
+    try std.testing.expect(got < naive - 20);
 }
 
 test "the window takes the widest card in the stack" {
