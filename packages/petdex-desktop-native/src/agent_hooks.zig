@@ -147,18 +147,35 @@ const QoderPaths = struct {
         return self.bufs[i][0..self.lens[i]];
     }
 
-    fn push(self: *QoderPaths, path: []const u8) void {
+    fn push(self: *QoderPaths, allocator: std.mem.Allocator, path: []const u8) void {
         if (path.len > self.bufs[0].len or self.count == self.bufs.len) return;
         // Roots collapse to one file if both *_CONFIG_DIR point at one
         // directory. Writing twice is harmless; counting twice is not.
         for (0..self.count) |i| {
-            if (std.mem.eql(u8, self.slice(i), path)) return;
+            if (samePath(allocator, self.slice(i), path)) return;
         }
         @memcpy(self.bufs[self.count][0..path.len], path);
         self.lens[self.count] = path.len;
         self.count += 1;
     }
 };
+
+/// Compare config paths using the host filesystem's lexical rules. Windows
+/// accepts either slash spelling and treats ASCII case as insignificant, so
+/// two environment overrides can name one file without being byte-identical.
+/// Resolving also folds `.` and `..` on every host; if a malformed path cannot
+/// be resolved, the exact spelling remains the conservative fallback.
+fn samePath(allocator: std.mem.Allocator, left: []const u8, right: []const u8) bool {
+    if (std.mem.eql(u8, left, right)) return true;
+    const left_resolved = std.fs.path.resolve(allocator, &.{left}) catch return false;
+    defer allocator.free(left_resolved);
+    const right_resolved = std.fs.path.resolve(allocator, &.{right}) catch return false;
+    defer allocator.free(right_resolved);
+    if (builtin.os.tag == .windows) {
+        return std.os.windows.eqlIgnoreCaseWtf8(left_resolved, right_resolved);
+    }
+    return std.mem.eql(u8, left_resolved, right_resolved);
+}
 
 /// Roots that exist and whose settings.json we could actually merge into. An
 /// unreadable or malformed config is skipped, not reported as "no hooks":
@@ -173,7 +190,7 @@ fn qoderActionablePaths(allocator: std.mem.Allocator, home: []const u8) QoderPat
         var path_buf: [512]u8 = undefined;
         const path = qoderRootSettings(&path_buf, home, root) orelse continue;
         if (!canInstallJsonHooks(allocator, path, &qoder_events)) continue;
-        out.push(path);
+        out.push(allocator, path);
     }
     return out;
 }
@@ -1240,6 +1257,13 @@ pub fn uninstall(allocator: std.mem.Allocator, home: []const u8, kind: AgentKind
 
 const t = std.testing;
 
+/// The Windows command contains mutually exclusive HOME and USERPROFILE
+/// branches, so its phase/agent text is present twice even though cmd.exe
+/// executes at most one branch. Unix has one canonical invocation.
+fn expectedCanonicalHookTextOccurrences() usize {
+    return if (builtin.os.tag == .windows) 2 else 1;
+}
+
 test "claude merge preserves foreign keys and hooks, replaces petdex entries" {
     // Build a fixture settings.json with a user hook and an old petdex
     // node hook, run the merge logic pieces on it via Value.
@@ -1288,7 +1312,7 @@ test "installClaude merges into a real fixture home non-destructively" {
     try t.expect(installClaude(t.allocator, home));
     const merged2 = readFileAlloc(t.allocator, cfg, 1024 * 1024).?;
     defer t.allocator.free(merged2);
-    try t.expectEqual(@as(usize, 1), std.mem.count(u8, merged2, "bubble pre claude-code"));
+    try t.expectEqual(expectedCanonicalHookTextOccurrences(), std.mem.count(u8, merged2, "bubble pre claude-code"));
     // Backup exists.
     const bak = std.fmt.bufPrint(&pb, "{s}/.claude/settings.json.pre-petdex-backup", .{home}) catch unreachable;
     try t.expect(fileExists(bak));
@@ -1402,8 +1426,8 @@ test "installQoder writes six events and stays out of the rest of the config" {
     try t.expect(installQoder(t.allocator, home));
     const merged2 = readFileAlloc(t.allocator, cfg, 1024 * 1024).?;
     defer t.allocator.free(merged2);
-    try t.expectEqual(@as(usize, 1), std.mem.count(u8, merged2, "bubble pre qoder"));
-    try t.expectEqual(@as(usize, 1), std.mem.count(u8, merged2, "bubble tool-failure qoder"));
+    try t.expectEqual(expectedCanonicalHookTextOccurrences(), std.mem.count(u8, merged2, "bubble pre qoder"));
+    try t.expectEqual(expectedCanonicalHookTextOccurrences(), std.mem.count(u8, merged2, "bubble tool-failure qoder"));
 
     const bak = std.fmt.bufPrint(&pb, "{s}/.qoder/settings.json.pre-petdex-backup", .{home}) catch unreachable;
     try t.expect(fileExists(bak));
@@ -1520,7 +1544,7 @@ test "a partially connected qoder reads as not installed and one press completes
     try t.expectEqual(HookStatus.current, scan(t.allocator, home)[qoder_row].status);
     const merged = readFileAlloc(t.allocator, global_cfg, 1024 * 1024).?;
     defer t.allocator.free(merged);
-    try t.expectEqual(@as(usize, 1), std.mem.count(u8, merged, "bubble pre qoder"));
+    try t.expectEqual(expectedCanonicalHookTextOccurrences(), std.mem.count(u8, merged, "bubble pre qoder"));
 }
 
 test "a qoder root we could never write to is excluded, not counted as unhooked" {
@@ -1571,8 +1595,26 @@ test "qoder roots that resolve to the same path collapse to one" {
     try t.expect(installQoder(t.allocator, home));
     const merged = readFileAlloc(t.allocator, cfg, 1024 * 1024).?;
     defer t.allocator.free(merged);
-    try t.expectEqual(@as(usize, 1), std.mem.count(u8, merged, "bubble pre qoder"));
+    try t.expectEqual(expectedCanonicalHookTextOccurrences(), std.mem.count(u8, merged, "bubble pre qoder"));
     try t.expectEqual(HookStatus.current, scan(t.allocator, home)[qoder_row].status);
+}
+
+test "Windows qoder paths collapse across separator and case spelling" {
+    if (builtin.os.tag != .windows) return;
+    const saved = saveQoderEnv();
+    defer restoreQoderEnv(saved);
+
+    const home = ".zig-cache/petdex-qoder-equivalent-home";
+    const shared = ".zig-cache/petdex-qoder-equivalent-shared";
+    plat.makeDir(home);
+    plat.makeDir(shared);
+
+    // Windows paths are case-insensitive and accept both slash styles. The
+    // two overrides therefore identify one settings.json despite differing
+    // bytes, so install must not rewrite it once per Qoder build.
+    env_qoder_config_dir = shared;
+    env_qoder_cn_config_dir = ".\\ZIG-CACHE\\PETDEX-QODER-EQUIVALENT-SHARED";
+    try t.expectEqual(@as(usize, 1), qoderActionablePaths(t.allocator, home).count);
 }
 
 test "each qoder root honours only its own env overrides" {
