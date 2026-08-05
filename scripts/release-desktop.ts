@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 // Cut a desktop release end-to-end: bump verification, build, sign,
 // notarize, tag, and upload to GitHub releases.
 //
@@ -18,7 +19,7 @@
 //   NATIVE_SDK_PATH       pinned Native SDK checkout used to build the CLI
 //
 // What it does:
-//   1. Validate version arg (semver, no leading 'v') + ensure tag doesn't exist
+//   1. Validate version arg (semver, optionally prefixed with v or desktop-v) + ensure tag doesn't exist
 //   2. Verify clean working tree on packages/petdex-desktop-native/ paths
 //   3. Run scripts/sign-macos.sh for arm64 and x64
 //   4. Verify all macOS artifacts exist
@@ -31,6 +32,7 @@
 // to skip the slow notarization step if artifacts are already on disk.
 
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   accessSync,
   existsSync,
@@ -38,6 +40,7 @@ import {
   mkdirSync,
   readFileSync,
   statSync,
+  writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -47,6 +50,25 @@ const REPO_ROOT = path.resolve(
   "..",
 );
 const MACOS_OUT_DIR = path.join(REPO_ROOT, "dist", "macos");
+const RELEASE_ARTIFACT_NAMES = [
+  "Petdex-arm64.dmg",
+  "Petdex-x64.dmg",
+  "petdex-desktop-native-darwin-arm64.zip",
+  "petdex-desktop-native-darwin-x64.zip",
+  "petdex-desktop-darwin-arm64.zip",
+  "petdex-desktop-darwin-x64.zip",
+] as const;
+const BUILD_MANIFEST_PATH = path.join(
+  MACOS_OUT_DIR,
+  "petdex-desktop-build-manifest.json",
+);
+
+type BuildManifest = {
+  format: 1;
+  version: string;
+  commit: string;
+  artifacts: Record<string, { size: number; sha256: string }>;
+};
 
 type Args = {
   version: string;
@@ -234,7 +256,9 @@ function preflightTree(): void {
       "--",
       "packages/petdex-desktop-native/src",
       "packages/petdex-desktop-native/app.zon",
+      "patches/native-sdk-macos-headerpad.patch",
       "packages/petdex-desktop-native/assets",
+      "scripts/patch-native-sdk.sh",
       "scripts/release-desktop.ts",
       "scripts/sign-macos.sh",
     ],
@@ -285,7 +309,36 @@ function preflightDetachDmgVolumes(): void {
   }
 }
 
-function buildRelease(env: Record<string, string>): void {
+function gitCommit(): string {
+  const commit = run("git", ["rev-parse", "HEAD"]).stdout.trim();
+  if (!/^[0-9a-f]{40}$/.test(commit)) die(`invalid HEAD commit: ${commit}`);
+  return commit;
+}
+
+function sha256(filePath: string): string {
+  return createHash("sha256").update(readFileSync(filePath)).digest("hex");
+}
+
+function writeBuildManifest(version: string): void {
+  const artifacts: BuildManifest["artifacts"] = {};
+  for (const name of RELEASE_ARTIFACT_NAMES) {
+    const filePath = path.join(MACOS_OUT_DIR, name);
+    if (!existsSync(filePath)) die(`cannot manifest missing artifact: ${name}`);
+    artifacts[name] = {
+      size: statSync(filePath).size,
+      sha256: sha256(filePath),
+    };
+  }
+  const manifest: BuildManifest = {
+    format: 1,
+    version,
+    commit: gitCommit(),
+    artifacts,
+  };
+  writeFileSync(BUILD_MANIFEST_PATH, `${JSON.stringify(manifest)}\n`, "utf8");
+}
+
+function buildRelease(env: Record<string, string>, version: string): void {
   step("Build, sign, and notarize macOS arm64 + x64");
   mkdirSync(MACOS_OUT_DIR, { recursive: true });
   for (const arch of ["arm64", "x64"]) {
@@ -298,21 +351,14 @@ function buildRelease(env: Record<string, string>): void {
       },
     );
   }
+  writeBuildManifest(version);
 }
 
-function verifyArtifacts(): string[] {
+function verifyArtifacts(version: string): string[] {
   step("Verify artifacts");
-  const required = [
-    "Petdex-arm64.dmg",
-    "Petdex-x64.dmg",
-    "petdex-desktop-native-darwin-arm64.zip",
-    "petdex-desktop-native-darwin-x64.zip",
-    "petdex-desktop-darwin-arm64.zip",
-    "petdex-desktop-darwin-x64.zip",
-  ];
   const missing: string[] = [];
   const present: string[] = [];
-  for (const name of required) {
+  for (const name of RELEASE_ARTIFACT_NAMES) {
     const p = path.join(MACOS_OUT_DIR, name);
     if (existsSync(p)) {
       present.push(p);
@@ -327,6 +373,42 @@ function verifyArtifacts(): string[] {
       `missing artifacts: ${missing.join(", ")}. Re-run without --skip-build.`,
     );
   }
+
+  if (!existsSync(BUILD_MANIFEST_PATH)) {
+    die(
+      "build manifest missing; run without --skip-build to create verified artifacts",
+    );
+  }
+  let manifest: BuildManifest;
+  try {
+    manifest = JSON.parse(
+      readFileSync(BUILD_MANIFEST_PATH, "utf8"),
+    ) as BuildManifest;
+  } catch {
+    die("build manifest is not valid JSON");
+  }
+  if (manifest.format !== 1 || manifest.version !== version) {
+    die(`build manifest does not match requested version ${version}`);
+  }
+  if (manifest.commit !== gitCommit()) {
+    die(
+      "build manifest was produced from a different commit; rebuild before release",
+    );
+  }
+  for (const name of RELEASE_ARTIFACT_NAMES) {
+    const record = manifest.artifacts?.[name];
+    const filePath = path.join(MACOS_OUT_DIR, name);
+    if (
+      !record ||
+      record.size !== statSync(filePath).size ||
+      record.sha256 !== sha256(filePath)
+    ) {
+      die(
+        `artifact changed after build or is not bound to the manifest: ${name}`,
+      );
+    }
+  }
+  console.log("  verified build manifest, commit, sizes, and SHA-256 hashes");
   return present;
 }
 
@@ -405,15 +487,15 @@ async function main() {
 
   preflightTree();
   const tag = preflightTag(args.version);
-  const env = resolveAppleEnv();
 
   if (!args.skipBuild) {
+    const env = resolveAppleEnv();
     preflightDetachDmgVolumes();
-    buildRelease(env);
+    buildRelease(env, args.version);
   } else {
     console.log("\n--skip-build: skipping zig build + notarize");
   }
-  const assets = verifyArtifacts();
+  const assets = verifyArtifacts(args.version);
 
   tagAndPush(args.version, tag);
   ghRelease(tag, args.version, args.notes, assets, args.draft, args.prerelease);

@@ -448,11 +448,10 @@ fn route(server: *Server, conn: *Conn, method: []const u8, path: []const u8, hea
             return respond(conn, 400, "{\"ok\":false,\"error\":\"invalid_state\"}");
         }
         var duration: u32 = 0;
-        if (jsonNumber(body, "duration")) |d| {
-            if (!std.math.isFinite(d) or d < 0) {
-                return respond(conn, 400, "{\"ok\":false,\"error\":\"invalid_duration\"}");
-            }
-            duration = @intFromFloat(@min(d, 30_000));
+        switch (parseDuration(body)) {
+            .missing => {},
+            .invalid => return respond(conn, 400, "{\"ok\":false,\"error\":\"invalid_duration\"}"),
+            .value => |value| duration = value,
         }
 
         // Sidecar's sprite variation: bare "running" alternates
@@ -466,7 +465,7 @@ fn route(server: *Server, conn: *Conn, method: []const u8, path: []const u8, hea
         event.state_len = applied.len;
         @memcpy(event.state[0..applied.len], applied);
         const enqueue_result = mailbox.enqueueWithCounter(event);
-        mirrorState(server, applied, enqueue_result.counter) catch {};
+        mirrorQueuedState(server, applied, enqueue_result) catch {};
 
         const dur_out: i64 = if (duration == 0) -1 else @intCast(duration);
         const out = if (dur_out < 0)
@@ -576,6 +575,98 @@ pub fn jsonStringPub(body: []const u8, key: []const u8) ?[]const u8 {
 
 pub fn jsonNumberPub(body: []const u8, key: []const u8) ?f64 {
     return jsonNumber(body, key);
+}
+
+const JsonFieldStart = union(enum) {
+    missing,
+    invalid,
+    value: usize,
+};
+
+const JsonNumberResult = union(enum) {
+    missing,
+    invalid,
+    value: f64,
+};
+
+const DurationResult = union(enum) {
+    missing,
+    invalid,
+    value: u32,
+};
+
+fn skipJsonWhitespace(body: []const u8, offset: usize) usize {
+    var i = offset;
+    while (i < body.len and (body[i] == ' ' or body[i] == '\t' or body[i] == '\r' or body[i] == '\n')) i += 1;
+    return i;
+}
+
+fn jsonFieldStart(body: []const u8, key: []const u8) JsonFieldStart {
+    var pat_buf: [32]u8 = undefined;
+    const pat = std.fmt.bufPrint(&pat_buf, "\"{s}\"", .{key}) catch return .invalid;
+    var search: usize = 0;
+    while (search < body.len) {
+        const relative = std.mem.indexOf(u8, body[search..], pat) orelse return .missing;
+        const key_at = search + relative;
+        var before = key_at;
+        while (before > 0 and (body[before - 1] == ' ' or body[before - 1] == '\t' or body[before - 1] == '\r' or body[before - 1] == '\n')) before -= 1;
+        if (before == 0 or body[before - 1] == '{' or body[before - 1] == ',') {
+            const after_key = skipJsonWhitespace(body, key_at + pat.len);
+            if (after_key >= body.len or body[after_key] != ':') return .invalid;
+            return .{ .value = skipJsonWhitespace(body, after_key + 1) };
+        }
+        search = key_at + pat.len;
+    }
+    return .missing;
+}
+
+fn scanJsonNumber(body: []const u8, offset: usize) ?usize {
+    var i = offset;
+    if (i >= body.len) return null;
+    if (body[i] == '-') {
+        i += 1;
+        if (i >= body.len) return null;
+    }
+
+    if (body[i] == '0') {
+        i += 1;
+        if (i < body.len and std.ascii.isDigit(body[i])) return null;
+    } else if (body[i] >= '1' and body[i] <= '9') {
+        i += 1;
+        while (i < body.len and std.ascii.isDigit(body[i])) i += 1;
+    } else {
+        return null;
+    }
+
+    if (i < body.len and body[i] == '.') {
+        i += 1;
+        const fraction_start = i;
+        while (i < body.len and std.ascii.isDigit(body[i])) i += 1;
+        if (i == fraction_start) return null;
+    }
+
+    if (i < body.len and (body[i] == 'e' or body[i] == 'E')) {
+        i += 1;
+        if (i < body.len and (body[i] == '+' or body[i] == '-')) i += 1;
+        const exponent_start = i;
+        while (i < body.len and std.ascii.isDigit(body[i])) i += 1;
+        if (i == exponent_start) return null;
+    }
+
+    if (i < body.len and body[i] != ' ' and body[i] != '\t' and body[i] != '\r' and body[i] != '\n' and body[i] != ',' and body[i] != '}' and body[i] != ']') return null;
+    return i;
+}
+
+fn jsonNumberResult(body: []const u8, key: []const u8) JsonNumberResult {
+    const value_start = switch (jsonFieldStart(body, key)) {
+        .missing => return .missing,
+        .invalid => return .invalid,
+        .value => |value| value,
+    };
+    const end = scanJsonNumber(body, value_start) orelse return .invalid;
+    const value = std.fmt.parseFloat(f64, body[value_start..end]) catch return .invalid;
+    if (!std.math.isFinite(value)) return .invalid;
+    return .{ .value = value };
 }
 
 fn jsonString(body: []const u8, key: []const u8) ?[]const u8 {
@@ -710,6 +801,23 @@ test "json string scanner rejects malformed mirror input" {
     try std.testing.expect(jsonString("{\"text\":\"bad\nline\"}", "text") == null);
 }
 
+test "json number scanner validates complete JSON numbers" {
+    try std.testing.expectEqual(@as(f64, 1000), jsonNumber("{\"duration\":1e3}", "duration").?);
+    try std.testing.expectEqual(@as(f64, -0.25), jsonNumber("{\"duration\":-0.25}", "duration").?);
+    try std.testing.expect(jsonNumber("{\"duration\":1-2}", "duration") == null);
+    try std.testing.expect(jsonNumber("{\"duration\":\"100\"}", "duration") == null);
+}
+
+test "duration parser distinguishes missing and invalid values" {
+    try std.testing.expect(std.meta.activeTag(parseDuration("{}")) == .missing);
+    try std.testing.expect(switch (parseDuration("{\"duration\":1e3}")) {
+        .value => |value| value == 1000,
+        else => false,
+    });
+    try std.testing.expect(std.meta.activeTag(parseDuration("{\"duration\":-1}")) == .invalid);
+    try std.testing.expect(std.meta.activeTag(parseDuration("{\"duration\":\"100\"}")) == .invalid);
+}
+
 test "mailbox returns the counter while holding its lock" {
     var box: Mailbox = .{};
     var event = StateEvent{};
@@ -721,6 +829,17 @@ test "mailbox returns the counter while holding its lock" {
     const duplicate = box.enqueueWithCounter(event);
     try std.testing.expect(!duplicate.queued);
     try std.testing.expectEqual(@as(u64, 1), duplicate.counter);
+}
+
+test "unqueued state never reaches the runtime mirror" {
+    var server = Server{
+        .allocator = std.testing.allocator,
+        .runtime_dir = "",
+        .token = undefined,
+        .pid = 0,
+    };
+    try mirrorQueuedState(&server, "failed", .{ .queued = false, .counter = 5 });
+    try std.testing.expectEqual(@as(u64, 0), server.last_state_mirror);
 }
 
 test "running state alternates without sharing mutable state with callers" {
@@ -736,15 +855,21 @@ test "running state alternates without sharing mutable state with callers" {
 }
 
 fn jsonNumber(body: []const u8, key: []const u8) ?f64 {
-    var pat_buf: [32]u8 = undefined;
-    const pat = std.fmt.bufPrint(&pat_buf, "\"{s}\"", .{key}) catch return null;
-    const key_at = std.mem.indexOf(u8, body, pat) orelse return null;
-    var i = key_at + pat.len;
-    while (i < body.len and (body[i] == ' ' or body[i] == ':')) i += 1;
-    const val_start = i;
-    while (i < body.len and (std.ascii.isDigit(body[i]) or body[i] == '.' or body[i] == '-')) i += 1;
-    if (i == val_start) return null;
-    return std.fmt.parseFloat(f64, body[val_start..i]) catch null;
+    return switch (jsonNumberResult(body, key)) {
+        .value => |value| value,
+        .missing, .invalid => null,
+    };
+}
+
+fn parseDuration(body: []const u8) DurationResult {
+    return switch (jsonNumberResult(body, "duration")) {
+        .missing => .missing,
+        .invalid => .invalid,
+        .value => |duration| {
+            if (duration < 0) return .invalid;
+            return .{ .value = @intFromFloat(@min(duration, 30_000)) };
+        },
+    };
 }
 
 // --------------------------------------------------------- runtime files
@@ -766,6 +891,11 @@ fn mirrorState(server: *Server, state: []const u8, counter: u64) !void {
     const json = try std.fmt.bufPrint(&buf, "{{\"state\":\"{s}\",\"counter\":{d}}}", .{ state, counter });
     try writeRuntimeFile(server, "state.json", json, 0o644);
     server.last_state_mirror = counter;
+}
+
+fn mirrorQueuedState(server: *Server, state: []const u8, result: Mailbox.EnqueueResult) !void {
+    if (!result.queued) return;
+    try mirrorState(server, state, result.counter);
 }
 
 fn mirrorBubble(server: *Server, text: []const u8, counter: u64, title: []const u8, agent: []const u8, busy: bool) !void {

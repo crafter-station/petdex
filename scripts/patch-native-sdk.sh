@@ -13,7 +13,7 @@ if [[ -z "$SDK" ]]; then
   echo "patch-native-sdk: NATIVE_SDK_PATH is required" >&2
   exit 1
 fi
-if [[ ! -d "$SDK/.git" ]]; then
+if ! git -C "$SDK" rev-parse --git-dir >/dev/null 2>&1; then
   echo "patch-native-sdk: SDK checkout not found: $SDK" >&2
   exit 1
 fi

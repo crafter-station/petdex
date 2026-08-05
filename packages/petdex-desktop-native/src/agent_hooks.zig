@@ -283,6 +283,57 @@ fn containsPetdexHomePath(command: []const u8, relative_path: []const u8) bool {
     return false;
 }
 
+fn shellSeparator(byte: u8) bool {
+    return byte == ';' or byte == '&' or byte == '|' or byte == '(' or byte == ')' or byte == '\n';
+}
+
+fn isLegacyStateInvocation(command: []const u8, path: []const u8) bool {
+    var offset: usize = 0;
+    while (std.mem.indexOfPos(u8, command, offset, path)) |path_at| {
+        const end = path_at + path.len;
+        const has_left_boundary = path_at == 0 or switch (command[path_at - 1]) {
+            ' ', '\t', '\r', '\n', '\'', '"', '(', '=', '/', '\\' => true,
+            else => false,
+        };
+        const has_right_boundary = end == command.len or switch (command[end]) {
+            ' ', '\t', '\r', '\n', '\'', '"', ';', ')', '&', '|' => true,
+            else => false,
+        };
+        if (has_left_boundary and has_right_boundary) {
+            var segment_start = path_at;
+            while (segment_start > 0 and !shellSeparator(command[segment_start - 1])) segment_start -= 1;
+            const prefix = std.mem.trim(u8, command[segment_start..path_at], " \t\r\n\"'");
+            var words = std.mem.tokenizeAny(u8, prefix, " \t\r\n");
+            const first = words.next() orelse return true;
+            if (std.mem.eql(u8, first, "exec") or std.mem.eql(u8, first, "command") or std.mem.eql(u8, first, "env")) return true;
+            if (std.mem.eql(u8, first, "then")) {
+                if (words.next()) |second| {
+                    if (std.mem.eql(u8, second, "exec")) return true;
+                }
+            }
+        }
+        offset = end;
+    }
+    return false;
+}
+
+fn containsPetdexStateInvocation(command: []const u8) bool {
+    const homes = [_][]const u8{
+        "$HOME/.petdex",
+        "${HOME}/.petdex",
+        "$HOME\\.petdex",
+        "${HOME}\\.petdex",
+    };
+    var path_buf: [128]u8 = undefined;
+    for (homes) |home| {
+        const unix_path = std.fmt.bufPrint(&path_buf, "{s}/bin/petdex-hook-state", .{home}) catch continue;
+        if (isLegacyStateInvocation(command, unix_path)) return true;
+        const windows_path = std.fmt.bufPrint(&path_buf, "{s}\\bin\\petdex-hook-state", .{home}) catch continue;
+        if (isLegacyStateInvocation(command, windows_path)) return true;
+    }
+    return false;
+}
+
 fn commandGeneration(command: []const u8) ManagedHookGeneration {
     // Old CLI-generated hooks invoked the persisted Node bundle, the shell
     // state wrapper, or posted directly with the old token-based curl
@@ -291,8 +342,7 @@ fn commandGeneration(command: []const u8) ManagedHookGeneration {
     const has_legacy_bundle = (containsPetdexHomePath(command, "/bin/petdex.js") or
         containsPetdexHomePath(command, "\\bin\\petdex.js")) and
         std.mem.indexOf(u8, command, " bubble ") != null;
-    const has_legacy_state = containsPetdexHomePath(command, "/bin/petdex-hook-state") or
-        containsPetdexHomePath(command, "\\bin\\petdex-hook-state");
+    const has_legacy_state = containsPetdexStateInvocation(command);
     const has_legacy_curl = containsPetdexHomePath(command, "/runtime/update-token") and
         std.mem.indexOf(u8, command, "X-Petdex-Update-Token") != null and
         std.mem.indexOf(u8, command, "http://127.0.0.1:7777/state") != null and
@@ -1687,6 +1737,14 @@ test "legacy state wrapper is recognized by its exact Petdex path" {
     try t.expectEqual(
         ManagedHookGeneration.none,
         commandGeneration("exec /tmp/.petdex/bin/petdex-hook-state running codex"),
+    );
+    try t.expectEqual(
+        ManagedHookGeneration.none,
+        commandGeneration("echo \"$HOME/.petdex/bin/petdex-hook-state\" running codex"),
+    );
+    try t.expectEqual(
+        ManagedHookGeneration.none,
+        commandGeneration("# exec \"$HOME/.petdex/bin/petdex-hook-state\" running codex"),
     );
 }
 

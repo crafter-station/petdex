@@ -10,6 +10,13 @@ APP_PATH="${PETDEX_DEV_APP_PATH:-$HOME/Applications/Petdex Dev.app}"
 NATIVE_CLI="${NATIVE_CLI:-$(command -v native || true)}"
 NATIVE_SDK_PATH="${NATIVE_SDK_PATH:-}"
 
+if [[ -n "$NATIVE_CLI" && "$NATIVE_CLI" != /* ]]; then
+  NATIVE_CLI="$ROOT/$NATIVE_CLI"
+fi
+if [[ -n "$NATIVE_SDK_PATH" && "$NATIVE_SDK_PATH" != /* ]]; then
+  NATIVE_SDK_PATH="$ROOT/$NATIVE_SDK_PATH"
+fi
+
 if [[ -z "$NATIVE_CLI" || ! -x "$NATIVE_CLI" ]]; then
   echo "macos-dev-restart: native CLI not found. Set NATIVE_CLI=/path/to/native" >&2
   exit 1
@@ -28,15 +35,36 @@ echo "==> Ensure Petdex Dev.app"
 "$ROOT/scripts/macos-dev-app.sh" >/dev/null
 
 echo "==> Stop existing dev desktop"
+stopped_pids=()
 while read -r pid; do
   [[ -n "$pid" ]] || continue
   command_line="$(ps -p "$pid" -o command= 2>/dev/null || true)"
   case "$command_line" in
-    *"$EXECUTABLE"*) kill "$pid" || true ;;
+    *"$EXECUTABLE"*)
+      kill "$pid" || true
+      stopped_pids+=("$pid")
+      ;;
   esac
 done < <(pgrep -x "$(basename "$EXECUTABLE")" || true)
 
-sleep 0.4
+remaining=0
+for _ in {1..50}; do
+  remaining=0
+  for pid in "${stopped_pids[@]}"; do
+    if kill -0 "$pid" 2>/dev/null; then
+      remaining=1
+      break
+    fi
+  done
+  if ((remaining == 0)); then
+    break
+  fi
+  sleep 0.1
+done
+if ((remaining != 0)); then
+  echo "macos-dev-restart: existing desktop process did not exit within 5 seconds" >&2
+  exit 1
+fi
 
 echo "==> Launch $APP_PATH"
 open -n "$APP_PATH"
