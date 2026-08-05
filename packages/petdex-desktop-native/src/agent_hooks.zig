@@ -58,7 +58,7 @@ pub const HookStatus = enum(u8) {
     absent,
     /// Agent present, no petdex hooks.
     none,
-    /// Hooks present but pointing at the legacy node runner.
+    /// Hooks present but pointing at a legacy runner.
     node,
     /// Hooks present, pointing at the in-binary runner.
     current,
@@ -284,17 +284,20 @@ fn containsPetdexHomePath(command: []const u8, relative_path: []const u8) bool {
 }
 
 fn commandGeneration(command: []const u8) ManagedHookGeneration {
-    // Old CLI-generated hooks invoked the persisted Node bundle or posted
-    // directly with the old token-based curl command. Match those exact
-    // ownership markers rather than every incidental mention of Petdex.
+    // Old CLI-generated hooks invoked the persisted Node bundle, the shell
+    // state wrapper, or posted directly with the old token-based curl
+    // command. Match those exact ownership markers rather than every
+    // incidental mention of Petdex.
     const has_legacy_bundle = (containsPetdexHomePath(command, "/bin/petdex.js") or
         containsPetdexHomePath(command, "\\bin\\petdex.js")) and
         std.mem.indexOf(u8, command, " bubble ") != null;
+    const has_legacy_state = containsPetdexHomePath(command, "/bin/petdex-hook-state") or
+        containsPetdexHomePath(command, "\\bin\\petdex-hook-state");
     const has_legacy_curl = containsPetdexHomePath(command, "/runtime/update-token") and
         std.mem.indexOf(u8, command, "X-Petdex-Update-Token") != null and
         std.mem.indexOf(u8, command, "http://127.0.0.1:7777/state") != null and
         std.mem.indexOf(u8, command, "curl") != null;
-    if (has_legacy_bundle or has_legacy_curl) return .legacy;
+    if (has_legacy_bundle or has_legacy_state or has_legacy_curl) return .legacy;
     if ((containsPetdexHomePath(command, "/bin/petdex-hook") or
         containsPetdexHomePath(command, "\\bin\\petdex-hook")) and
         std.mem.indexOf(u8, command, " bubble ") != null) return .current;
@@ -1597,7 +1600,7 @@ test "migrateLegacyHooks rewrites recognized legacy configs at startup" {
     var codex_path_buf: [512]u8 = undefined;
     const codex = std.fmt.bufPrint(&codex_path_buf, "{s}/.codex/hooks.json", .{home}) catch unreachable;
     const legacy_codex =
-        \\{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"T=\"$(cat $HOME/.petdex/runtime/update-token 2>/dev/null)\"; [ -n \"$T\" ] && curl -s -m 0.3 -X POST http://127.0.0.1:7777/state -H \"X-Petdex-Update-Token: $T\""}]}]}}
+        \\{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"exec \"$HOME/.petdex/bin/petdex-hook-state\" jumping codex 800 >/dev/null 2>&1 # legacy"}]}]}}
     ;
     try t.expect(writeFile(codex, legacy_codex));
     var gemini_path_buf: [512]u8 = undefined;
@@ -1617,6 +1620,7 @@ test "migrateLegacyHooks rewrites recognized legacy configs at startup" {
     try t.expect(std.mem.indexOf(u8, claude_after, "petdex-hook") != null);
     const codex_after = readFileAlloc(t.allocator, codex, 64 * 1024).?;
     defer t.allocator.free(codex_after);
+    try t.expect(std.mem.indexOf(u8, codex_after, "petdex-hook-state") == null);
     try t.expect(std.mem.indexOf(u8, codex_after, "update-token") == null);
     try t.expect(std.mem.indexOf(u8, codex_after, "petdex-hook") != null);
     const gemini_after = readFileAlloc(t.allocator, gemini, 64 * 1024).?;
@@ -1665,6 +1669,25 @@ test "legacy curl migration requires the complete Petdex command signature" {
     try t.expectEqual(ManagedHookGeneration.legacy, commandGeneration(command));
     try t.expectEqual(ManagedHookGeneration.none, commandGeneration("curl -H \"X-Petdex-Update-Token: $T\" http://127.0.0.1:7777/state"));
     try t.expectEqual(ManagedHookGeneration.none, commandGeneration("cat $HOME/.petdex/runtime/update-token; curl http://127.0.0.1:7777/other -H \"X-Petdex-Update-Token: $T\""));
+}
+
+test "legacy state wrapper is recognized by its exact Petdex path" {
+    try t.expectEqual(
+        ManagedHookGeneration.legacy,
+        commandGeneration("exec \"$HOME/.petdex/bin/petdex-hook-state\" jumping codex 800 >/dev/null 2>&1"),
+    );
+    try t.expectEqual(
+        ManagedHookGeneration.legacy,
+        commandGeneration("exec \"${HOME}/.petdex/bin/petdex-hook-state\" running claude-code"),
+    );
+    try t.expectEqual(
+        ManagedHookGeneration.none,
+        commandGeneration("exec \"$HOME/.petdex/bin/petdex-hook-state-custom\" running codex"),
+    );
+    try t.expectEqual(
+        ManagedHookGeneration.none,
+        commandGeneration("exec /tmp/.petdex/bin/petdex-hook-state running codex"),
+    );
 }
 
 test "command path detection requires both boundaries" {
