@@ -341,14 +341,11 @@ const terminal_focus_script =
     \\on run argv
     \\  set targetTTY to item 1 of argv
     \\  tell application "Terminal"
-    \\    set allTabs to every tab of every window
-    \\    set windowIndex to 0
-    \\    repeat with tabsInWindow in allTabs
-    \\      set windowIndex to windowIndex + 1
-    \\      repeat with targetTab in tabsInWindow
+    \\    repeat with targetWindow in every window
+    \\      repeat with targetTab in tabs of targetWindow
     \\        if (tty of targetTab) is targetTTY then
     \\          set selected of targetTab to true
-    \\          set frontmost of window windowIndex to true
+    \\          set index of targetWindow to 1
     \\          activate
     \\          return
     \\        end if
