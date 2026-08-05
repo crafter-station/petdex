@@ -44,7 +44,7 @@ const default_pet_slug = "boba";
 
 const app_permissions = [_][]const u8{ native_sdk.security.permission_command, native_sdk.security.permission_view };
 const shell_views = [_]native_sdk.ShellView{
-    .{ .label = canvas_label, .kind = .gpu_surface, .fill = true, .role = "Pet canvas", .accessibility_label = "Petdex pet", .gpu_backend = .metal, .gpu_pixel_format = .bgra8_unorm, .gpu_present_mode = .timer, .gpu_alpha_mode = .@"opaque", .gpu_color_space = .srgb, .gpu_vsync = true },
+    .{ .label = canvas_label, .kind = .gpu_surface, .fill = true, .role = "Pet canvas", .accessibility_label = "Petdex pet", .gpu_backend = .metal, .gpu_pixel_format = .bgra8_unorm, .gpu_present_mode = .timer, .gpu_alpha_mode = .premultiplied, .gpu_color_space = .srgb, .gpu_vsync = true },
 };
 const shell_windows = [_]native_sdk.ShellWindow{.{
     .label = "main",
@@ -3584,6 +3584,13 @@ test "every agent gets its own cell in the icon strip" {
     const atlas_w = agent_hooks.agent_count * agent_icon_px;
     try std.testing.expect(atlas_w * agent_icon_px * 4 <= 1024 * 1024);
     try std.testing.expect(atlas_w <= 512 * 512);
+}
+
+test "pet canvas preserves transparent pixels" {
+    // The pet window is transparent and its atlas has transparent padding.
+    // An opaque GPU surface paints that padding as a rectangle on the desktop.
+    try std.testing.expectEqualStrings("premultiplied", @tagName(shell_views[0].gpu_alpha_mode.?));
+    try std.testing.expect(shell_windows[0].transparent);
 }
 
 test "one image slot covers every agent" {
