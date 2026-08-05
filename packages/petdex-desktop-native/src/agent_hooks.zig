@@ -1044,6 +1044,7 @@ fn inspectFeatureHooks(toml: []const u8) FeatureHooksInspection {
     var hook_is_enabled = false;
     var hook_offset: usize = 0;
     var hook_line_end: usize = 0;
+    var nested_features_seen = false;
     while (line_start <= toml.len) {
         const relative_end = std.mem.indexOfScalar(u8, toml[line_start..], '\n');
         const line_end = if (relative_end) |end| line_start + end else toml.len;
@@ -1051,11 +1052,21 @@ fn inspectFeatureHooks(toml: []const u8) FeatureHooksInspection {
         const trimmed = std.mem.trim(u8, line, " \t\r\n");
         if (trimmed.len > 0 and trimmed[0] == '[') {
             const name = sectionName(trimmed) orelse return .{ .state = .unsafe };
-            if (std.mem.startsWith(u8, name, "features.")) return .{ .state = .unsafe };
-            current_features = std.mem.eql(u8, name, "features");
+            if (std.mem.eql(u8, name, "features")) {
+                // A child table before its parent makes an insertion at the
+                // end ambiguous, so keep that layout conservative. Once the
+                // parent is known, later [features.*] tables do not change
+                // the top-level hooks key and are safe to ignore.
+                if (features_insert_offset != null or nested_features_seen) return .{ .state = .unsafe };
+                current_features = true;
+            } else if (std.mem.startsWith(u8, name, "features.")) {
+                nested_features_seen = true;
+                current_features = false;
+            } else {
+                current_features = false;
+            }
             at_root = false;
             if (current_features) {
-                if (features_insert_offset != null) return .{ .state = .unsafe };
                 features_insert_offset = if (relative_end == null) line_end else line_end + 1;
             }
         } else if (at_root and isFeaturesNamespaceAssignment(trimmed)) {
@@ -1086,6 +1097,7 @@ fn inspectFeatureHooks(toml: []const u8) FeatureHooksInspection {
             .{ .state = .replace_line, .offset = hook_offset, .line_end = hook_line_end };
     }
     if (features_insert_offset) |offset| return .{ .state = .insert_after_features, .offset = offset };
+    if (nested_features_seen) return .{ .state = .unsafe };
     return .{ .state = .append_features };
 }
 
@@ -1878,6 +1890,9 @@ test "Windows upgrades the old POSIX runner instead of treating it as current" {
 
 test "codex feature inspection is section-aware and conservative" {
     try t.expectEqual(FeatureHooksState.enabled, inspectFeatureHooks("[features]\nhooks = true # keep\n").state);
+    try t.expectEqual(FeatureHooksState.enabled, inspectFeatureHooks("[features]\nhooks = true\n[features.multi_agent_v2]\nenabled = true\n").state);
+    try t.expectEqual(FeatureHooksState.replace_line, inspectFeatureHooks("[features]\nhooks = false\n[features.multi_agent_v2]\nenabled = true\n").state);
+    try t.expectEqual(FeatureHooksState.insert_after_features, inspectFeatureHooks("[features]\nmemories = true\n[features.multi_agent_v2]\nenabled = true\n").state);
     try t.expectEqual(FeatureHooksState.replace_line, inspectFeatureHooks("[features]\nhooks = false\n").state);
     try t.expectEqual(FeatureHooksState.insert_after_features, inspectFeatureHooks("[features]\nmemories = true\n").state);
     try t.expectEqual(FeatureHooksState.append_features, inspectFeatureHooks("[other]\nhooks = true\n").state);
