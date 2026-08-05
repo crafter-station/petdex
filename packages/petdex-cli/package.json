@@ -1,7 +1,21 @@
 {
   "name": "petdex",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "CLI for Petdex. Install, browse, and submit Codex pets from your terminal.",
+  "keywords": [
+    "petdex",
+    "codex",
+    "openai-codex",
+    "pets",
+    "pet",
+    "mascot",
+    "cli",
+    "terminal",
+    "animated",
+    "pixel-art",
+    "developer-tools",
+    "fun"
+  ],
   "homepage": "https://petdex.dev",
   "repository": {
     "type": "git",
@@ -18,7 +32,9 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "AGENTS.md",
+    "CLAUDE.md"
   ],
   "scripts": {
     "build": "bun build ./bin/petdex.ts --target=node --outfile=./dist/petdex.js --minify --external @napi-rs/keyring",

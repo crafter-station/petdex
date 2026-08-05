@@ -48,9 +48,22 @@ pub const Bubble = struct {
     title_len: usize = 0,
     agent: [24]u8 = @splat(0),
     agent_len: usize = 0,
+    /// Which conversation this bubble belongs to. Empty is the sentinel
+    /// key an agent without a session_id lands on (older CLI, the MCP
+    /// path), which is what keeps single-bubble behaviour identical.
+    session: [64]u8 = @splat(0),
+    session_len: usize = 0,
     busy: bool = false,
     counter: u64 = 0,
+
+    pub fn sessionSlice(self: *const Bubble) []const u8 {
+        return self.session[0..self.session_len];
+    }
 };
+
+/// How many conversations can narrate at once. Fixed because the
+/// mailbox holds them inline: no allocator runs on the hook hot path.
+pub const max_bubbles = 8;
 
 /// Shared mailbox between the server thread (producer) and the app's
 /// poll timer (consumer). Everything behind one mutex; operations are
@@ -72,8 +85,15 @@ pub const Mailbox = struct {
     pending: [max_pending]StateEvent = @splat(.{}),
     pending_len: usize = 0,
     last_enqueued: StateEvent = .{},
-    bubble: Bubble = .{},
-    bubble_dirty: bool = false,
+    /// One live bubble per conversation, keyed by session id. Slots
+    /// below bubbles_len are occupied; the array is compacted on evict
+    /// so the consumer copies a dense prefix.
+    bubbles: [max_bubbles]Bubble = @splat(.{}),
+    bubbles_len: usize = 0,
+    bubbles_dirty: bool = false,
+    /// Monotonic across every session, so a bubble's counter doubles as
+    /// its LRU stamp: the smallest one is the least recently updated.
+    bubble_counter: u64 = 0,
     state_counter: u64 = 0,
 
     pub const EnqueueResult = struct {
@@ -118,31 +138,86 @@ pub const Mailbox = struct {
         return head;
     }
 
-    pub fn setBubble(self: *Mailbox, text: []const u8, agent: []const u8, title: []const u8, busy: bool) u64 {
+    /// Update the bubble for `session`, or open a slot for it. A repeat
+    /// session overwrites its own entry in place, which is what keeps
+    /// two conversations from stepping on each other. When the set is
+    /// full the least recently updated entry is evicted: an abandoned
+    /// session must not hold a slot against a live one.
+    pub fn setBubble(self: *Mailbox, session: []const u8, text: []const u8, agent: []const u8, title: []const u8, busy: bool) u64 {
         self.mutex.lock();
         defer self.mutex.unlock();
-        const n = @min(text.len, self.bubble.text.len);
-        @memcpy(self.bubble.text[0..n], text[0..n]);
-        self.bubble.text_len = n;
-        const an = @min(agent.len, self.bubble.agent.len);
-        @memcpy(self.bubble.agent[0..an], agent[0..an]);
-        self.bubble.agent_len = an;
-        const tn = @min(title.len, self.bubble.title.len);
-        @memcpy(self.bubble.title[0..tn], title[0..tn]);
-        self.bubble.title_len = tn;
-        self.bubble.busy = busy;
-        self.bubble.counter += 1;
-        self.bubble_dirty = true;
-        return self.bubble.counter;
+
+        const slot = blk: {
+            for (self.bubbles[0..self.bubbles_len]) |*b| {
+                if (std.mem.eql(u8, b.sessionSlice(), session)) break :blk b;
+            }
+            if (self.bubbles_len < max_bubbles) {
+                const b = &self.bubbles[self.bubbles_len];
+                self.bubbles_len += 1;
+                break :blk b;
+            }
+            var oldest = &self.bubbles[0];
+            for (self.bubbles[1..self.bubbles_len]) |*b| {
+                if (b.counter < oldest.counter) oldest = b;
+            }
+            break :blk oldest;
+        };
+
+        slot.* = .{};
+        const sn = @min(session.len, slot.session.len);
+        @memcpy(slot.session[0..sn], session[0..sn]);
+        slot.session_len = sn;
+        const n = @min(text.len, slot.text.len);
+        @memcpy(slot.text[0..n], text[0..n]);
+        slot.text_len = n;
+        const an = @min(agent.len, slot.agent.len);
+        @memcpy(slot.agent[0..an], agent[0..an]);
+        slot.agent_len = an;
+        const tn = @min(title.len, slot.title.len);
+        @memcpy(slot.title[0..tn], title[0..tn]);
+        slot.title_len = tn;
+        slot.busy = busy;
+
+        self.bubble_counter += 1;
+        slot.counter = self.bubble_counter;
+        self.bubbles_dirty = true;
+        return slot.counter;
     }
 
-    pub fn takeBubble(self: *Mailbox, out: *Bubble) bool {
+    /// Drain the whole set into `out`, returning how many slots landed.
+    /// All-or-nothing rather than per-bubble: the consumer re-renders
+    /// the stack as a unit, so a partial copy has no meaning.
+    pub fn takeBubbles(self: *Mailbox, out: *[max_bubbles]Bubble) ?usize {
         self.mutex.lock();
         defer self.mutex.unlock();
-        if (!self.bubble_dirty) return false;
-        out.* = self.bubble;
-        self.bubble_dirty = false;
-        return true;
+        if (!self.bubbles_dirty) return null;
+        @memcpy(out[0..self.bubbles_len], self.bubbles[0..self.bubbles_len]);
+        self.bubbles_dirty = false;
+        return self.bubbles_len;
+    }
+
+    /// Drop a session's bubble once the app decides it has expired, so
+    /// the slot is free for the next conversation. No dirty flag: the
+    /// consumer already knows, it asked for this.
+    pub fn dropBubble(self: *Mailbox, session: []const u8) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        for (self.bubbles[0..self.bubbles_len], 0..) |*b, i| {
+            if (!std.mem.eql(u8, b.sessionSlice(), session)) continue;
+            const last = self.bubbles_len - 1;
+            if (i != last) self.bubbles[i] = self.bubbles[last];
+            self.bubbles[last] = .{};
+            self.bubbles_len = last;
+            return;
+        }
+    }
+
+    pub fn clearBubbles(self: *Mailbox) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        self.bubbles = @splat(.{});
+        self.bubbles_len = 0;
+        self.bubbles_dirty = false;
     }
 };
 
@@ -410,7 +485,11 @@ fn route(server: *Server, conn: *Conn, method: []const u8, path: []const u8, hea
         const agent = jsonString(body, "agent_source") orelse "";
         const title = jsonString(body, "title") orelse "";
         const busy = std.mem.indexOf(u8, body, "\"busy\":true") != null;
-        const counter = mailbox.setBubble(capped, agent[0..@min(agent.len, 24)], title[0..@min(title.len, 96)], busy);
+        // No session_id means an agent that predates per-conversation
+        // bubbles (or the MCP path, which has no session): the empty key
+        // is one shared slot, so those callers keep the old behaviour.
+        const session = jsonString(body, "session_id") orelse "";
+        const counter = mailbox.setBubble(session[0..@min(session.len, 64)], capped, agent[0..@min(agent.len, 24)], title[0..@min(title.len, 96)], busy);
         mirrorBubble(server, capped, counter, title[0..@min(title.len, 96)], agent[0..@min(agent.len, 24)], busy) catch {};
         const out = std.fmt.bufPrint(&scratch, "{{\"ok\":true,\"counter\":{d}}}", .{counter}) catch return;
         return respond(conn, 200, out);
@@ -534,6 +613,90 @@ fn jsonString(body: []const u8, key: []const u8) ?[]const u8 {
     }
     if (!closed) return null;
     return body[val_start..i];
+}
+
+test "two sessions hold two bubbles and neither overwrites the other" {
+    var mb: Mailbox = .{};
+    _ = mb.setBubble("alpha", "reading main.zig", "claude-code", "Fix the tail", true);
+    _ = mb.setBubble("beta", "running tests", "codex", "Ship it", true);
+
+    var out: [max_bubbles]Bubble = @splat(.{});
+    try std.testing.expectEqual(@as(?usize, 2), mb.takeBubbles(&out));
+    try std.testing.expectEqualStrings("reading main.zig", out[0].text[0..out[0].text_len]);
+    try std.testing.expectEqualStrings("running tests", out[1].text[0..out[1].text_len]);
+
+    // Updating alpha must leave beta exactly as it was, including its
+    // counter: that is the acceptance criterion the single slot broke.
+    const beta_counter = out[1].counter;
+    _ = mb.setBubble("alpha", "done", "claude-code", "Fix the tail", false);
+    try std.testing.expectEqual(@as(?usize, 2), mb.takeBubbles(&out));
+    try std.testing.expectEqualStrings("done", out[0].text[0..out[0].text_len]);
+    try std.testing.expect(!out[0].busy);
+    try std.testing.expectEqualStrings("running tests", out[1].text[0..out[1].text_len]);
+    try std.testing.expect(out[1].busy);
+    try std.testing.expectEqual(beta_counter, out[1].counter);
+}
+
+test "a sessionless agent keeps the single shared slot" {
+    var mb: Mailbox = .{};
+    _ = mb.setBubble("", "first", "codex", "", true);
+    _ = mb.setBubble("", "second", "codex", "", false);
+
+    var out: [max_bubbles]Bubble = @splat(.{});
+    try std.testing.expectEqual(@as(?usize, 1), mb.takeBubbles(&out));
+    try std.testing.expectEqualStrings("second", out[0].text[0..out[0].text_len]);
+}
+
+test "a full set evicts the least recently updated session" {
+    var mb: Mailbox = .{};
+    var key: [max_bubbles][2]u8 = undefined;
+    for (0..max_bubbles) |i| {
+        key[i] = .{ 's', '0' + @as(u8, @intCast(i)) };
+        _ = mb.setBubble(&key[i], "hello", "codex", "", true);
+    }
+    // s0 is the oldest by counter, so touching s1 must make s0 the one
+    // that loses its slot to the newcomer.
+    _ = mb.setBubble(&key[1], "still here", "codex", "", true);
+    _ = mb.setBubble("newcomer", "just arrived", "codex", "", true);
+
+    var out: [max_bubbles]Bubble = @splat(.{});
+    try std.testing.expectEqual(@as(?usize, max_bubbles), mb.takeBubbles(&out));
+    var saw_s0 = false;
+    var saw_new = false;
+    for (out[0..max_bubbles]) |b| {
+        if (std.mem.eql(u8, b.sessionSlice(), "s0")) saw_s0 = true;
+        if (std.mem.eql(u8, b.sessionSlice(), "newcomer")) saw_new = true;
+    }
+    try std.testing.expect(!saw_s0);
+    try std.testing.expect(saw_new);
+}
+
+test "takeBubbles only reports a set that changed" {
+    var mb: Mailbox = .{};
+    var out: [max_bubbles]Bubble = @splat(.{});
+    try std.testing.expectEqual(@as(?usize, null), mb.takeBubbles(&out));
+    _ = mb.setBubble("alpha", "hello", "codex", "", true);
+    try std.testing.expectEqual(@as(?usize, 1), mb.takeBubbles(&out));
+    try std.testing.expectEqual(@as(?usize, null), mb.takeBubbles(&out));
+}
+
+test "dropping a session frees its slot and keeps the rest dense" {
+    var mb: Mailbox = .{};
+    _ = mb.setBubble("alpha", "a", "codex", "", true);
+    _ = mb.setBubble("beta", "b", "codex", "", true);
+    _ = mb.setBubble("gamma", "c", "codex", "", true);
+    mb.dropBubble("beta");
+
+    var out: [max_bubbles]Bubble = @splat(.{});
+    try std.testing.expectEqual(@as(?usize, 2), mb.takeBubbles(&out));
+    for (out[0..2]) |b| {
+        try std.testing.expect(!std.mem.eql(u8, b.sessionSlice(), "beta"));
+        try std.testing.expect(b.text_len > 0);
+    }
+    mb.dropBubble("nobody");
+    _ = mb.takeBubbles(&out);
+    mb.clearBubbles();
+    try std.testing.expectEqual(@as(?usize, null), mb.takeBubbles(&out));
 }
 
 test "json string scanner preserves escaped multiline content" {

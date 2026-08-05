@@ -6,6 +6,8 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { Loader2, Pencil, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 
+import { PET_ASSET_MAX_BYTES } from "@/lib/upload-limits";
+
 type Pending = {
   displayName: string | null;
   description: string | null;
@@ -46,7 +48,7 @@ function readImageDims(file: File): Promise<{ width: number; height: number }> {
   });
 }
 
-const MAX_SPRITE_BYTES = 2 * 1024 * 1024;
+const MAX_SPRITE_BYTES = PET_ASSET_MAX_BYTES;
 const MAX_SPRITE_DIM = 4096;
 
 export function OwnerEditPanel({

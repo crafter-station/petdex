@@ -345,6 +345,19 @@ pub fn settingsView(ui: *AppUi, model: *const Model, icons: IconAtlas, thumbs: T
         ui.el(.panel, .{ .style_tokens = .{ .background = .surface, .radius = .md } }, .{
             ui.row(.{ .padding = 12, .cross = .center, .gap = 12 }, .{
                 ui.column(.{ .grow = 1 }, .{
+                    ui.text(.{}, "One bubble per conversation"),
+                    ui.text(.{ .size = .sm, .style_tokens = .{ .foreground = .text_muted } }, "Stack a card per agent; off shows one bubble at a time"),
+                }),
+                ui.el(.switch_control, .{
+                    .selected = model.bubbles_per_conversation,
+                    .on_toggle = .toggle_bubbles_per_conversation,
+                    .semantics = .{ .label = "One bubble per conversation" },
+                }, .{}),
+            }),
+        }),
+        ui.el(.panel, .{ .style_tokens = .{ .background = .surface, .radius = .md } }, .{
+            ui.row(.{ .padding = 12, .cross = .center, .gap = 12 }, .{
+                ui.column(.{ .grow = 1 }, .{
                     ui.text(.{}, "Bubble lifetime"),
                     ui.text(.{ .size = .sm, .style_tokens = .{ .foreground = .text_muted } }, "0 keeps bubbles visible; 1–60 seconds enables expiry"),
                 }),

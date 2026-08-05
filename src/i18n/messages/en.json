@@ -740,7 +740,7 @@
       "spritesheetHelp": "Replaces the current sprite. Goes to manual review.",
       "metaLabel": "Metadata (pet.json)",
       "metaHelp": "Replaces the current metadata. Goes to manual review.",
-      "fileTooBig": "File exceeds 2 MB",
+      "fileTooBig": "File exceeds 8 MB",
       "invalidImage": "Invalid image file",
       "invalidJson": "Invalid JSON file",
       "autoApproved": "Edit applied",

@@ -918,7 +918,7 @@
       "spritesheetHelp": "替换当前精灵图集 Spritesheet。需要人工审核。",
       "metaLabel": "元数据 pet.json",
       "metaHelp": "替换当前元数据。需要人工审核。",
-      "fileTooBig": "文件超过 2 MB",
+      "fileTooBig": "文件超过 8 MB",
       "invalidImage": "无效的图片文件",
       "invalidJson": "无效的 JSON 文件",
       "autoApproved": "编辑已应用",

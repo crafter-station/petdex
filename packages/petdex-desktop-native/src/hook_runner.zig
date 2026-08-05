@@ -97,10 +97,7 @@ pub fn run(phase: []const u8, arg_agent: ?[]const u8, home: []const u8) void {
     var post_count: usize = 0;
     var body_buf: [1024]u8 = undefined;
     if (text.len > 0) {
-        const body = if (title.len > 0)
-            std.fmt.bufPrint(&body_buf, "{{\"text\":\"{s}\",\"title\":\"{s}\",\"busy\":{},\"agent_source\":\"{s}\"}}", .{ text, title, busy, agent }) catch null
-        else
-            std.fmt.bufPrint(&body_buf, "{{\"text\":\"{s}\",\"busy\":{},\"agent_source\":\"{s}\"}}", .{ text, busy, agent }) catch null;
+        const body = bubbleBody(&body_buf, text, title, busy, agent, session_id);
         if (body) |b| {
             if (startPost("/bubble", b, token)) |post| {
                 posts[post_count] = post;
@@ -131,6 +128,33 @@ fn isStopPhase(phase: []const u8) bool {
 
 fn isToolFailurePhase(phase: []const u8) bool {
     return std.mem.eql(u8, phase, "tool-failure");
+}
+
+/// The /bubble request body, extracted and pure for the same reason stateBody
+/// is: `run()` reaches stdin, the token file and a socket, so a body built
+/// inline there cannot be reached from `zig test`.
+///
+/// `session_id` is what lets the desktop hold one bubble per conversation
+/// instead of one globally. Omitted rather than sent empty when absent, so a
+/// payload without a session keeps landing on the server's single-bubble key
+/// and renders exactly what shipped before per-conversation bubbles.
+///
+/// Title and session are optional fragments in ONE format string rather than a
+/// separate string per combination: the two divergent bodies this replaces are
+/// precisely how session_id got parsed, used for titles, and then left out of
+/// the POST that needed it.
+pub fn bubbleBody(out: []u8, text: []const u8, title: []const u8, busy: bool, agent: []const u8, session_id: ?[]const u8) ?[]const u8 {
+    var title_buf: [256]u8 = undefined;
+    const title_part: []const u8 = if (title.len > 0)
+        (std.fmt.bufPrint(&title_buf, ",\"title\":\"{s}\"", .{title}) catch return null)
+    else
+        "";
+    var session_buf: [96]u8 = undefined;
+    const session_part: []const u8 = if (session_id) |sid|
+        (std.fmt.bufPrint(&session_buf, ",\"session_id\":\"{s}\"", .{sid}) catch return null)
+    else
+        "";
+    return std.fmt.bufPrint(out, "{{\"text\":\"{s}\"{s},\"busy\":{},\"agent_source\":\"{s}\"{s}}}", .{ text, title_part, busy, agent, session_part }) catch null;
 }
 
 /// The /state request body. Extracted and pure for one reason: `run()` reaches
@@ -688,6 +712,68 @@ test "stateBody adds duration only for the failure phase" {
         "{\"state\":\"waving\",\"agent_source\":\"codex\"}",
         stateBody(&buf, "waving", 0, "codex").?,
     );
+}
+
+test "bubbleBody carries session_id, and omits it when there is none" {
+    var buf: [512]u8 = undefined;
+    // The bug this pins: session_id was parsed and used for titles, but
+    // neither body format string emitted it, so every Claude Code session
+    // installed through the Zig runner collapsed onto one bubble slot.
+    try t.expectEqualStrings(
+        "{\"text\":\"Reading main.zig\",\"title\":\"Fix the tail\",\"busy\":true,\"agent_source\":\"claude-code\",\"session_id\":\"abc123\"}",
+        bubbleBody(&buf, "Reading main.zig", "Fix the tail", true, "claude-code", "abc123").?,
+    );
+    // Regression guard: no session means byte-identity with what shipped
+    // before per-conversation bubbles, title present or not.
+    try t.expectEqualStrings(
+        "{\"text\":\"Done.\",\"busy\":false,\"agent_source\":\"codex\"}",
+        bubbleBody(&buf, "Done.", "", false, "codex", null).?,
+    );
+    try t.expectEqualStrings(
+        "{\"text\":\"Done.\",\"title\":\"Ship it\",\"busy\":false,\"agent_source\":\"codex\"}",
+        bubbleBody(&buf, "Done.", "Ship it", false, "codex", null).?,
+    );
+    try t.expectEqualStrings(
+        "{\"text\":\"Working\",\"busy\":true,\"agent_source\":\"codex\",\"session_id\":\"s-1\"}",
+        bubbleBody(&buf, "Working", "", true, "codex", "s-1").?,
+    );
+}
+
+test "two runner sessions reach the mailbox as two bubbles" {
+    // End to end over the real parser and the real mailbox: this is the
+    // acceptance criterion of #657 on the path the default install uses,
+    // which the TS CLI fix alone never covered.
+    hook_server.mailbox.clearBubbles();
+
+    var buf_a: [512]u8 = undefined;
+    var buf_b: [512]u8 = undefined;
+    const body_a = bubbleBody(&buf_a, "Reading main.zig", "Fix the tail", true, "claude-code", "sess-a").?;
+    const body_b = bubbleBody(&buf_b, "Running tests", "Ship it", true, "claude-code", "sess-b").?;
+
+    for ([_][]const u8{ body_a, body_b }) |body| {
+        const text = hook_server.jsonStringPub(body, "text").?;
+        const agent = hook_server.jsonStringPub(body, "agent_source").?;
+        const title = hook_server.jsonStringPub(body, "title") orelse "";
+        const session = hook_server.jsonStringPub(body, "session_id") orelse "";
+        const busy = std.mem.indexOf(u8, body, "\"busy\":true") != null;
+        _ = hook_server.mailbox.setBubble(session, text, agent, title, busy);
+    }
+
+    var out: [hook_server.max_bubbles]hook_server.Bubble = @splat(.{});
+    try t.expectEqual(@as(?usize, 2), hook_server.mailbox.takeBubbles(&out));
+    try t.expectEqualStrings("sess-a", out[0].sessionSlice());
+    try t.expectEqualStrings("sess-b", out[1].sessionSlice());
+
+    // A payload with no session still shares the single legacy slot.
+    hook_server.mailbox.clearBubbles();
+    var buf_c: [512]u8 = undefined;
+    const legacy = bubbleBody(&buf_c, "Done.", "", false, "codex", null).?;
+    const legacy_session = hook_server.jsonStringPub(legacy, "session_id") orelse "";
+    try t.expectEqualStrings("", legacy_session);
+    _ = hook_server.mailbox.setBubble(legacy_session, "Done.", "codex", "", false);
+    _ = hook_server.mailbox.setBubble(legacy_session, "Again.", "codex", "", false);
+    try t.expectEqual(@as(?usize, 1), hook_server.mailbox.takeBubbles(&out));
+    hook_server.mailbox.clearBubbles();
 }
 
 test "tool-failure bubble survives the hook server reader round trip" {

@@ -39,9 +39,10 @@ import {
   SUBMISSION_SIMILARITY_VISUAL_THRESHOLD,
   SUBMISSION_STRONG_SEMANTIC_CORROBORATION_THRESHOLD,
 } from "@/lib/submission-similarity";
+import { PET_ASSET_MAX_BYTES } from "@/lib/upload-limits";
 import { isAllowedAssetUrl } from "@/lib/url-allowlist";
 
-const MAX_ASSET_BYTES = 8 * 1024 * 1024;
+const MAX_ASSET_BYTES = PET_ASSET_MAX_BYTES;
 const MAX_ZIP_ENTRIES = 80;
 const MAX_ZIP_PET_JSON_SCAN_ENTRIES = 16;
 const MAX_ZIP_PET_JSON_TOTAL_BYTES = MAX_ASSET_BYTES;
