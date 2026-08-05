@@ -291,6 +291,42 @@ pub fn replaceSymlink(target: []const u8, link: []const u8) bool {
     return true;
 }
 
+/// Build the Windows launcher that keeps the hook path stable across app
+/// updates without requiring symbolic-link privileges. Percent signs in the
+/// target are doubled because cmd.exe expands them in batch files.
+pub fn windowsHookLauncher(buf: []u8, target: []const u8) ?[]const u8 {
+    const prefix = "@echo off\r\n\"";
+    const suffix = "\" %*\r\n";
+    if (buf.len < prefix.len + suffix.len) return null;
+
+    var at: usize = 0;
+    @memcpy(buf[at .. at + prefix.len], prefix);
+    at += prefix.len;
+    for (target) |byte| {
+        if (byte == '%') {
+            if (at + 2 > buf.len - suffix.len) return null;
+            buf[at] = '%';
+            at += 1;
+        }
+        if (at + 1 > buf.len - suffix.len) return null;
+        buf[at] = byte;
+        at += 1;
+    }
+    if (at + suffix.len > buf.len) return null;
+    @memcpy(buf[at .. at + suffix.len], suffix);
+    at += suffix.len;
+    return buf[0..at];
+}
+
+test "Windows hook launcher forwards stdin and arguments" {
+    var buf: [256]u8 = undefined;
+    const launcher = windowsHookLauncher(&buf, "C:\\Program Files\\Petdex\\petdex%dev.exe").?;
+    try std.testing.expectEqualStrings(
+        "@echo off\r\n\"C:\\Program Files\\Petdex\\petdex%%dev.exe\" %*\r\n",
+        launcher,
+    );
+}
+
 /// Own pid, for the /whoami endpoint. std has no portable accessor in
 /// 0.16, so this is the one genuine per-platform branch in this file.
 ///

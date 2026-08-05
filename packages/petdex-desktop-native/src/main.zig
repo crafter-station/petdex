@@ -3368,10 +3368,10 @@ fn petdexWindowView(ui: *PetdexApp.Ui, model: *const Model, window_label: []cons
 
 
 
-/// Keep `~/.petdex/bin/petdex-hook` pointing at the running binary so
-/// agent hooks survive app updates: the hooks reference the stable
-/// symlink, the app re-aims it every boot.
-fn refreshHookSymlink(argv0: []const u8) void {
+/// Keep the stable hook entry pointing at the running binary so agent hooks
+/// survive app updates. Unix uses a symlink; Windows uses a regular .cmd
+/// launcher because ordinary users cannot create symlinks reliably.
+fn refreshHookEntry(argv0: []const u8) void {
     _ = argv0;
     const home = env_home orelse return;
     var self_buf: [1024]u8 = undefined;
@@ -3381,7 +3381,18 @@ fn refreshHookSymlink(argv0: []const u8) void {
     plat.makeDir(bin);
     var link_buf: [512]u8 = undefined;
     const link = std.fmt.bufPrint(&link_buf, "{s}/.petdex/bin/petdex-hook", .{home}) catch return;
-    _ = plat.replaceSymlink(rp, link);
+    if (builtin.os.tag == .windows) {
+        var launcher_path_buf: [512]u8 = undefined;
+        const launcher_path = std.fmt.bufPrint(&launcher_path_buf, "{s}.cmd", .{link}) catch return;
+        var launcher_buf: [1536]u8 = undefined;
+        const launcher = plat.windowsHookLauncher(&launcher_buf, rp) orelse return;
+        _ = plat.writeFile(launcher_path, launcher);
+        // Remove a stale link/file from pre-launcher builds. The .cmd entry is
+        // the only path used by new configurations.
+        plat.deleteFile(link);
+    } else {
+        _ = plat.replaceSymlink(rp, link);
+    }
 }
 
 // -------------------------------------------------------------------- app
@@ -3480,7 +3491,7 @@ pub fn main(init: std.process.Init) !void {
             return;
         }
     }
-    if (argv0) |a0| refreshHookSymlink(a0);
+    if (argv0) |a0| refreshHookEntry(a0);
     materializeTrayIcon();
     env_wanted_pet = init.environ_map.get("PETDEX_PET");
     boot_io = init.io;
