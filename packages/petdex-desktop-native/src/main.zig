@@ -55,6 +55,7 @@ const shell_windows = [_]native_sdk.ShellWindow{.{
     .restore_state = false,
     .titlebar = .chromeless,
     .floating = true,
+    .fullscreen_overlay = true,
     .transparent = true,
     .views = &shell_views,
 }};
@@ -1541,7 +1542,7 @@ pub fn boot(model: *Model, fx: *Effects) void {
     // host's runloop spins up; a Regular-policy Dock icon may blink in
     // for the first frames of a hidden-dock boot, which beats holding
     // the setting hostage to an SDK boot hook that does not exist yet.
-    plat.setDockIconHidden(model.hide_dock, true);
+    plat.setDockIconHidden(model.hide_dock);
     if (env_home) |home| model.agents = agent_hooks.scan(boot_allocator, home);
 
     // First point where the platform codec is reachable: `init_fx` runs
@@ -1866,7 +1867,7 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
         },
         .toggle_hide_dock => {
             model.hide_dock = !model.hide_dock;
-            plat.setDockIconHidden(model.hide_dock, true);
+            plat.setDockIconHidden(model.hide_dock);
             saveSettings(model);
         },
         .toggle_launch_at_login => {
@@ -2791,7 +2792,11 @@ fn updateBubbleStack(model: *Model, cursor_x: f64, cursor_y: f64, now_ms: i64, f
 /// stack is empty.
 fn newestBubble(model: *const Model) ?*const hook_server.Bubble {
     if (model.bubbles_len == 0) return null;
-    return &model.bubbles[model.bubbles_len - 1];
+    var newest = &model.bubbles[0];
+    for (model.bubbles[1..model.bubbles_len]) |*bubble| {
+        if (bubble.counter > newest.counter) newest = bubble;
+    }
+    return newest;
 }
 
 fn clearBubble(model: *Model) void {
@@ -4574,6 +4579,15 @@ test "two conversations stack and grow the window vertically" {
     // budget, they do not sit side by side.
     try std.testing.expectEqual(one_wide, bubbleWindowWidth(&model));
     try std.testing.expectEqualStrings("beta", newestBubble(&model).?.sessionSlice());
+}
+
+test "newest bubble follows counter rather than array position" {
+    var model: Model = .{};
+    testPushBubble(&model, "older", "older text", true, -1);
+    testPushBubble(&model, "newer", "newer text", true, -1);
+    model.bubbles[0].counter = 9;
+    model.bubbles[1].counter = 4;
+    try std.testing.expectEqualStrings("older", newestBubble(&model).?.sessionSlice());
 }
 
 test "an empty stack still reserves one card of window height" {

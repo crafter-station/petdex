@@ -462,12 +462,9 @@ const AppleApp = if (builtin.os.tag == .macos) struct {
 /// `.accessory` vs `.regular`). Windows still open and focus in
 /// accessory mode; the app just leaves the Dock and app switcher.
 /// No-op on other platforms.
-pub fn setDockIconHidden(hidden: bool, fullscreen_overlay: bool) void {
+pub fn setDockIconHidden(hidden: bool) void {
     if (builtin.os.tag != .macos) return;
-    // A fullscreen companion must remain accessory even when the user
-    // leaves Hide Dock icon disabled. This keeps the SDK's launch policy
-    // and the runtime toggle from fighting each other.
-    const ctx: ?*anyopaque = if (hidden or fullscreen_overlay) @ptrFromInt(1) else null;
+    const ctx: ?*anyopaque = if (hidden) @ptrFromInt(1) else null;
     AppleApp.dispatch_async_f(&AppleApp._dispatch_main_q, ctx, AppleApp.applyPolicy);
 }
 
