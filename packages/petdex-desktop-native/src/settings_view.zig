@@ -32,6 +32,7 @@ const catalog = &catalog_mod.catalog;
 const catalog_len = &catalog_mod.catalog_len;
 const max_catalog = catalog_mod.max_catalog;
 const agent_hooks = @import("agent_hooks.zig");
+const settingsBackground = app.settingsBackground;
 
 /// Where the agent logos are, handed in so this file does not reach into
 /// main.zig's registration state.
@@ -233,7 +234,7 @@ pub fn settingsView(ui: *AppUi, model: *const Model, icons: IconAtlas, thumbs: T
     // One scrollable page: the root scroll takes the window frame and
     // everything - full pet catalog included - flows inside it. No
     // more per-section band budgets.
-    return ui.scroll(.{ .grow = 1 }, .{ui.column(.{ .padding = 16, .gap = 12 }, .{
+    var page = ui.scroll(.{ .grow = 1 }, .{ui.column(.{ .padding = 16, .gap = 12 }, .{
         ui.text(.{ .size = .lg }, "Pets"),
         installBanner(ui, model),
         ui.el(.search_field, .{
@@ -445,4 +446,6 @@ pub fn settingsView(ui: *AppUi, model: *const Model, icons: IconAtlas, thumbs: T
         // of the scroll extent, so the last card needs explicit air.
         ui.el(.stack, .{ .height = 8 }, .{}),
     })});
+    page.widget.style.background = settingsBackground(model);
+    return page;
 }

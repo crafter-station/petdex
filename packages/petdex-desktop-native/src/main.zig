@@ -44,7 +44,7 @@ const default_pet_slug = "boba";
 
 const app_permissions = [_][]const u8{ native_sdk.security.permission_command, native_sdk.security.permission_view };
 const shell_views = [_]native_sdk.ShellView{
-    .{ .label = canvas_label, .kind = .gpu_surface, .fill = true, .role = "Pet canvas", .accessibility_label = "Petdex pet", .gpu_backend = .metal, .gpu_pixel_format = .bgra8_unorm, .gpu_present_mode = .timer, .gpu_alpha_mode = .@"opaque", .gpu_color_space = .srgb, .gpu_vsync = true },
+    .{ .label = canvas_label, .kind = .gpu_surface, .fill = true, .role = "Pet canvas", .accessibility_label = "Petdex pet", .gpu_backend = .metal, .gpu_pixel_format = .bgra8_unorm, .gpu_present_mode = .timer, .gpu_alpha_mode = .premultiplied, .gpu_color_space = .srgb, .gpu_vsync = true },
 };
 const shell_windows = [_]native_sdk.ShellWindow{.{
     .label = "main",
@@ -281,7 +281,7 @@ pub const Model = struct {
 /// Petdex web tokens (globals.css) translated from OKLCH: brand purple
 /// #5266ea family, cool-tinted near-white light surfaces, stone-900
 /// dark cards. High contrast keeps the stock loud register untouched.
-fn petdexTokens(model: *const Model) canvas.DesignTokens {
+fn petdexThemeTokens(model: *const Model) canvas.DesignTokens {
     const scheme: canvas.ColorScheme = if (model.dark) .dark else .light;
     var tokens = canvas.DesignTokens.theme(.{
         .color_scheme = scheme,
@@ -319,6 +319,18 @@ fn petdexTokens(model: *const Model) canvas.DesignTokens {
         c.destructive = canvas.Color.rgb8(212, 12, 26);
     }
     return tokens.withOverrides(canvas.accentOverrides(c.accent, scheme));
+}
+
+fn petdexTokens(model: *const Model) canvas.DesignTokens {
+    var tokens = petdexThemeTokens(model);
+    // Transparent pet and bubble windows must clear to zero alpha. The
+    // settings window paints its own opaque page background below.
+    tokens.colors.background = canvas.Color.rgba8(0, 0, 0, 0);
+    return tokens;
+}
+
+pub fn settingsBackground(model: *const Model) canvas.Color {
+    return petdexThemeTokens(model).colors.background;
 }
 
 fn onAppearance(appearance: native_sdk.platform.Appearance) ?Msg {
@@ -3611,6 +3623,23 @@ test "every agent gets its own cell in the icon strip" {
     const atlas_w = agent_hooks.agent_count * agent_icon_px;
     try std.testing.expect(atlas_w * agent_icon_px * 4 <= 1024 * 1024);
     try std.testing.expect(atlas_w <= 512 * 512);
+}
+
+test "transparent surfaces clear independently from settings" {
+    // The pet and bubble windows contain transparent atlas padding. Their
+    // GPU surface must preserve that alpha instead of painting a rectangle.
+    try std.testing.expectEqualStrings("premultiplied", @tagName(shell_views[0].gpu_alpha_mode.?));
+    try std.testing.expect(shell_windows[0].transparent);
+
+    var model: Model = .{};
+    const pet_background = petdexTokens(&model).colors.background;
+    const settings_background = settingsBackground(&model);
+    try std.testing.expectEqual(@as(f32, 0), pet_background.a);
+    try std.testing.expectEqual(@as(f32, 1), settings_background.a);
+
+    model.dark = false;
+    try std.testing.expectEqual(@as(f32, 0), petdexTokens(&model).colors.background.a);
+    try std.testing.expectEqual(@as(f32, 1), settingsBackground(&model).a);
 }
 
 test "one image slot covers every agent" {
