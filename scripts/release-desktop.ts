@@ -39,6 +39,7 @@ import {
   constants as fsConstants,
   mkdirSync,
   readFileSync,
+  realpathSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -64,10 +65,20 @@ const BUILD_MANIFEST_PATH = path.join(
 );
 
 type BuildManifest = {
-  format: 1;
+  format: 2;
   version: string;
   commit: string;
+  sdkCommit: string;
+  cliCommit: string;
   artifacts: Record<string, { size: number; sha256: string }>;
+};
+
+type NativeToolchain = {
+  env: Record<string, string>;
+  sdkPath: string;
+  sdkCommit: string;
+  cliPath: string;
+  cliCommit: string;
 };
 
 type Args = {
@@ -151,7 +162,101 @@ function run(
   };
 }
 
-function resolveAppleEnv(): Record<string, string> {
+function pinnedNativeSdkRef(): string {
+  const workflowPaths = [
+    path.join(REPO_ROOT, ".github", "workflows", "desktop-native-ci.yml"),
+    path.join(REPO_ROOT, ".github", "workflows", "desktop-release.yml"),
+  ];
+  const refs = workflowPaths.flatMap((workflowPath) => {
+    const source = readFileSync(workflowPath, "utf8");
+    return [...source.matchAll(/NATIVE_SDK_REF:\s*"([0-9a-f]{40})"/g)].map(
+      (match) => match[1],
+    );
+  });
+  if (refs.length !== 2 || refs.some((ref) => ref !== refs[0])) {
+    die("desktop workflows do not agree on one Native SDK commit");
+  }
+  return refs[0];
+}
+
+function resolveNativeToolchain(): NativeToolchain {
+  if (!process.env.NATIVE_CLI)
+    die("NATIVE_CLI is required (build it from the pinned Native SDK)");
+  if (!process.env.NATIVE_SDK_PATH)
+    die("NATIVE_SDK_PATH is required (use the same SDK as NATIVE_CLI)");
+
+  const cliInput = path.isAbsolute(process.env.NATIVE_CLI)
+    ? process.env.NATIVE_CLI
+    : path.resolve(process.cwd(), process.env.NATIVE_CLI);
+  const sdkInput = path.isAbsolute(process.env.NATIVE_SDK_PATH)
+    ? process.env.NATIVE_SDK_PATH
+    : path.resolve(process.cwd(), process.env.NATIVE_SDK_PATH);
+  try {
+    accessSync(cliInput, fsConstants.X_OK);
+  } catch {
+    die(`NATIVE_CLI is not executable: ${cliInput}`);
+  }
+  if (!existsSync(sdkInput) || !statSync(sdkInput).isDirectory()) {
+    die(`NATIVE_SDK_PATH is not a directory: ${sdkInput}`);
+  }
+
+  const cliPath = realpathSync(cliInput);
+  const sdkPath = realpathSync(sdkInput);
+  const relativeCli = path.relative(sdkPath, cliPath);
+  const expectedCliDir = path.join("zig-out", "bin");
+  const relativeCliDir = path.dirname(relativeCli);
+  const cliName = path.basename(relativeCli);
+  if (
+    relativeCli.startsWith("..") ||
+    path.isAbsolute(relativeCli) ||
+    relativeCliDir !== expectedCliDir ||
+    (cliName !== "native" && cliName !== "native.exe")
+  ) {
+    die("NATIVE_CLI must be zig-out/bin/native from NATIVE_SDK_PATH");
+  }
+
+  const expectedCommit = pinnedNativeSdkRef();
+  const sdkResult = spawnSync("git", ["-C", sdkPath, "rev-parse", "HEAD"], {
+    encoding: "utf8",
+  });
+  const sdkCommit = (sdkResult.stdout || "").trim();
+  if (sdkResult.status !== 0 || !/^[0-9a-f]{40}$/.test(sdkCommit)) {
+    die("unable to read the Native SDK commit");
+  }
+  if (sdkCommit !== expectedCommit) {
+    die("NATIVE_SDK_PATH is not at the commit pinned by the desktop workflows");
+  }
+
+  const cliResult = spawnSync(cliPath, ["version"], {
+    cwd: sdkPath,
+    encoding: "utf8",
+    timeout: 5000,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const cliOutput = cliResult.stdout || "";
+  const cliCommit =
+    cliOutput.match(/\bcommit\s+([0-9a-f]{7,40})\b/i)?.[1] ?? "";
+  if (
+    cliResult.status !== 0 ||
+    cliResult.signal ||
+    !/^[0-9a-f]{7,40}$/.test(cliCommit)
+  ) {
+    die("NATIVE_CLI does not report a verifiable build commit");
+  }
+  if (!sdkCommit.startsWith(cliCommit)) {
+    die("NATIVE_CLI was built from a different Native SDK commit");
+  }
+
+  return {
+    env: { NATIVE_CLI: cliPath, NATIVE_SDK_PATH: sdkPath },
+    sdkPath,
+    sdkCommit,
+    cliPath,
+    cliCommit,
+  };
+}
+
+function resolveAppleEnv(toolchain: NativeToolchain): Record<string, string> {
   // Resolve APPLE_API_KEY to absolute path. The notarytool requires
   // an absolute path; relative paths from the user's home shell
   // session won't survive the cwd change inside sign-macos.sh.
@@ -200,26 +305,7 @@ function resolveAppleEnv(): Record<string, string> {
       );
     }
   }
-  if (!process.env.NATIVE_CLI)
-    die("NATIVE_CLI is required (build it from the pinned Native SDK)");
-  if (!process.env.NATIVE_SDK_PATH)
-    die("NATIVE_SDK_PATH is required (use the same SDK as NATIVE_CLI)");
-  const nativeCli = path.isAbsolute(process.env.NATIVE_CLI)
-    ? process.env.NATIVE_CLI
-    : path.resolve(process.cwd(), process.env.NATIVE_CLI);
-  try {
-    accessSync(nativeCli, fsConstants.X_OK);
-  } catch {
-    die(`NATIVE_CLI is not executable: ${nativeCli}`);
-  }
-  const nativeSdk = path.isAbsolute(process.env.NATIVE_SDK_PATH)
-    ? process.env.NATIVE_SDK_PATH
-    : path.resolve(process.cwd(), process.env.NATIVE_SDK_PATH);
-  if (!existsSync(nativeSdk) || !statSync(nativeSdk).isDirectory()) {
-    die(`NATIVE_SDK_PATH is not a directory: ${nativeSdk}`);
-  }
-  env.NATIVE_CLI = nativeCli;
-  env.NATIVE_SDK_PATH = nativeSdk;
+  Object.assign(env, toolchain.env);
   return env;
 }
 
@@ -319,7 +405,7 @@ function sha256(filePath: string): string {
   return createHash("sha256").update(readFileSync(filePath)).digest("hex");
 }
 
-function writeBuildManifest(version: string): void {
+function writeBuildManifest(version: string, toolchain: NativeToolchain): void {
   const artifacts: BuildManifest["artifacts"] = {};
   for (const name of RELEASE_ARTIFACT_NAMES) {
     const filePath = path.join(MACOS_OUT_DIR, name);
@@ -330,15 +416,21 @@ function writeBuildManifest(version: string): void {
     };
   }
   const manifest: BuildManifest = {
-    format: 1,
+    format: 2,
     version,
     commit: gitCommit(),
+    sdkCommit: toolchain.sdkCommit,
+    cliCommit: toolchain.cliCommit,
     artifacts,
   };
   writeFileSync(BUILD_MANIFEST_PATH, `${JSON.stringify(manifest)}\n`, "utf8");
 }
 
-function buildRelease(env: Record<string, string>, version: string): void {
+function buildRelease(
+  env: Record<string, string>,
+  version: string,
+  toolchain: NativeToolchain,
+): void {
   step("Build, sign, and notarize macOS arm64 + x64");
   mkdirSync(MACOS_OUT_DIR, { recursive: true });
   for (const arch of ["arm64", "x64"]) {
@@ -351,10 +443,13 @@ function buildRelease(env: Record<string, string>, version: string): void {
       },
     );
   }
-  writeBuildManifest(version);
+  writeBuildManifest(version, toolchain);
 }
 
-function verifyArtifacts(version: string): string[] {
+function verifyArtifacts(
+  version: string,
+  toolchain: NativeToolchain,
+): string[] {
   step("Verify artifacts");
   const missing: string[] = [];
   const present: string[] = [];
@@ -387,7 +482,12 @@ function verifyArtifacts(version: string): string[] {
   } catch {
     die("build manifest is not valid JSON");
   }
-  if (manifest.format !== 1 || manifest.version !== version) {
+  if (
+    manifest.format !== 2 ||
+    manifest.version !== version ||
+    manifest.sdkCommit !== toolchain.sdkCommit ||
+    manifest.cliCommit !== toolchain.cliCommit
+  ) {
     die(`build manifest does not match requested version ${version}`);
   }
   if (manifest.commit !== gitCommit()) {
@@ -487,15 +587,16 @@ async function main() {
 
   preflightTree();
   const tag = preflightTag(args.version);
+  const toolchain = resolveNativeToolchain();
 
   if (!args.skipBuild) {
-    const env = resolveAppleEnv();
+    const env = resolveAppleEnv(toolchain);
     preflightDetachDmgVolumes();
-    buildRelease(env, args.version);
+    buildRelease(env, args.version, toolchain);
   } else {
     console.log("\n--skip-build: skipping zig build + notarize");
   }
-  const assets = verifyArtifacts(args.version);
+  const assets = verifyArtifacts(args.version, toolchain);
 
   tagAndPush(args.version, tag);
   ghRelease(tag, args.version, args.notes, assets, args.draft, args.prerelease);

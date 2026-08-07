@@ -122,7 +122,20 @@ pub fn writeFileMode(path: []const u8, bytes: []const u8, mode: u16) bool {
 }
 
 fn writeFileIo(io: std.Io, path: []const u8, bytes: []const u8, mode: ?u16) bool {
-    var atomic_file = std.Io.Dir.cwd().createFileAtomic(io, path, .{
+    // Replacing a symlink path atomically replaces the link itself. Runtime
+    // files are user-managed, and a symlink is a supported way to relocate
+    // them, so resolve an existing link before creating the replacement.
+    // A dangling link is left untouched and reported as a write failure.
+    var resolved_path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    var target_path = path;
+    if (std.Io.Dir.cwd().statFile(io, path, .{ .follow_symlinks = false })) |stat| {
+        if (stat.kind == .sym_link) {
+            const resolved_len = std.Io.Dir.cwd().realPathFile(io, path, &resolved_path_buf) catch return false;
+            target_path = resolved_path_buf[0..resolved_len];
+        }
+    } else |_| {}
+
+    var atomic_file = std.Io.Dir.cwd().createFileAtomic(io, target_path, .{
         .permissions = permissionsFromMode(mode),
         .replace = true,
     }) catch return false;

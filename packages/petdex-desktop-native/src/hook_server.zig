@@ -80,6 +80,22 @@ const SpinMutex = struct {
     }
 };
 
+/// Runtime mirrors perform filesystem I/O, so a spin lock would burn a CPU
+/// while another hook waits for an atomic replace to finish. Use the SDK's
+/// futex-backed Io mutex for that path; the mailbox/request locks remain
+/// short spin locks because they never cross an I/O boundary.
+const BlockingMutex = struct {
+    inner: std.Io.Mutex = .init,
+
+    fn lock(self: *BlockingMutex, io: std.Io) void {
+        self.inner.lockUncancelable(io);
+    }
+
+    fn unlock(self: *BlockingMutex, io: std.Io) void {
+        self.inner.unlock(io);
+    }
+};
+
 pub const Mailbox = struct {
     mutex: SpinMutex = .{},
     pending: [max_pending]StateEvent = @splat(.{}),
@@ -248,7 +264,7 @@ const Server = struct {
     runtime_dir: []const u8,
     token: [64]u8,
     request_lock: SpinMutex = .{},
-    mirror_lock: SpinMutex = .{},
+    mirror_lock: BlockingMutex = .{},
     last_state_mirror: u64 = 0,
     last_bubble_mirror: u64 = 0,
     active_connections: std.atomic.Value(u32) = .init(0),
@@ -876,7 +892,7 @@ fn parseDuration(body: []const u8) DurationResult {
 
 fn writeRuntimeFile(server: *Server, name: []const u8, bytes: []const u8, mode: u16) !void {
     plat.makeDir(server.runtime_dir);
-    var path_buf: [512]u8 = undefined;
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ server.runtime_dir, name }) catch return error.PathTooLong;
     // The 0600 on update-token is a POSIX guarantee only; on Windows
     // the file inherits the parent ACL (see plat.permissionsFromMode).
@@ -884,8 +900,11 @@ fn writeRuntimeFile(server: *Server, name: []const u8, bytes: []const u8, mode: 
 }
 
 fn mirrorState(server: *Server, state: []const u8, counter: u64) !void {
-    server.mirror_lock.lock();
-    defer server.mirror_lock.unlock();
+    var scope = plat.Scope.init();
+    defer scope.deinit();
+    const io = scope.io();
+    server.mirror_lock.lock(io);
+    defer server.mirror_lock.unlock(io);
     if (counter < server.last_state_mirror) return;
     var buf: [128]u8 = undefined;
     const json = try std.fmt.bufPrint(&buf, "{{\"state\":\"{s}\",\"counter\":{d}}}", .{ state, counter });
@@ -899,8 +918,11 @@ fn mirrorQueuedState(server: *Server, state: []const u8, result: Mailbox.Enqueue
 }
 
 fn mirrorBubble(server: *Server, text: []const u8, counter: u64, title: []const u8, agent: []const u8, busy: bool) !void {
-    server.mirror_lock.lock();
-    defer server.mirror_lock.unlock();
+    var scope = plat.Scope.init();
+    defer scope.deinit();
+    const io = scope.io();
+    server.mirror_lock.lock(io);
+    defer server.mirror_lock.unlock(io);
     if (counter < server.last_bubble_mirror) return;
     var buf: [1024]u8 = undefined;
     const json = try std.fmt.bufPrint(&buf, "{{\"text\":\"{s}\",\"title\":\"{s}\",\"agent_source\":\"{s}\",\"busy\":{},\"counter\":{d},\"at\":{d}}}", .{ text, title, agent, busy, counter, nowMs() });

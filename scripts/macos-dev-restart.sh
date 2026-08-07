@@ -7,6 +7,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DESKTOP_DIR="$ROOT/packages/petdex-desktop-native"
 EXECUTABLE="$DESKTOP_DIR/zig-out/bin/petdex-desktop-native"
 APP_PATH="${PETDEX_DEV_APP_PATH:-$HOME/Applications/Petdex Dev.app}"
+APP_EXECUTABLE="$APP_PATH/Contents/MacOS/PetdexDev"
 NATIVE_CLI="${NATIVE_CLI:-$(command -v native || true)}"
 NATIVE_SDK_PATH="${NATIVE_SDK_PATH:-}"
 
@@ -36,16 +37,17 @@ echo "==> Ensure Petdex Dev.app"
 
 echo "==> Stop existing dev desktop"
 stopped_pids=()
-while read -r pid; do
+while read -r pid command_line; do
   [[ -n "$pid" ]] || continue
-  command_line="$(ps -p "$pid" -o command= 2>/dev/null || true)"
-  case "$command_line" in
-    *"$EXECUTABLE"*)
-      kill "$pid" || true
-      stopped_pids+=("$pid")
-      ;;
-  esac
-done < <(pgrep -x "$(basename "$EXECUTABLE")" || true)
+  [[ "$pid" =~ ^[0-9]+$ ]] || continue
+  # `open -n` may expose either the bundle launcher or the executable
+  # behind it. Enumerate the bounded process table instead of relying on
+  # an exact basename match, which misses app launches and path variants.
+  if [[ "$command_line" == *"$EXECUTABLE"* || "$command_line" == *"$APP_EXECUTABLE"* ]]; then
+    kill "$pid" || true
+    stopped_pids+=("$pid")
+  fi
+done < <(ps -axo pid=,command= 2>/dev/null || true)
 
 remaining=0
 for _ in {1..50}; do

@@ -2128,6 +2128,10 @@ test "omp install writes the extension where OMP discovers it" {
     try t.expect(std.mem.indexOf(u8, written, "export default function") != null);
     // Failure comes from isError on tool_result, not from parsing text.
     try t.expect(std.mem.indexOf(u8, written, "isError") != null);
+    // Each OMP event must identify its conversation so concurrent sessions
+    // remain separate in the desktop mailbox.
+    try t.expect(std.mem.indexOf(u8, written, "session_id") != null);
+    try t.expect(std.mem.indexOf(u8, written, "getSessionId") != null);
 
     const agents = scan(t.allocator, home);
     try t.expectEqual(HookStatus.current, agents[@intFromEnum(AgentKind.omp)].status);
@@ -2172,4 +2176,11 @@ test "omp extension maps every state the sprite sheet has" {
     // Grep bubbles use typographic quotes: an ASCII quote closes the JSON
     // string early and the pattern vanishes (#628).
     try t.expect(std.mem.indexOf(u8, omp_extension, "\\\"") == null);
+}
+
+test "opencode plugin carries session ids for tools and lifecycle events" {
+    try t.expect(std.mem.indexOf(u8, opencode_plugin, "input.sessionID") != null);
+    try t.expect(std.mem.indexOf(u8, opencode_plugin, "event?.properties?.sessionID") != null);
+    try t.expect(std.mem.indexOf(u8, opencode_plugin, "session_id") != null);
+    try t.expect(std.mem.indexOf(u8, opencode_plugin, "const titleCache = new Map") != null);
 }

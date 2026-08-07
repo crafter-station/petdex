@@ -63,7 +63,31 @@ type Notify = {
   text?: string;
   title?: string;
   busy?: boolean;
+  sessionId?: string | null;
 };
+
+type ExtensionContext = {
+  sessionManager?: {
+    getSessionId?: () => string | null | undefined;
+  };
+  ui: { notify(message: string, type?: string): void };
+};
+
+type SessionEvent = { sessionId?: unknown };
+
+function sessionIdFor(
+  ctx: ExtensionContext | undefined,
+  event?: SessionEvent,
+): string | null {
+  const eventSession = event?.sessionId;
+  if (typeof eventSession === "string" && eventSession.length > 0) {
+    return eventSession;
+  }
+  const contextSession = ctx?.sessionManager?.getSessionId?.();
+  return typeof contextSession === "string" && contextSession.length > 0
+    ? contextSession
+    : null;
+}
 
 async function notify({
   state,
@@ -71,6 +95,7 @@ async function notify({
   text,
   title,
   busy,
+  sessionId,
 }: Notify): Promise<void> {
   // Killswitch first, before the token read, so the disabled state costs
   // one existsSync and nothing else.
@@ -85,6 +110,10 @@ async function notify({
     text,
     agent_source: AGENT_SOURCE,
   };
+  if (sessionId) {
+    stateBody.session_id = sessionId;
+    bubbleBody.session_id = sessionId;
+  }
   if (title) bubbleBody.title = title;
   if (busy !== undefined) bubbleBody.busy = busy;
   await Promise.all([
@@ -152,7 +181,10 @@ type ToolResultEvent = {
 type InputEvent = { text: string };
 
 type ExtensionAPI = {
-  on(event: string, handler: (event: never, ctx: never) => unknown): void;
+  on(
+    event: string,
+    handler: (event: never, ctx: ExtensionContext) => unknown,
+  ): void;
   registerCommand(
     name: string,
     options: {
@@ -166,71 +198,97 @@ type ExtensionAPI = {
 };
 
 export default function petdex(pi: ExtensionAPI): void {
-  let lastPrompt: string | null = null;
+  const prompts = new Map<string, string>();
+  const promptKey = (sessionId: string | null): string => sessionId ?? "";
+  const titleFor = (sessionId: string | null): string | undefined =>
+    prompts.get(promptKey(sessionId));
 
-  pi.on("session_start", (async () => {
-    await notify({ state: "jumping", duration: 1200, busy: false });
-  }) as never);
-
-  pi.on("input", (async (event: InputEvent) => {
-    // `text` is a plain string here, unlike Kimi Code's ContentPart[].
-    lastPrompt = typeof event?.text === "string" ? clip(event.text, 60) : null;
-    await notify({ state: "jumping", duration: 900, busy: false });
-  }) as never);
-
-  pi.on("tool_call", (async (event: ToolCallEvent) => {
-    const name = event?.toolName ?? "";
+  pi.on("session_start", (async (_event, ctx) => {
     await notify({
-      state: REVIEW_TOOLS.has(name) ? "review" : "running",
-      text: describeTool(name, event?.input ?? {}, false),
-      title: lastPrompt ?? undefined,
-      busy: true,
+      state: "jumping",
+      duration: 1200,
+      busy: false,
+      sessionId: sessionIdFor(ctx),
     });
   }) as never);
 
-  pi.on("tool_result", (async (event: ToolResultEvent) => {
+  pi.on("input", (async (event: InputEvent, ctx) => {
+    // `text` is a plain string here, unlike Kimi Code's ContentPart[].
+    const sessionId = sessionIdFor(ctx);
+    const prompt = typeof event?.text === "string" ? clip(event.text, 60) : "";
+    if (prompt) prompts.set(promptKey(sessionId), prompt);
+    await notify({
+      state: "jumping",
+      duration: 900,
+      busy: false,
+      sessionId,
+    });
+  }) as never);
+
+  pi.on("tool_call", (async (event: ToolCallEvent, ctx) => {
+    const name = event?.toolName ?? "";
+    const sessionId = sessionIdFor(ctx);
+    await notify({
+      state: REVIEW_TOOLS.has(name) ? "review" : "running",
+      text: describeTool(name, event?.input ?? {}, false),
+      title: titleFor(sessionId),
+      busy: true,
+      sessionId,
+    });
+  }) as never);
+
+  pi.on("tool_result", (async (event: ToolResultEvent, ctx) => {
     // `isError` is on the payload, set true before the error is rethrown,
     // so failure is a real signal here rather than something inferred
     // from result text the way CodeBuddy forces.
+    const sessionId = sessionIdFor(ctx);
     if (event?.isError) {
       await notify({
         state: "failed",
         duration: 2500,
         text: `${describeTool(event?.toolName ?? "", event?.input ?? {}, true)} failed`,
-        title: lastPrompt ?? undefined,
+        title: titleFor(sessionId),
         busy: false,
+        sessionId,
       });
       return;
     }
     await notify({
       state: "idle",
       text: describeTool(event?.toolName ?? "", event?.input ?? {}, true),
-      title: lastPrompt ?? undefined,
+      title: titleFor(sessionId),
       busy: true,
+      sessionId,
     });
   }) as never);
 
-  pi.on("tool_approval_requested", (async () => {
+  pi.on("tool_approval_requested", (async (event: SessionEvent, ctx) => {
+    const sessionId = sessionIdFor(ctx, event);
     await notify({
       state: "waiting",
       text: "Waiting on you.",
-      title: lastPrompt ?? undefined,
+      title: titleFor(sessionId),
       busy: false,
+      sessionId,
     });
   }) as never);
 
-  pi.on("agent_end", (async () => {
+  pi.on("agent_end", (async (_event, ctx) => {
+    const sessionId = sessionIdFor(ctx);
     await notify({
       state: "waving",
       duration: 1500,
       text: "Done.",
-      title: lastPrompt ?? undefined,
+      title: titleFor(sessionId),
       busy: false,
+      sessionId,
     });
   }) as never);
 
-  pi.on("session_shutdown", (async () => {
-    await notify({ state: "idle", busy: false });
+  pi.on("session_shutdown", (async (_event, ctx) => {
+    const sessionId = sessionIdFor(ctx);
+    await notify({ state: "idle", busy: false, sessionId });
+    prompts.delete(promptKey(sessionId));
   }) as never);
 
   pi.registerCommand("petdex", {
