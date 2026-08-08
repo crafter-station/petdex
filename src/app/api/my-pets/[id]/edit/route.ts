@@ -315,7 +315,6 @@ export async function PATCH(
       pendingSpritesheetUrl: null,
       pendingPetJsonUrl: null,
       pendingZipUrl: null,
-      pendingSpriteVersionNumber: null,
 
       editCountLast24h,
     });

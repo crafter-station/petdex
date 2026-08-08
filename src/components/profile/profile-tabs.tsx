@@ -432,6 +432,10 @@ function submissionToPet(submission: Submission): PetWithMetrics {
     colorFamily: null,
     submittedBy: undefined,
     source: "submit",
+    // Submissions do not carry the atlas version through this view, and
+    // the column defaults to 1 for every row, so the card renders the v1
+    // layout until an approved pet comes back through rowToPet.
+    spriteVersionNumber: 1,
     approvedAt: submission.approvedAt,
     importedAt: submission.createdAt,
     qa: {},

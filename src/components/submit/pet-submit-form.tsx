@@ -240,6 +240,7 @@ export function PetSubmitForm() {
             spritesheetUrl: "",
             spritesheetWidth: 0,
             spritesheetHeight: 0,
+            spriteVersionNumber: 1,
             issues: [t("issues.dropPetFolderOrZip")],
             source: "zip",
           });

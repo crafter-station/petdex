@@ -63,6 +63,7 @@ export type SearchFacets = {
   vibes: Record<string, number>;
   colors: Record<ColorFamily, number>;
   batches: Array<{ key: string; label: string; count: number }>;
+  spriteVersions: Record<string, number>;
 };
 
 export type SearchPet = Pick<
@@ -419,7 +420,7 @@ function toSearchPetFromRow(row: {
   creditImage: string | null;
   source: PetdexPet["source"];
   approvedAt: Date | null;
-  spriteVersionNumber: PetdexPet["spriteVersionNumber"];
+  spriteVersionNumber: number;
   dexNumber: number | null;
   installCount: number | null;
   likeCount: number | null;
@@ -442,7 +443,8 @@ function toSearchPetFromRow(row: {
       : undefined,
     source: row.source,
     approvedAt: row.approvedAt?.toISOString() ?? null,
-    spriteVersionNumber: row.spriteVersionNumber,
+    spriteVersionNumber:
+      row.spriteVersionNumber as PetdexPet["spriteVersionNumber"],
     dexNumber: row.dexNumber,
     metrics: {
       installCount: row.installCount ?? 0,
