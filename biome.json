@@ -13,7 +13,6 @@
       "!.next",
       "!dist",
       "!build",
-      "!packages/petdex-desktop/sidecar/server.js",
       "!packages/petdex-desktop-native/src/assets/opencode-plugin.js"
     ]
   },

@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 // Cut a desktop release end-to-end: bump verification, build, sign,
 // notarize, tag, and upload to GitHub releases.
 //
@@ -14,24 +15,34 @@
 //   APPLE_API_KEY_ID      e.g. 8FN535ATJ5
 //   APPLE_API_ISSUER      issuer UUID
 //   SIGN_IDENTITY         e.g. "Developer ID Application: NAME (TEAM)"
-//   ZERO_NATIVE_PATH      path to zero-native checkout (defaults: ../railly/zero-native)
+//   NATIVE_CLI            native CLI built from the pinned SDK
+//   NATIVE_SDK_PATH       pinned Native SDK checkout used to build the CLI
 //
 // What it does:
-//   1. Validate version arg (semver, no leading 'v') + ensure tag doesn't exist
-//   2. Verify clean working tree on packages/petdex-desktop/ paths
-//   3. Build sidecar bundle (server.ts -> server.js, CJS minified)
-//   4. Run scripts/build-release.sh (zig build + sign + notarize for arm64+x64)
-//   5. Verify all 5 artifacts exist
-//   6. Create annotated tag desktop-vX.Y.Z, push to origin
-//   7. gh release create with notes + 5 assets
-//   8. Verify /api/desktop/latest-release picks it up (probe production)
+//   1. Validate version arg (semver, optionally prefixed with v or desktop-v) + ensure tag doesn't exist
+//   2. Verify clean working tree on packages/petdex-desktop-native/ paths
+//   3. Run scripts/sign-macos.sh for arm64 and x64
+//   4. Verify all macOS artifacts exist
+//   5. Create annotated tag desktop-vX.Y.Z, push to origin
+//   6. gh release create with notes + macOS assets
+//   7. Verify /api/desktop/latest-release picks it up (probe production)
 //
 // All steps are idempotent on retry except the tag push and gh release create.
 // On failure mid-flight, fix the underlying issue and re-run with --skip-build
 // to skip the slow notarization step if artifacts are already on disk.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  accessSync,
+  existsSync,
+  constants as fsConstants,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 
@@ -39,8 +50,36 @@ const REPO_ROOT = path.resolve(
   path.dirname(new URL(import.meta.url).pathname),
   "..",
 );
-const DESKTOP_DIR = path.join(REPO_ROOT, "packages", "petdex-desktop");
-const SIDECAR_DIR = path.join(DESKTOP_DIR, "sidecar");
+const MACOS_OUT_DIR = path.join(REPO_ROOT, "dist", "macos");
+const RELEASE_ARTIFACT_NAMES = [
+  "Petdex-arm64.dmg",
+  "Petdex-x64.dmg",
+  "petdex-desktop-native-darwin-arm64.zip",
+  "petdex-desktop-native-darwin-x64.zip",
+  "petdex-desktop-darwin-arm64.zip",
+  "petdex-desktop-darwin-x64.zip",
+] as const;
+const BUILD_MANIFEST_PATH = path.join(
+  MACOS_OUT_DIR,
+  "petdex-desktop-build-manifest.json",
+);
+
+type BuildManifest = {
+  format: 2;
+  version: string;
+  commit: string;
+  sdkCommit: string;
+  cliCommit: string;
+  artifacts: Record<string, { size: number; sha256: string }>;
+};
+
+type NativeToolchain = {
+  env: Record<string, string>;
+  sdkPath: string;
+  sdkCommit: string;
+  cliPath: string;
+  cliCommit: string;
+};
 
 type Args = {
   version: string;
@@ -123,10 +162,104 @@ function run(
   };
 }
 
-function resolveAppleEnv(): Record<string, string> {
+function pinnedNativeSdkRef(): string {
+  const workflowPaths = [
+    path.join(REPO_ROOT, ".github", "workflows", "desktop-native-ci.yml"),
+    path.join(REPO_ROOT, ".github", "workflows", "desktop-release.yml"),
+  ];
+  const refs = workflowPaths.flatMap((workflowPath) => {
+    const source = readFileSync(workflowPath, "utf8");
+    return [...source.matchAll(/NATIVE_SDK_REF:\s*"([0-9a-f]{40})"/g)].map(
+      (match) => match[1],
+    );
+  });
+  if (refs.length !== 2 || refs.some((ref) => ref !== refs[0])) {
+    die("desktop workflows do not agree on one Native SDK commit");
+  }
+  return refs[0];
+}
+
+function resolveNativeToolchain(): NativeToolchain {
+  if (!process.env.NATIVE_CLI)
+    die("NATIVE_CLI is required (build it from the pinned Native SDK)");
+  if (!process.env.NATIVE_SDK_PATH)
+    die("NATIVE_SDK_PATH is required (use the same SDK as NATIVE_CLI)");
+
+  const cliInput = path.isAbsolute(process.env.NATIVE_CLI)
+    ? process.env.NATIVE_CLI
+    : path.resolve(process.cwd(), process.env.NATIVE_CLI);
+  const sdkInput = path.isAbsolute(process.env.NATIVE_SDK_PATH)
+    ? process.env.NATIVE_SDK_PATH
+    : path.resolve(process.cwd(), process.env.NATIVE_SDK_PATH);
+  try {
+    accessSync(cliInput, fsConstants.X_OK);
+  } catch {
+    die(`NATIVE_CLI is not executable: ${cliInput}`);
+  }
+  if (!existsSync(sdkInput) || !statSync(sdkInput).isDirectory()) {
+    die(`NATIVE_SDK_PATH is not a directory: ${sdkInput}`);
+  }
+
+  const cliPath = realpathSync(cliInput);
+  const sdkPath = realpathSync(sdkInput);
+  const relativeCli = path.relative(sdkPath, cliPath);
+  const expectedCliDir = path.join("zig-out", "bin");
+  const relativeCliDir = path.dirname(relativeCli);
+  const cliName = path.basename(relativeCli);
+  if (
+    relativeCli.startsWith("..") ||
+    path.isAbsolute(relativeCli) ||
+    relativeCliDir !== expectedCliDir ||
+    (cliName !== "native" && cliName !== "native.exe")
+  ) {
+    die("NATIVE_CLI must be zig-out/bin/native from NATIVE_SDK_PATH");
+  }
+
+  const expectedCommit = pinnedNativeSdkRef();
+  const sdkResult = spawnSync("git", ["-C", sdkPath, "rev-parse", "HEAD"], {
+    encoding: "utf8",
+  });
+  const sdkCommit = (sdkResult.stdout || "").trim();
+  if (sdkResult.status !== 0 || !/^[0-9a-f]{40}$/.test(sdkCommit)) {
+    die("unable to read the Native SDK commit");
+  }
+  if (sdkCommit !== expectedCommit) {
+    die("NATIVE_SDK_PATH is not at the commit pinned by the desktop workflows");
+  }
+
+  const cliResult = spawnSync(cliPath, ["version"], {
+    cwd: sdkPath,
+    encoding: "utf8",
+    timeout: 5000,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const cliOutput = cliResult.stdout || "";
+  const cliCommit =
+    cliOutput.match(/\bcommit\s+([0-9a-f]{7,40})\b/i)?.[1] ?? "";
+  if (
+    cliResult.status !== 0 ||
+    cliResult.signal ||
+    !/^[0-9a-f]{7,40}$/.test(cliCommit)
+  ) {
+    die("NATIVE_CLI does not report a verifiable build commit");
+  }
+  if (!sdkCommit.startsWith(cliCommit)) {
+    die("NATIVE_CLI was built from a different Native SDK commit");
+  }
+
+  return {
+    env: { NATIVE_CLI: cliPath, NATIVE_SDK_PATH: sdkPath },
+    sdkPath,
+    sdkCommit,
+    cliPath,
+    cliCommit,
+  };
+}
+
+function resolveAppleEnv(toolchain: NativeToolchain): Record<string, string> {
   // Resolve APPLE_API_KEY to absolute path. The notarytool requires
   // an absolute path; relative paths from the user's home shell
-  // session won't survive the cwd change inside build-release.sh.
+  // session won't survive the cwd change inside sign-macos.sh.
   const env: Record<string, string> = {};
   const key = process.env.APPLE_API_KEY;
   if (key) {
@@ -172,22 +305,7 @@ function resolveAppleEnv(): Record<string, string> {
       );
     }
   }
-  // ZERO_NATIVE_PATH default — sibling layout is the dev convention.
-  if (!process.env.ZERO_NATIVE_PATH) {
-    const guesses = [
-      path.join(homedir(), "Programming", "railly", "zero-native"),
-      path.resolve(REPO_ROOT, "..", "..", "..", "railly", "zero-native"),
-    ];
-    const found = guesses.find((p) => existsSync(p));
-    if (found) {
-      env.ZERO_NATIVE_PATH = found;
-      console.log(`auto-detected ZERO_NATIVE_PATH: ${found}`);
-    } else {
-      die(
-        `ZERO_NATIVE_PATH not set and no checkout found in ${guesses.join(", ")}`,
-      );
-    }
-  }
+  Object.assign(env, toolchain.env);
   return env;
 }
 
@@ -214,21 +332,21 @@ function preflightTag(version: string): string {
 
 function preflightTree(): void {
   // Confirm the desktop sources we're about to ship are committed.
-  // build artifacts (DMGs, bare binaries) and sidecar/server.js are
-  // OK to be uncommitted — those are outputs, not inputs. We check
-  // src/, sidecar/server.ts, build.zig, and assets/ specifically.
+  // Build artifacts are outputs, not inputs. Check the native source,
+  // manifest, and bundled assets specifically.
   const r = run(
     "git",
     [
       "status",
       "--porcelain",
       "--",
-      "packages/petdex-desktop/src",
-      "packages/petdex-desktop/sidecar/server.ts",
-      "packages/petdex-desktop/sidecar/state-queue.ts",
-      "packages/petdex-desktop/sidecar/running-variant.ts",
-      "packages/petdex-desktop/build.zig",
-      "packages/petdex-desktop/assets",
+      "packages/petdex-desktop-native/src",
+      "packages/petdex-desktop-native/app.zon",
+      "patches/native-sdk-macos-headerpad.patch",
+      "packages/petdex-desktop-native/assets",
+      "scripts/patch-native-sdk.sh",
+      "scripts/release-desktop.ts",
+      "scripts/sign-macos.sh",
     ],
     { allowFail: true },
   );
@@ -242,14 +360,6 @@ function preflightTree(): void {
     if (!process.env.RELEASE_DESKTOP_ALLOW_DIRTY) {
       die("re-run with RELEASE_DESKTOP_ALLOW_DIRTY=1 to override");
     }
-  }
-}
-
-function buildSidecar(): void {
-  step("Build sidecar bundle (server.ts -> server.js, CJS minified)");
-  run("bun", ["run", "build"], { cwd: SIDECAR_DIR });
-  if (!existsSync(path.join(SIDECAR_DIR, "server.js"))) {
-    die("sidecar build did not produce server.js");
   }
 }
 
@@ -285,26 +395,66 @@ function preflightDetachDmgVolumes(): void {
   }
 }
 
-function buildRelease(env: Record<string, string>): void {
-  step("Build, sign, notarize for arm64 + x64 (this takes 5-10 min)");
-  run("bash", [path.join("scripts", "build-release.sh")], {
-    cwd: DESKTOP_DIR,
-    env,
-  });
+function gitCommit(): string {
+  const commit = run("git", ["rev-parse", "HEAD"]).stdout.trim();
+  if (!/^[0-9a-f]{40}$/.test(commit)) die(`invalid HEAD commit: ${commit}`);
+  return commit;
 }
 
-function verifyArtifacts(): string[] {
+function sha256(filePath: string): string {
+  return createHash("sha256").update(readFileSync(filePath)).digest("hex");
+}
+
+function writeBuildManifest(version: string, toolchain: NativeToolchain): void {
+  const artifacts: BuildManifest["artifacts"] = {};
+  for (const name of RELEASE_ARTIFACT_NAMES) {
+    const filePath = path.join(MACOS_OUT_DIR, name);
+    if (!existsSync(filePath)) die(`cannot manifest missing artifact: ${name}`);
+    artifacts[name] = {
+      size: statSync(filePath).size,
+      sha256: sha256(filePath),
+    };
+  }
+  const manifest: BuildManifest = {
+    format: 2,
+    version,
+    commit: gitCommit(),
+    sdkCommit: toolchain.sdkCommit,
+    cliCommit: toolchain.cliCommit,
+    artifacts,
+  };
+  writeFileSync(BUILD_MANIFEST_PATH, `${JSON.stringify(manifest)}\n`, "utf8");
+}
+
+function buildRelease(
+  env: Record<string, string>,
+  version: string,
+  toolchain: NativeToolchain,
+): void {
+  step("Build, sign, and notarize macOS arm64 + x64");
+  mkdirSync(MACOS_OUT_DIR, { recursive: true });
+  for (const arch of ["arm64", "x64"]) {
+    run(
+      "bash",
+      [path.join(REPO_ROOT, "scripts", "sign-macos.sh"), MACOS_OUT_DIR, arch],
+      {
+        cwd: REPO_ROOT,
+        env,
+      },
+    );
+  }
+  writeBuildManifest(version, toolchain);
+}
+
+function verifyArtifacts(
+  version: string,
+  toolchain: NativeToolchain,
+): string[] {
   step("Verify artifacts");
-  const required = [
-    "Petdex-arm64.dmg",
-    "Petdex-x64.dmg",
-    "petdex-desktop-darwin-arm64",
-    "petdex-desktop-darwin-x64",
-  ];
   const missing: string[] = [];
   const present: string[] = [];
-  for (const name of required) {
-    const p = path.join(DESKTOP_DIR, name);
+  for (const name of RELEASE_ARTIFACT_NAMES) {
+    const p = path.join(MACOS_OUT_DIR, name);
     if (existsSync(p)) {
       present.push(p);
       console.log(`  ✓ ${name}`);
@@ -318,15 +468,47 @@ function verifyArtifacts(): string[] {
       `missing artifacts: ${missing.join(", ")}. Re-run without --skip-build.`,
     );
   }
-  // Sidecar lives at sidecar/server.js but uploads as petdex-desktop-sidecar.js.
-  const sidecarSrc = path.join(SIDECAR_DIR, "server.js");
-  if (!existsSync(sidecarSrc)) die(`sidecar bundle missing at ${sidecarSrc}`);
-  const sidecarUploadName = path.join(DESKTOP_DIR, "petdex-desktop-sidecar.js");
-  // Copy via cp so we don't overwrite the source if the build doesn't
-  // produce this filename directly.
-  run("cp", [sidecarSrc, sidecarUploadName]);
-  present.push(sidecarUploadName);
-  console.log(`  ✓ petdex-desktop-sidecar.js (copied from sidecar/server.js)`);
+
+  if (!existsSync(BUILD_MANIFEST_PATH)) {
+    die(
+      "build manifest missing; run without --skip-build to create verified artifacts",
+    );
+  }
+  let manifest: BuildManifest;
+  try {
+    manifest = JSON.parse(
+      readFileSync(BUILD_MANIFEST_PATH, "utf8"),
+    ) as BuildManifest;
+  } catch {
+    die("build manifest is not valid JSON");
+  }
+  if (
+    manifest.format !== 2 ||
+    manifest.version !== version ||
+    manifest.sdkCommit !== toolchain.sdkCommit ||
+    manifest.cliCommit !== toolchain.cliCommit
+  ) {
+    die(`build manifest does not match requested version ${version}`);
+  }
+  if (manifest.commit !== gitCommit()) {
+    die(
+      "build manifest was produced from a different commit; rebuild before release",
+    );
+  }
+  for (const name of RELEASE_ARTIFACT_NAMES) {
+    const record = manifest.artifacts?.[name];
+    const filePath = path.join(MACOS_OUT_DIR, name);
+    if (
+      !record ||
+      record.size !== statSync(filePath).size ||
+      record.sha256 !== sha256(filePath)
+    ) {
+      die(
+        `artifact changed after build or is not bound to the manifest: ${name}`,
+      );
+    }
+  }
+  console.log("  verified build manifest, commit, sizes, and SHA-256 hashes");
   return present;
 }
 
@@ -405,16 +587,16 @@ async function main() {
 
   preflightTree();
   const tag = preflightTag(args.version);
-  const env = resolveAppleEnv();
+  const toolchain = resolveNativeToolchain();
 
-  buildSidecar();
   if (!args.skipBuild) {
+    const env = resolveAppleEnv(toolchain);
     preflightDetachDmgVolumes();
-    buildRelease(env);
+    buildRelease(env, args.version, toolchain);
   } else {
     console.log("\n--skip-build: skipping zig build + notarize");
   }
-  const assets = verifyArtifacts();
+  const assets = verifyArtifacts(args.version, toolchain);
 
   tagAndPush(args.version, tag);
   ghRelease(tag, args.version, args.notes, assets, args.draft, args.prerelease);

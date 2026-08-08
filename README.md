@@ -82,7 +82,7 @@ Full CLI reference: [`packages/petdex-cli/README.md`](./packages/petdex-cli/READ
 If you want to build on top of Petdex (a desktop client, a wearable, an SDK, a Discord bot, anything), you have two stable surfaces:
 
 - **The HTTP API.** `petdex.dev/api/manifest` returns every approved pet with its slug, spritesheet URL, animation states, and metadata.
-- **The pet package format.** Every pet is a `pet.json` plus a `spritesheet.{webp,png}` rendered as an 8×9 grid of 192×208 frames.
+- **The pet package format.** Every pet is a `pet.json` plus a `spritesheet.{webp,png}` rendered as an 8x9 grid of 192x208 frames, or the v2 8x11 grid.
 
 21 open-source and source-available projects already build on these. See [petdex.dev/built-with](https://petdex.dev/built-with) for the catalog, then [submit yours via the issue template](https://github.com/crafter-station/petdex/issues/new?template=built-with.yml).
 
@@ -97,8 +97,9 @@ crafter-station/petdex
 │   ├── app/api/admin/         Admin review surface for submissions, edits, collection requests
 │   └── lib/db/schema.ts       Drizzle schema (Postgres)
 ├── packages/
-│   ├── petdex-cli/            npm `petdex` (auth, list, install, select, submit, hooks, init)
-│   ├── petdex-desktop/        Zig + WebKit floating mascot for macOS
+│   ├── petdex-cli/            npm `petdex` catalog client (auth, list, install, submit)
+│   ├── petdex-desktop-native/ Native SDK floating mascot for macOS, Linux and Windows
+│   ├── petdex-desktop-windows/ Legacy Tauri Windows implementation (not the release path)
 │   └── discord-bot/           Discord.js bot for the Petdex server
 ├── public/built-with/         Screenshots for the community page
 ├── public/brand/              Logos, OS icons, Discord icon
@@ -107,7 +108,7 @@ crafter-station/petdex
 
 **Web stack**: Next.js 16, React 19, Tailwind, Drizzle, Postgres, Redis, Clerk, R2.<br />
 **CLI**: Bun + TypeScript, ships as a single npm binary. Auth via Clerk OAuth + PKCE.<br />
-**Desktop**: Zig on a fork of [`vercel-labs/zero-native`](https://github.com/vercel-labs/zero-native), HTTP sidecar in Node for agent hooks.
+**Desktop**: Native SDK app with an in-process Zig hook server on `127.0.0.1:7777`. The current release path has no WebView or Node sidecar.
 
 ## Develop locally
 
@@ -134,10 +135,10 @@ Every pet is two files:
 ```text
 my-pet/
 ├── pet.json                Metadata: name, slug, tags, vibes, kind, frame size, animation states
-└── spritesheet.webp        9 rows × 8 cols = 72 frames of 192×208 px each (or .png)
+└── spritesheet.webp        8x9 or v2 8x11 frame grid of 192x208 px each (or .png)
 ```
 
-Animation states are the rows: `idle`, `wave`, `run`, `failed`, `review`, `jump`, `extra1`, `extra2`. Codex maps these to its agent activity hooks. Loop timing defaults to 1100ms at 6 frames per state.
+The native renderer supports nine state rows: `idle`, `running-right`, `running-left`, `waving`, `jumping`, `failed`, `waiting`, `running`, and `review`. Codex and the supported coding agents map their activity hooks to these states. The v2 8x11 atlas leaves two additional rows available to the consuming client.
 
 ## Contribute
 

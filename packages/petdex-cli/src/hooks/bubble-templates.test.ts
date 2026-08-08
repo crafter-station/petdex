@@ -148,7 +148,7 @@ describe("formatBubble - grep + glob", () => {
   });
 
   test("no template renders an ASCII quote", () => {
-    // The in-app runner embeds this text raw into the sidecar POST body
+    // The in-app runner embeds this text raw into the hook server POST body
     // and hook_server reads it back with a scanner that decodes nothing,
     // so a `"` or a `\` anywhere in a template truncates the bubble.
     for (const toolName of ["Grep", "Glob", "Read", "Bash", "WebFetch"]) {
@@ -269,7 +269,7 @@ describe("formatBubble - clipping", () => {
     ).toBe("Tool failed");
   });
 
-  test("failed phase output is free of characters the sidecar reader truncates on", () => {
+  test("failed phase output is free of characters the hook server reader truncates on", () => {
     const rendered = formatBubble({
       kind: "tool",
       phase: "failed",

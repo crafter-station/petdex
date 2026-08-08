@@ -7,8 +7,8 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-const SIDECAR_URL = "http://127.0.0.1:7777/state";
-const SIDECAR_BUBBLE_URL = "http://127.0.0.1:7777/bubble";
+const HOOK_SERVER_URL = "http://127.0.0.1:7777/state";
+const HOOK_SERVER_BUBBLE_URL = "http://127.0.0.1:7777/bubble";
 const RUNTIME_DIR = join(homedir(), ".petdex", "runtime");
 const TOKEN_PATH = join(RUNTIME_DIR, "update-token");
 const KILLSWITCH_PATH = join(RUNTIME_DIR, "hooks-disabled");
@@ -83,7 +83,7 @@ function formatTool(toolName, toolInput, phase) {
     case "grep": {
       const pattern = fieldFrom(toolInput, "pattern");
       // Curly quotes: JSON.stringify escapes an ASCII `"` correctly, but
-      // the sidecar reads the body back with a scanner that stops at the
+      // the hook server reads the body back with a scanner that stops at the
       // backslash, so the pattern never reaches the bubble.
       return pattern ? (past ? "Searched “" + clip(pattern, 28) + "”" : "Searching “" + clip(pattern, 28) + "”") : past ? "Searched files" : "Searching files";
     }
@@ -124,22 +124,22 @@ async function postJson(url, body, token) {
       signal: AbortSignal.timeout(300),
     });
   } catch {
-    // sidecar offline: stay quiet, the agent shouldn't notice.
+    // Hook server offline: stay quiet, the agent should not notice.
   }
 }
 
-async function notify({ state, duration, text, title, busy }) {
+async function notify({ state, duration, text, title, busy, sessionId }) {
   // Killswitch: users toggle this with /petdex inside their agent
   // (or 'petdex hooks toggle' from a shell). Bail before the token
   // read so the disabled state has zero filesystem cost beyond the
   // existsSync.
   if (existsSync(KILLSWITCH_PATH)) return;
   // Token gate defends against drive-by no-cors POSTs from any site
-  // the user visits. The token rotates per sidecar session and lives
+  // the user visits. The token rotates per desktop session and lives
   // at mode 0600, so only this user can read it.
   const token = await readToken();
-  if (!token) return; // sidecar offline or missing — silently no-op
-  // Stamp agent_source so the sidecar can route per-pet when we
+  if (!token) return; // Hook server offline or missing; silently no-op.
+  // Stamp agent_source so the hook server can route per-pet when we
   // ship multi-mascot. Today the field is recorded for telemetry
   // but doesn't affect routing.
   const stateBody =
@@ -149,11 +149,15 @@ async function notify({ state, duration, text, title, busy }) {
   const metadata = originMetadata();
   Object.assign(stateBody, metadata);
   const bubbleBody = { text, agent_source: "opencode", ...metadata };
+  if (sessionId) {
+    stateBody.session_id = sessionId;
+    bubbleBody.session_id = sessionId;
+  }
   if (title) bubbleBody.title = title;
   if (busy !== undefined) bubbleBody.busy = busy;
   await Promise.all([
-    postJson(SIDECAR_URL, stateBody, token),
-    text ? postJson(SIDECAR_BUBBLE_URL, bubbleBody, token) : Promise.resolve(),
+    postJson(HOOK_SERVER_URL, stateBody, token),
+    text ? postJson(HOOK_SERVER_BUBBLE_URL, bubbleBody, token) : Promise.resolve(),
   ]);
 }
 
@@ -161,21 +165,19 @@ async function notify({ state, duration, text, title, busy }) {
 // the plugin context and returning the hooks object. The client gives
 // us opencode's own LLM-generated session titles for the bubble.
 const PetdexPlugin = async ({ client }) => {
-  let titleSession = null;
-  let titleCache = null;
+  const titleCache = new Map();
   async function sessionTitle(sessionID) {
-    if (!sessionID || !client) return titleCache;
+    if (!sessionID || !client) return titleCache.get(sessionID) || null;
     try {
       const res = await client.session.get({ path: { id: sessionID } });
       const title = res?.data?.title;
       if (typeof title === "string" && title.length > 0) {
-        titleSession = sessionID;
-        titleCache = title.length > 60 ? title.slice(0, 59) + "\u2026" : title;
+        titleCache.set(sessionID, title.length > 60 ? title.slice(0, 59) + "\u2026" : title);
       }
     } catch {
-      // Sidecar-grade silence: a missing title never stains the agent.
+      // Hook-server silence: a missing title never stains the agent.
     }
-    return titleCache;
+    return titleCache.get(sessionID) || null;
   }
   return {
     "tool.execute.before": async (input, output) => notify({
@@ -183,16 +185,37 @@ const PetdexPlugin = async ({ client }) => {
       text: formatTool(input.tool, output.args, "running"),
       title: await sessionTitle(input.sessionID),
       busy: true,
+      sessionId: input.sessionID,
     }),
     "tool.execute.after": async (input) => notify({
       state: "idle",
       text: formatTool(input.tool, input.args, "done"),
       title: await sessionTitle(input.sessionID),
       busy: true,
+      sessionId: input.sessionID,
     }),
     event: async ({ event }) => {
-      if (event.type === "session.idle") notify({ state: "waving", duration: 1500, text: "Done.", title: titleCache, busy: false });
-      else if (event.type === "session.error") notify({ state: "failed", duration: 2500, text: "OpenCode hit an error.", title: titleCache, busy: false });
+      const sessionId = event?.properties?.sessionID;
+      if (typeof sessionId !== "string" || sessionId.length === 0) return;
+      if (event.type === "session.idle") {
+        await notify({
+          state: "waving",
+          duration: 1500,
+          text: "Done.",
+          title: await sessionTitle(sessionId),
+          busy: false,
+          sessionId,
+        });
+      } else if (event.type === "session.error") {
+        await notify({
+          state: "failed",
+          duration: 2500,
+          text: "OpenCode hit an error.",
+          title: await sessionTitle(sessionId),
+          busy: false,
+          sessionId,
+        });
+      }
     },
   };
 };

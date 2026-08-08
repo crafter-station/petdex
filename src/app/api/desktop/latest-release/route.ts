@@ -77,18 +77,18 @@ async function findLatestDesktopRelease(): Promise<GhRelease | null> {
 
 // Map platform alias → asset filename matchers, in priority order.
 // First match wins. We prefer the .dmg because users expect "drag
-// to Applications" UX from a download click; the bare binary is
-// kept around for the CLI's existing install flow (`petdex install
-// desktop`) which isn't changing in this release.
+// to Applications" UX from a download click; the legacy asset name is
+// kept around for existing installers while the native bundle is rolled
+// out.
 const PLATFORM_ASSET_PATTERNS: Record<string, RegExp[]> = {
   "darwin-arm64": [
     /^Petdex-arm64\.dmg$/, // signed + notarized DMG, drag-to-Applications UX
-    /^petdex-desktop-darwin-arm64(\.zip)?$/, // bare binary, legacy CLI flow
+    /^petdex-desktop-darwin-arm64(\.zip)?$/, // legacy asset name
     /^petdex-desktop-native-darwin-arm64\.zip$/, // native rewrite bundle
   ],
   "darwin-x64": [
     /^Petdex-x64\.dmg$/,
-    /^petdex-desktop-darwin-x64(\.zip)?$/,
+    /^petdex-desktop-darwin-x64(\.zip)?$/, // legacy asset name
     /^petdex-desktop-native-darwin-x64\.zip$/, // native rewrite bundle
   ],
   // The native rewrite is the only build that produces a Linux binary:

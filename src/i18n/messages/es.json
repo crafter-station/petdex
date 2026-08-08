@@ -1348,7 +1348,7 @@
     },
     "fields": {
       "installId": "Random ID generated on first run and stored at <code>~/.petdex/telemetry.json</code>. Never linked to your account, email, or any other identity.",
-      "event": "Which lifecycle step fired: <code>cli_install_desktop_success</code>, <code>cli_hooks_install_success</code>, <code>cli_desktop_start_success</code>, or <code>desktop_first_state_received</code>. The desktop sidecar emits the last one once per session when a hook first reaches the mascot.",
+      "event": "Which lifecycle step fired: <code>cli_install_desktop_success</code>, <code>cli_hooks_install_success</code>, <code>cli_desktop_start_success</code>, or <code>desktop_first_state_received</code>. The in-process desktop hook server emits the last one once per session when a hook first reaches the mascot.",
       "cliVersion": "Version of the petdex CLI package, for example <code>0.1.4</code>.",
       "binaryVersion": "Version of the desktop binary that was installed, for example <code>0.1.4</code>. Only sent on <code>cli_install_desktop_success</code>.",
       "os": "Operating system: <code>darwin</code>, <code>linux</code>, or <code>win32</code>.",
@@ -1573,7 +1573,7 @@
       "desktop": {
         "title": "Desktop app",
         "intro": "Petdex Desktop is a floating mascot that lives on top of your workspace and reacts to your coding agent tool calls. macOS, Linux and Windows. See <download>/download</download> for the visual tour.",
-        "sidecarCallout": "The sidecar is a local HTTP server on port <code>7777</code>. Anything that can <code>curl</code> + read the per-session token at <code>~/.petdex/runtime/update-token</code> can drive the pet. The token rotates every sidecar boot and lives at mode <code>0600</code>, so only your user can read it. Browsers and remote sites cannot:",
+        "sidecarCallout": "La aplicación de escritorio expone un servidor HTTP local de hooks integrado en el proceso en el puerto <code>7777</code>. Cualquier programa que pueda usar <code>curl</code> y leer el token de cada sesión en <code>~/.petdex/runtime/update-token</code> puede controlar la mascota. El token cambia en cada inicio de la aplicación y el archivo tiene permisos <code>0600</code>, por lo que solo tu usuario puede leerlo. Los navegadores y sitios remotos no pueden:",
         "windowTitle": "Convivir con la mascota",
         "windowBody": "La mascota flota sobre todas las ventanas y nunca roba el foco. Los clics atraviesan la burbuja de actividad hacia lo que haya detrás, así que un mensaje sobre tu editor no puede tragarse una tecla. El sprite sí se arrastra: agarralo y soltalo donde quieras.",
         "shortcutsTitle": "Atajos",

@@ -62,7 +62,7 @@ jobs:
             runner: ubuntu-latest
             expected_to_fail: false
           # A real Windows box, not a cross-compile: the Win32 paths
-          # (symlink privilege, the ACL fallback for the token file,
+          # (cmd hook launcher, the ACL fallback for the token file,
           # `cmd /c start`) only run here, and cross-compiling proves
           # none of them.
           - platform: windows
@@ -114,6 +114,10 @@ jobs:
           git -C "$GITHUB_WORKSPACE/native-sdk" checkout --detach "$NATIVE_SDK_REF"
           echo "NATIVE_SDK_PATH=$GITHUB_WORKSPACE/native-sdk" >> "$GITHUB_ENV"
 
+      - name: Apply Petdex Native SDK patches
+        shell: bash
+        run: scripts/patch-native-sdk.sh
+
       - name: Install Zig 0.16.0
         uses: mlugg/setup-zig@v2
         with:
@@ -144,12 +148,9 @@ jobs:
         # existed: `zig build test` collects tests from the root module
         # file only, so the imported files' tests (agent_hooks' config
         # merging, hook_runner's payload parsing, installer's URL
-        # checks) compiled green and never executed — and CI had no
-        # test step to notice. Unix legs only for now: the fixture
-        # tests write under /tmp by absolute POSIX path, which Windows
-        # has no equivalent for until the fixtures learn a portable
-        # temp dir.
-        if: matrix.platform != 'windows'
+        # checks) compiled green and never executed. Fixture homes are
+        # relative to the package's ignored `.zig-cache` now, so the
+        # same assertions run on Windows too.
         working-directory: packages/petdex-desktop-native
         shell: bash
         run: |

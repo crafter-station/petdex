@@ -8,7 +8,7 @@
 //!
 //! A line-for-line port of the CLI's bubble-runner.ts + templates
 //! (kept in parity by the tests at the bottom, which mirror the TS
-//! suite's expectations). Extraction is the sidecar's flat JSON scan:
+//! suite's expectations). Extraction uses the hook server's flat JSON scan:
 //! hook payloads never repeat our keys across nesting levels.
 
 const std = @import("std");
@@ -28,7 +28,7 @@ const post_poll_ms: u64 = 5;
 // ------------------------------------------------------------- entry
 
 /// argv tail after "bubble": [phase, agent?]. Reads stdin, formats,
-/// POSTs bubble + state to the sidecar. Never fails outward.
+/// POSTs bubble + state to the in-process hook server. Never fails outward.
 pub fn run(phase: []const u8, arg_agent: ?[]const u8, origin_app: plat.OriginApplication, source_cwd_raw: ?[]const u8, home: []const u8) void {
     // Always finish consuming the host's payload before any early return.
     // The host may still be writing after the useful 64 KiB prefix, and
@@ -586,7 +586,7 @@ fn waitForPosts(posts: []PostJob) void {
     }
 }
 
-/// Minimal HTTP POST to the sidecar. The caller owns the deadline; this
+/// Minimal HTTP POST to the in-process hook server. The caller owns the deadline; this
 /// worker only flushes a small request and never waits for a response.
 fn postLocalhostBlocking(path: []const u8, body: []const u8, token: []const u8) void {
     var scope = plat.Scope.init();
@@ -789,7 +789,7 @@ test "two runner sessions reach the mailbox as two bubbles" {
     hook_server.mailbox.clearBubbles();
 }
 
-test "tool-failure bubble survives the sidecar reader round trip" {
+test "tool-failure bubble survives the hook server reader round trip" {
     // The whole class #628 exposed: formatBubble output is embedded raw into the
     // POST body, then read back by a scanner that stops at `"` and `\`. Push the
     // new template through both halves and assert nothing is lost.

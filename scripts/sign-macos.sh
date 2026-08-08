@@ -9,13 +9,27 @@
 #
 # Needs ~/.config/petdex-apple/env with:
 #   APPLE_API_KEY, APPLE_API_KEY_ID, APPLE_API_ISSUER, SIGN_IDENTITY
+# And the caller must export NATIVE_CLI and NATIVE_SDK_PATH for the pinned
+# Native SDK used by the matching CI build.
 #
 # Usage:
 #   scripts/sign-macos.sh [output-dir] [arm64|x64]
 #   gh release upload desktop-vX.Y.Z <output-dir>/*.zip --clobber
 set -euo pipefail
 
-OUT="${1:-dist/macos}"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+OUT="${1:-$REPO_ROOT/dist/macos}"
+if [[ "$OUT" != /* ]]; then
+  OUT="$REPO_ROOT/$OUT"
+fi
+if [[ -n "${NATIVE_CLI:-}" && "$NATIVE_CLI" != /* ]]; then
+  NATIVE_CLI="$REPO_ROOT/$NATIVE_CLI"
+  export NATIVE_CLI
+fi
+if [[ -n "${NATIVE_SDK_PATH:-}" && "$NATIVE_SDK_PATH" != /* ]]; then
+  NATIVE_SDK_PATH="$REPO_ROOT/$NATIVE_SDK_PATH"
+  export NATIVE_SDK_PATH
+fi
 # Which Mac this build runs on. arm64 by default so the common case is
 # unchanged; pass x64 for the Intel build (#609). Cross-compiled from
 # either host: Zig does not need an Intel machine, but the signature and
@@ -27,7 +41,7 @@ case "$ARCH" in
   x64)   ZIG_TARGET="x86_64-macos" ;;
   *) echo "unknown arch: $ARCH (expected arm64 or x64)" >&2; exit 1 ;;
 esac
-PKG="packages/petdex-desktop-native"
+PKG="$REPO_ROOT/packages/petdex-desktop-native"
 CREDS="$HOME/.config/petdex-apple/env"
 
 [ -f "$CREDS" ] || { echo "missing $CREDS" >&2; exit 1; }
@@ -41,6 +55,8 @@ KEY="$APPLE_API_KEY"
 
 : "${NATIVE_CLI:?set NATIVE_CLI to the native CLI built from the pinned SDK}"
 : "${NATIVE_SDK_PATH:?set NATIVE_SDK_PATH to the pinned SDK checkout}"
+
+"$(dirname "${BASH_SOURCE[0]}")/patch-native-sdk.sh"
 
 mkdir -p "$OUT"
 # Only this arch's outputs: a second run for the other arch must not
@@ -61,7 +77,7 @@ echo "==> package + sign"
 (cd "$PKG" && "$NATIVE_CLI" package \
   --target macos \
   --binary zig-out/bin/petdex-desktop-native \
-  --output "$OLDPWD/$OUT/Petdex.app" \
+  --output "$OUT/Petdex.app" \
   --signing identity \
   --identity "$SIGN_IDENTITY")
 

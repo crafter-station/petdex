@@ -4,13 +4,14 @@
 //! agents exist on this machine, and whether their configs carry our
 //! hooks (and which runner generation they point at). A separate,
 //! narrow migration updates only recognized legacy Petdex hook entries.
-//! Installation writes the canonical hook command - the stable
-//! `petdex-hook` symlink the app re-aims at itself every boot - and
+//! Installation writes the canonical hook command - a stable executable
+//! entry the app refreshes every boot - and
 //! never touches non-Petdex hook entries. JSON config files are merged
 //! through a std.json Value roundtrip and a one-time backup is written
 //! beside any file we edit.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const plat = @import("plat.zig");
 
 pub const AgentKind = enum(u8) {
@@ -58,7 +59,7 @@ pub const HookStatus = enum(u8) {
     absent,
     /// Agent present, no petdex hooks.
     none,
-    /// Hooks present but pointing at the legacy node runner.
+    /// Hooks present but pointing at a legacy runner.
     node,
     /// Hooks present, pointing at the in-binary runner.
     current,
@@ -146,18 +147,35 @@ const QoderPaths = struct {
         return self.bufs[i][0..self.lens[i]];
     }
 
-    fn push(self: *QoderPaths, path: []const u8) void {
+    fn push(self: *QoderPaths, allocator: std.mem.Allocator, path: []const u8) void {
         if (path.len > self.bufs[0].len or self.count == self.bufs.len) return;
         // Roots collapse to one file if both *_CONFIG_DIR point at one
         // directory. Writing twice is harmless; counting twice is not.
         for (0..self.count) |i| {
-            if (std.mem.eql(u8, self.slice(i), path)) return;
+            if (samePath(allocator, self.slice(i), path)) return;
         }
         @memcpy(self.bufs[self.count][0..path.len], path);
         self.lens[self.count] = path.len;
         self.count += 1;
     }
 };
+
+/// Compare config paths using the host filesystem's lexical rules. Windows
+/// accepts either slash spelling and treats ASCII case as insignificant, so
+/// two environment overrides can name one file without being byte-identical.
+/// Resolving also folds `.` and `..` on every host; if a malformed path cannot
+/// be resolved, the exact spelling remains the conservative fallback.
+fn samePath(allocator: std.mem.Allocator, left: []const u8, right: []const u8) bool {
+    if (std.mem.eql(u8, left, right)) return true;
+    const left_resolved = std.fs.path.resolve(allocator, &.{left}) catch return false;
+    defer allocator.free(left_resolved);
+    const right_resolved = std.fs.path.resolve(allocator, &.{right}) catch return false;
+    defer allocator.free(right_resolved);
+    if (builtin.os.tag == .windows) {
+        return std.os.windows.eqlIgnoreCaseWtf8(left_resolved, right_resolved);
+    }
+    return std.mem.eql(u8, left_resolved, right_resolved);
+}
 
 /// Roots that exist and whose settings.json we could actually merge into. An
 /// unreadable or malformed config is skipped, not reported as "no hooks":
@@ -172,7 +190,7 @@ fn qoderActionablePaths(allocator: std.mem.Allocator, home: []const u8) QoderPat
         var path_buf: [512]u8 = undefined;
         const path = qoderRootSettings(&path_buf, home, root) orelse continue;
         if (!canInstallJsonHooks(allocator, path, &qoder_events)) continue;
-        out.push(path);
+        out.push(allocator, path);
     }
     return out;
 }
@@ -231,15 +249,27 @@ const codex_events = [_]HookEvent{
     .{ .event = "Stop", .phase = "stop" },
 };
 
-/// Canonical hook command: pass live payloads to the stable symlink. The
-/// disabled and missing-runner paths still drain stdin before exiting so an
-/// agent host never sees EPIPE while it is writing a hook payload.
-pub fn canonicalCommand(buf: []u8, phase: []const u8, agent: []const u8) ?[]const u8 {
+/// Build the canonical hook command for one shell family. Unix keeps the
+/// bounded stdin drain in the shell wrapper; Windows delegates that work to
+/// the native runner through a regular .cmd launcher, because cmd.exe cannot
+/// parse POSIX tests, redirections, or `exec`.
+fn canonicalCommandForTarget(buf: []u8, phase: []const u8, agent: []const u8, windows: bool) ?[]const u8 {
+    if (windows) {
+        return std.fmt.bufPrint(
+            buf,
+            "if exist \"%HOME%\\.petdex\\bin\\petdex-hook.cmd\" (call \"%HOME%\\.petdex\\bin\\petdex-hook.cmd\" bubble {s} {s}) else if exist \"%USERPROFILE%\\.petdex\\bin\\petdex-hook.cmd\" (call \"%USERPROFILE%\\.petdex\\bin\\petdex-hook.cmd\" bubble {s} {s}) & exit /b 0",
+            .{ phase, agent, phase, agent },
+        ) catch null;
+    }
     return std.fmt.bufPrint(
         buf,
         "if [ -f \"$HOME/.petdex/runtime/hooks-disabled\" ]; then [ -t 0 ] || cat >/dev/null; exit 0; fi; if [ -x \"$HOME/.petdex/bin/petdex-hook\" ]; then exec \"$HOME/.petdex/bin/petdex-hook\" bubble {s} {s}; fi; [ -t 0 ] || cat >/dev/null; exit 0",
         .{ phase, agent },
     ) catch null;
+}
+
+pub fn canonicalCommand(buf: []u8, phase: []const u8, agent: []const u8) ?[]const u8 {
+    return canonicalCommandForTarget(buf, phase, agent, builtin.os.tag == .windows);
 }
 
 // ----------------------------------------------------------- detection
@@ -274,6 +304,11 @@ fn containsPetdexHomePath(command: []const u8, relative_path: []const u8) bool {
         "${HOME}/.petdex",
         "$HOME\\.petdex",
         "${HOME}\\.petdex",
+        "%HOME%/.petdex",
+        "%HOME%\\.petdex",
+        "%USERPROFILE%/.petdex",
+        "%USERPROFILE%\\.petdex",
+        "%HOMEDRIVE%%HOMEPATH%\\.petdex",
     };
     var path_buf: [128]u8 = undefined;
     for (homes) |home| {
@@ -283,22 +318,114 @@ fn containsPetdexHomePath(command: []const u8, relative_path: []const u8) bool {
     return false;
 }
 
-fn commandGeneration(command: []const u8) ManagedHookGeneration {
-    // Old CLI-generated hooks invoked the persisted Node bundle or posted
-    // directly with the old token-based curl command. Match those exact
-    // ownership markers rather than every incidental mention of Petdex.
+fn containsWindowsPetdexHomePath(command: []const u8, relative_path: []const u8) bool {
+    const homes = [_][]const u8{
+        "%HOME%/.petdex",
+        "%HOME%\\.petdex",
+        "%USERPROFILE%/.petdex",
+        "%USERPROFILE%\\.petdex",
+        "%HOMEDRIVE%%HOMEPATH%\\.petdex",
+    };
+    var path_buf: [128]u8 = undefined;
+    for (homes) |home| {
+        const path = std.fmt.bufPrint(&path_buf, "{s}{s}", .{ home, relative_path }) catch continue;
+        if (containsCommandPath(command, path)) return true;
+    }
+    return false;
+}
+
+fn shellSeparator(byte: u8) bool {
+    return byte == ';' or byte == '&' or byte == '|' or byte == '(' or byte == ')' or byte == '\n';
+}
+
+fn isLegacyStateInvocation(command: []const u8, path: []const u8) bool {
+    var offset: usize = 0;
+    while (std.mem.indexOfPos(u8, command, offset, path)) |path_at| {
+        const end = path_at + path.len;
+        const has_left_boundary = path_at == 0 or switch (command[path_at - 1]) {
+            ' ', '\t', '\r', '\n', '\'', '"', '(', '=', '/', '\\' => true,
+            else => false,
+        };
+        const has_right_boundary = end == command.len or switch (command[end]) {
+            ' ', '\t', '\r', '\n', '\'', '"', ';', ')', '&', '|' => true,
+            else => false,
+        };
+        if (has_left_boundary and has_right_boundary) {
+            var segment_start = path_at;
+            while (segment_start > 0 and !shellSeparator(command[segment_start - 1])) segment_start -= 1;
+            const prefix = std.mem.trim(u8, command[segment_start..path_at], " \t\r\n\"'");
+            var words = std.mem.tokenizeAny(u8, prefix, " \t\r\n");
+            const first = words.next() orelse return true;
+            if (std.mem.eql(u8, first, "exec") or std.mem.eql(u8, first, "command") or std.mem.eql(u8, first, "env")) return true;
+            if (std.mem.eql(u8, first, "then")) {
+                if (words.next()) |second| {
+                    if (std.mem.eql(u8, second, "exec")) return true;
+                }
+            }
+        }
+        offset = end;
+    }
+    return false;
+}
+
+fn containsPetdexStateInvocation(command: []const u8) bool {
+    const homes = [_][]const u8{
+        "$HOME/.petdex",
+        "${HOME}/.petdex",
+        "$HOME\\.petdex",
+        "${HOME}\\.petdex",
+        "%HOME%/.petdex",
+        "%HOME%\\.petdex",
+        "%USERPROFILE%/.petdex",
+        "%USERPROFILE%\\.petdex",
+        "%HOMEDRIVE%%HOMEPATH%\\.petdex",
+    };
+    var path_buf: [128]u8 = undefined;
+    for (homes) |home| {
+        const unix_path = std.fmt.bufPrint(&path_buf, "{s}/bin/petdex-hook-state", .{home}) catch continue;
+        if (isLegacyStateInvocation(command, unix_path)) return true;
+        const windows_path = std.fmt.bufPrint(&path_buf, "{s}\\bin\\petdex-hook-state", .{home}) catch continue;
+        if (isLegacyStateInvocation(command, windows_path)) return true;
+    }
+    return false;
+}
+
+fn commandGenerationForTarget(command: []const u8, windows: bool) ManagedHookGeneration {
+    // Old CLI-generated hooks invoked the persisted Node bundle, the shell
+    // state wrapper, or posted directly with the old token-based curl
+    // command. Match those exact ownership markers rather than every
+    // incidental mention of Petdex.
     const has_legacy_bundle = (containsPetdexHomePath(command, "/bin/petdex.js") or
         containsPetdexHomePath(command, "\\bin\\petdex.js")) and
         std.mem.indexOf(u8, command, " bubble ") != null;
+    const has_legacy_state = containsPetdexStateInvocation(command);
     const has_legacy_curl = containsPetdexHomePath(command, "/runtime/update-token") and
         std.mem.indexOf(u8, command, "X-Petdex-Update-Token") != null and
         std.mem.indexOf(u8, command, "http://127.0.0.1:7777/state") != null and
         std.mem.indexOf(u8, command, "curl") != null;
-    if (has_legacy_bundle or has_legacy_curl) return .legacy;
-    if ((containsPetdexHomePath(command, "/bin/petdex-hook") or
-        containsPetdexHomePath(command, "\\bin\\petdex-hook")) and
-        std.mem.indexOf(u8, command, " bubble ") != null) return .current;
+    if (has_legacy_bundle or has_legacy_state or has_legacy_curl) return .legacy;
+
+    const has_posix_current = (std.mem.indexOf(u8, command, "$HOME") != null or
+        std.mem.indexOf(u8, command, "${HOME}") != null) and
+        (containsPetdexHomePath(command, "/bin/petdex-hook") or
+            containsPetdexHomePath(command, "\\bin\\petdex-hook")) and
+        std.mem.indexOf(u8, command, " bubble ") != null;
+    const has_windows_current = (containsWindowsPetdexHomePath(command, "/bin/petdex-hook.cmd") or
+        containsWindowsPetdexHomePath(command, "\\bin\\petdex-hook.cmd")) and
+        std.mem.indexOf(u8, command, " bubble ") != null;
+
+    if (windows) {
+        if (has_windows_current) return .current;
+        if (has_posix_current) return .legacy;
+    } else {
+        if (has_posix_current) return .current;
+        if (has_windows_current) return .legacy;
+    }
     return .none;
+}
+
+fn commandGeneration(command: []const u8) ManagedHookGeneration {
+    return commandGenerationForTarget(command, builtin.os.tag == .windows);
 }
 
 fn hookGeneration(hook: std.json.Value) ManagedHookGeneration {
@@ -714,7 +841,7 @@ pub fn installKimiCode(allocator: std.mem.Allocator, home: []const u8) bool {
 }
 
 /// opencode has no hooks: it loads a self-contained JS plugin that
-/// posts straight to the sidecar from inside its own runtime. Install
+/// posts straight to the in-process hook server from inside its own runtime. Install
 /// is writing one file (a build-time snapshot of the CLI's template).
 const opencode_plugin = @embedFile("assets/opencode-plugin.js");
 
@@ -917,6 +1044,7 @@ fn inspectFeatureHooks(toml: []const u8) FeatureHooksInspection {
     var hook_is_enabled = false;
     var hook_offset: usize = 0;
     var hook_line_end: usize = 0;
+    var nested_features_seen = false;
     while (line_start <= toml.len) {
         const relative_end = std.mem.indexOfScalar(u8, toml[line_start..], '\n');
         const line_end = if (relative_end) |end| line_start + end else toml.len;
@@ -924,11 +1052,21 @@ fn inspectFeatureHooks(toml: []const u8) FeatureHooksInspection {
         const trimmed = std.mem.trim(u8, line, " \t\r\n");
         if (trimmed.len > 0 and trimmed[0] == '[') {
             const name = sectionName(trimmed) orelse return .{ .state = .unsafe };
-            if (std.mem.startsWith(u8, name, "features.")) return .{ .state = .unsafe };
-            current_features = std.mem.eql(u8, name, "features");
+            if (std.mem.eql(u8, name, "features")) {
+                // A child table before its parent makes an insertion at the
+                // end ambiguous, so keep that layout conservative. Once the
+                // parent is known, later [features.*] tables do not change
+                // the top-level hooks key and are safe to ignore.
+                if (features_insert_offset != null or nested_features_seen) return .{ .state = .unsafe };
+                current_features = true;
+            } else if (std.mem.startsWith(u8, name, "features.")) {
+                nested_features_seen = true;
+                current_features = false;
+            } else {
+                current_features = false;
+            }
             at_root = false;
             if (current_features) {
-                if (features_insert_offset != null) return .{ .state = .unsafe };
                 features_insert_offset = if (relative_end == null) line_end else line_end + 1;
             }
         } else if (at_root and isFeaturesNamespaceAssignment(trimmed)) {
@@ -959,6 +1097,7 @@ fn inspectFeatureHooks(toml: []const u8) FeatureHooksInspection {
             .{ .state = .replace_line, .offset = hook_offset, .line_end = hook_line_end };
     }
     if (features_insert_offset) |offset| return .{ .state = .insert_after_features, .offset = offset };
+    if (nested_features_seen) return .{ .state = .unsafe };
     return .{ .state = .append_features };
 }
 
@@ -1130,6 +1269,13 @@ pub fn uninstall(allocator: std.mem.Allocator, home: []const u8, kind: AgentKind
 
 const t = std.testing;
 
+/// The Windows command contains mutually exclusive HOME and USERPROFILE
+/// branches, so its phase/agent text is present twice even though cmd.exe
+/// executes at most one branch. Unix has one canonical invocation.
+fn expectedCanonicalHookTextOccurrences() usize {
+    return if (builtin.os.tag == .windows) 2 else 1;
+}
+
 test "claude merge preserves foreign keys and hooks, replaces petdex entries" {
     // Build a fixture settings.json with a user hook and an old petdex
     // node hook, run the merge logic pieces on it via Value.
@@ -1151,7 +1297,7 @@ test "claude merge preserves foreign keys and hooks, replaces petdex entries" {
 }
 
 test "installClaude merges into a real fixture home non-destructively" {
-    const home = "/tmp/petdex-agenthooks-fixture";
+    const home = ".zig-cache/petdex-agenthooks-fixture";
     plat.makeDir(home ++ "/.claude");
     const fixture =
         \\{"model":"opus","hooks":{"PreToolUse":[
@@ -1178,14 +1324,14 @@ test "installClaude merges into a real fixture home non-destructively" {
     try t.expect(installClaude(t.allocator, home));
     const merged2 = readFileAlloc(t.allocator, cfg, 1024 * 1024).?;
     defer t.allocator.free(merged2);
-    try t.expectEqual(@as(usize, 1), std.mem.count(u8, merged2, "bubble pre claude-code"));
+    try t.expectEqual(expectedCanonicalHookTextOccurrences(), std.mem.count(u8, merged2, "bubble pre claude-code"));
     // Backup exists.
     const bak = std.fmt.bufPrint(&pb, "{s}/.claude/settings.json.pre-petdex-backup", .{home}) catch unreachable;
     try t.expect(fileExists(bak));
 }
 
 test "installCodex migrates legacy hooks without dropping a foreign hook" {
-    const home = "/tmp/petdex-agenthooks-codex-fixture";
+    const home = ".zig-cache/petdex-agenthooks-codex-fixture";
     plat.makeDir(home ++ "/.codex");
     var pb: [512]u8 = undefined;
     const toml = std.fmt.bufPrint(&pb, "{s}/.codex/config.toml", .{home}) catch unreachable;
@@ -1220,8 +1366,8 @@ test "CLAUDE_CONFIG_DIR redirects install, scan and uninstall" {
 
     // A home with NO ~/.claude at all: only the override dir exists,
     // exactly the machine #601 describes.
-    const home = "/tmp/petdex-claude-cfgdir-home";
-    const alt = "/tmp/petdex-claude-cfgdir-alt";
+    const home = ".zig-cache/petdex-claude-cfgdir-home";
+    const alt = ".zig-cache/petdex-claude-cfgdir-alt";
     plat.makeDir(home);
     plat.makeDir(alt);
     var pb: [512]u8 = undefined;
@@ -1260,7 +1406,7 @@ test "CLAUDE_CONFIG_DIR redirects install, scan and uninstall" {
 }
 
 test "installQoder writes six events and stays out of the rest of the config" {
-    const home = "/tmp/petdex-qoder-fixture";
+    const home = ".zig-cache/petdex-qoder-fixture";
     plat.makeDir(home ++ "/.qoder");
     const fixture =
         \\{"model":"auto","hooksConfig":{"enabled":false},"hooks":{"PreToolUse":[
@@ -1292,8 +1438,8 @@ test "installQoder writes six events and stays out of the rest of the config" {
     try t.expect(installQoder(t.allocator, home));
     const merged2 = readFileAlloc(t.allocator, cfg, 1024 * 1024).?;
     defer t.allocator.free(merged2);
-    try t.expectEqual(@as(usize, 1), std.mem.count(u8, merged2, "bubble pre qoder"));
-    try t.expectEqual(@as(usize, 1), std.mem.count(u8, merged2, "bubble tool-failure qoder"));
+    try t.expectEqual(expectedCanonicalHookTextOccurrences(), std.mem.count(u8, merged2, "bubble pre qoder"));
+    try t.expectEqual(expectedCanonicalHookTextOccurrences(), std.mem.count(u8, merged2, "bubble tool-failure qoder"));
 
     const bak = std.fmt.bufPrint(&pb, "{s}/.qoder/settings.json.pre-petdex-backup", .{home}) catch unreachable;
     try t.expect(fileExists(bak));
@@ -1348,12 +1494,12 @@ test "one qoder row covers every root present" {
     // and the "must be absent" assertions cannot un-create a directory.
 
     // Neither build installed: no row at all.
-    const empty_home = "/tmp/petdex-qoder-neither";
+    const empty_home = ".zig-cache/petdex-qoder-neither";
     plat.makeDir(empty_home);
     try t.expectEqual(HookStatus.absent, scan(t.allocator, empty_home)[qoder_row].status);
 
     // Only the CN build present: one row, and Install reaches it.
-    const cn_home = "/tmp/petdex-qoder-cn-only";
+    const cn_home = ".zig-cache/petdex-qoder-cn-only";
     plat.makeDir(cn_home);
     plat.makeDir(cn_home ++ "/.qoder-cn");
     // "present but not connected" is only reachable from a config this test has
@@ -1365,7 +1511,7 @@ test "one qoder row covers every root present" {
     try t.expectEqual(HookStatus.current, scan(t.allocator, cn_home)[qoder_row].status);
 
     // Both present: one Install covers both roots, one Disconnect clears both.
-    const both_home = "/tmp/petdex-qoder-both";
+    const both_home = ".zig-cache/petdex-qoder-both";
     plat.makeDir(both_home);
     plat.makeDir(both_home ++ "/.qoder");
     plat.makeDir(both_home ++ "/.qoder-cn");
@@ -1389,7 +1535,7 @@ test "a partially connected qoder reads as not installed and one press completes
     const saved = saveQoderEnv();
     defer restoreQoderEnv(saved);
 
-    const home = "/tmp/petdex-qoder-partial";
+    const home = ".zig-cache/petdex-qoder-partial";
     plat.makeDir(home);
     plat.makeDir(home ++ "/.qoder");
     plat.makeDir(home ++ "/.qoder-cn");
@@ -1410,14 +1556,14 @@ test "a partially connected qoder reads as not installed and one press completes
     try t.expectEqual(HookStatus.current, scan(t.allocator, home)[qoder_row].status);
     const merged = readFileAlloc(t.allocator, global_cfg, 1024 * 1024).?;
     defer t.allocator.free(merged);
-    try t.expectEqual(@as(usize, 1), std.mem.count(u8, merged, "bubble pre qoder"));
+    try t.expectEqual(expectedCanonicalHookTextOccurrences(), std.mem.count(u8, merged, "bubble pre qoder"));
 }
 
 test "a qoder root we could never write to is excluded, not counted as unhooked" {
     const saved = saveQoderEnv();
     defer restoreQoderEnv(saved);
 
-    const home = "/tmp/petdex-qoder-broken-root";
+    const home = ".zig-cache/petdex-qoder-broken-root";
     plat.makeDir(home);
     plat.makeDir(home ++ "/.qoder");
     plat.makeDir(home ++ "/.qoder-cn");
@@ -1445,8 +1591,8 @@ test "qoder roots that resolve to the same path collapse to one" {
     const saved = saveQoderEnv();
     defer restoreQoderEnv(saved);
 
-    const home = "/tmp/petdex-qoder-samepath-home";
-    const shared = "/tmp/petdex-qoder-samepath-shared";
+    const home = ".zig-cache/petdex-qoder-samepath-home";
+    const shared = ".zig-cache/petdex-qoder-samepath-shared";
     plat.makeDir(home);
     plat.makeDir(shared);
     var pb: [512]u8 = undefined;
@@ -1461,8 +1607,26 @@ test "qoder roots that resolve to the same path collapse to one" {
     try t.expect(installQoder(t.allocator, home));
     const merged = readFileAlloc(t.allocator, cfg, 1024 * 1024).?;
     defer t.allocator.free(merged);
-    try t.expectEqual(@as(usize, 1), std.mem.count(u8, merged, "bubble pre qoder"));
+    try t.expectEqual(expectedCanonicalHookTextOccurrences(), std.mem.count(u8, merged, "bubble pre qoder"));
     try t.expectEqual(HookStatus.current, scan(t.allocator, home)[qoder_row].status);
+}
+
+test "Windows qoder paths collapse across separator and case spelling" {
+    if (builtin.os.tag != .windows) return;
+    const saved = saveQoderEnv();
+    defer restoreQoderEnv(saved);
+
+    const home = ".zig-cache/petdex-qoder-equivalent-home";
+    const shared = ".zig-cache/petdex-qoder-equivalent-shared";
+    plat.makeDir(home);
+    plat.makeDir(shared);
+
+    // Windows paths are case-insensitive and accept both slash styles. The
+    // two overrides therefore identify one settings.json despite differing
+    // bytes, so install must not rewrite it once per Qoder build.
+    env_qoder_config_dir = shared;
+    env_qoder_cn_config_dir = ".\\ZIG-CACHE\\PETDEX-QODER-EQUIVALENT-SHARED";
+    try t.expectEqual(@as(usize, 1), qoderActionablePaths(t.allocator, home).count);
 }
 
 test "each qoder root honours only its own env overrides" {
@@ -1470,8 +1634,8 @@ test "each qoder root honours only its own env overrides" {
     defer restoreQoderEnv(saved);
 
     // A home with no ~/.qoder at all: only the override dir exists.
-    const home = "/tmp/petdex-qoder-env-home";
-    const alt = "/tmp/petdex-qoder-env-alt";
+    const home = ".zig-cache/petdex-qoder-env-home";
+    const alt = ".zig-cache/petdex-qoder-env-alt";
     plat.makeDir(home);
     plat.makeDir(alt);
     var pb: [512]u8 = undefined;
@@ -1499,17 +1663,17 @@ test "each qoder root honours only its own env overrides" {
     // CLI_HOME relocates the home directory rather than the root, so the leaf
     // is still appended. Empty string reads as unset, matching Claude's rule.
     env_qoder_config_dir = "";
-    env_qoder_cli_home = "/tmp/petdex-qoder-clihome";
-    plat.makeDir("/tmp/petdex-qoder-clihome");
-    plat.makeDir("/tmp/petdex-qoder-clihome/.qoder");
+    env_qoder_cli_home = ".zig-cache/petdex-qoder-clihome";
+    plat.makeDir(".zig-cache/petdex-qoder-clihome");
+    plat.makeDir(".zig-cache/petdex-qoder-clihome/.qoder");
     try t.expect(installQoder(t.allocator, home));
-    const cli_home_cfg = std.fmt.bufPrint(&pb, "/tmp/petdex-qoder-clihome/.qoder/settings.json", .{}) catch unreachable;
+    const cli_home_cfg = std.fmt.bufPrint(&pb, ".zig-cache/petdex-qoder-clihome/.qoder/settings.json", .{}) catch unreachable;
     try t.expect(fileExists(cli_home_cfg));
     try t.expectEqual(HookStatus.current, scan(t.allocator, home)[qoder_row].status);
 }
 
 test "installQoder removes only its command from a mixed hook group" {
-    const home = "/tmp/petdex-qoder-mixed";
+    const home = ".zig-cache/petdex-qoder-mixed";
     plat.makeDir(home ++ "/.qoder");
     var path_buf: [512]u8 = undefined;
     const config = std.fmt.bufPrint(&path_buf, "{s}/.qoder/settings.json", .{home}) catch unreachable;
@@ -1534,7 +1698,7 @@ test "installQoder removes only its command from a mixed hook group" {
 }
 
 test "installQoder refuses a malformed config without overwriting it" {
-    const home = "/tmp/petdex-qoder-malformed";
+    const home = ".zig-cache/petdex-qoder-malformed";
     plat.makeDir(home ++ "/.qoder");
     var path_buf: [512]u8 = undefined;
     const config = std.fmt.bufPrint(&path_buf, "{s}/.qoder/settings.json", .{home}) catch unreachable;
@@ -1547,7 +1711,7 @@ test "installQoder refuses a malformed config without overwriting it" {
 }
 
 test "installClaude removes only its command from a mixed hook group" {
-    const home = "/tmp/petdex-agenthooks-mixed-group-fixture";
+    const home = ".zig-cache/petdex-agenthooks-mixed-group-fixture";
     plat.makeDir(home ++ "/.claude");
     var path_buf: [512]u8 = undefined;
     const config = std.fmt.bufPrint(&path_buf, "{s}/.claude/settings.json", .{home}) catch unreachable;
@@ -1567,7 +1731,7 @@ test "installClaude removes only its command from a mixed hook group" {
 }
 
 test "migration ignores similarly named user scripts" {
-    const home = "/tmp/petdex-agenthooks-user-script-fixture";
+    const home = ".zig-cache/petdex-agenthooks-user-script-fixture";
     plat.makeDir(home ++ "/.claude");
     var path_buf: [512]u8 = undefined;
     const config = std.fmt.bufPrint(&path_buf, "{s}/.claude/settings.json", .{home}) catch unreachable;
@@ -1584,7 +1748,7 @@ test "migration ignores similarly named user scripts" {
 }
 
 test "migrateLegacyHooks rewrites recognized legacy configs at startup" {
-    const home = "/tmp/petdex-agenthooks-migrate-fixture";
+    const home = ".zig-cache/petdex-agenthooks-migrate-fixture";
     plat.makeDir(home ++ "/.claude");
     plat.makeDir(home ++ "/.codex");
     plat.makeDir(home ++ "/.gemini");
@@ -1597,7 +1761,7 @@ test "migrateLegacyHooks rewrites recognized legacy configs at startup" {
     var codex_path_buf: [512]u8 = undefined;
     const codex = std.fmt.bufPrint(&codex_path_buf, "{s}/.codex/hooks.json", .{home}) catch unreachable;
     const legacy_codex =
-        \\{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"T=\"$(cat $HOME/.petdex/runtime/update-token 2>/dev/null)\"; [ -n \"$T\" ] && curl -s -m 0.3 -X POST http://127.0.0.1:7777/state -H \"X-Petdex-Update-Token: $T\""}]}]}}
+        \\{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"exec \"$HOME/.petdex/bin/petdex-hook-state\" jumping codex 800 >/dev/null 2>&1 # legacy"}]}]}}
     ;
     try t.expect(writeFile(codex, legacy_codex));
     var gemini_path_buf: [512]u8 = undefined;
@@ -1617,6 +1781,7 @@ test "migrateLegacyHooks rewrites recognized legacy configs at startup" {
     try t.expect(std.mem.indexOf(u8, claude_after, "petdex-hook") != null);
     const codex_after = readFileAlloc(t.allocator, codex, 64 * 1024).?;
     defer t.allocator.free(codex_after);
+    try t.expect(std.mem.indexOf(u8, codex_after, "petdex-hook-state") == null);
     try t.expect(std.mem.indexOf(u8, codex_after, "update-token") == null);
     try t.expect(std.mem.indexOf(u8, codex_after, "petdex-hook") != null);
     const gemini_after = readFileAlloc(t.allocator, gemini, 64 * 1024).?;
@@ -1626,7 +1791,7 @@ test "migrateLegacyHooks rewrites recognized legacy configs at startup" {
 }
 
 test "installJsonHooks refuses malformed configs without overwriting them" {
-    const home = "/tmp/petdex-agenthooks-invalid-json";
+    const home = ".zig-cache/petdex-agenthooks-invalid-json";
     plat.makeDir(home ++ "/.claude");
     var path_buf: [512]u8 = undefined;
     const config = std.fmt.bufPrint(&path_buf, "{s}/.claude/settings.json", .{home}) catch unreachable;
@@ -1638,16 +1803,24 @@ test "installJsonHooks refuses malformed configs without overwriting them" {
     try t.expectEqualStrings(invalid, after);
 }
 
-test "canonical command carries killswitch, symlink, phase and agent" {
-    var buf: [512]u8 = undefined;
-    const cmd = canonicalCommand(&buf, "pre", "claude-code").?;
-    try t.expect(std.mem.indexOf(u8, cmd, "hooks-disabled") != null);
-    try t.expect(std.mem.indexOf(u8, cmd, "petdex-hook\" bubble pre claude-code") != null);
-    try t.expectEqual(@as(usize, 2), std.mem.count(u8, cmd, "cat >/dev/null"));
+test "canonical commands match the host shell contract" {
+    var unix_buf: [512]u8 = undefined;
+    const unix = canonicalCommandForTarget(&unix_buf, "pre", "claude-code", false).?;
+    try t.expect(std.mem.indexOf(u8, unix, "hooks-disabled") != null);
+    try t.expect(std.mem.indexOf(u8, unix, "petdex-hook\" bubble pre claude-code") != null);
+    try t.expectEqual(@as(usize, 2), std.mem.count(u8, unix, "cat >/dev/null"));
+
+    var windows_buf: [512]u8 = undefined;
+    const windows = canonicalCommandForTarget(&windows_buf, "pre", "claude-code", true).?;
+    try t.expect(std.mem.indexOf(u8, windows, "%USERPROFILE%\\.petdex\\bin\\petdex-hook.cmd") != null);
+    try t.expect(std.mem.indexOf(u8, windows, "bubble pre claude-code") != null);
+    try t.expect(std.mem.indexOf(u8, windows, "hooks-disabled") == null);
+    try t.expect(std.mem.indexOf(u8, windows, "cat >/dev/null") == null);
+    try t.expect(std.mem.indexOf(u8, windows, "exec ") == null);
 }
 
 test "installGemini enables hooks and uses a millisecond timeout" {
-    const home = "/tmp/petdex-agenthooks-gemini-fixture";
+    const home = ".zig-cache/petdex-agenthooks-gemini-fixture";
     plat.makeDir(home ++ "/.gemini");
     var path_buf: [512]u8 = undefined;
     const config = std.fmt.bufPrint(&path_buf, "{s}/.gemini/settings.json", .{home}) catch unreachable;
@@ -1667,6 +1840,33 @@ test "legacy curl migration requires the complete Petdex command signature" {
     try t.expectEqual(ManagedHookGeneration.none, commandGeneration("cat $HOME/.petdex/runtime/update-token; curl http://127.0.0.1:7777/other -H \"X-Petdex-Update-Token: $T\""));
 }
 
+test "legacy state wrapper is recognized by its exact Petdex path" {
+    try t.expectEqual(
+        ManagedHookGeneration.legacy,
+        commandGeneration("exec \"$HOME/.petdex/bin/petdex-hook-state\" jumping codex 800 >/dev/null 2>&1"),
+    );
+    try t.expectEqual(
+        ManagedHookGeneration.legacy,
+        commandGeneration("exec \"${HOME}/.petdex/bin/petdex-hook-state\" running claude-code"),
+    );
+    try t.expectEqual(
+        ManagedHookGeneration.none,
+        commandGeneration("exec \"$HOME/.petdex/bin/petdex-hook-state-custom\" running codex"),
+    );
+    try t.expectEqual(
+        ManagedHookGeneration.none,
+        commandGeneration("exec /tmp/.petdex/bin/petdex-hook-state running codex"),
+    );
+    try t.expectEqual(
+        ManagedHookGeneration.none,
+        commandGeneration("echo \"$HOME/.petdex/bin/petdex-hook-state\" running codex"),
+    );
+    try t.expectEqual(
+        ManagedHookGeneration.none,
+        commandGeneration("# exec \"$HOME/.petdex/bin/petdex-hook-state\" running codex"),
+    );
+}
+
 test "command path detection requires both boundaries" {
     try t.expectEqual(ManagedHookGeneration.legacy, commandGeneration("node $HOME/.petdex/bin/petdex.js bubble pre codex"));
     try t.expectEqual(ManagedHookGeneration.legacy, commandGeneration("node ${HOME}/.petdex/bin/petdex.js bubble pre codex"));
@@ -1676,8 +1876,23 @@ test "command path detection requires both boundaries" {
     try t.expectEqual(ManagedHookGeneration.none, commandGeneration("node $HOME/.petdex/bin/petdex.js status"));
 }
 
+test "Windows launcher command is classified as current" {
+    const command = "if exist \"%HOME%\\.petdex\\bin\\petdex-hook.cmd\" (call \"%HOME%\\.petdex\\bin\\petdex-hook.cmd\" bubble pre codex) else if exist \"%USERPROFILE%\\.petdex\\bin\\petdex-hook.cmd\" (call \"%USERPROFILE%\\.petdex\\bin\\petdex-hook.cmd\" bubble pre codex) & exit /b 0";
+    try t.expectEqual(ManagedHookGeneration.current, commandGenerationForTarget(command, true));
+    try t.expectEqual(ManagedHookGeneration.legacy, commandGenerationForTarget(command, false));
+}
+
+test "Windows upgrades the old POSIX runner instead of treating it as current" {
+    const command = "if [ -x \"$HOME/.petdex/bin/petdex-hook\" ]; then exec \"$HOME/.petdex/bin/petdex-hook\" bubble pre codex; fi";
+    try t.expectEqual(ManagedHookGeneration.legacy, commandGenerationForTarget(command, true));
+    try t.expectEqual(ManagedHookGeneration.current, commandGenerationForTarget(command, false));
+}
+
 test "codex feature inspection is section-aware and conservative" {
     try t.expectEqual(FeatureHooksState.enabled, inspectFeatureHooks("[features]\nhooks = true # keep\n").state);
+    try t.expectEqual(FeatureHooksState.enabled, inspectFeatureHooks("[features]\nhooks = true\n[features.multi_agent_v2]\nenabled = true\n").state);
+    try t.expectEqual(FeatureHooksState.replace_line, inspectFeatureHooks("[features]\nhooks = false\n[features.multi_agent_v2]\nenabled = true\n").state);
+    try t.expectEqual(FeatureHooksState.insert_after_features, inspectFeatureHooks("[features]\nmemories = true\n[features.multi_agent_v2]\nenabled = true\n").state);
     try t.expectEqual(FeatureHooksState.replace_line, inspectFeatureHooks("[features]\nhooks = false\n").state);
     try t.expectEqual(FeatureHooksState.insert_after_features, inspectFeatureHooks("[features]\nmemories = true\n").state);
     try t.expectEqual(FeatureHooksState.append_features, inspectFeatureHooks("[other]\nhooks = true\n").state);
@@ -1691,7 +1906,7 @@ test "codex feature inspection is section-aware and conservative" {
 }
 
 test "installCodex replaces a false feature flag without duplicating it" {
-    const home = "/tmp/petdex-agenthooks-codex-false-feature";
+    const home = ".zig-cache/petdex-agenthooks-codex-false-feature";
     plat.makeDir(home ++ "/.codex");
     var path_buf: [512]u8 = undefined;
     const toml = std.fmt.bufPrint(&path_buf, "{s}/.codex/config.toml", .{home}) catch unreachable;
@@ -1704,7 +1919,7 @@ test "installCodex replaces a false feature flag without duplicating it" {
 }
 
 test "installCodex does not update hooks when its feature config is unsafe" {
-    const home = "/tmp/petdex-agenthooks-codex-unsafe-feature";
+    const home = ".zig-cache/petdex-agenthooks-codex-unsafe-feature";
     plat.makeDir(home ++ "/.codex");
     var path_buf: [512]u8 = undefined;
     const toml = std.fmt.bufPrint(&path_buf, "{s}/.codex/config.toml", .{home}) catch unreachable;
@@ -1720,7 +1935,7 @@ test "installCodex does not update hooks when its feature config is unsafe" {
 }
 
 test "installCodex does not update its feature config when hooks json is malformed" {
-    const home = "/tmp/petdex-agenthooks-codex-invalid-hooks";
+    const home = ".zig-cache/petdex-agenthooks-codex-invalid-hooks";
     plat.makeDir(home ++ "/.codex");
     var path_buf: [512]u8 = undefined;
     const toml = std.fmt.bufPrint(&path_buf, "{s}/.codex/config.toml", .{home}) catch unreachable;
@@ -1736,7 +1951,7 @@ test "installCodex does not update its feature config when hooks json is malform
 }
 
 test "uninstallCodex preserves foreign hooks in a mixed config" {
-    const home = "/tmp/petdex-agenthooks-codex-uninstall-fixture";
+    const home = ".zig-cache/petdex-agenthooks-codex-uninstall-fixture";
     plat.makeDir(home ++ "/.codex");
     var hooks_path_buf: [512]u8 = undefined;
     const hooks = std.fmt.bufPrint(&hooks_path_buf, "{s}/.codex/hooks.json", .{home}) catch unreachable;
@@ -1757,7 +1972,7 @@ test "uninstallCodex preserves foreign hooks in a mixed config" {
 test "kimi writes its hooks as TOML and keeps foreign config" {
     const saved = env_kimi_code_home;
     defer env_kimi_code_home = saved;
-    const home = "/tmp/petdex-kimi-home";
+    const home = ".zig-cache/petdex-kimi-home";
     plat.makeDir(home);
     plat.makeDir(home ++ "/.kimi-code");
     var pb: [512]u8 = undefined;
@@ -1800,8 +2015,8 @@ test "kimi writes its hooks as TOML and keeps foreign config" {
 test "KIMI_CODE_HOME redirects install and detection" {
     const saved = env_kimi_code_home;
     defer env_kimi_code_home = saved;
-    const home = "/tmp/petdex-kimi-nohome";
-    const alt = "/tmp/petdex-kimi-alt";
+    const home = ".zig-cache/petdex-kimi-nohome";
+    const alt = ".zig-cache/petdex-kimi-alt";
     plat.makeDir(home);
     plat.makeDir(alt);
     var pb: [512]u8 = undefined;
@@ -1837,7 +2052,7 @@ test "kimi hook headers tolerate TOML whitespace" {
 }
 
 test "codebuddy merges into its own config and leaves Claude's alone" {
-    const home = "/tmp/petdex-codebuddy-home";
+    const home = ".zig-cache/petdex-codebuddy-home";
     plat.makeDir(home);
     plat.makeDir(home ++ "/.codebuddy");
     plat.makeDir(home ++ "/.claude");
@@ -1897,7 +2112,7 @@ test "omp install writes the extension where OMP discovers it" {
     defer env_pi_coding_agent_dir = saved;
     env_pi_coding_agent_dir = null;
 
-    const home = "/tmp/petdex-omp-home";
+    const home = ".zig-cache/petdex-omp-home";
     plat.makeDir(home);
     plat.makeDir(home ++ "/.omp");
     plat.makeDir(home ++ "/.omp/agent");
@@ -1913,6 +2128,10 @@ test "omp install writes the extension where OMP discovers it" {
     try t.expect(std.mem.indexOf(u8, written, "export default function") != null);
     // Failure comes from isError on tool_result, not from parsing text.
     try t.expect(std.mem.indexOf(u8, written, "isError") != null);
+    // Each OMP event must identify its conversation so concurrent sessions
+    // remain separate in the desktop mailbox.
+    try t.expect(std.mem.indexOf(u8, written, "session_id") != null);
+    try t.expect(std.mem.indexOf(u8, written, "getSessionId") != null);
 
     const agents = scan(t.allocator, home);
     try t.expectEqual(HookStatus.current, agents[@intFromEnum(AgentKind.omp)].status);
@@ -1925,8 +2144,8 @@ test "PI_CODING_AGENT_DIR relocates the whole OMP agent base" {
     const saved = env_pi_coding_agent_dir;
     defer env_pi_coding_agent_dir = saved;
 
-    const home = "/tmp/petdex-omp-nohome";
-    const alt = "/tmp/petdex-omp-alt";
+    const home = ".zig-cache/petdex-omp-nohome";
+    const alt = ".zig-cache/petdex-omp-alt";
     plat.makeDir(home);
     plat.makeDir(alt);
 
@@ -1957,4 +2176,11 @@ test "omp extension maps every state the sprite sheet has" {
     // Grep bubbles use typographic quotes: an ASCII quote closes the JSON
     // string early and the pattern vanishes (#628).
     try t.expect(std.mem.indexOf(u8, omp_extension, "\\\"") == null);
+}
+
+test "opencode plugin carries session ids for tools and lifecycle events" {
+    try t.expect(std.mem.indexOf(u8, opencode_plugin, "input.sessionID") != null);
+    try t.expect(std.mem.indexOf(u8, opencode_plugin, "event?.properties?.sessionID") != null);
+    try t.expect(std.mem.indexOf(u8, opencode_plugin, "session_id") != null);
+    try t.expect(std.mem.indexOf(u8, opencode_plugin, "const titleCache = new Map") != null);
 }

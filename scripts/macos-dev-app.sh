@@ -1,21 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Build a local macOS app wrapper for the desktop binary.
+# Build a local macOS app wrapper for the native desktop binary.
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DESKTOP_DIR="$ROOT/packages/petdex-desktop"
+DESKTOP_DIR="$ROOT/packages/petdex-desktop-native"
 APP_PATH="${PETDEX_DEV_APP_PATH:-$HOME/Applications/Petdex Dev.app}"
-EXECUTABLE="$DESKTOP_DIR/zig-out/bin/petdex-desktop"
+EXECUTABLE="$DESKTOP_DIR/zig-out/bin/petdex-desktop-native"
 CONTENTS_DIR="$APP_PATH/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
 LAUNCHER="$MACOS_DIR/PetdexDev"
 
+if [[ ! -x "$EXECUTABLE" ]]; then
+  echo "macos-dev-app: native binary not found or not executable: $EXECUTABLE" >&2
+  echo "macos-dev-app: run scripts/macos-dev-restart.sh first" >&2
+  exit 1
+fi
+
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 
-if [[ -f "$DESKTOP_DIR/assets/icon.icns" ]]; then
-  cp "$DESKTOP_DIR/assets/icon.icns" "$RESOURCES_DIR/icon.icns"
+if [[ -f "$DESKTOP_DIR/assets/icon.png" ]]; then
+  cp "$DESKTOP_DIR/assets/icon.png" "$RESOURCES_DIR/icon.png"
 fi
 
 cat > "$CONTENTS_DIR/Info.plist" <<PLIST
@@ -30,7 +36,7 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
   <key>CFBundleExecutable</key>
   <string>PetdexDev</string>
   <key>CFBundleIconFile</key>
-  <string>icon.icns</string>
+  <string>icon.png</string>
   <key>CFBundleIdentifier</key>
   <string>run.crafter.petdex-desktop.dev</string>
   <key>CFBundleName</key>

@@ -2168,10 +2168,14 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
                     // folds into one slot before the model ever sees the
                     // set, so the rest of the pipeline (deadlines, view,
                     // hover) runs the single-bubble path unchanged.
-                    const count = if (model.bubbles_per_conversation)
-                        raw_count
-                    else
-                        collapseToNewest(&drained, raw_count);
+                    const count = if (model.bubbles_per_conversation) blk: {
+                        // Mailbox slots retain first-seen session order while
+                        // updates happen in place. The renderer treats the
+                        // final slot as the front card, so sort by the
+                        // monotonic event counter before copying the stack.
+                        sortBubblesByCounter(drained[0..raw_count]);
+                        break :blk raw_count;
+                    } else collapseToNewest(&drained, raw_count);
                     // Deadlines are matched against the outgoing stack,
                     // so the copy has to happen before it is overwritten.
                     const previous = model.bubbles;
@@ -2860,11 +2864,7 @@ fn updateBubbleStack(model: *Model, cursor_x: f64, cursor_y: f64, now_ms: i64, f
 /// stack is empty.
 fn newestBubble(model: *const Model) ?*const hook_server.Bubble {
     if (model.bubbles_len == 0) return null;
-    var newest = &model.bubbles[0];
-    for (model.bubbles[1..model.bubbles_len]) |*bubble| {
-        if (bubble.counter > newest.counter) newest = bubble;
-    }
-    return newest;
+    return &model.bubbles[newestOf(model.bubbles[0..model.bubbles_len])];
 }
 
 fn clearBubble(model: *Model) void {
@@ -2887,6 +2887,23 @@ fn newestOf(bubbles: []const hook_server.Bubble) usize {
         if (b.counter > bubbles[newest].counter) newest = i;
     }
     return newest;
+}
+
+/// Put bubbles in oldest-to-newest order for the stacked renderer. The
+/// mailbox deliberately keeps insertion order so a session update can be
+/// applied in place; the view deliberately keeps the newest card in the last
+/// slot. Counters are globally monotonic, so this stable insertion sort is
+/// deterministic and preserves the original order for equal test fixtures.
+fn sortBubblesByCounter(bubbles: []hook_server.Bubble) void {
+    if (bubbles.len < 2) return;
+    for (1..bubbles.len) |i| {
+        const value = bubbles[i];
+        var j = i;
+        while (j > 0 and bubbles[j - 1].counter > value.counter) : (j -= 1) {
+            bubbles[j] = bubbles[j - 1];
+        }
+        bubbles[j] = value;
+    }
 }
 
 /// Fold a drained multi-conversation set down to the single newest
@@ -3507,10 +3524,11 @@ fn petdexWindowView(ui: *PetdexApp.Ui, model: *const Model, window_label: []cons
     });
 }
 
-/// Keep `~/.petdex/bin/petdex-hook` pointing at the running binary so
-/// agent hooks survive app updates: the hooks reference the stable
-/// symlink, the app re-aims it every boot.
-fn refreshHookSymlink(argv0: []const u8) void {
+/// Keep the stable hook entry pointing at the running binary so agent
+/// hooks survive app updates: the hooks reference it, the app re-aims it
+/// every boot. Unix uses a symlink; Windows uses a regular .cmd launcher
+/// because ordinary users cannot create symlinks reliably.
+fn refreshHookEntry(argv0: []const u8) void {
     _ = argv0;
     const home = env_home orelse return;
     var self_buf: [1024]u8 = undefined;
@@ -3520,7 +3538,18 @@ fn refreshHookSymlink(argv0: []const u8) void {
     plat.makeDir(bin);
     var link_buf: [512]u8 = undefined;
     const link = std.fmt.bufPrint(&link_buf, "{s}/.petdex/bin/petdex-hook", .{home}) catch return;
-    _ = plat.replaceSymlink(rp, link);
+    if (builtin.os.tag == .windows) {
+        var launcher_path_buf: [512]u8 = undefined;
+        const launcher_path = std.fmt.bufPrint(&launcher_path_buf, "{s}.cmd", .{link}) catch return;
+        var launcher_buf: [1536]u8 = undefined;
+        const launcher = plat.windowsHookLauncher(&launcher_buf, rp) orelse return;
+        _ = plat.writeFile(launcher_path, launcher);
+        // Remove a stale link/file from pre-launcher builds. The .cmd entry is
+        // the only path used by new configurations.
+        plat.deleteFile(link);
+    } else {
+        _ = plat.replaceSymlink(rp, link);
+    }
 }
 
 // -------------------------------------------------------------------- app
@@ -3623,7 +3652,7 @@ pub fn main(init: std.process.Init) !void {
             return;
         }
     }
-    if (argv0) |a0| refreshHookSymlink(a0);
+    if (argv0) |a0| refreshHookEntry(a0);
     materializeTrayIcon();
     env_wanted_pet = init.environ_map.get("PETDEX_PET");
     boot_io = init.io;
@@ -4806,13 +4835,27 @@ test "two conversations stack and grow the window vertically" {
     try std.testing.expectEqualStrings("beta", newestBubble(&model).?.sessionSlice());
 }
 
-test "newest bubble follows counter rather than array position" {
+test "newest bubble follows its update counter instead of its slot" {
     var model: Model = .{};
-    testPushBubble(&model, "older", "older text", true, -1);
-    testPushBubble(&model, "newer", "newer text", true, -1);
+    testPushBubble(&model, "codex-session", "current codex update", true, -1);
+    testPushBubble(&model, "claude-session", "older claude update", false, -1);
+
+    // The Claude conversation was opened later, but Codex received the
+    // latest event. Mailbox slots stay in insertion order, so the last slot
+    // is not necessarily the newest bubble.
     model.bubbles[0].counter = 9;
     model.bubbles[1].counter = 4;
-    try std.testing.expectEqualStrings("older", newestBubble(&model).?.sessionSlice());
+    @memcpy(model.bubbles[0].agent[0.."codex".len], "codex");
+    model.bubbles[0].agent_len = "codex".len;
+    @memcpy(model.bubbles[1].agent[0.."claude-code".len], "claude-code");
+    model.bubbles[1].agent_len = "claude-code".len;
+
+    const newest = newestBubble(&model).?;
+    try std.testing.expectEqualStrings("codex", newest.agent[0..newest.agent_len]);
+
+    sortBubblesByCounter(model.bubbles[0..model.bubbles_len]);
+    try std.testing.expectEqualStrings("claude-session", model.bubbles[0].sessionSlice());
+    try std.testing.expectEqualStrings("codex-session", model.bubbles[1].sessionSlice());
 }
 
 test "an empty stack still reserves one card of window height" {

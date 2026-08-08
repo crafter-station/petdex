@@ -1612,7 +1612,7 @@
     },
     "fields": {
       "installId": "首次运行时生成的随机 ID，保存在 <code>~/.petdex/telemetry.json</code>。它不会关联你的账号、邮箱或其他身份信息。",
-      "event": "触发了哪个生命周期事件：<code>cli_install_desktop_success</code>、<code>cli_hooks_install_success</code>、<code>cli_desktop_start_success</code> 或 <code>desktop_first_state_received</code>。最后一个事件会在桌面 sidecar 每次会话首次收到 hook 时发送。",
+      "event": "触发了哪个生命周期事件：<code>cli_install_desktop_success</code>、<code>cli_hooks_install_success</code>、<code>cli_desktop_start_success</code> 或 <code>desktop_first_state_received</code>。最后一个事件会在桌面内置 hook server 每次会话首次收到 hook 时发送。",
       "cliVersion": "petdex CLI 的版本，例如 <code>0.1.4</code>。",
       "binaryVersion": "已安装的桌面端版本，例如 <code>0.1.4</code>。只会在 <code>cli_install_desktop_success</code> 时发送。",
       "os": "操作系统：<code>darwin</code>、<code>linux</code> 或 <code>win32</code>。",
@@ -1875,7 +1875,7 @@
       "desktop": {
         "title": "桌面应用",
         "intro": "Petdex Desktop 是一个漂浮在工作区上的桌面宠物，会根据 Agent 的工具调用做出反应。支持 macOS、Linux 和 Windows。视觉介绍见 <download>/download</download>。",
-        "sidecarCallout": "Sidecar 是运行在本机 <code>7777</code> 端口的 HTTP server。任何能 <code>curl</code> 并读取每次会话 token（<code>~/.petdex/runtime/update-token</code>）的程序都能驱动宠物。这个 token 每次 sidecar 启动都会轮换，文件权限是 <code>0600</code>，只有当前用户能读；浏览器和远程网站不能直接访问：",
+        "sidecarCallout": "桌面应用内置了运行在本机 <code>7777</code> 端口的 HTTP hook server。任何能 <code>curl</code> 并读取每次会话 token（<code>~/.petdex/runtime/update-token</code>）的程序都能驱动宠物。这个 token 每次应用启动都会轮换，文件权限是 <code>0600</code>，只有当前用户能读；浏览器和远程网站不能直接访问：",
         "windowTitle": "Living with the pet",
         "windowBody": "The pet floats above every window and never steals focus. Clicks pass straight through the activity bubble to whatever is behind it, so a message appearing over your editor cannot swallow a keystroke. The sprite itself stays draggable: pick it up and drop it wherever it belongs on your screen.",
         "shortcutsTitle": "Shortcuts",

@@ -27,6 +27,9 @@ const Conn = struct {
 };
 
 pub const max_pending = 50;
+const max_active_connections: u32 = 64;
+const max_request_bytes: usize = 8192;
+const connection_timeout_ms: i64 = 5_000;
 
 pub const StateEvent = struct {
     state: [16]u8 = @splat(0),
@@ -88,6 +91,22 @@ const SpinMutex = struct {
     }
 };
 
+/// Runtime mirrors perform filesystem I/O, so a spin lock would burn a CPU
+/// while another hook waits for an atomic replace to finish. Use the SDK's
+/// futex-backed Io mutex for that path; the mailbox/request locks remain
+/// short spin locks because they never cross an I/O boundary.
+const BlockingMutex = struct {
+    inner: std.Io.Mutex = .init,
+
+    fn lock(self: *BlockingMutex, io: std.Io) void {
+        self.inner.lockUncancelable(io);
+    }
+
+    fn unlock(self: *BlockingMutex, io: std.Io) void {
+        self.inner.unlock(io);
+    }
+};
+
 pub const Mailbox = struct {
     mutex: SpinMutex = .{},
     pending: [max_pending]StateEvent = @splat(.{}),
@@ -104,20 +123,33 @@ pub const Mailbox = struct {
     bubble_counter: u64 = 0,
     state_counter: u64 = 0,
 
+    pub const EnqueueResult = struct {
+        queued: bool,
+        counter: u64,
+    };
+
     /// Coalesce + append, sidecar semantics: consecutive identical
     /// states collapse. Returns whether the event was queued.
     pub fn enqueue(self: *Mailbox, event: StateEvent) bool {
+        return self.enqueueWithCounter(event).queued;
+    }
+
+    pub fn enqueueWithCounter(self: *Mailbox, event: StateEvent) EnqueueResult {
         self.mutex.lock();
         defer self.mutex.unlock();
         if (self.pending_len > 0 or self.last_enqueued.state_len > 0) {
-            if (std.mem.eql(u8, self.last_enqueued.slice(), event.slice())) return false;
+            if (std.mem.eql(u8, self.last_enqueued.slice(), event.slice())) {
+                return .{ .queued = false, .counter = self.state_counter };
+            }
         }
-        if (self.pending_len >= max_pending) return false;
+        if (self.pending_len >= max_pending) {
+            return .{ .queued = false, .counter = self.state_counter };
+        }
         self.pending[self.pending_len] = event;
         self.pending_len += 1;
         self.last_enqueued = event;
         self.state_counter += 1;
-        return true;
+        return .{ .queued = true, .counter = self.state_counter };
     }
 
     pub fn pop(self: *Mailbox) ?StateEvent {
@@ -253,6 +285,11 @@ const Server = struct {
     allocator: std.mem.Allocator,
     runtime_dir: []const u8,
     token: [64]u8,
+    request_lock: SpinMutex = .{},
+    mirror_lock: BlockingMutex = .{},
+    last_state_mirror: u64 = 0,
+    last_bubble_mirror: u64 = 0,
+    active_connections: std.atomic.Value(u32) = .init(0),
     // Token-bucket limiter, sidecar budget: 30/s shared by state+bubble.
     bucket: f64 = 30,
     bucket_stamp_ms: i64 = 0,
@@ -260,6 +297,8 @@ const Server = struct {
     pid: i32,
 
     fn rateLimitOk(self: *Server) bool {
+        self.request_lock.lock();
+        defer self.request_lock.unlock();
         const now = nowMs();
         if (self.bucket_stamp_ms == 0) self.bucket_stamp_ms = now;
         const elapsed: f64 = @floatFromInt(now - self.bucket_stamp_ms);
@@ -268,6 +307,14 @@ const Server = struct {
         if (self.bucket < 1) return false;
         self.bucket -= 1;
         return true;
+    }
+
+    fn nextRunningState(self: *Server) []const u8 {
+        self.request_lock.lock();
+        defer self.request_lock.unlock();
+        const state = if (self.running_toggle) "running-left" else "running-right";
+        self.running_toggle = !self.running_toggle;
+        return state;
     }
 };
 
@@ -318,47 +365,73 @@ fn run(server: *Server) void {
 
     while (true) {
         const stream = listener.accept(io) catch continue;
-        var conn: Conn = .{ .stream = stream, .io = io };
-        handleConnection(server, &conn);
-        stream.close(io);
+        const active = server.active_connections.fetchAdd(1, .acq_rel);
+        if (active >= max_active_connections) {
+            _ = server.active_connections.fetchSub(1, .release);
+            stream.close(io);
+            continue;
+        }
+        // A client can disappear after sending only part of a request. Keep
+        // that blocking read off the accept loop so later hooks still reach
+        // the server while the abandoned connection drains or closes.
+        const thread = std.Thread.spawn(.{}, handleConnectionThread, .{ server, stream }) catch {
+            _ = server.active_connections.fetchSub(1, .release);
+            stream.close(io);
+            continue;
+        };
+        thread.detach();
     }
 }
 
+fn handleConnectionThread(server: *Server, stream: std.Io.net.Stream) void {
+    defer _ = server.active_connections.fetchSub(1, .release);
+    var scope = plat.Scope.init();
+    defer scope.deinit();
+    const io = scope.io();
+    var conn: Conn = .{ .stream = stream, .io = io };
+    handleConnection(server, &conn);
+    stream.close(io);
+}
+
 fn handleConnection(server: *Server, conn: *Conn) void {
-    var buf: [8192]u8 = undefined;
-    var read_buf: [8192]u8 = undefined;
-    var reader = conn.stream.reader(conn.io, &read_buf);
-    const r = &reader.interface;
-
-    // Headers line by line: a sized read would block waiting for bytes
-    // the client will not send until it sees a response (the old
-    // std.c.read returned whatever one syscall had, this does not).
+    var buf: [max_request_bytes]u8 = undefined;
     var total: usize = 0;
-    while (true) {
-        // Inclusive, not exclusive: the exclusive form leaves the '\n'
-        // in the stream, so the next line would start with it and read
-        // back as empty, ending the loop after the request line.
-        const line = r.takeDelimiterInclusive('\n') catch return;
-        const trimmed = std.mem.trimEnd(u8, line, "\r\n");
-        if (total + trimmed.len + 2 > buf.len) return;
-        @memcpy(buf[total..][0..trimmed.len], trimmed);
-        buf[total + trimmed.len] = '\r';
-        buf[total + trimmed.len + 1] = '\n';
-        total += trimmed.len + 2;
-        if (trimmed.len == 0) break;
-    }
-    if (total == 0) return;
-    const head = buf[0..total];
+    var header_end: ?usize = null;
+    const timeout = (std.Io.Timeout{ .duration = .{
+        .raw = std.Io.Duration.fromMilliseconds(connection_timeout_ms),
+        .clock = .awake,
+    } }).toDeadline(conn.io);
 
-    const content_length = headerValueInt(head, "content-length") orelse 0;
-    if (content_length > buf.len - total) {
+    // Read the complete header with a bounded deadline. A hook host can
+    // disappear after opening a socket, so no connection may wait forever.
+    while (header_end == null) {
+        if (total == buf.len) {
+            respond(conn, 413, "{\"ok\":false,\"error\":\"headers_too_large\"}");
+            return;
+        }
+        const got = receiveWithTimeout(conn, buf[total..], timeout) catch return;
+        if (got == 0) return;
+        total += got;
+        header_end = if (std.mem.indexOf(u8, buf[0..total], "\r\n\r\n")) |at| at + 4 else null;
+    }
+
+    const head_len = header_end.?;
+    const head = buf[0..head_len];
+    const content_length = if (headerValue(head, "content-length")) |raw| std.fmt.parseInt(usize, raw, 10) catch {
+        respond(conn, 400, "{\"ok\":false,\"error\":\"invalid_content_length\"}");
+        return;
+    } else 0;
+    if (content_length > buf.len - head_len) {
         respond(conn, 413, "{\"ok\":false,\"error\":\"body_too_large\"}");
         return;
     }
-    const body = if (content_length == 0) buf[total..total] else blk: {
-        const got = r.readSliceShort(buf[total..][0..content_length]) catch break :blk buf[total..total];
-        break :blk buf[total..][0..got];
-    };
+    const request_len = head_len + content_length;
+    while (total < request_len) {
+        const got = receiveWithTimeout(conn, buf[total..request_len], timeout) catch return;
+        if (got == 0) return;
+        total += got;
+    }
+    const body = buf[head_len..request_len];
 
     var line_it = std.mem.splitSequence(u8, head, "\r\n");
     const request_line = line_it.next() orelse return;
@@ -368,6 +441,11 @@ fn handleConnection(server: *Server, conn: *Conn) void {
     const path = if (std.mem.indexOfScalar(u8, target, '?')) |q| target[0..q] else target;
 
     route(server, conn, method, path, head, body);
+}
+
+fn receiveWithTimeout(conn: *Conn, buffer: []u8, timeout: std.Io.Timeout) !usize {
+    const message = try conn.stream.socket.receiveTimeout(conn.io, buffer, timeout);
+    return message.data.len;
 }
 
 fn route(server: *Server, conn: *Conn, method: []const u8, path: []const u8, head: []const u8, body: []const u8) void {
@@ -408,27 +486,30 @@ fn route(server: *Server, conn: *Conn, method: []const u8, path: []const u8, hea
             return respond(conn, 400, "{\"ok\":false,\"error\":\"invalid_state\"}");
         }
         var duration: u32 = 0;
-        if (jsonNumber(body, "duration")) |d| duration = @intFromFloat(@min(d, 30_000));
+        switch (parseDuration(body)) {
+            .missing => {},
+            .invalid => return respond(conn, 400, "{\"ok\":false,\"error\":\"invalid_duration\"}"),
+            .value => |value| duration = value,
+        }
 
         // Sidecar's sprite variation: bare "running" alternates
         // left/right per session so consecutive tool calls vary.
         var applied: []const u8 = state_raw;
         if (std.mem.eql(u8, state_raw, "running")) {
-            applied = if (server.running_toggle) "running-left" else "running-right";
-            server.running_toggle = !server.running_toggle;
+            applied = server.nextRunningState();
         }
 
         var event = StateEvent{ .duration_ms = duration };
         event.state_len = applied.len;
         @memcpy(event.state[0..applied.len], applied);
-        const queued = mailbox.enqueue(event);
-        mirrorState(server, applied, mailbox.state_counter) catch {};
+        const enqueue_result = mailbox.enqueueWithCounter(event);
+        mirrorQueuedState(server, applied, enqueue_result) catch {};
 
         const dur_out: i64 = if (duration == 0) -1 else @intCast(duration);
         const out = if (dur_out < 0)
-            std.fmt.bufPrint(&scratch, "{{\"ok\":true,\"state\":\"{s}\",\"duration\":null,\"queued\":{}}}", .{ state_raw, queued }) catch return
+            std.fmt.bufPrint(&scratch, "{{\"ok\":true,\"state\":\"{s}\",\"duration\":null,\"queued\":{}}}", .{ state_raw, enqueue_result.queued }) catch return
         else
-            std.fmt.bufPrint(&scratch, "{{\"ok\":true,\"state\":\"{s}\",\"duration\":{d},\"queued\":{}}}", .{ state_raw, dur_out, queued }) catch return;
+            std.fmt.bufPrint(&scratch, "{{\"ok\":true,\"state\":\"{s}\",\"duration\":{d},\"queued\":{}}}", .{ state_raw, dur_out, enqueue_result.queued }) catch return;
         return respond(conn, 200, out);
     }
 
@@ -537,6 +618,98 @@ pub fn jsonNumberPub(body: []const u8, key: []const u8) ?f64 {
     return jsonNumber(body, key);
 }
 
+const JsonFieldStart = union(enum) {
+    missing,
+    invalid,
+    value: usize,
+};
+
+const JsonNumberResult = union(enum) {
+    missing,
+    invalid,
+    value: f64,
+};
+
+const DurationResult = union(enum) {
+    missing,
+    invalid,
+    value: u32,
+};
+
+fn skipJsonWhitespace(body: []const u8, offset: usize) usize {
+    var i = offset;
+    while (i < body.len and (body[i] == ' ' or body[i] == '\t' or body[i] == '\r' or body[i] == '\n')) i += 1;
+    return i;
+}
+
+fn jsonFieldStart(body: []const u8, key: []const u8) JsonFieldStart {
+    var pat_buf: [32]u8 = undefined;
+    const pat = std.fmt.bufPrint(&pat_buf, "\"{s}\"", .{key}) catch return .invalid;
+    var search: usize = 0;
+    while (search < body.len) {
+        const relative = std.mem.indexOf(u8, body[search..], pat) orelse return .missing;
+        const key_at = search + relative;
+        var before = key_at;
+        while (before > 0 and (body[before - 1] == ' ' or body[before - 1] == '\t' or body[before - 1] == '\r' or body[before - 1] == '\n')) before -= 1;
+        if (before == 0 or body[before - 1] == '{' or body[before - 1] == ',') {
+            const after_key = skipJsonWhitespace(body, key_at + pat.len);
+            if (after_key >= body.len or body[after_key] != ':') return .invalid;
+            return .{ .value = skipJsonWhitespace(body, after_key + 1) };
+        }
+        search = key_at + pat.len;
+    }
+    return .missing;
+}
+
+fn scanJsonNumber(body: []const u8, offset: usize) ?usize {
+    var i = offset;
+    if (i >= body.len) return null;
+    if (body[i] == '-') {
+        i += 1;
+        if (i >= body.len) return null;
+    }
+
+    if (body[i] == '0') {
+        i += 1;
+        if (i < body.len and std.ascii.isDigit(body[i])) return null;
+    } else if (body[i] >= '1' and body[i] <= '9') {
+        i += 1;
+        while (i < body.len and std.ascii.isDigit(body[i])) i += 1;
+    } else {
+        return null;
+    }
+
+    if (i < body.len and body[i] == '.') {
+        i += 1;
+        const fraction_start = i;
+        while (i < body.len and std.ascii.isDigit(body[i])) i += 1;
+        if (i == fraction_start) return null;
+    }
+
+    if (i < body.len and (body[i] == 'e' or body[i] == 'E')) {
+        i += 1;
+        if (i < body.len and (body[i] == '+' or body[i] == '-')) i += 1;
+        const exponent_start = i;
+        while (i < body.len and std.ascii.isDigit(body[i])) i += 1;
+        if (i == exponent_start) return null;
+    }
+
+    if (i < body.len and body[i] != ' ' and body[i] != '\t' and body[i] != '\r' and body[i] != '\n' and body[i] != ',' and body[i] != '}' and body[i] != ']') return null;
+    return i;
+}
+
+fn jsonNumberResult(body: []const u8, key: []const u8) JsonNumberResult {
+    const value_start = switch (jsonFieldStart(body, key)) {
+        .missing => return .missing,
+        .invalid => return .invalid,
+        .value => |value| value,
+    };
+    const end = scanJsonNumber(body, value_start) orelse return .invalid;
+    const value = std.fmt.parseFloat(f64, body[value_start..end]) catch return .invalid;
+    if (!std.math.isFinite(value)) return .invalid;
+    return .{ .value = value };
+}
+
 fn jsonString(body: []const u8, key: []const u8) ?[]const u8 {
     var pat_buf: [32]u8 = undefined;
     const pat = std.fmt.bufPrint(&pat_buf, "\"{s}\"", .{key}) catch return null;
@@ -546,14 +719,31 @@ fn jsonString(body: []const u8, key: []const u8) ?[]const u8 {
     if (i >= body.len or body[i] != '"') return null;
     i += 1;
     const val_start = i;
+    var closed = false;
     while (i < body.len) {
         if (body[i] == '\\') {
-            i += @min(@as(usize, 2), body.len - i);
+            if (i + 1 >= body.len) return null;
+            switch (body[i + 1]) {
+                '"', '\\', '/', 'b', 'f', 'n', 'r', 't' => i += 2,
+                'u' => {
+                    if (i + 6 > body.len) return null;
+                    for (body[i + 2 .. i + 6]) |digit| {
+                        if (!std.ascii.isHex(digit)) return null;
+                    }
+                    i += 6;
+                },
+                else => return null,
+            }
             continue;
         }
-        if (body[i] == '"') break;
+        if (body[i] == '"') {
+            closed = true;
+            break;
+        }
+        if (body[i] < 0x20) return null;
         i += 1;
     }
+    if (!closed) return null;
     return body[val_start..i];
 }
 
@@ -646,23 +836,88 @@ test "json string scanner preserves escaped multiline content" {
     try std.testing.expectEqualStrings("first\\nsecond third", jsonString(body, "last_assistant_message").?);
 }
 
+test "json string scanner rejects malformed mirror input" {
+    try std.testing.expect(jsonString("{\"text\":\"unterminated}", "text") == null);
+    try std.testing.expect(jsonString("{\"text\":\"bad\\x\"}", "text") == null);
+    try std.testing.expect(jsonString("{\"text\":\"bad\nline\"}", "text") == null);
+}
+
+test "json number scanner validates complete JSON numbers" {
+    try std.testing.expectEqual(@as(f64, 1000), jsonNumber("{\"duration\":1e3}", "duration").?);
+    try std.testing.expectEqual(@as(f64, -0.25), jsonNumber("{\"duration\":-0.25}", "duration").?);
+    try std.testing.expect(jsonNumber("{\"duration\":1-2}", "duration") == null);
+    try std.testing.expect(jsonNumber("{\"duration\":\"100\"}", "duration") == null);
+}
+
+test "duration parser distinguishes missing and invalid values" {
+    try std.testing.expect(std.meta.activeTag(parseDuration("{}")) == .missing);
+    try std.testing.expect(switch (parseDuration("{\"duration\":1e3}")) {
+        .value => |value| value == 1000,
+        else => false,
+    });
+    try std.testing.expect(std.meta.activeTag(parseDuration("{\"duration\":-1}")) == .invalid);
+    try std.testing.expect(std.meta.activeTag(parseDuration("{\"duration\":\"100\"}")) == .invalid);
+}
+
+test "mailbox returns the counter while holding its lock" {
+    var box: Mailbox = .{};
+    var event = StateEvent{};
+    event.state_len = 4;
+    @memcpy(event.state[0..4], "idle");
+    const first = box.enqueueWithCounter(event);
+    try std.testing.expect(first.queued);
+    try std.testing.expectEqual(@as(u64, 1), first.counter);
+    const duplicate = box.enqueueWithCounter(event);
+    try std.testing.expect(!duplicate.queued);
+    try std.testing.expectEqual(@as(u64, 1), duplicate.counter);
+}
+
+test "unqueued state never reaches the runtime mirror" {
+    var server = Server{
+        .allocator = std.testing.allocator,
+        .runtime_dir = "",
+        .token = undefined,
+        .pid = 0,
+    };
+    try mirrorQueuedState(&server, "failed", .{ .queued = false, .counter = 5 });
+    try std.testing.expectEqual(@as(u64, 0), server.last_state_mirror);
+}
+
+test "running state alternates without sharing mutable state with callers" {
+    var server = Server{
+        .allocator = std.testing.allocator,
+        .runtime_dir = "",
+        .token = undefined,
+        .pid = 0,
+    };
+    try std.testing.expectEqualStrings("running-right", server.nextRunningState());
+    try std.testing.expectEqualStrings("running-left", server.nextRunningState());
+    try std.testing.expectEqualStrings("running-right", server.nextRunningState());
+}
+
 fn jsonNumber(body: []const u8, key: []const u8) ?f64 {
-    var pat_buf: [32]u8 = undefined;
-    const pat = std.fmt.bufPrint(&pat_buf, "\"{s}\"", .{key}) catch return null;
-    const key_at = std.mem.indexOf(u8, body, pat) orelse return null;
-    var i = key_at + pat.len;
-    while (i < body.len and (body[i] == ' ' or body[i] == ':')) i += 1;
-    const val_start = i;
-    while (i < body.len and (std.ascii.isDigit(body[i]) or body[i] == '.' or body[i] == '-')) i += 1;
-    if (i == val_start) return null;
-    return std.fmt.parseFloat(f64, body[val_start..i]) catch null;
+    return switch (jsonNumberResult(body, key)) {
+        .value => |value| value,
+        .missing, .invalid => null,
+    };
+}
+
+fn parseDuration(body: []const u8) DurationResult {
+    return switch (jsonNumberResult(body, "duration")) {
+        .missing => .missing,
+        .invalid => .invalid,
+        .value => |duration| {
+            if (duration < 0) return .invalid;
+            return .{ .value = @intFromFloat(@min(duration, 30_000)) };
+        },
+    };
 }
 
 // --------------------------------------------------------- runtime files
 
 fn writeRuntimeFile(server: *Server, name: []const u8, bytes: []const u8, mode: u16) !void {
     plat.makeDir(server.runtime_dir);
-    var path_buf: [512]u8 = undefined;
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ server.runtime_dir, name }) catch return error.PathTooLong;
     // The 0600 on update-token is a POSIX guarantee only; on Windows
     // the file inherits the parent ACL (see plat.permissionsFromMode).
@@ -670,13 +925,32 @@ fn writeRuntimeFile(server: *Server, name: []const u8, bytes: []const u8, mode: 
 }
 
 fn mirrorState(server: *Server, state: []const u8, counter: u64) !void {
+    var scope = plat.Scope.init();
+    defer scope.deinit();
+    const io = scope.io();
+    server.mirror_lock.lock(io);
+    defer server.mirror_lock.unlock(io);
+    if (counter < server.last_state_mirror) return;
     var buf: [128]u8 = undefined;
     const json = try std.fmt.bufPrint(&buf, "{{\"state\":\"{s}\",\"counter\":{d}}}", .{ state, counter });
     try writeRuntimeFile(server, "state.json", json, 0o644);
+    server.last_state_mirror = counter;
+}
+
+fn mirrorQueuedState(server: *Server, state: []const u8, result: Mailbox.EnqueueResult) !void {
+    if (!result.queued) return;
+    try mirrorState(server, state, result.counter);
 }
 
 fn mirrorBubble(server: *Server, text: []const u8, counter: u64, title: []const u8, agent: []const u8, busy: bool) !void {
+    var scope = plat.Scope.init();
+    defer scope.deinit();
+    const io = scope.io();
+    server.mirror_lock.lock(io);
+    defer server.mirror_lock.unlock(io);
+    if (counter < server.last_bubble_mirror) return;
     var buf: [1024]u8 = undefined;
     const json = try std.fmt.bufPrint(&buf, "{{\"text\":\"{s}\",\"title\":\"{s}\",\"agent_source\":\"{s}\",\"busy\":{},\"counter\":{d},\"at\":{d}}}", .{ text, title, agent, busy, counter, nowMs() });
     try writeRuntimeFile(server, "bubble.json", json, 0o644);
+    server.last_bubble_mirror = counter;
 }

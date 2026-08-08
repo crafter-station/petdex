@@ -122,15 +122,30 @@ pub fn writeFileMode(path: []const u8, bytes: []const u8, mode: u16) bool {
 }
 
 fn writeFileIo(io: std.Io, path: []const u8, bytes: []const u8, mode: ?u16) bool {
-    var file = std.Io.Dir.cwd().createFile(io, path, .{
-        .truncate = true,
+    // Replacing a symlink path atomically replaces the link itself. Runtime
+    // files are user-managed, and a symlink is a supported way to relocate
+    // them, so resolve an existing link before creating the replacement.
+    // A dangling link is left untouched and reported as a write failure.
+    var resolved_path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    var target_path = path;
+    if (std.Io.Dir.cwd().statFile(io, path, .{ .follow_symlinks = false })) |stat| {
+        if (stat.kind == .sym_link) {
+            const resolved_len = std.Io.Dir.cwd().realPathFile(io, path, &resolved_path_buf) catch return false;
+            target_path = resolved_path_buf[0..resolved_len];
+        }
+    } else |_| {}
+
+    var atomic_file = std.Io.Dir.cwd().createFileAtomic(io, target_path, .{
         .permissions = permissionsFromMode(mode),
+        .replace = true,
     }) catch return false;
-    defer file.close(io);
+    defer atomic_file.deinit(io);
+
     var write_buf: [4096]u8 = undefined;
-    var writer = file.writer(io, &write_buf);
+    var writer = atomic_file.file.writer(io, &write_buf);
     writer.interface.writeAll(bytes) catch return false;
     writer.interface.flush() catch return false;
+    atomic_file.replace(io) catch return false;
     return true;
 }
 
@@ -287,6 +302,42 @@ pub fn replaceSymlink(target: []const u8, link: []const u8) bool {
     cwd.deleteFile(io, link) catch {};
     cwd.symLink(io, target, link, .{}) catch return false;
     return true;
+}
+
+/// Build the Windows launcher that keeps the hook path stable across app
+/// updates without requiring symbolic-link privileges. Percent signs in the
+/// target are doubled because cmd.exe expands them in batch files.
+pub fn windowsHookLauncher(buf: []u8, target: []const u8) ?[]const u8 {
+    const prefix = "@echo off\r\n\"";
+    const suffix = "\" %*\r\n";
+    if (buf.len < prefix.len + suffix.len) return null;
+
+    var at: usize = 0;
+    @memcpy(buf[at .. at + prefix.len], prefix);
+    at += prefix.len;
+    for (target) |byte| {
+        if (byte == '%') {
+            if (at + 2 > buf.len - suffix.len) return null;
+            buf[at] = '%';
+            at += 1;
+        }
+        if (at + 1 > buf.len - suffix.len) return null;
+        buf[at] = byte;
+        at += 1;
+    }
+    if (at + suffix.len > buf.len) return null;
+    @memcpy(buf[at .. at + suffix.len], suffix);
+    at += suffix.len;
+    return buf[0..at];
+}
+
+test "Windows hook launcher forwards stdin and arguments" {
+    var buf: [256]u8 = undefined;
+    const launcher = windowsHookLauncher(&buf, "C:\\Program Files\\Petdex\\petdex%dev.exe").?;
+    try std.testing.expectEqualStrings(
+        "@echo off\r\n\"C:\\Program Files\\Petdex\\petdex%%dev.exe\" %*\r\n",
+        launcher,
+    );
 }
 
 /// Own pid, for the /whoami endpoint. std has no portable accessor in
