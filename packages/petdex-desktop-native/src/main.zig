@@ -3728,15 +3728,21 @@ test "transparent surfaces clear independently from settings" {
     try std.testing.expectEqualStrings("premultiplied", @tagName(shell_views[0].gpu_alpha_mode.?));
     try std.testing.expect(shell_windows[0].transparent);
 
+    // The settings window paints an opaque page background of its own on
+    // AppKit and Win32. Linux presents every surface through one
+    // alpha-zero GTK clear, so there the settings background is
+    // transparent too and the pet-vs-settings split does not apply.
+    const settings_alpha: f32 = if (builtin.target.os.tag == .linux) 0 else 1;
+
     var model: Model = .{};
     const pet_background = petdexTokens(&model).colors.background;
     const settings_background = settingsBackground(&model);
     try std.testing.expectEqual(@as(f32, 0), pet_background.a);
-    try std.testing.expectEqual(@as(f32, 1), settings_background.a);
+    try std.testing.expectEqual(settings_alpha, settings_background.a);
 
     model.dark = false;
     try std.testing.expectEqual(@as(f32, 0), petdexTokens(&model).colors.background.a);
-    try std.testing.expectEqual(@as(f32, 1), settingsBackground(&model).a);
+    try std.testing.expectEqual(settings_alpha, settingsBackground(&model).a);
 }
 
 test "one image slot covers every agent" {
