@@ -34,6 +34,7 @@ const frame_h: f32 = 208;
 const max_scale: f32 = 1.2;
 const win_w: f32 = frame_w * max_scale;
 const win_h: f32 = frame_h * max_scale;
+const pet_edge_pad: f32 = 8;
 const cols: u64 = 8;
 const sheet_image_id: u64 = 1;
 /// What a first run offers to download. Small, friendly, and already in
@@ -44,7 +45,7 @@ const default_pet_slug = "boba";
 
 const app_permissions = [_][]const u8{ native_sdk.security.permission_command, native_sdk.security.permission_view };
 const shell_views = [_]native_sdk.ShellView{
-    .{ .label = canvas_label, .kind = .gpu_surface, .fill = true, .role = "Pet canvas", .accessibility_label = "Petdex pet", .gpu_backend = .metal, .gpu_pixel_format = .bgra8_unorm, .gpu_present_mode = .timer, .gpu_alpha_mode = .premultiplied, .gpu_color_space = .srgb, .gpu_vsync = true },
+    .{ .label = canvas_label, .kind = .gpu_surface, .fill = true, .role = "Pet canvas", .accessibility_label = "Petdex pet", .gpu_backend = if (builtin.target.os.tag == .linux) .software else .metal, .gpu_pixel_format = .bgra8_unorm, .gpu_present_mode = .timer, .gpu_alpha_mode = .premultiplied, .gpu_color_space = .srgb, .gpu_vsync = true },
 };
 const shell_windows = [_]native_sdk.ShellWindow{.{
     .label = "main",
@@ -110,9 +111,12 @@ pub const Msg = union(enum) {
     spritesheet_done: native_sdk.EffectExit,
     dismiss_install_error,
     install_first_pet,
+    native_drag_started: ?State,
+    native_drag_ended,
+    native_drag_watchdog: native_sdk.EffectTimer,
     noop,
 
-    pub const view_unbound = .{ "frame_tick", "poll_tick", "physics_tick", "frame_clock", "cycle_state", "chime_done", "quit_app", "toggle_focus_mode", "shuffle_pet" };
+    pub const view_unbound = .{ "frame_tick", "poll_tick", "physics_tick", "frame_clock", "cycle_state", "native_drag_watchdog", "chime_done", "quit_app", "toggle_focus_mode", "shuffle_pet" };
 };
 
 pub const Model = struct {
@@ -289,19 +293,20 @@ fn petdexThemeTokens(model: *const Model) canvas.DesignTokens {
         .contrast = if (model.high_contrast) .high else .standard,
         .reduce_motion = model.reduce_motion,
     });
-    // The `.heading` typography rung is unused anywhere in this app
-    // (section titles sit on `.lg`), so it is repurposed as THE bubble
-    // text size: per-widget sizes only step ±1pt around the body base,
-    // and scaling the body base itself would drag the whole settings
-    // window along. Aiming the free rung at the persisted preference
-    // gives the bubble a real 13..20pt range while every other window
-    // keeps stock type.
+    // The heading rung is reserved for bubble text so the manual size
+    // preference remains available on the untouched Win/mac SDK too.
     tokens.typography.heading_size = model.bubble_text_px;
     if (custom_font_active) tokens.typography.font_id = custom_font_id;
+    // Linux's software presenter needs an alpha-zero clear all the way
+    // into GTK's ARGB surface. Win32 and AppKit retain their upstream
+    // platform-owned transparency paths and ordinary theme tokens.
+    if (builtin.target.os.tag == .linux) {
+        tokens.colors.background = canvas.Color.rgba8(0, 0, 0, 0);
+    }
     if (model.high_contrast) return tokens;
     const c = &tokens.colors;
     if (model.dark) {
-        c.background = canvas.Color.rgb8(12, 12, 15);
+        if (builtin.target.os.tag != .linux) c.background = canvas.Color.rgb8(12, 12, 15);
         c.surface = canvas.Color.rgb8(25, 25, 28);
         c.surface_subtle = canvas.Color.rgb8(45, 45, 48);
         c.surface_pressed = canvas.Color.rgb8(22, 27, 67);
@@ -310,7 +315,7 @@ fn petdexThemeTokens(model: *const Model) canvas.DesignTokens {
         c.accent = canvas.Color.rgb8(137, 163, 255);
         c.destructive = canvas.Color.rgb8(250, 105, 94);
     } else {
-        c.background = canvas.Color.rgb8(247, 250, 255);
+        if (builtin.target.os.tag != .linux) c.background = canvas.Color.rgb8(247, 250, 255);
         c.surface = canvas.Color.rgb8(255, 255, 255);
         c.surface_subtle = canvas.Color.rgb8(236, 238, 244);
         c.surface_pressed = canvas.Color.rgb8(233, 238, 251);
@@ -723,6 +728,8 @@ const sample_window_ms: i64 = 100;
 pub const Effects = native_sdk.Effects(Msg);
 
 const frame_timer_key: u64 = 1;
+const native_drag_watchdog_key: u64 = 4;
+const native_drag_watchdog_ms: u32 = 5000;
 
 fn armFrameTimer(model: *const Model, fx: *Effects) void {
     const def = stateDef(model.state);
@@ -1924,6 +1931,32 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             model.high_contrast = a.high_contrast;
             model.reduce_motion = a.reduce_motion;
         },
+        .native_drag_started => |direction| {
+            fx.cancelTimer(native_drag_watchdog_key);
+            model.throwing = false;
+            model.dragging = false;
+            model.sample_len = 0;
+            if (direction) |state| setThrowState(model, state, fx);
+            // Wayland may not deliver the pointer release after the
+            // compositor owns the move. This is only a safety net: the
+            // native end command still wins when GTK delivers it.
+            fx.startTimer(.{
+                .key = native_drag_watchdog_key,
+                .interval_ms = native_drag_watchdog_ms,
+                .mode = .one_shot,
+                .on_fire = Effects.timerMsg(.native_drag_watchdog),
+            });
+        },
+        .native_drag_ended => {
+            fx.cancelTimer(native_drag_watchdog_key);
+            if (model.state == .@"running-left" or model.state == .@"running-right")
+                applyState(model, .waving, 1200, fx);
+        },
+        .native_drag_watchdog => |timer| {
+            if (timer.outcome != .fired) return;
+            if (model.state == .@"running-left" or model.state == .@"running-right")
+                applyState(model, .waving, 1200, fx);
+        },
         .noop => {},
         .open_pets_folder => {
             if (env_home) |home| {
@@ -2095,10 +2128,16 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             }
             const pet_w = frame_w * model.scale;
             const pet_h = frame_h * model.scale;
-            // The window is fitted to the sprite, so the pet rect IS
-            // the window rect.
-            const inside = read.cursor_x >= read.x and read.cursor_x <= read.x + pet_w and
-                read.cursor_y >= read.y and read.cursor_y <= read.y + pet_h;
+            const pet_x = if (builtin.target.os.tag == .linux)
+                read.x + (@as(f64, win_w) - pet_w) / 2.0
+            else
+                read.x;
+            const pet_y = if (builtin.target.os.tag == .linux)
+                read.y + @as(f64, win_h - pet_edge_pad) - pet_h
+            else
+                read.y;
+            const inside = read.cursor_x >= pet_x and read.cursor_x <= pet_x + pet_w and
+                read.cursor_y >= pet_y and read.cursor_y <= pet_y + pet_h;
             if (read.primary_down and !model.primary_was_down and inside) {
                 model.dragging = true;
                 model.grab_dx = read.cursor_x - read.x;
@@ -2200,6 +2239,13 @@ pub fn onCommand(name: []const u8) ?Msg {
     if (std.mem.eql(u8, name, "petdex.cycle")) return .cycle_state;
     if (std.mem.eql(u8, name, "petdex.settings")) return .open_settings;
     if (std.mem.eql(u8, name, "petdex.close")) return .close_pet;
+    if (builtin.target.os.tag == .linux and std.mem.eql(u8, name, "native-sdk.window-drag.begin"))
+        return .{ .native_drag_started = null };
+    if (builtin.target.os.tag == .linux and std.mem.eql(u8, name, "native-sdk.window-drag.begin-left"))
+        return .{ .native_drag_started = .@"running-left" };
+    if (builtin.target.os.tag == .linux and std.mem.eql(u8, name, "native-sdk.window-drag.begin-right"))
+        return .{ .native_drag_started = .@"running-right" };
+    if (builtin.target.os.tag == .linux and std.mem.eql(u8, name, "native-sdk.window-drag.end")) return .native_drag_ended;
     if (std.mem.eql(u8, name, "petdex.quit")) return .quit_app;
     if (std.mem.eql(u8, name, "petdex.focus")) return .toggle_focus_mode;
     if (std.mem.eql(u8, name, "petdex.shuffle")) return .shuffle_pet;
@@ -2935,6 +2981,9 @@ fn syncBubbleDeadlines(model: *Model, previous: []const hook_server.Bubble, prev
 /// above it while a bubble is showing (kept at least bubble-wide so
 /// the text can wrap like the old 190px-capped tooltip).
 fn fitWindow(model: *const Model, fx: *Effects) bool {
+    // The Linux Wayland pet keeps its fixed max-size startup canvas.
+    // Win/mac retain the upstream sprite-sized main window.
+    if (builtin.target.os.tag == .linux) return true;
     return fx.resizeWindow("main", frame_w * model.scale, frame_h * model.scale, .bottom_center);
 }
 
@@ -2975,7 +3024,10 @@ fn bubbleClampCorrection(actual_x: f64, actual_y: f64, settled_x: f64, settled_y
 /// throws, scale changes, and text-size changes all need no
 /// special-casing.
 fn syncBubbleWindow(model: *Model, fx: *Effects) void {
-    if (!bubbleActive(model)) return;
+    // Linux uses a parent-local compositor popup. Its descriptor drives
+    // size and anchoring, so application-side global moves are both
+    // unnecessary and invalid on Wayland.
+    if (builtin.target.os.tag == .linux or !bubbleActive(model)) return;
     // The flip is decided HERE, in the function that consumes it, rather
     // than by each caller beforehand. bubbleWantY below reads the flag,
     // so a caller that moved the pet and forgot to refresh it first would
@@ -3143,18 +3195,24 @@ pub fn rootView(ui: *AppUi, model: *const Model) AppUi.Node {
     });
     node.widget.image_fit = .stretch;
     node.widget.image_sampling = .nearest;
-    // Bottom-center anchored: a smaller pet still stands on the same
-    // ground line instead of floating at the window's top-left. The
-    // context menu rides the root container: the image widget is
-    // display-only for hit testing, the column owns the right-click.
-    // on_press makes the container a press claimer so the right-click
-    // fall-through resolves here and the context menu shows; the drag
-    // never rides widget presses (cursor polling), so a claimed press
-    // costs nothing.
+    // Linux hands primary presses to the compositor through GTK/GDK;
+    // secondary presses still follow the canvas context-menu route.
+    if (builtin.target.os.tag == .linux) {
+        // Bind the menu to the sprite itself, not only its layout parent.
+        // Linux resolves the deepest context-menu node on the right-click
+        // hit route before mounting the canvas fallback menu.
+        node.context_menu = &pet_menu;
+        return ui.column(.{ .grow = 1, .main = .end, .cross = .center, .window_drag = true, .context_menu = &pet_menu }, .{
+            node,
+            ui.el(.stack, .{ .width = 1, .height = pet_edge_pad }, .{}),
+        });
+    }
+    // Win/mac keep the upstream sprite-only root and app-owned drag path;
+    // their bubble is a separate companion window.
     return ui.column(.{ .grow = 1, .main = .end, .cross = .center, .on_press = .noop, .context_menu = &pet_menu }, .{node});
 }
 
-// ----------------------------------------------------------- bubble window
+// ----------------------------------------------------------- bubble
 
 /// One conversation's card. `slot` indexes the per-card clip scratch and
 /// decides whether this is the newest bubble, which is the only one the
@@ -3232,8 +3290,8 @@ fn bubbleCard(ui: *AppUi, model: *const Model, slot: usize) AppUi.Node {
         ui.el(.spinner, .{ .width = bubble_busy_width, .height = bubble_busy_width, .semantics = .{ .label = "Working" } }, .{})
     else if (newest and model.state == .waiting)
         ui.el(.stack, .{
-            .width = 16,
-            .height = 16,
+            .width = bubble_busy_width,
+            .height = bubble_busy_width,
             .main = .center,
             .cross = .center,
             .semantics = .{ .label = "Approval or input required" },
@@ -3380,24 +3438,43 @@ fn petdexWindows(model: *const Model, scratch: *PetdexApp.WindowsScratch) []cons
     if (bubbleActive(model)) {
         const bubble_w = bubbleWindowWidth(model);
         const bubble_h = bubbleWindowHeight(model);
-        scratch.windows[count] = .{
-            .label = "bubble",
-            .canvas_label = "bubble-canvas",
-            .title = "",
-            .width = bubble_w,
-            .height = bubble_h,
-            .x = @floatCast(model.pet_x + (frame_w * model.scale) / 2.0 - bubble_w / 2.0),
-            // Same flip the frame clock maintains, so the window is born
-            // on the correct side rather than spawning over the pet and
-            // jumping on the next sync.
-            .y = @floatCast(bubbleWantY(model, bubble_h)),
-            .resizable = false,
-            .titlebar = .chromeless,
-            .floating = true,
-            .fullscreen_overlay = true,
-            .transparent = true,
-            .click_through = true,
-        };
+        if (comptime builtin.target.os.tag == .linux) {
+            const pet_h = frame_h * model.scale;
+            scratch.windows[count] = .{
+                .label = "bubble",
+                .canvas_label = "bubble-canvas",
+                .title = "",
+                .width = bubble_w,
+                .height = bubble_h,
+                .x = win_w / 2,
+                .y = win_h - pet_edge_pad - pet_h,
+                .resizable = false,
+                .titlebar = .chromeless,
+                .floating = true,
+                .transparent = true,
+                .click_through = true,
+                .popup_parent = "main",
+            };
+        } else {
+            scratch.windows[count] = .{
+                .label = "bubble",
+                .canvas_label = "bubble-canvas",
+                .title = "",
+                .width = bubble_w,
+                .height = bubble_h,
+                .x = @floatCast(model.pet_x + (frame_w * model.scale) / 2.0 - bubble_w / 2.0),
+                // Same flip the frame clock maintains, so the window is born
+                // on the correct side rather than spawning over the pet and
+                // jumping on the next sync.
+                .y = @floatCast(bubbleWantY(model, bubble_h)),
+                .resizable = false,
+                .titlebar = .chromeless,
+                .floating = true,
+                .fullscreen_overlay = true,
+                .transparent = true,
+                .click_through = true,
+            };
+        }
         count += 1;
     }
     if (model.settings_open) {
@@ -3474,7 +3551,10 @@ fn petdexStatusItem(model: *const Model, scratch: *PetdexApp.StatusItemScratch) 
 /// embedded PNG is materialized into the runtime dir at boot and the
 /// tray points at that absolute path. Missing HOME or a failed write
 /// degrade to the host's title fallback ("P"), never a broken item.
-const tray_icon_png = @embedFile("assets/tray-icon.png");
+const tray_icon_png = if (builtin.target.os.tag == .linux)
+    @embedFile("assets/tray-icon-color.png")
+else
+    @embedFile("assets/tray-icon.png");
 var tray_icon_path_buf: [512]u8 = undefined;
 var tray_icon_path: []const u8 = "";
 
@@ -3588,7 +3668,7 @@ pub fn main(init: std.process.Init) !void {
             .tooltip = "Petdex",
         },
         .status_item_fn = petdexStatusItem,
-        .on_frame = onFrame,
+        .on_frame = if (builtin.target.os.tag == .linux) null else onFrame,
         .on_urls_opened = onUrlsOpened,
         .windows_fn = petdexWindows,
         .window_view = petdexWindowView,
@@ -3607,7 +3687,11 @@ pub fn main(init: std.process.Init) !void {
         .default_frame = geometry.RectF.init(0, 0, win_w, win_h),
         .restore_state = false,
         .js_window_api = false,
-        .menus = &app_menus,
+        // GTK presents application menus as an in-window menubar. On a
+        // chromeless desktop pet that looks like a titlebar and also
+        // steals vertical space; Linux already exposes these commands
+        // through the pet's context menu.
+        .menus = if (builtin.target.os.tag == .linux) &.{} else &app_menus,
         .security = .{
             .permissions = &app_permissions,
             .navigation = .{ .allowed_origins = &.{ "zero://inline", "zero://app" } },

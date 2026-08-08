@@ -136,7 +136,7 @@ jobs:
           # Match the release build: baseline x86-64, so CI exercises
           # the same instruction set users actually get. See the note in
           # desktop-release.yml.
-          "$NATIVE_CLI" build -Dcpu=baseline
+          "$NATIVE_CLI" build -Dcpu=baseline -Dtrace=off
           ls -lh zig-out/bin/
 
       - name: Run the test suite
@@ -591,3 +591,11 @@ jobs:
             ${{ runner.temp }}/windows-screen.png
             ${{ runner.temp }}/windows-screen-deeplink.png
           if-no-files-found: warn
+
+      - name: Upload Linux test binary
+        if: matrix.platform == 'linux'
+        uses: actions/upload-artifact@v7
+        with:
+          name: petdex-desktop-native-linux-test
+          path: packages/petdex-desktop-native/zig-out/bin/petdex-desktop-native
+          if-no-files-found: error

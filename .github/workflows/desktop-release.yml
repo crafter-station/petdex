@@ -100,7 +100,7 @@ jobs:
           # desktop-v0.3.1 Windows exe carries 862 kmovd and 199
           # vpternlogd, which no Zen 3 chip decodes. That is the
           # 0xC000001D illegal-instruction crash in #604 and #618.
-          "$NATIVE_CLI" build -Dcpu=baseline
+          "$NATIVE_CLI" build -Dcpu=baseline -Dtrace=off
           ls -lh zig-out/bin/
 
       - name: Stage the binary (Linux)
