@@ -1,0 +1,12 @@
+{
+  "projectTitle": "Petdex",
+  "description": "Gallery, web app, and CLI for animated pixel-art pets (mascots) for OpenAI Codex and other coding agents",
+  "folders": [],
+  "excludeFolders": ["node_modules", "dist", ".next", "public", "drizzle"],
+  "rules": [
+    "The npm package is plain `petdex` (unscoped): `npx -y petdex install <slug>`; there is no @crafter/petdex",
+    "Always pass -y to npx in scripts; npx's own install confirmation looks like a hang otherwise",
+    "The CLI requires Node.js 20+; `petdex login` needs a browser for the OAuth callback",
+    "Repo development uses Bun (`bun install`, `bun run dev:docker`); npm/npx commands are for end users of the CLI"
+  ]
+}

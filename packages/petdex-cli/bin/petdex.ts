@@ -25,10 +25,17 @@ const DOWNLOAD_URL = `${PETDEX_URL.replace(/\/+$/, "")}/download`;
 // replaces it, so the user learns where the capability went instead of
 // hunting for a flag that no longer exists. Declared here, above the
 // top-level main() call, so the lookup is not in the temporal dead zone.
+const DESKTOP_START_REDIRECT =
+  "The desktop app runs on its own. Launch Petdex from Applications.";
+const DESKTOP_STOP_REDIRECT = "Quit Petdex from its menu bar icon to stop it.";
+
 const RETIRED_COMMANDS = new Map<string, string>([
   ["init", "The desktop app installs its own agent hooks from Settings."],
-  ["up", "The desktop app runs on its own. Launch Petdex from Applications."],
-  ["down", "Quit Petdex from its menu bar icon to stop it."],
+  ["up", DESKTOP_START_REDIRECT],
+  ["start", DESKTOP_START_REDIRECT],
+  ["restart", DESKTOP_START_REDIRECT],
+  ["down", DESKTOP_STOP_REDIRECT],
+  ["stop", DESKTOP_STOP_REDIRECT],
   ["toggle", "Toggle the mascot from the Petdex menu bar icon."],
   ["desktop", "The desktop app manages its own lifecycle."],
   ["update", "The desktop app updates itself automatically."],

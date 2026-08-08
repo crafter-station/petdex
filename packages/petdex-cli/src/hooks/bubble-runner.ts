@@ -264,6 +264,32 @@ export function stateBody(
   return body;
 }
 
+/**
+ * The /bubble request body, extracted for the same reason stateBody is: the
+ * inline version sat behind a token read and a fetch, unreachable from tests.
+ *
+ * `session_id` is what lets the desktop keep one bubble per conversation
+ * instead of one globally. It is omitted rather than sent null when absent so
+ * an older desktop — and the MCP path, which has no session — keeps landing on
+ * the server's single-bubble key exactly as before.
+ */
+export function bubbleBody(
+  text: string,
+  busy: boolean,
+  agentSource: string | null,
+  title: string | null,
+  sessionId: string | null,
+): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    text,
+    busy,
+    agent_source: agentSource,
+  };
+  if (title) body.title = title;
+  if (sessionId) body.session_id = sessionId;
+  return body;
+}
+
 export async function readStdin(
   input: HookStdin = process.stdin,
 ): Promise<string> {
@@ -520,13 +546,13 @@ export async function runBubble(args: string[]): Promise<void> {
       phase === "pre" ||
       phase === "post" ||
       phase === "tool-failure";
-    const body: Record<string, unknown> = {
-      text,
-      busy,
-      agent_source: agentSource,
-    };
-    if (title) body.title = title;
-    tasks.push(postJson(SIDECAR_BUBBLE_URL, body, token));
+    tasks.push(
+      postJson(
+        SIDECAR_BUBBLE_URL,
+        bubbleBody(text, busy, agentSource, title, sessionId),
+        token,
+      ),
+    );
   }
   if (state) {
     const durationMs = phase === "tool-failure" ? FAILED_DURATION_MS : 0;
