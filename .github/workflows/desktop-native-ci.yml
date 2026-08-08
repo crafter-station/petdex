@@ -105,7 +105,7 @@ jobs:
         env:
           NATIVE_SDK_REMOTE: "https://github.com/Railly/native.git"
           NATIVE_SDK_BRANCH: "feat/floating-window-0.5.3"
-          NATIVE_SDK_REF: "5f9f7cfa77f2a16f2dc26e337806d2a4b59a067b"
+          NATIVE_SDK_REF: "c0b10d027efa490fc99a3bc7f1cf88b015999d45"
         shell: bash
         run: |
           set -euo pipefail
