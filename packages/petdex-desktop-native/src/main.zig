@@ -2234,6 +2234,10 @@ const bubble_anim_ms: f32 = 180;
 /// flipped below it. Without it a pet parked exactly on the threshold
 /// flips every frame.
 const bubble_flip_hysteresis: f64 = 40;
+/// Minimum screen-space separation between the bubble window and the pet.
+/// Keep this outside the window so transparent canvas margins cannot make
+/// the visible bubble appear to overlap the sprite on any flip direction.
+const bubble_pet_clearance: f64 = 6;
 
 const bubble_lifetime_default_secs: f32 = 0;
 const bubble_lifetime_min_secs: f32 = 0;
@@ -2976,11 +2980,11 @@ fn recordPetCenterLocal(model: *Model, window_x: f64) void {
 }
 
 /// Where the top of the bubble window wants to sit for the current flip.
-/// Above the pet the window ends just over its head; flipped, it starts
-/// just below the sprite's feet.
+/// The clearance is applied to the window edge, not the card's internal
+/// margin, so both the speech tail and stacked cards stay outside the pet.
 fn bubbleWantY(model: *const Model, bubble_h: f32) f64 {
-    if (model.bubble_flipped) return model.pet_y + frame_h * model.scale - 2.0;
-    return model.pet_y - bubble_h + 2.0;
+    if (model.bubble_flipped) return model.pet_y + frame_h * model.scale + bubble_pet_clearance;
+    return model.pet_y - bubble_h - bubble_pet_clearance;
 }
 
 /// Decide whether the stack hangs below the pet instead of above it.
@@ -2991,11 +2995,12 @@ fn bubbleWantY(model: *const Model, bubble_h: f32) f64 {
 /// hovers it.
 ///
 /// Hysteresis keeps a pet parked near the threshold from flapping every
-/// frame: it takes the bare height to flip down, but that height plus a
-/// margin to come back up.
+/// frame: it takes the full height plus the clearance to flip down, but
+/// that threshold plus a margin to come back up.
 fn bubbleShouldFlip(model: *const Model, space_above: f64, needed: f64) bool {
-    if (model.bubble_flipped) return space_above < needed + bubble_flip_hysteresis;
-    return space_above < needed;
+    const required = needed + bubble_pet_clearance;
+    if (model.bubble_flipped) return space_above < required + bubble_flip_hysteresis;
+    return space_above < required;
 }
 
 /// What the pet window shows before there is a pet to draw.
@@ -4099,17 +4104,17 @@ test "flipping sends the stack below the pet, clear of the sprite" {
 
     const pet_h: f64 = @floatCast(frame_h * model.scale);
     const win_y = bubbleWantY(&model, bubble_h);
-    try std.testing.expect(win_y >= model.pet_y + pet_h - 2.01);
+    try std.testing.expect(win_y >= model.pet_y + pet_h + bubble_pet_clearance - 0.01);
 
     // Plenty of room above: the stack sits over the pet as usual, and
-    // the window ends at (or just past) the pet's top edge.
+    // the window ends above the pet with the same positive clearance.
     var high: Model = .{};
     testPushBubble(&high, "alpha", "older", false, -1);
     testPushBubble(&high, "beta", "newer", true, -1);
     high.pet_y = 2000;
     high.bubble_flipped = bubbleShouldFlip(&high, high.pet_y, @floatCast(bubble_h));
     try std.testing.expect(!high.bubble_flipped);
-    try std.testing.expect(bubbleWantY(&high, bubble_h) + @as(f64, @floatCast(bubble_h)) <= high.pet_y + 2.01);
+    try std.testing.expect(bubbleWantY(&high, bubble_h) + @as(f64, @floatCast(bubble_h)) <= high.pet_y - bubble_pet_clearance + 0.01);
 }
 
 test "the flip has hysteresis so a pet on the threshold does not flap" {
@@ -4118,16 +4123,18 @@ test "the flip has hysteresis so a pet on the threshold does not flap" {
     testPushBubble(&model, "beta", "newer", true, -1);
     const needed: f64 = 200;
 
-    // Coming from unflipped it takes the bare height to flip down.
+    // Coming from unflipped it takes the full height plus the clearance to
+    // flip down.
     model.bubble_flipped = false;
-    try std.testing.expect(!bubbleShouldFlip(&model, needed + 1, needed));
-    try std.testing.expect(bubbleShouldFlip(&model, needed - 1, needed));
+    try std.testing.expect(!bubbleShouldFlip(&model, needed + bubble_pet_clearance + 1, needed));
+    try std.testing.expect(bubbleShouldFlip(&model, needed + bubble_pet_clearance - 1, needed));
 
     // Once flipped, the same space is NOT enough to come back: it takes
-    // the margin too, so the band between the two is stable either way.
+    // the clearance and hysteresis too, so the band between the two is
+    // stable either way.
     model.bubble_flipped = true;
-    try std.testing.expect(bubbleShouldFlip(&model, needed + 1, needed));
-    try std.testing.expect(!bubbleShouldFlip(&model, needed + bubble_flip_hysteresis + 1, needed));
+    try std.testing.expect(bubbleShouldFlip(&model, needed + bubble_pet_clearance + bubble_flip_hysteresis - 1, needed));
+    try std.testing.expect(!bubbleShouldFlip(&model, needed + bubble_pet_clearance + bubble_flip_hysteresis + 1, needed));
 }
 
 test "a flipped stack grows downward and is hit tested from the top" {
@@ -4440,10 +4447,10 @@ test "a thrown pet keeps its flip and collapse current through the flight" {
         const want_y = bubbleWantY(&model, @floatCast(needed));
         if (want) {
             // Flipped: window hangs below the sprite.
-            try std.testing.expect(want_y >= model.pet_y);
+            try std.testing.expect(want_y >= model.pet_y + bubble_pet_clearance);
         } else {
-            // Upright: window ends at or above the pet's top edge.
-            try std.testing.expect(want_y + needed <= model.pet_y + 2.01);
+            // Upright: window ends above the pet with the same clearance.
+            try std.testing.expect(want_y + needed <= model.pet_y - bubble_pet_clearance + 0.01);
             crossed_back = true;
         }
     }
