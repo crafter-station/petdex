@@ -34,6 +34,7 @@
                 .resizable = false,
                 .titlebar = "chromeless",
                 .floating = true,
+                .fullscreen_overlay = true,
                 .transparent = true,
                 .restore_state = false,
                 .restore_policy = "center_on_primary",

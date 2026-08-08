@@ -36,6 +36,15 @@ function clip(text, max = 40) {
   return text.length <= max ? text : text.slice(0, max - 1) + "…";
 }
 
+function originMetadata() {
+  const sourceApp = process.env.TERM_PROGRAM;
+  if (sourceApp !== "Apple_Terminal" && sourceApp !== "vscode") return {};
+  return {
+    source_app: sourceApp,
+    source_cwd: process.cwd(),
+  };
+}
+
 function canonicalToolKind(toolName) {
   const lower = String(toolName || "").toLowerCase();
   if (lower === "read") return "read";
@@ -137,7 +146,9 @@ async function notify({ state, duration, text, title, busy }) {
     duration != null
       ? { state, duration, agent_source: "opencode" }
       : { state, agent_source: "opencode" };
-  const bubbleBody = { text, agent_source: "opencode" };
+  const metadata = originMetadata();
+  Object.assign(stateBody, metadata);
+  const bubbleBody = { text, agent_source: "opencode", ...metadata };
   if (title) bubbleBody.title = title;
   if (busy !== undefined) bubbleBody.busy = busy;
   await Promise.all([

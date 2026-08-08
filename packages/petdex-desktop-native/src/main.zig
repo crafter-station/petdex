@@ -55,6 +55,7 @@ const shell_windows = [_]native_sdk.ShellWindow{.{
     .restore_state = false,
     .titlebar = .chromeless,
     .floating = true,
+    .fullscreen_overlay = true,
     .transparent = true,
     .views = &shell_views,
 }};
@@ -1553,7 +1554,7 @@ pub fn boot(model: *Model, fx: *Effects) void {
     // host's runloop spins up; a Regular-policy Dock icon may blink in
     // for the first frames of a hidden-dock boot, which beats holding
     // the setting hostage to an SDK boot hook that does not exist yet.
-    if (model.hide_dock) plat.setDockIconHidden(true);
+    plat.setDockIconHidden(model.hide_dock);
     if (env_home) |home| model.agents = agent_hooks.scan(boot_allocator, home);
 
     // First point where the platform codec is reachable: `init_fx` runs
@@ -2067,6 +2068,9 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
                 // canned (#557's "pet" interaction).
                 if (isTap(now - model.press_ms, read.x - model.press_x, read.y - model.press_y)) {
                     model.sample_len = 0;
+                    if (newestBubble(model)) |bubble| {
+                        _ = plat.activateOriginApplication(bubble.origin_app, bubble.ttySlice(), bubble.cwdSlice());
+                    }
                     model.pat_flip = !model.pat_flip;
                     applyState(model, if (model.pat_flip) .jumping else .waving, pat_react_ms, fx);
                     return;
@@ -2810,7 +2814,11 @@ fn updateBubbleStack(model: *Model, cursor_x: f64, cursor_y: f64, now_ms: i64, f
 /// stack is empty.
 fn newestBubble(model: *const Model) ?*const hook_server.Bubble {
     if (model.bubbles_len == 0) return null;
-    return &model.bubbles[model.bubbles_len - 1];
+    var newest = &model.bubbles[0];
+    for (model.bubbles[1..model.bubbles_len]) |*bubble| {
+        if (bubble.counter > newest.counter) newest = bubble;
+    }
+    return newest;
 }
 
 fn clearBubble(model: *Model) void {
@@ -3386,6 +3394,7 @@ fn petdexWindows(model: *const Model, scratch: *PetdexApp.WindowsScratch) []cons
             .resizable = false,
             .titlebar = .chromeless,
             .floating = true,
+            .fullscreen_overlay = true,
             .transparent = true,
             .click_through = true,
         };
@@ -3420,8 +3429,6 @@ fn petdexWindowView(ui: *PetdexApp.Ui, model: *const Model, window_label: []cons
         .cell_h = @floatFromInt(thumb_h),
     });
 }
-
-
 
 /// Keep `~/.petdex/bin/petdex-hook` pointing at the running binary so
 /// agent hooks survive app updates: the hooks reference the stable
@@ -3531,7 +3538,8 @@ pub fn main(init: std.process.Init) !void {
         if (std.mem.eql(u8, cmd, "bubble")) {
             const phase = args_it.next() orelse return;
             const agent: ?[]const u8 = args_it.next();
-            hook_runner.run(phase, agent, env_home orelse return);
+            const origin_app = plat.OriginApplication.fromTermProgram(init.environ_map.get("TERM_PROGRAM"));
+            hook_runner.run(phase, agent, origin_app, init.environ_map.get("PWD"), env_home orelse return);
             return;
         }
     }
@@ -4706,6 +4714,15 @@ test "two conversations stack and grow the window vertically" {
     // budget, they do not sit side by side.
     try std.testing.expectEqual(one_wide, bubbleWindowWidth(&model));
     try std.testing.expectEqualStrings("beta", newestBubble(&model).?.sessionSlice());
+}
+
+test "newest bubble follows counter rather than array position" {
+    var model: Model = .{};
+    testPushBubble(&model, "older", "older text", true, -1);
+    testPushBubble(&model, "newer", "newer text", true, -1);
+    model.bubbles[0].counter = 9;
+    model.bubbles[1].counter = 4;
+    try std.testing.expectEqualStrings("older", newestBubble(&model).?.sessionSlice());
 }
 
 test "an empty stack still reserves one card of window height" {
