@@ -10,16 +10,26 @@ describe("R2 delete outcomes", () => {
     } as never);
 
     const expected: R2DeleteBatchResult = {
-      deletedKeys: ["one"],
-      failures: [
-        { key: "two", code: "AccessDenied", message: "denied" },
-        {
-          key: "three",
-          code: "not_confirmed",
-          message: "R2 did not confirm deletion",
-        },
-      ],
+      deletedKeys: ["one", "three"],
+      failures: [{ key: "two", code: "AccessDenied", message: "denied" }],
     };
     expect(result).toEqual(expected);
+  });
+
+  it("treats an omitted Deleted entry without an error as idempotent success", () => {
+    expect(
+      summarizeR2DeleteBatch(["already-gone"], { Errors: [] } as never),
+    ).toEqual({ deletedKeys: ["already-gone"], failures: [] });
+  });
+
+  it("keeps explicit R2 errors as failures", () => {
+    expect(
+      summarizeR2DeleteBatch(["denied"], {
+        Errors: [{ Key: "denied", Code: "AccessDenied", Message: "denied" }],
+      } as never),
+    ).toEqual({
+      deletedKeys: [],
+      failures: [{ key: "denied", code: "AccessDenied", message: "denied" }],
+    });
   });
 });

@@ -169,7 +169,8 @@ export const editRatelimit = createRatelimit({
 
 // Asset presigns can be retried without creating a submitted edit. Keep that
 // transport budget separate so an upload retry does not consume the actual
-// edit quota enforced by applyPetEdit.
+// edit quota enforced by applyPetEdit. Key by user because orphan creation is
+// global across all pets owned by that user.
 export const editPresignRatelimit = createRatelimit({
   redis,
   limiter: Ratelimit.slidingWindow(20, "1 h"),

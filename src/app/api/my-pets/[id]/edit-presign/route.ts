@@ -58,7 +58,7 @@ export async function POST(
     );
   }
 
-  const lim = await editPresignRatelimit.limit(`${userId}:${row.id}`);
+  const lim = await editPresignRatelimit.limit(userId);
   if (!lim.success) {
     return NextResponse.json(
       {

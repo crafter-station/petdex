@@ -1,4 +1,5 @@
 import type { SubmittedPet } from "@/lib/db/schema";
+import type { SpriteVersionNumber } from "@/lib/types";
 
 export type PendingEditPatch = {
   pendingDisplayName: string | null;
@@ -11,6 +12,7 @@ export type PendingEditPatch = {
   pendingZipUrl: string | null;
   pendingSpritesheetWidth: number | null;
   pendingSpritesheetHeight: number | null;
+  pendingSpriteVersionNumber: SpriteVersionNumber | null;
   pendingDhash: string | null;
   pendingReviewId: string | null;
 };
@@ -27,6 +29,11 @@ export function buildPendingEditPatch(row: SubmittedPet): PendingEditPatch {
     pendingZipUrl: row.pendingZipUrl ?? null,
     pendingSpritesheetWidth: row.pendingSpritesheetWidth ?? null,
     pendingSpritesheetHeight: row.pendingSpritesheetHeight ?? null,
+    pendingSpriteVersionNumber:
+      row.pendingSpriteVersionNumber === 1 ||
+      row.pendingSpriteVersionNumber === 2
+        ? row.pendingSpriteVersionNumber
+        : null,
     pendingDhash: row.pendingDhash ?? null,
     pendingReviewId: row.pendingReviewId ?? null,
   };
@@ -56,6 +63,11 @@ export function pendingEditIsNoOp(
     patch.pendingPetJsonUrl === (row.pendingPetJsonUrl ?? null) &&
     patch.pendingZipUrl === (row.pendingZipUrl ?? null) &&
     patch.pendingSpritesheetWidth === (row.pendingSpritesheetWidth ?? null) &&
-    patch.pendingSpritesheetHeight === (row.pendingSpritesheetHeight ?? null)
+    patch.pendingSpritesheetHeight === (row.pendingSpritesheetHeight ?? null) &&
+    patch.pendingSpriteVersionNumber ===
+      (row.pendingSpriteVersionNumber === 1 ||
+      row.pendingSpriteVersionNumber === 2
+        ? row.pendingSpriteVersionNumber
+        : null)
   );
 }

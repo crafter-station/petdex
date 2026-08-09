@@ -27,6 +27,7 @@ const { apply: APPLY, ageHours: AGE_HOURS } = parsePendingGcArgs(
 const sql = neon(requiredEnv("DATABASE_URL"));
 
 type ObjectRow = { key: string; lastModified: Date };
+type ClaimRow = { key: string; claimed_at: Date | string };
 
 async function listObjects(): Promise<ObjectRow[]> {
   const objects: ObjectRow[] = [];
@@ -129,6 +130,32 @@ async function claimOrphanedKeys(keys: string[]): Promise<string[]> {
   return rows.map((row) => row.key);
 }
 
+async function releaseClaims(keys: readonly string[]): Promise<void> {
+  if (keys.length === 0) return;
+  await sql`
+    DELETE FROM pending_asset_gc_claims
+    WHERE key = ANY(${Array.from(new Set(keys))}::text[])
+  `;
+}
+
+async function purgeStaleClaims(
+  cutoff: Date,
+  objectKeys: ReadonlySet<string>,
+  referenced: ReadonlySet<string>,
+): Promise<number> {
+  const rows = (await sql`
+    SELECT key, claimed_at
+    FROM pending_asset_gc_claims
+    WHERE claimed_at < ${cutoff}
+  `) as ClaimRow[];
+  const removable = rows
+    .map((row) => row.key)
+    .filter((key) => !objectKeys.has(key) && !referenced.has(key));
+  if (removable.length === 0) return 0;
+  await releaseClaims(removable);
+  return removable.length;
+}
+
 type DeleteSummary = {
   deletedKeys: string[];
   failures: R2DeleteFailure[];
@@ -143,6 +170,20 @@ async function deleteInBatches(keys: string[]): Promise<DeleteSummary> {
       const batchSummary = summarizeR2DeleteBatch(batch, result);
       summary.deletedKeys.push(...batchSummary.deletedKeys);
       summary.failures.push(...batchSummary.failures);
+      try {
+        // Once R2 confirms deletion, or reports an already-missing key,
+        // release the claim so the table cannot grow forever.
+        await releaseClaims(batchSummary.deletedKeys);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        summary.failures.push(
+          ...batchSummary.deletedKeys.map((key) => ({
+            key,
+            code: "claim_release_failed",
+            message,
+          })),
+        );
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       summary.failures.push(
@@ -161,6 +202,13 @@ async function main(): Promise<void> {
   const cutoff = Date.now() - AGE_HOURS * 60 * 60 * 1000;
   const objects = await listObjects();
   const referenced = await referencedKeys();
+  const purgedClaims = APPLY
+    ? await purgeStaleClaims(
+        new Date(cutoff),
+        new Set(objects.map((object) => object.key)),
+        referenced,
+      )
+    : 0;
   const candidates = objects.filter(
     (object) =>
       object.lastModified.getTime() < cutoff && isPendingAssetKey(object.key),
@@ -175,6 +223,7 @@ async function main(): Promise<void> {
       candidates: candidates.length,
       referenced: candidates.length - orphaned.length,
       orphaned: orphaned.length,
+      purgedClaims,
     }),
   );
 

@@ -29,6 +29,7 @@ import {
 } from "@/lib/pet-edit-state";
 import { editRatelimit } from "@/lib/ratelimit";
 import { refreshSimilarityFor } from "@/lib/similarity";
+import { normalizeSpriteVersionNumber } from "@/lib/sprite-version";
 import { containsUrl, URL_BLOCKED_REASON } from "@/lib/url-blocklist";
 
 export type PatchBody = {
@@ -39,6 +40,7 @@ export type PatchBody = {
   spritesheetWidth?: number;
   spritesheetHeight?: number;
   petJsonUrl?: string;
+  spriteVersionNumber?: 1 | 2;
   zipUrl?: string;
 };
 
@@ -128,6 +130,21 @@ function applyAssetFields(
   patch: PendingPatch,
   flags: EditFlags,
 ): Response | null {
+  const spriteVersion =
+    body.spriteVersionNumber === undefined
+      ? null
+      : normalizeSpriteVersionNumber(body.spriteVersionNumber);
+  if (spriteVersion && !spriteVersion.ok) {
+    return NextResponse.json(
+      {
+        error: "invalid_sprite_version",
+        field: "spriteVersionNumber",
+        message: "spriteVersionNumber must be omitted, 1, or 2.",
+      },
+      { status: 400 },
+    );
+  }
+
   const setAsset = (
     role: PendingAssetRole,
     value: string,
@@ -192,6 +209,7 @@ function applyAssetFields(
   }
 
   if (typeof body.petJsonUrl === "string") {
+    const previousPetJsonUrl = patch.pendingPetJsonUrl;
     const error = setAsset(
       "petjson",
       body.petJsonUrl,
@@ -200,6 +218,14 @@ function applyAssetFields(
       "pendingPetJsonUrl",
     );
     if (error) return error;
+    if (patch.pendingPetJsonUrl !== null) {
+      patch.pendingSpriteVersionNumber =
+        spriteVersion?.ok === true ? spriteVersion.version : 1;
+    } else if (previousPetJsonUrl !== patch.pendingPetJsonUrl) {
+      patch.pendingSpriteVersionNumber = null;
+    }
+  } else if (patch.pendingPetJsonUrl !== null && spriteVersion?.ok === true) {
+    patch.pendingSpriteVersionNumber = spriteVersion.version;
   }
 
   if (typeof body.zipUrl === "string") {
@@ -256,7 +282,8 @@ function hasAssetEdit(patch: PendingPatch): boolean {
   return (
     patch.pendingSpritesheetUrl !== null ||
     patch.pendingPetJsonUrl !== null ||
-    patch.pendingZipUrl !== null
+    patch.pendingZipUrl !== null ||
+    patch.pendingSpriteVersionNumber !== null
   );
 }
 
@@ -269,6 +296,7 @@ async function persistAutoAcceptedEdit(
     pendingDisplayName: null,
     pendingDescription: null,
     pendingTags: null,
+    pendingSpriteVersionNumber: null,
     pendingSubmittedAt: null,
     pendingRejectionReason: null,
     pendingAutoApprovedAt: new Date(),
@@ -422,10 +450,10 @@ async function queueAssetEditWithClaimGuard(
     patch.pendingTags === null
       ? sql`NULL::jsonb`
       : sql`${JSON.stringify(patch.pendingTags)}::jsonb`;
-  const result = (await db.execute(sql`
-    WITH lock AS MATERIALIZED (
-      SELECT pg_advisory_xact_lock(${PENDING_ASSET_GC_LOCK_KEY}) AS acquired
-    )
+  const lockStatement = sql`
+    SELECT pg_advisory_xact_lock(${PENDING_ASSET_GC_LOCK_KEY})
+  `;
+  const updateStatement = sql`
     UPDATE submitted_pets AS pet
     SET pending_display_name = ${patch.pendingDisplayName},
         pending_description = ${patch.pendingDescription},
@@ -437,9 +465,9 @@ async function queueAssetEditWithClaimGuard(
         pending_zip_url = ${patch.pendingZipUrl},
         pending_spritesheet_width = ${patch.pendingSpritesheetWidth},
         pending_spritesheet_height = ${patch.pendingSpritesheetHeight},
+        pending_sprite_version_number = ${patch.pendingSpriteVersionNumber},
         pending_dhash = ${patch.pendingDhash},
         pending_review_id = ${patch.pendingReviewId}
-    FROM lock
     WHERE pet.id = ${id}
       AND NOT EXISTS (
         SELECT 1
@@ -451,8 +479,39 @@ async function queueAssetEditWithClaimGuard(
       pet.pending_description AS "pendingDescription",
       pet.pending_tags AS "pendingTags",
       pet.pending_submitted_at AS "pendingSubmittedAt"
-  `)) as unknown as { rows?: QueuedEditRow[] };
-  return result.rows?.[0] ?? null;
+  `;
+
+  const rowsFromResult = (result: unknown): QueuedEditRow[] => {
+    if (Array.isArray(result)) return result as QueuedEditRow[];
+    if (
+      result &&
+      typeof result === "object" &&
+      Array.isArray((result as { rows?: unknown }).rows)
+    ) {
+      return (result as { rows: QueuedEditRow[] }).rows;
+    }
+    return [];
+  };
+
+  // Neon HTTP has no callback transaction API, but its batch endpoint runs
+  // all statements in one database transaction. The lock is a separate
+  // statement so the UPDATE gets a fresh snapshot after the lock waits.
+  const batchDb = db as unknown as {
+    batch?: (queries: readonly unknown[]) => Promise<readonly unknown[]>;
+  };
+  if (typeof batchDb.batch === "function") {
+    const [, updateResult] = await batchDb.batch.call(db, [
+      db.execute(lockStatement),
+      db.execute(updateStatement),
+    ]);
+    return rowsFromResult(updateResult)[0] ?? null;
+  }
+
+  const updateResult = await db.transaction(async (tx) => {
+    await tx.execute(lockStatement);
+    return tx.execute(updateStatement);
+  });
+  return rowsFromResult(updateResult)[0] ?? null;
 }
 
 export async function applyPetEdit(input: {

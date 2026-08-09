@@ -88,15 +88,27 @@ export type R2DeleteBatchResult = {
   failures: R2DeleteFailure[];
 };
 
-// Convert a non-quiet S3 response into an explicit outcome. Missing keys are
-// unconfirmed so callers do not log a deletion that R2 did not acknowledge.
+// Convert a non-quiet S3 response into an explicit outcome. R2 may omit an
+// already-missing object from Deleted without returning an Error; that is an
+// idempotent success for garbage collection. Explicit per-key errors remain
+// failures.
 export function summarizeR2DeleteBatch(
   keys: readonly string[],
   result: DeleteObjectsCommandOutput | null,
 ): R2DeleteBatchResult {
   const requested = Array.from(new Set(keys.filter((key) => key.length > 0)));
+  if (result === null) {
+    return {
+      deletedKeys: [],
+      failures: requested.map((key) => ({
+        key,
+        code: "not_confirmed",
+        message: "R2 did not return a deletion response",
+      })),
+    };
+  }
   const errorsByKey = new Map<string, { code?: string; message?: string }>();
-  for (const error of result?.Errors ?? []) {
+  for (const error of result.Errors ?? []) {
     if (typeof error.Key === "string" && error.Key.length > 0) {
       errorsByKey.set(error.Key, {
         code: error.Code,
@@ -105,26 +117,19 @@ export function summarizeR2DeleteBatch(
     }
   }
 
-  const deleted = new Set<string>();
-  for (const entry of result?.Deleted ?? []) {
-    if (typeof entry.Key === "string") deleted.add(entry.Key);
-  }
-
   const failures = requested
-    .filter((key) => !deleted.has(key) || errorsByKey.has(key))
+    .filter((key) => errorsByKey.has(key))
     .map((key) => {
       const error = errorsByKey.get(key);
       return {
         key,
-        code: error?.code ?? "not_confirmed",
-        message: error?.message ?? "R2 did not confirm deletion",
+        code: error?.code ?? "delete_failed",
+        message: error?.message ?? "R2 reported a deletion error",
       };
     });
 
   return {
-    deletedKeys: requested.filter(
-      (key) => deleted.has(key) && !errorsByKey.has(key),
-    ),
+    deletedKeys: requested.filter((key) => !errorsByKey.has(key)),
     failures,
   };
 }

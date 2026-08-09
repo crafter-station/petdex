@@ -71,7 +71,7 @@ export async function POST(req: Request): Promise<Response> {
     );
   }
 
-  const lim = await editPresignRatelimit.limit(`${principal.userId}:${row.id}`);
+  const lim = await editPresignRatelimit.limit(principal.userId);
   if (!lim.success) {
     return NextResponse.json(
       {

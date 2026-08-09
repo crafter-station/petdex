@@ -15,6 +15,7 @@ function row(overrides: Record<string, unknown> = {}) {
     pendingZipUrl: null,
     pendingSpritesheetWidth: 1536,
     pendingSpritesheetHeight: 1872,
+    pendingSpriteVersionNumber: 2,
     pendingDhash: "0123456789abcdef",
     pendingReviewId: "review-1",
     ...overrides,
@@ -27,6 +28,7 @@ describe("pending edit state", () => {
     expect(patch.pendingDisplayName).toBe("Existing name");
     expect(patch.pendingTags).toEqual(["old-tag"]);
     expect(patch.pendingSpritesheetUrl).toContain("pending-0123456789ab");
+    expect(patch.pendingSpriteVersionNumber).toBe(2);
     expect(patch.pendingDhash).toBe("0123456789abcdef");
     expect(patch.pendingReviewId).toBe("review-1");
   });
@@ -51,6 +53,13 @@ describe("pending edit state", () => {
     patch.pendingTags = ["old-tag"];
     expect(pendingEditIsNoOp(current, patch)).toBe(true);
     patch.pendingTags = ["new-tag"];
+    expect(pendingEditIsNoOp(current, patch)).toBe(false);
+  });
+
+  it("detects a pending sprite version change", () => {
+    const current = row();
+    const patch = buildPendingEditPatch(current);
+    patch.pendingSpriteVersionNumber = 1;
     expect(pendingEditIsNoOp(current, patch)).toBe(false);
   });
 });
