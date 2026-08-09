@@ -52,6 +52,16 @@ pub const ThumbAtlas = struct {
     cell_h: f32,
 };
 
+/// Secondary copy in a settings row. A plain `ui.text` leaf is always
+/// single-line and elides when the trailing control narrows its column.
+/// Span paragraphs word-wrap and make the row reserve the resulting
+/// height, so the default window width remains fully readable.
+fn mutedParagraph(ui: *AppUi, content: []const u8) AppUi.Node {
+    return ui.paragraph(.{
+        .size = .sm,
+        .style_tokens = .{ .foreground = .text_muted },
+    }, &.{.{ .text = content }});
+}
 
 fn agentStatusCaption(info: agent_hooks.AgentInfo, codex_note: bool) []const u8 {
     if (info.kind == .codex and codex_note) return "Installed - restart Codex and approve its hooks once";
@@ -166,7 +176,7 @@ fn agentsSection(ui: *AppUi, model: *const Model, icons: IconAtlas) AppUi.Node {
                 logo,
                 ui.column(.{ .grow = 1, .main = .center }, .{
                     ui.text(.{}, info.kind.displayName()),
-                    ui.text(.{ .size = .sm, .style_tokens = .{ .foreground = .text_muted } }, agentStatusCaption(info, model.codex_trust_note)),
+                    mutedParagraph(ui, agentStatusCaption(info, model.codex_trust_note)),
                 }),
                 trailing,
             }),
@@ -265,7 +275,7 @@ pub fn settingsView(ui: *AppUi, model: *const Model, icons: IconAtlas, thumbs: T
             ui.row(.{ .padding = 12, .cross = .center, .gap = 12 }, .{
                 ui.column(.{ .grow = 1 }, .{
                     ui.text(.{}, "Pet size"),
-                    ui.text(.{ .size = .sm, .style_tokens = .{ .foreground = .text_muted } }, "Adjust the size of your pet"),
+                    mutedParagraph(ui, "Adjust the size of your pet"),
                 }),
                 ui.el(.slider, .{ .width = 150, .value = scale_fraction, .on_value = AppUi.valueMsg(.set_scale), .semantics = .{ .label = "Pet size" } }, .{}),
             }),
@@ -274,7 +284,7 @@ pub fn settingsView(ui: *AppUi, model: *const Model, icons: IconAtlas, thumbs: T
             ui.row(.{ .padding = 12, .cross = .center, .gap = 12 }, .{
                 ui.column(.{ .grow = 1 }, .{
                     ui.text(.{}, "Bubble text size"),
-                    ui.text(.{ .size = .sm, .style_tokens = .{ .foreground = .text_muted } }, "Size of the bubble text"),
+                    mutedParagraph(ui, "Size of the bubble text"),
                 }),
                 ui.el(.slider, .{ .width = 150, .value = bubble_text_fraction, .on_value = AppUi.valueMsg(.set_bubble_text_size), .semantics = .{ .label = "Bubble text size" } }, .{}),
             }),
@@ -283,7 +293,7 @@ pub fn settingsView(ui: *AppUi, model: *const Model, icons: IconAtlas, thumbs: T
             ui.row(.{ .padding = 12, .cross = .center, .gap = 12 }, .{
                 ui.column(.{ .grow = 1 }, .{
                     ui.text(.{}, "Characters per line"),
-                    ui.text(.{ .size = .sm, .style_tokens = .{ .foreground = .text_muted } }, "8–120; maximum characters before wrapping"),
+                    mutedParagraph(ui, "8–120; maximum characters before wrapping"),
                 }),
                 ui.el(.input, .{
                     .width = 72,
@@ -298,7 +308,7 @@ pub fn settingsView(ui: *AppUi, model: *const Model, icons: IconAtlas, thumbs: T
             ui.row(.{ .padding = 12, .cross = .center, .gap = 12 }, .{
                 ui.column(.{ .grow = 1 }, .{
                     ui.text(.{}, "Answer lines"),
-                    ui.text(.{ .size = .sm, .style_tokens = .{ .foreground = .text_muted } }, "1–8 answer rows; title uses one additional row"),
+                    mutedParagraph(ui, "1–8 answer rows; title uses one additional row"),
                 }),
                 ui.el(.input, .{
                     .width = 72,
@@ -312,15 +322,14 @@ pub fn settingsView(ui: *AppUi, model: *const Model, icons: IconAtlas, thumbs: T
         ui.el(.panel, .{ .style_tokens = .{ .background = .surface, .radius = .md } }, .{
             ui.column(.{ .padding = 12, .gap = 8 }, .{
                 ui.text(.{}, "Custom font file"),
-                ui.text(.{ .size = .sm, .style_tokens = .{ .foreground = .text_muted } },
-                    if (model.font_load_failed)
-                        "Could not load this TrueType font; the default font is active"
-                    else if (model.font_path_dirty)
-                        "Saved; restart Petdex to apply"
-                    else if (custom_font_active.*)
-                        "Applied to all app text; restart after changing the path"
-                    else
-                        "Optional local .ttf path; leave empty for the default font"),
+                mutedParagraph(ui, if (model.font_load_failed)
+                    "Could not load this TrueType font; the default font is active"
+                else if (model.font_path_dirty)
+                    "Saved; restart Petdex to apply"
+                else if (custom_font_active.*)
+                    "Applied to all app text; restart after changing the path"
+                else
+                    "Optional local .ttf path; leave empty for the default font"),
                 ui.el(.input, .{
                     .height = 34,
                     .text = model.font_path[0..model.font_path_len],
@@ -334,7 +343,7 @@ pub fn settingsView(ui: *AppUi, model: *const Model, icons: IconAtlas, thumbs: T
             ui.row(.{ .padding = 12, .cross = .center, .gap = 12 }, .{
                 ui.column(.{ .grow = 1 }, .{
                     ui.text(.{}, "Show messages"),
-                    ui.text(.{ .size = .sm, .style_tokens = .{ .foreground = .text_muted } }, "Agent activity bubbles over the pet"),
+                    mutedParagraph(ui, "Agent activity bubbles over the pet"),
                 }),
                 ui.el(.switch_control, .{
                     .selected = model.bubbles_enabled,
@@ -347,7 +356,7 @@ pub fn settingsView(ui: *AppUi, model: *const Model, icons: IconAtlas, thumbs: T
             ui.row(.{ .padding = 12, .cross = .center, .gap = 12 }, .{
                 ui.column(.{ .grow = 1 }, .{
                     ui.text(.{}, "One bubble per conversation"),
-                    ui.text(.{ .size = .sm, .style_tokens = .{ .foreground = .text_muted } }, "Stack a card per agent; off shows one bubble at a time"),
+                    mutedParagraph(ui, "Stack a card per agent; off shows one bubble at a time"),
                 }),
                 ui.el(.switch_control, .{
                     .selected = model.bubbles_per_conversation,
@@ -360,7 +369,7 @@ pub fn settingsView(ui: *AppUi, model: *const Model, icons: IconAtlas, thumbs: T
             ui.row(.{ .padding = 12, .cross = .center, .gap = 12 }, .{
                 ui.column(.{ .grow = 1 }, .{
                     ui.text(.{}, "Bubble lifetime"),
-                    ui.text(.{ .size = .sm, .style_tokens = .{ .foreground = .text_muted } }, "0 keeps bubbles visible; 1–60 seconds enables expiry"),
+                    mutedParagraph(ui, "0 keeps bubbles visible; 1–60 seconds enables expiry"),
                 }),
                 ui.el(.input, .{
                     .width = 72,
@@ -375,7 +384,7 @@ pub fn settingsView(ui: *AppUi, model: *const Model, icons: IconAtlas, thumbs: T
             ui.row(.{ .padding = 12, .cross = .center, .gap = 12 }, .{
                 ui.column(.{ .grow = 1 }, .{
                     ui.text(.{}, "Rotate pet daily"),
-                    ui.text(.{ .size = .sm, .style_tokens = .{ .foreground = .text_muted } }, "Wake up to a different pet each day"),
+                    mutedParagraph(ui, "Wake up to a different pet each day"),
                 }),
                 ui.el(.switch_control, .{
                     .selected = model.rotate_pets,
@@ -391,7 +400,7 @@ pub fn settingsView(ui: *AppUi, model: *const Model, icons: IconAtlas, thumbs: T
                 ui.row(.{ .padding = 12, .cross = .center, .gap = 12 }, .{
                     ui.column(.{ .grow = 1 }, .{
                         ui.text(.{}, "Launch at login"),
-                        ui.text(.{ .size = .sm, .style_tokens = .{ .foreground = .text_muted } }, "Start Petdex when you log in"),
+                        mutedParagraph(ui, "Start Petdex when you log in"),
                     }),
                     ui.el(.switch_control, .{
                         .selected = model.launch_at_login,
@@ -409,7 +418,7 @@ pub fn settingsView(ui: *AppUi, model: *const Model, icons: IconAtlas, thumbs: T
                 ui.row(.{ .padding = 12, .cross = .center, .gap = 12 }, .{
                     ui.column(.{ .grow = 1 }, .{
                         ui.text(.{}, "Hide Dock icon"),
-                        ui.text(.{ .size = .sm, .style_tokens = .{ .foreground = .text_muted } }, "Petdex lives in the menu bar only"),
+                        mutedParagraph(ui, "Petdex lives in the menu bar only"),
                     }),
                     ui.el(.switch_control, .{
                         .selected = model.hide_dock,
@@ -424,7 +433,7 @@ pub fn settingsView(ui: *AppUi, model: *const Model, icons: IconAtlas, thumbs: T
             ui.row(.{ .padding = 12, .cross = .center, .gap = 12 }, .{
                 ui.column(.{ .grow = 1 }, .{
                     ui.text(.{}, "Waiting sound"),
-                    ui.text(.{ .size = .sm, .style_tokens = .{ .foreground = .text_muted } }, "Play a chime when your agent is waiting for your input"),
+                    mutedParagraph(ui, "Play a chime when your agent is waiting for your input"),
                 }),
                 ui.el(.switch_control, .{
                     .selected = model.waiting_sound,
@@ -448,4 +457,16 @@ pub fn settingsView(ui: *AppUi, model: *const Model, icons: IconAtlas, thumbs: T
     })});
     page.widget.style.background = settingsBackground(model);
     return page;
+}
+
+test "settings descriptions use wrapped paragraphs" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    var ui = AppUi.init(arena_state.allocator());
+
+    const copy = "A description long enough to wrap beside a control";
+    const node = mutedParagraph(&ui, copy);
+    try std.testing.expectEqual(@as(usize, 1), node.widget.spans.len);
+    try std.testing.expectEqualStrings(copy, node.widget.text);
+    try std.testing.expect(!node.widget.text_no_wrap);
 }
