@@ -1,6 +1,21 @@
 import { describe, expect, test } from "bun:test";
 
-import { isTrustedAssetUrl } from "./asset-hosts";
+import { listAllowedHosts } from "../../../src/lib/url-allowlist";
+import { isTrustedAssetUrl, TRUSTED_ASSET_HOSTS } from "./asset-hosts";
+
+describe("allowlist sync with server", () => {
+  test("TRUSTED_ASSET_HOSTS matches the server-side asset allowlist", () => {
+    expect(new Set(TRUSTED_ASSET_HOSTS)).toEqual(new Set(listAllowedHosts()));
+  });
+
+  test("every server-allowed asset URL is accepted by the CLI", () => {
+    for (const host of listAllowedHosts()) {
+      expect(
+        isTrustedAssetUrl(`https://${host}/pets/boba/spritesheet.webp`),
+      ).toBe(true);
+    }
+  });
+});
 
 describe("isTrustedAssetUrl", () => {
   test("accepts the canonical asset host", () => {

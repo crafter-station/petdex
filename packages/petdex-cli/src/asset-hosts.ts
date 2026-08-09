@@ -8,7 +8,9 @@
  * CLI either rejects legit installs or accepts attacker bytes.
  */
 
-const TRUSTED_ASSET_HOSTS = new Set<string>(["assets.petdex.dev"]);
+export const TRUSTED_ASSET_HOSTS: ReadonlySet<string> = new Set<string>([
+  "assets.petdex.dev",
+]);
 
 export function isTrustedAssetUrl(url: string): boolean {
   try {
