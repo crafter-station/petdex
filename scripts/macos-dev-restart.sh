@@ -50,19 +50,24 @@ while read -r pid command_line; do
 done < <(ps -axo pid=,command= 2>/dev/null || true)
 
 remaining=0
-for _ in {1..50}; do
-  remaining=0
-  for pid in "${stopped_pids[@]}"; do
-    if kill -0 "$pid" 2>/dev/null; then
-      remaining=1
+# macOS still ships Bash 3.2, where expanding an empty array under
+# `set -u` raises "unbound variable". Skip the expansion entirely when
+# there was no prior dev process to stop.
+if ((${#stopped_pids[@]} > 0)); then
+  for _ in {1..50}; do
+    remaining=0
+    for pid in "${stopped_pids[@]}"; do
+      if kill -0 "$pid" 2>/dev/null; then
+        remaining=1
+        break
+      fi
+    done
+    if ((remaining == 0)); then
       break
     fi
+    sleep 0.1
   done
-  if ((remaining == 0)); then
-    break
-  fi
-  sleep 0.1
-done
+fi
 if ((remaining != 0)); then
   echo "macos-dev-restart: existing desktop process did not exit within 5 seconds" >&2
   exit 1
