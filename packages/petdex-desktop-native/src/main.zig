@@ -1806,7 +1806,11 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             model.settings_open = true;
         },
         .settings_closed => model.settings_open = false,
-        .close_pet => fx.closeWindow("main"),
+        .close_pet => {
+            clearBubble(model);
+            fx.closeWindow("bubble");
+            fx.closeWindow("main");
+        },
         .select_pet => |index| {
             if (index >= catalog_mod.catalog_len) return;
             // `index == active_pet` is a no-op only once a sheet is up.
