@@ -1,15 +1,20 @@
 import { describe, expect, test } from "bun:test";
 
-import { listAllowedHosts } from "../../../src/lib/url-allowlist";
+// Imports the leaf module the server allowlist is built from, not
+// url-allowlist itself: that file pulls in the `@/` alias, which the CLI's
+// own tsconfig cannot resolve, and importing it would drag the app's module
+// graph into the published package's typecheck. `listAllowedHosts()` returns
+// `[...R2_TRUSTED_HOSTS]` verbatim, so this compares the same set.
+import { R2_TRUSTED_HOSTS } from "../../../src/lib/r2-public-url";
 import { isTrustedAssetUrl, TRUSTED_ASSET_HOSTS } from "./asset-hosts";
 
 describe("allowlist sync with server", () => {
   test("TRUSTED_ASSET_HOSTS matches the server-side asset allowlist", () => {
-    expect(new Set(TRUSTED_ASSET_HOSTS)).toEqual(new Set(listAllowedHosts()));
+    expect(new Set(TRUSTED_ASSET_HOSTS)).toEqual(new Set(R2_TRUSTED_HOSTS));
   });
 
   test("every server-allowed asset URL is accepted by the CLI", () => {
-    for (const host of listAllowedHosts()) {
+    for (const host of R2_TRUSTED_HOSTS) {
       expect(
         isTrustedAssetUrl(`https://${host}/pets/boba/spritesheet.webp`),
       ).toBe(true);
