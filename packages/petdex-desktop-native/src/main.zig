@@ -3856,6 +3856,7 @@ test {
     _ = hook_server;
     _ = installer;
     _ = plat;
+    _ = settings_view;
 }
 
 test "bubble geometry follows columns lines and font size" {
