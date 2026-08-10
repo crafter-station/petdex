@@ -30,6 +30,8 @@ const DESKTOP_START_REDIRECT =
 const DESKTOP_STOP_REDIRECT = "Quit Petdex from its menu bar icon to stop it.";
 
 const RETIRED_COMMANDS = new Map<string, string>([
+  // Desktop Settings → Agents:
+  // packages/petdex-desktop-native/src/settings_view.zig (`agentsSection`).
   ["init", "The desktop app installs its own agent hooks from Settings."],
   ["up", DESKTOP_START_REDIRECT],
   ["start", DESKTOP_START_REDIRECT],
@@ -39,6 +41,9 @@ const RETIRED_COMMANDS = new Map<string, string>([
   ["toggle", "Toggle the mascot from the Petdex menu bar icon."],
   ["desktop", "The desktop app manages its own lifecycle."],
   ["update", "The desktop app updates itself automatically."],
+  // Desktop Settings → Agents:
+  // packages/petdex-desktop-native/src/settings_view.zig (`agentsSection`).
+  // This view renders agent/hook status and the Install/Update actions.
   ["doctor", "Petdex Settings shows agent and hook status directly."],
   ["hooks", "Install agent hooks from Petdex Settings, one click per agent."],
 ]);
