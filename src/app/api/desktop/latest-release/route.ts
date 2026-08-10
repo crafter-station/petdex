@@ -133,12 +133,63 @@ function releasePageUrl(release: GhRelease | null): string {
   return RELEASES_PAGE;
 }
 
+// `desktop-v0.6.0` → `0.6.0`. The tag is the only place the version
+// lives, so a tag that does not carry one yields null rather than a
+// guess: a client comparing against a made-up version is worse than a
+// client that learns nothing this poll.
+export function versionFromTag(tag: string | undefined): string | null {
+  if (typeof tag !== "string" || !tag.startsWith(DESKTOP_TAG_PREFIX)) {
+    return null;
+  }
+  const version = tag.slice(DESKTOP_TAG_PREFIX.length);
+  return /^\d+\.\d+\.\d+/.test(version) ? version : null;
+}
+
+export type LatestReleasePayload = {
+  version: string | null;
+  tag: string | null;
+  releaseUrl: string;
+  assets: Record<string, string>;
+};
+
+// The shape old clients keep calling forever, so it stays additive:
+// fields may be added, never removed or retyped. `version` is null when
+// GitHub is unreachable, which the client must read as "do not know"
+// rather than "up to date".
+export function buildJsonPayload(
+  release: GhRelease | null,
+): LatestReleasePayload {
+  const assets: Record<string, string> = {};
+  if (release) {
+    for (const platform of Object.keys(PLATFORM_ASSET_PATTERNS)) {
+      const hit = pickAssetForPlatform(release, platform);
+      if (hit?.browser_download_url) {
+        assets[platform] = hit.browser_download_url;
+      }
+    }
+  }
+  return {
+    version: versionFromTag(release?.tag_name),
+    tag: release?.tag_name ?? null,
+    releaseUrl: releasePageUrl(release),
+    assets,
+  };
+}
+
 /**
  * GET /api/desktop/latest-release
  *
  * Default behavior: 307 to the latest desktop-v* release page on
  * GitHub. This is the "show me where the desktop app lives" UX —
  * the user lands on a page they can browse.
+ *
+ * `?format=json`: returns the latest version, its tag, the release
+ * page, and the per-platform asset URLs instead of redirecting. This is
+ * what the desktop app polls to learn it is behind (#673); it carries no
+ * version of its own at runtime today, so this endpoint is the other
+ * half of that check. Old installs call this shape forever, so treat it
+ * as additive-only. `version` is null when GitHub cannot be reached,
+ * which means "unknown", not "up to date".
  *
  * `?asset=darwin-arm64` (or any future platform suffix): 307 directly
  * to the platform-specific binary asset's download URL. The browser
@@ -152,11 +203,26 @@ function releasePageUrl(release: GhRelease | null): string {
  */
 export async function GET(req: NextRequest): Promise<Response> {
   const asset = req.nextUrl.searchParams.get("asset");
+  const format = req.nextUrl.searchParams.get("format");
   let release: GhRelease | null = null;
   try {
     release = await findLatestDesktopRelease();
   } catch {
     // fall through with release=null → fallback page
+  }
+
+  // Checked before `asset` so a client can ask for both without the
+  // redirect winning and turning a version check into a file download.
+  if (format === "json") {
+    return NextResponse.json(buildJsonPayload(release), {
+      // A desktop client polls this on its own schedule and must never
+      // be told it is current by a stale edge copy after a release.
+      // Same 5 minutes as the page cache, explicit because JSON is
+      // consumed by long-lived installs rather than one browser click.
+      headers: {
+        "Cache-Control": "public, max-age=300, stale-while-revalidate=300",
+      },
+    });
   }
 
   if (asset) {
