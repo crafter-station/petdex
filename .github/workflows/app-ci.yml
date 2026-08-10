@@ -1,0 +1,53 @@
+name: app-ci
+
+# Runs the app's own test suite and typecheck on every PR.
+#
+# Until now nothing did. cli-ci and desktop-native-ci both filter on the
+# paths of their own package, and cli-release only runs `bun test` when
+# packages/petdex-cli/package.json changes the version, so a PR touching
+# only src/ got a green tick from workflows that never executed a single
+# app test. #654 landed 31 files of edit/auth/GC logic that way: the 396
+# tests covering it were run by hand during review, not by CI.
+#
+# No paths filter on purpose. src/, scripts/ and drizzle/ all feed the
+# same suite, and a filter is what created the gap this closes.
+#
+# Needs no secrets: the suite runs green with the environment unset, and
+# the two db-backed specs (test:db, pet-search.integration) are excluded
+# from `bun test` by their own filenames.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: app-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: App tests and typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install with frozen lockfile
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bunx tsc --noEmit
+
+      - name: Run app tests
+        run: bun test --timeout 60000
