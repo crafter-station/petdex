@@ -72,7 +72,12 @@ def _delegate_parent(row: dict[str, str]) -> str:
 
 def _source_marks_subagent(row: dict[str, str]) -> bool:
     source = str(row.get("source") or "").strip().lower().replace("-", "_")
-    return source in _SUBAGENT_SOURCES or bool(_delegate_parent(row))
+    if source in _SUBAGENT_SOURCES or bool(_delegate_parent(row)):
+        return True
+    # During child creation Hermes can persist the parent link before its
+    # durable `_delegate_from` marker. Continuations keep a session_key;
+    # parent-linked, unkeyed rows are therefore safe to suppress as children.
+    return bool(row.get("parent_session_id")) and not bool(row.get("session_key"))
 
 
 def _session_context(
@@ -91,7 +96,10 @@ def _session_context(
     empty = {
         "conversation": session_id,
         "parent": "",
-        "kind": "primary",
+        # Unknown Hermes rows are usually the child-persistence race. Prefer a
+        # missed first lifecycle event over a standalone ghost card; a real
+        # primary becomes visible on its next event once state.db resolves it.
+        "kind": "subagent",
         "label": "",
         "title": "",
     }
@@ -215,6 +223,10 @@ def _callback(phase: str):
                 force_subagent=is_subagent_lifecycle,
                 explicit_label=str(payload.get("child_role") or ""),
             )
+            # The base Petdex card model has no nested child hierarchy. Drop
+            # delegated work instead of opening one top-level card per worker.
+            if context["kind"] == "subagent":
+                return
             if context["title"]:
                 # Namespaced so a tool argument named `title` cannot be
                 # mistaken for a server-side session rename by the runner.
