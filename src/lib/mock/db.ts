@@ -172,6 +172,10 @@ async function bootstrap(client: PGlite): Promise<void> {
     `ALTER TABLE "submitted_pets" ADD COLUMN IF NOT EXISTS "pending_rejection_reason" text`,
     `ALTER TABLE "submitted_pets" ADD COLUMN IF NOT EXISTS "sprite_version_number" integer NOT NULL DEFAULT 1`,
     `ALTER TABLE "submitted_pets" ADD COLUMN IF NOT EXISTS "pending_sprite_version_number" integer`,
+    `CREATE TABLE IF NOT EXISTS "pending_asset_gc_claims" (
+      "key" text PRIMARY KEY NOT NULL,
+      "claimed_at" timestamp with time zone NOT NULL DEFAULT now()
+    )`,
     // Denormalize metric columns onto submitted_pets so drizzle's
     // coalesce-without-table-prefix queries (pet-search.ts:135) don't
     // 42703 in PGlite. Real Postgres handles the same query via the

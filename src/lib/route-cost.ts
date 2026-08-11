@@ -69,6 +69,7 @@ const STATIC_ROUTE_SET = new Set([
   "-/u/-/opengraph-image",
   "about",
   "api/cli/auth-config",
+  "api/cli/edit",
   "api/cli/edit-presign",
   "api/cli/submit",
   "api/cli/submit/check",

@@ -9,12 +9,14 @@ import { and, eq } from "drizzle-orm";
 
 import { verifyCliBearer } from "@/lib/cli-auth";
 import { db, schema } from "@/lib/db/client";
+import {
+  buildPendingAssetKey,
+  type PendingAssetRole,
+} from "@/lib/pending-asset";
 import { presignPut } from "@/lib/r2";
-import { cliVerifyRatelimit, editRatelimit } from "@/lib/ratelimit";
+import { cliVerifyRatelimit, editPresignRatelimit } from "@/lib/ratelimit";
 
 export const runtime = "nodejs";
-
-const MAX_KEY_LEN = 80;
 
 type Body = {
   petId?: string;
@@ -69,12 +71,12 @@ export async function POST(req: Request): Promise<Response> {
     );
   }
 
-  const lim = await editRatelimit.limit(`${principal.userId}:${row.id}`);
+  const lim = await editPresignRatelimit.limit(principal.userId);
   if (!lim.success) {
     return NextResponse.json(
       {
         error: "rate_limited",
-        message: "Limit reached: 5 edits per pet / 24h.",
+        message: "Limit reached: 20 asset presign requests per hour.",
         retryAfter: lim.reset,
       },
       { status: 429 },
@@ -101,15 +103,23 @@ export async function POST(req: Request): Promise<Response> {
     return NextResponse.json({ error: "no_assets_requested" }, { status: 400 });
   }
 
+  const keyedSlots = slots.map((slot) => ({
+    slot,
+    key: buildPendingAssetKey(
+      row.slug,
+      uploadId,
+      slot.role as PendingAssetRole,
+      slot.ext,
+    ),
+  }));
+  if (keyedSlots.some(({ key }) => key === null)) {
+    return NextResponse.json({ error: "invalid_pet_slug" }, { status: 500 });
+  }
+
   const presigned = await Promise.all(
-    slots.map(async (s) => {
-      const key =
-        `pets/${row.slug}-pending-${uploadId}/${s.role}.${s.ext}`.slice(
-          0,
-          MAX_KEY_LEN + 32,
-        );
-      const result = await presignPut(key, s.ct);
-      return { role: s.role, ...result };
+    keyedSlots.map(async ({ slot, key }) => {
+      const result = await presignPut(key as string, slot.ct);
+      return { role: slot.role, ...result };
     }),
   );
 

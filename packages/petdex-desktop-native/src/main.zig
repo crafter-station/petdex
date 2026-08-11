@@ -1173,14 +1173,16 @@ fn loadAgentsAtlas(dark: bool, fx: *Effects) void {
 }
 const tail_w: usize = 18;
 const tail_h: usize = 9;
+const tail_atlas_h: usize = tail_h * 2;
 var tail_dark: bool = false;
 var tail_ready: bool = false;
 
-/// Register the speech-bubble tail: a filled triangle pointing down,
-/// generated in code and colored like the card for the active theme.
+/// Register both speech-bubble tail directions in one image slot. The
+/// upper atlas cell points down for a bubble above the pet; the lower
+/// cell points up for a bubble that has flipped below it.
 fn registerTail(dark: bool, fx: *Effects) void {
     if (tail_ready and tail_dark == dark) return;
-    var pixels: [tail_w * tail_h * 4]u8 = @splat(0);
+    var pixels: [tail_w * tail_atlas_h * 4]u8 = @splat(0);
     const cr: u8 = if (dark) 25 else 255;
     const cg: u8 = if (dark) 25 else 255;
     const cb: u8 = if (dark) 28 else 255;
@@ -1206,12 +1208,31 @@ fn registerTail(dark: bool, fx: *Effects) void {
                     pixels[i + 1] = eg;
                     pixels[i + 2] = eb;
                 }
+                // Mirror the downward cell into the lower half. Its
+                // full-width base then sits at the bottom, where it can
+                // tuck under the top edge of a flipped card.
+                const mirror_y = tail_atlas_h - y - 1;
+                const mirror_i = (mirror_y * tail_w + x) * 4;
+                @memcpy(pixels[mirror_i..][0..4], pixels[i..][0..4]);
             }
         }
     }
-    fx.registerImage(tail_image_id, tail_w, tail_h, &pixels) catch return;
+    fx.registerImage(tail_image_id, tail_w, tail_atlas_h, &pixels) catch return;
     tail_dark = dark;
     tail_ready = true;
+}
+
+fn tailSourceRect(flipped: bool) geometry.RectF {
+    // Canvas source rectangles address the registered texture from the
+    // opposite vertical origin to the row-major RGBA buffer above. The
+    // visually downward cell is therefore the lower source rectangle,
+    // and the upward cell is the upper one.
+    return geometry.RectF.init(
+        0,
+        @floatFromInt(if (flipped) 0 else tail_h),
+        @floatFromInt(tail_w),
+        @floatFromInt(tail_h),
+    );
 }
 var avatar_agent: [24]u8 = @splat(0);
 var avatar_agent_len: usize = 0;
@@ -2279,6 +2300,7 @@ const bubble_avatar_width: f32 = 20;
 const bubble_busy_width: f32 = 16;
 const bubble_content_gap: f32 = 8;
 const bubble_card_padding: f32 = 12;
+const bubble_card_radius: f32 = 18;
 const bubble_head_gap: f32 = 12;
 const bubble_line_gap: f32 = 2;
 /// Vertical breathing room between stacked conversation cards.
@@ -2463,6 +2485,28 @@ fn bubbleCardCenterDx(model: *const Model, slot: usize) f32 {
     return axis - bubbleRenderedCardWidth(model, slot) / 2;
 }
 
+/// Where the speech tail's center belongs inside the front card.
+///
+/// The companion window is centered over the pet until a screen edge
+/// clamps it. At that point the pet and window centers diverge; keeping
+/// the tail at the card midpoint makes it point into empty space. Follow
+/// the pet's actual local center instead, with enough inset that the
+/// tail's full base stays off the rounded corner. A conversation stack
+/// uses the newest/front card for the same reason: that is the bubble
+/// visually speaking for the pet.
+fn bubbleTailCenterX(model: *const Model) f32 {
+    const front = model.bubbles_len - 1;
+    const card_x = bubbleCardCenterDx(model, front);
+    const card_w = bubbleRenderedCardWidth(model, front);
+    const corner_inset = bubble_card_radius + @as(f32, @floatFromInt(tail_w)) / 2;
+    const inset = @min(card_w / 2, corner_inset);
+    return std.math.clamp(model.bubble_pet_center_local, card_x + inset, card_x + card_w - inset);
+}
+
+fn bubbleTailDx(model: *const Model) f32 {
+    return bubbleTailCenterX(model) - bubbleStackWidth(model) / 2;
+}
+
 fn bubbleWindowWidth(model: *const Model) f32 {
     const content = if (model.bubbles_len == 0) bubbleMaxCardWidth(model) else bubbleStackWidth(model);
     return content + bubble_canvas_margin * 2;
@@ -2471,8 +2515,8 @@ fn bubbleWindowWidth(model: *const Model) f32 {
 // -------------------------------------------------- collapsed stack math
 
 /// A single bubble is not a stack: no peek, no hover, no animation. The
-/// whole slice 2 behaviour hangs off this so one conversation renders
-/// byte-identically to slice 1.
+/// whole stack interaction hangs off this so the speech-bubble path only
+/// adds its own pet-anchored tail behavior.
 fn bubbleStackable(model: *const Model) bool {
     return model.bubbles_len > 1;
 }
@@ -3341,7 +3385,7 @@ fn bubbleCard(ui: *AppUi, model: *const Model, slot: usize) AppUi.Node {
         .width = card_width,
         .height = bubbleRenderedCardHeight(model, slot),
     }, @as([]const AppUi.Node, if (clamped) content[0..0] else content[0..1]));
-    card.widget.style.radius = 18;
+    card.widget.style.radius = bubble_card_radius;
     if (model.dark) {
         card.widget.style.background = canvas.Color.rgb8(25, 25, 28);
         card.widget.style.border = canvas.Color.rgba8(255, 255, 255, 26);
@@ -3382,10 +3426,9 @@ fn bubbleCard(ui: *AppUi, model: *const Model, slot: usize) AppUi.Node {
 /// One bubble is a speech bubble: a single card with a tail pointing at
 /// the pet, exactly what shipped before any of this.
 ///
-/// Two or more is a notification tray, and it gets NO tail. The tail is
-/// drawn centered in the window, so with a stack of mixed widths it read
-/// as an arrow floating loose next to the front card. The metaphor only
-/// ever belonged to the single bubble.
+/// Two or more keeps the same tail on the newest/front card. A stack is
+/// still the pet speaking through several conversations, and dropping
+/// the tail there makes the whole tray look detached from the pet.
 ///
 /// Stacked, the cards OVERLAY (a `.stack` takes the max of its children
 /// rather than flowing them) and each is placed by the transform
@@ -3413,24 +3456,31 @@ fn bubbleView(ui: *AppUi, model: *const Model) AppUi.Node {
         }, @as([]const AppUi.Node, overlay[0..model.bubbles_len]));
         count += 1;
     } else {
-        for (0..model.bubbles_len) |i| {
-            cards[count] = bubbleCard(ui, model, i);
-            count += 1;
-        }
-
-        var tail = ui.image(.{
-            .width = @floatFromInt(tail_w),
-            .height = @floatFromInt(tail_h),
-            .image = if (tail_ready) tail_image_id else 0,
-        });
-        tail.widget.image_fit = .contain;
-        // Pure translation (no rotation, so no canvas-origin surprises):
-        // the tail rides up over the card's bottom hairline, hiding the
-        // border segment behind it so bubble and arrow read as one shape.
-        tail.widget.transform = canvas.Affine.translate(0, -1.5);
-        cards[count] = tail;
+        cards[count] = bubbleCard(ui, model, 0);
         count += 1;
     }
+
+    var tail = ui.image(.{
+        .width = @floatFromInt(tail_w),
+        .height = @floatFromInt(tail_h),
+        .image = if (tail_ready) tail_image_id else 0,
+    });
+    tail.widget.image_src = tailSourceRect(model.bubble_flipped);
+    tail.widget.image_fit = .contain;
+    // Pure translation (no rotation, so no canvas-origin surprises).
+    // Horizontally, the tail tracks the pet after an edge clamp;
+    // vertically, its base rides over the front card hairline so card and
+    // arrow read as one shape on either side of the pet.
+    tail.widget.transform = canvas.Affine.translate(bubbleTailDx(model), if (model.bubble_flipped) 1.5 else -1.5);
+    if (model.bubble_flipped) {
+        // The body is one node in both modes: either the card itself or
+        // the stack container. Put the upward tail before it.
+        cards[1] = cards[0];
+        cards[0] = tail;
+    } else {
+        cards[count] = tail;
+    }
+    count += 1;
 
     // The head-gap spacer sits between the pet and the cards, so which
     // end it goes on follows the flip: above the pet the group hugs the
@@ -3856,6 +3906,7 @@ test {
     _ = hook_server;
     _ = installer;
     _ = plat;
+    _ = settings_view;
 }
 
 test "bubble geometry follows columns lines and font size" {
@@ -4392,6 +4443,56 @@ test "the stack axis follows the pet when the window is clamped off-center" {
     // rather than jumping when the fan opens.
     const mid = bubbleStackAxis(&model, stack_w, 0.5);
     try std.testing.expect(mid < axis_right and mid > stack_w / 2);
+}
+
+test "a single bubble tail follows the pet after a screen-edge clamp" {
+    var model: Model = .{};
+    testPushBubble(&model, "codex", "running tests", true, -1);
+
+    const card_w = bubbleCardWidth(&model, 0);
+    const inset = bubble_card_radius + @as(f32, @floatFromInt(tail_w)) / 2;
+
+    model.bubble_pet_center_local = card_w / 2;
+    try std.testing.expectEqual(@as(f32, 0), bubbleTailDx(&model));
+
+    // At either edge the point follows the pet as far as it safely can,
+    // while the tail's full base stays clear of the rounded corner.
+    model.bubble_pet_center_local = 0;
+    try std.testing.expectEqual(inset, bubbleTailCenterX(&model));
+    try std.testing.expect(bubbleTailDx(&model) < 0);
+
+    model.bubble_pet_center_local = card_w;
+    try std.testing.expectEqual(card_w - inset, bubbleTailCenterX(&model));
+    try std.testing.expect(bubbleTailDx(&model) > 0);
+}
+
+test "a stacked bubble keeps its tail attached to the front card" {
+    var model: Model = .{};
+    testPushBubble(&model, "alpha", "a much wider card behind the front one", false, -1);
+    testPushBubble(&model, "codex", "working", true, -1);
+
+    const front = model.bubbles_len - 1;
+    const front_w = bubbleRenderedCardWidth(&model, front);
+    const inset = bubble_card_radius + @as(f32, @floatFromInt(tail_w)) / 2;
+
+    model.bubble_pet_center_local = 0;
+    const left_x = bubbleCardCenterDx(&model, front);
+    try std.testing.expectEqual(left_x + inset, bubbleTailCenterX(&model));
+    try std.testing.expect(bubbleTailDx(&model) < 0);
+
+    model.bubble_pet_center_local = bubbleStackWidth(&model);
+    const right_x = bubbleCardCenterDx(&model, front);
+    try std.testing.expectEqual(right_x + front_w - inset, bubbleTailCenterX(&model));
+    try std.testing.expect(bubbleTailDx(&model) > 0);
+}
+
+test "the tail points toward the pet on both vertical placements" {
+    const down = tailSourceRect(false);
+    const up = tailSourceRect(true);
+    try std.testing.expectEqual(@as(f32, @floatFromInt(tail_h)), down.y);
+    try std.testing.expectEqual(@as(f32, 0), up.y);
+    try std.testing.expectEqual(down.width, up.width);
+    try std.testing.expectEqual(down.height, up.height);
 }
 
 test "bubble movement crosses displays before applying target bounds" {
