@@ -1806,7 +1806,7 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             model.settings_open = true;
         },
         .settings_closed => model.settings_open = false,
-        .close_pet => fx.closeWindow("main"),
+        .close_pet => closePet(model, fx),
         .select_pet => |index| {
             if (index >= catalog_mod.catalog_len) return;
             // `index == active_pet` is a no-op only once a sheet is up.
@@ -2916,6 +2916,13 @@ fn clearBubble(model: *Model) void {
     model.bubbles_len = 0;
     model.bubble_expires_at_ms = @splat(-1);
     hook_server.mailbox.clearBubbles();
+}
+
+const close_pet_window_labels = [_][]const u8{ "bubble", "main" };
+
+fn closePet(model: *Model, fx: *Effects) void {
+    clearBubble(model);
+    for (close_pet_window_labels) |label| fx.closeWindow(label);
 }
 
 /// Index of the most recently updated bubble in `drained`.
@@ -4921,6 +4928,21 @@ test "clearing a bubble also cancels its lifetime" {
     try std.testing.expectEqual(@as(usize, 0), model.bubbles_len);
     try std.testing.expect(!bubbleActive(&model));
     try std.testing.expectEqual(@as(i64, -1), model.bubble_expires_at_ms[0]);
+}
+
+test "closing the pet clears its bubble and closes both windows" {
+    var model: Model = .{};
+    testPushBubble(&model, "alpha", "x", true, 1234);
+    var fx = Effects.init(std.testing.allocator);
+    defer fx.deinit();
+
+    closePet(&model, &fx);
+
+    try std.testing.expectEqual(@as(usize, 0), model.bubbles_len);
+    try std.testing.expectEqual(@as(u32, close_pet_window_labels.len), fx.windowActionState().close_count);
+    try std.testing.expectEqualStrings("bubble", close_pet_window_labels[0]);
+    try std.testing.expectEqualStrings("main", close_pet_window_labels[1]);
+    try std.testing.expectEqualStrings("main", fx.windowActionState().lastLabel());
 }
 
 test "two conversations stack and grow the window vertically" {
