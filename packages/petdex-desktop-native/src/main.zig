@@ -271,6 +271,7 @@ pub const Model = struct {
         .{ .kind = .kimi_code },
         .{ .kind = .codebuddy },
         .{ .kind = .omp },
+        .{ .kind = .hermes },
     },
     agents_prompted: bool = false,
     codex_trust_note: bool = false,
@@ -1119,6 +1120,7 @@ const agent_art = [agent_hooks.agent_count]AgentArt{
     .{ .light = @embedFile("assets/agents/kimi-code.png"), .dark = @embedFile("assets/agents/kimi-code.png") },
     .{ .light = @embedFile("assets/agents/codebuddy.png"), .dark = @embedFile("assets/agents/codebuddy.png") },
     .{ .light = @embedFile("assets/agents/omp.png"), .dark = @embedFile("assets/agents/omp.png") },
+    .{ .light = @embedFile("assets/agents/hermes.png"), .dark = @embedFile("assets/agents/hermes.png") },
 };
 const agent_fallback_art: []const u8 = @embedFile("assets/agents/fallback.png");
 
@@ -1789,6 +1791,7 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
                 .kimi_code => agent_hooks.installKimiCode(boot_allocator, home),
                 .codebuddy => agent_hooks.installCodeBuddy(boot_allocator, home),
                 .omp => agent_hooks.installOmp(boot_allocator, home),
+                .hermes => agent_hooks.installHermes(boot_allocator, home),
             };
             if (ok and kind == .codex) model.codex_trust_note = true;
             model.agents = agent_hooks.scan(boot_allocator, home);
@@ -3692,6 +3695,7 @@ pub fn main(init: std.process.Init) !void {
     agent_hooks.env_qoder_cn_config_dir = init.environ_map.get("QODERCN_CONFIG_DIR");
     agent_hooks.env_qoder_cli_home = init.environ_map.get("QODER_CLI_HOME");
     agent_hooks.env_qoder_cn_cli_home = init.environ_map.get("QODERCN_CLI_HOME");
+    agent_hooks.env_hermes_home = init.environ_map.get("HERMES_HOME");
     // Hook hot path: `<binary> bubble <phase> [agent]` runs the
     // in-binary runner and exits before any UI machinery spins up.
     // initAllocator, not init: on Windows the command line arrives as

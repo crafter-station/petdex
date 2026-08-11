@@ -1,0 +1,15 @@
+name: petdex-desktop
+version: "1.0.0"
+description: "Forwards Hermes Desktop lifecycle events to the local Petdesk companion."
+author: Petdex
+hooks:
+  - pre_tool_call
+  - post_tool_call
+  - pre_llm_call
+  - post_llm_call
+  - pre_approval_request
+  - post_approval_response
+  - subagent_start
+  - subagent_stop
+  - on_session_start
+  - on_session_end
