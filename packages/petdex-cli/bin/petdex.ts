@@ -21,6 +21,7 @@ import {
   maybeShowFirstRunNotice,
   setEnabled,
 } from "../src/telemetry.js";
+import { resolveAuthConfig } from "../src/auth-config.js";
 
 // ─── config ────────────────────────────────────────────────────────────────
 const PETDEX_URL = process.env.PETDEX_URL ?? "https://petdex.dev";
@@ -48,64 +49,10 @@ const RETIRED_COMMANDS = new Map<string, string>([
   ["doctor", "Petdex Settings shows agent and hook status directly."],
   ["hooks", "Install agent hooks from Petdex Settings, one click per agent."],
 ]);
-const FALLBACK_ISSUER = "https://clerk.petdex.dev";
-const FALLBACK_CLIENT_ID = "LcThwEayl6KAA1Qm";
-const DEFAULT_SCOPES = ["profile", "email", "openid", "offline_access"];
-
-// Resolve OAuth config in this order:
-// 1. Environment overrides (advanced users, CI)
-// 2. Server-side /api/cli/auth-config (so we can rotate clientId without
-//    forcing every CLI user to reinstall)
-// 3. Hardcoded fallback (works offline / first-run / server down)
-async function resolveAuthConfig(): Promise<{
-  issuer: string;
-  clientId: string;
-  scopes: string[];
-}> {
-  const envIssuer = process.env.CLERK_ISSUER;
-  const envClientId = process.env.CLERK_OAUTH_CLIENT_ID;
-  if (envIssuer && envClientId) {
-    return { issuer: envIssuer, clientId: envClientId, scopes: DEFAULT_SCOPES };
-  }
-
-  try {
-    const res = await fetch(`${PETDEX_URL}/api/cli/auth-config`, {
-      signal: AbortSignal.timeout(3000),
-    });
-    if (res.ok) {
-      const data = (await res.json()) as {
-        issuer?: unknown;
-        clientId?: unknown;
-        scopes?: unknown;
-      };
-      const issuer = typeof data.issuer === "string" ? data.issuer : null;
-      const clientId = typeof data.clientId === "string" ? data.clientId : null;
-      const scopes = Array.isArray(data.scopes)
-        ? data.scopes.filter((s): s is string => typeof s === "string")
-        : null;
-      if (issuer && clientId) {
-        return {
-          issuer: envIssuer ?? issuer,
-          clientId: envClientId ?? clientId,
-          scopes: scopes && scopes.length > 0 ? scopes : DEFAULT_SCOPES,
-        };
-      }
-    }
-  } catch {
-    /* fall through to baked defaults */
-  }
-
-  return {
-    issuer: envIssuer ?? FALLBACK_ISSUER,
-    clientId: envClientId ?? FALLBACK_CLIENT_ID,
-    scopes: DEFAULT_SCOPES,
-  };
-}
-
 let _auth: ClerkCliAuth | null = null;
 async function getAuth(): Promise<ClerkCliAuth> {
   if (_auth) return _auth;
-  const cfg = await resolveAuthConfig();
+  const cfg = await resolveAuthConfig({ petdexUrl: PETDEX_URL });
   _auth = new ClerkCliAuth({
     clientId: cfg.clientId,
     issuer: cfg.issuer,
