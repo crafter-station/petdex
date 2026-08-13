@@ -467,11 +467,15 @@ fn handleConnection(server: *Server, conn: *Conn) void {
 }
 
 fn receiveWithTimeout(conn: *Conn, buffer: []u8, timeout: std.Io.Timeout) !usize {
-    const message = if (builtin.os.tag == .windows)
-        try conn.stream.socket.receive(conn.io, buffer)
-    else
-        try conn.stream.socket.receiveTimeout(conn.io, buffer, timeout);
-    return message.data.len;
+    if (builtin.os.tag == .windows) {
+        var reader = conn.stream.reader(conn.io, &.{});
+        var data = [_][]u8{buffer};
+        return reader.interface.readVec(&data) catch |err| switch (err) {
+            error.EndOfStream => 0,
+            error.ReadFailed => return reader.err orelse error.Unexpected,
+        };
+    }
+    return (try conn.stream.socket.receiveTimeout(conn.io, buffer, timeout)).data.len;
 }
 
 fn route(server: *Server, conn: *Conn, method: []const u8, path: []const u8, head: []const u8, body: []const u8) void {
