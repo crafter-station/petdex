@@ -492,6 +492,15 @@ fn spawnAndWait(argv: []const []const u8) bool {
     };
 }
 
+pub fn herdrAvailable(home: []const u8) bool {
+    if (spawnAndWait(&.{ "herdr", "--version" })) return true;
+    var local_buf: [768]u8 = undefined;
+    const local = std.fmt.bufPrint(&local_buf, "{s}/.local/bin/herdr", .{home}) catch return false;
+    if (spawnAndWait(&.{ local, "--version" })) return true;
+    if (spawnAndWait(&.{ "/opt/homebrew/bin/herdr", "--version" })) return true;
+    return spawnAndWait(&.{ "/usr/local/bin/herdr", "--version" });
+}
+
 pub fn activateHerdrPane(home: []const u8, pane_raw: []const u8) bool {
     const pane = safeHerdrPaneId(pane_raw) orelse return false;
     if (spawnAndWait(&.{ "herdr", "agent", "focus", pane })) return true;

@@ -192,6 +192,33 @@ fn agentsSection(ui: *AppUi, model: *const Model, icons: IconAtlas) AppUi.Node {
     return ui.column(.{ .gap = 12 }, @as([]const AppUi.Node, rows[0..count]));
 }
 
+fn herdrSection(ui: *AppUi, model: *const Model, icons: IconAtlas) AppUi.Node {
+    if (model.herdr_status == .absent) return ui.el(.stack, .{}, .{});
+    var logo = ui.image(.{
+        .width = 24,
+        .height = 24,
+        .image = if (icons.ready) icons.image else 0,
+        .semantics = .{ .label = "Herdr" },
+    });
+    logo.widget.image_src = icons.rect(app.herdr_icon_index);
+    logo.widget.image_fit = .contain;
+    return ui.el(.panel, .{
+        .padding = 12,
+        .gap = 12,
+        .cross = .center,
+        .style_tokens = .{ .background = .surface, .radius = .md },
+        .semantics = .{ .label = "Herdr" },
+    }, .{
+        ui.row(.{ .gap = 12, .cross = .center }, .{
+            logo,
+            ui.column(.{ .grow = 1, .main = .center }, .{
+                ui.text(.{}, "Herdr"),
+                mutedParagraph(ui, model.herdr_status.caption()),
+            }),
+        }),
+    });
+}
+
 /// SSH remotes running agents whose hooks ride the reverse tunnel.
 /// Read-only by design: remotes are declared in
 /// ~/.petdex/remote-agents.json and the section only reports what the
@@ -280,7 +307,7 @@ pub fn settingsView(ui: *AppUi, model: *const Model, icons: IconAtlas, thumbs: T
     // One scrollable page: the root scroll takes the window frame and
     // everything - full pet catalog included - flows inside it. No
     // more per-section band budgets.
-    var page = ui.scroll(.{ .grow = 1 }, .{ui.column(.{ .padding = 16, .gap = 12 }, .{
+    const page = ui.scroll(.{ .grow = 1 }, .{ui.column(.{ .padding = 16, .gap = 12 }, .{
         ui.text(.{ .size = .lg }, "Pets"),
         installBanner(ui, model),
         ui.el(.search_field, .{
@@ -305,6 +332,7 @@ pub fn settingsView(ui: *AppUi, model: *const Model, icons: IconAtlas, thumbs: T
         ui.el(.stack, .{ .height = 10 }, .{}),
         ui.text(.{ .size = .lg }, "Agents"),
         agentsSection(ui, model, icons),
+        herdrSection(ui, model, icons),
         remoteSection(ui, model),
         ui.el(.stack, .{ .height = 10 }, .{}),
         ui.text(.{ .size = .lg }, "Appearance"),
@@ -492,8 +520,9 @@ pub fn settingsView(ui: *AppUi, model: *const Model, icons: IconAtlas, thumbs: T
         // of the scroll extent, so the last card needs explicit air.
         ui.el(.stack, .{ .height = 8 }, .{}),
     })});
-    page.widget.style.background = settingsBackground(model);
-    return page;
+    var root = ui.el(.panel, .{ .grow = 1 }, .{page});
+    root.widget.style.background = settingsBackground(model);
+    return root;
 }
 
 test "settings descriptions use wrapped paragraphs" {

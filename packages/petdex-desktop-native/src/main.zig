@@ -26,6 +26,7 @@ const remote_agents = @import("remote_agents.zig");
 const remote_ssh = @import("remote_ssh.zig");
 const remote_writeback = @import("remote_writeback.zig");
 const remote_runtime = @import("remote_runtime.zig");
+const herdr_status = @import("herdr_status.zig");
 
 pub const panic = std.debug.FullPanic(native_sdk.debug.capturePanic);
 
@@ -280,6 +281,7 @@ pub const Model = struct {
         .{ .kind = .omp },
         .{ .kind = .hermes },
     },
+    herdr_status: herdr_status.Status = .absent,
     agents_prompted: bool = false,
     codex_trust_note: bool = false,
     pet_filter: [48]u8 = @splat(0),
@@ -1120,7 +1122,7 @@ fn agentIconRect(index: usize) geometry.RectF {
 /// cannot go missing from a bundle or resolve against the wrong cwd.
 /// opencode ships light and dark glyphs; the rest read on both.
 const AgentArt = struct { light: []const u8, dark: []const u8 };
-const agent_art = [agent_hooks.agent_count + 1]AgentArt{
+const agent_art = [agent_hooks.agent_count + 2]AgentArt{
     .{ .light = @embedFile("assets/agents/claude-code.png"), .dark = @embedFile("assets/agents/claude-code.png") },
     .{ .light = @embedFile("assets/agents/codex.png"), .dark = @embedFile("assets/agents/codex.png") },
     .{ .light = @embedFile("assets/agents/gemini.png"), .dark = @embedFile("assets/agents/gemini.png") },
@@ -1130,9 +1132,11 @@ const agent_art = [agent_hooks.agent_count + 1]AgentArt{
     .{ .light = @embedFile("assets/agents/codebuddy.png"), .dark = @embedFile("assets/agents/codebuddy.png") },
     .{ .light = @embedFile("assets/agents/omp.png"), .dark = @embedFile("assets/agents/omp.png") },
     .{ .light = @embedFile("assets/agents/hermes.png"), .dark = @embedFile("assets/agents/hermes.png") },
+    .{ .light = @embedFile("assets/agents/herdr.png"), .dark = @embedFile("assets/agents/herdr.png") },
     .{ .light = @embedFile("assets/agents/fallback.png"), .dark = @embedFile("assets/agents/fallback.png") },
 };
-const agent_fallback_index = agent_hooks.agent_count;
+pub const herdr_icon_index = agent_hooks.agent_count;
+const agent_fallback_index = agent_hooks.agent_count + 1;
 
 /// Pack every settings agent logo into one registry slot, themed like the
 /// bubble avatar and rebuilt on appearance flips. Each logo decodes
@@ -1255,13 +1259,14 @@ var avatar_theme_dark: bool = false;
 /// is looked up by name rather than by enum. An unknown name is the
 /// normal case for an agent we do not ship a glyph for, not an error.
 fn agentArtBytes(agent: []const u8, dark: bool) []const u8 {
-    const index = if (agentKindForName(agent)) |kind| @intFromEnum(kind) else agent_fallback_index;
+    const index = if (std.mem.eql(u8, agent, "herdr")) herdr_icon_index else if (agentKindForName(agent)) |kind| @intFromEnum(kind) else agent_fallback_index;
     const art = agent_art[index];
     return if (dark) art.dark else art.light;
 }
 
 /// Which cell of the packed logo strip belongs to this agent.
 fn agentIconIndex(agent: []const u8) usize {
+    if (std.mem.eql(u8, agent, "herdr")) return herdr_icon_index;
     if (agentKindForName(agent)) |kind| return @intFromEnum(kind);
     return agent_fallback_index;
 }
@@ -1675,7 +1680,11 @@ pub fn boot(model: *Model, fx: *Effects) void {
     // for the first frames of a hidden-dock boot, which beats holding
     // the setting hostage to an SDK boot hook that does not exist yet.
     plat.setDockIconHidden(model.hide_dock);
-    if (env_home) |home| model.agents = agent_hooks.scan(boot_allocator, home);
+    if (env_home) |home| {
+        model.agents = agent_hooks.scan(boot_allocator, home);
+        model.herdr_status = herdr_status.detect(boot_allocator, home);
+    }
+    loadAgentsAtlas(model.dark, fx);
 
     // First point where the platform codec is reachable: `init_fx` runs
     // on the loop thread right after the runtime binds services onto fx.
@@ -1887,7 +1896,10 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             model.agents = agent_hooks.scan(boot_allocator, home);
         },
         .open_settings => {
-            if (env_home) |home| model.agents = agent_hooks.scan(boot_allocator, home);
+            if (env_home) |home| {
+                model.agents = agent_hooks.scan(boot_allocator, home);
+                model.herdr_status = herdr_status.detect(boot_allocator, home);
+            }
             loadAgentsAtlas(model.dark, fx);
             if (model.settings_open) {
                 // Already open, likely buried behind other windows:
@@ -2497,6 +2509,25 @@ fn bubbleContentHeight(model: *const Model, row_count: usize) f32 {
     return rows * bubbleFontSize(model) * 1.35 + @as(f32, @floatFromInt(row_count - 1)) * bubble_line_gap;
 }
 
+fn bubbleRowCount(model: *const Model, slot: usize) usize {
+    const bubble = &model.bubbles[slot];
+    const chars_per_line: usize = model.bubble_columns;
+    const answer_lines: usize = model.bubble_answer_lines;
+    const title = clipDisplay(bubble.title[0..bubble.title_len], chars_per_line, &bubble_title_scratch[slot], false);
+    const text = clipDisplay(bubble.text[0..bubble.text_len], chars_per_line * answer_lines, &bubble_text_scratch[slot], true);
+    var count: usize = if (title.len > 0) 1 else 0;
+    for (splitLines(text, chars_per_line, answer_lines)) |line| {
+        if (line.len > 0) count += 1;
+    }
+    return count;
+}
+
+fn bubbleCardHeight(model: *const Model, slot: usize) f32 {
+    const content = bubbleContentHeight(model, bubbleRowCount(model, slot));
+    const inner = @max(content, @max(bubble_avatar_width, bubble_busy_width));
+    return @ceil(inner + bubble_card_padding * 2);
+}
+
 /// Painted width of the widest line a card holds. The strings are the
 /// ones bubbleCard hands to the view, and the font ids come from
 /// textSpanFontId over the same tokens, which is the SDK's measurement
@@ -2574,8 +2605,7 @@ fn bubbleRenderedCardWidth(model: *const Model, slot: usize) f32 {
 /// rounded rect. Outside a stack there is nothing to inherit from and
 /// intrinsic sizing is what the single bubble has always wanted.
 fn bubbleRenderedCardHeight(model: *const Model, slot: usize) f32 {
-    _ = slot;
-    return if (bubbleStackable(model)) bubbleMaxCardHeight(model) else 0;
+    return if (bubbleStackable(model)) bubbleCardHeight(model, slot) else 0;
 }
 
 /// The vertical axis the cards center on, in stack-container local
@@ -2695,15 +2725,28 @@ fn bubbleCardAlpha(model: *const Model, slot: usize) f32 {
 fn bubbleCardOffset(model: *const Model, slot: usize) f32 {
     if (!bubbleStackable(model)) return 0;
     const from_front: f32 = @floatFromInt(model.bubbles_len - 1 - slot);
-    const collapsed = bubble_peek_offset * @min(from_front, bubble_peek_max_depth);
-    const expanded = (bubbleMaxCardHeight(model) + bubble_stack_gap) * from_front;
-    const magnitude = collapsed + (expanded - collapsed) * bubbleExpansionEased(model);
-    if (model.bubble_flipped) return magnitude;
-    // Unflipped, the container reserves the whole fan but the front card
-    // belongs at its BOTTOM edge (nearest the pet), so every card starts
-    // from there and the others stack upward from it.
-    const slack = bubbleStackHeightAt(model, 1) - bubbleMaxCardHeight(model);
-    return slack - magnitude;
+    const peek = bubble_peek_offset * @min(from_front, bubble_peek_max_depth);
+    const front = model.bubbles_len - 1;
+    const collapsed = if (model.bubble_flipped)
+        peek
+    else
+        bubbleExpandedStackHeight(model) - bubbleCardHeight(model, front) - peek;
+    var expanded: f32 = 0;
+    if (model.bubble_flipped) {
+        var i = front;
+        while (i > slot) : (i -= 1) expanded += bubbleCardHeight(model, i) + bubble_stack_gap;
+    } else {
+        for (0..slot) |i| expanded += bubbleCardHeight(model, i) + bubble_stack_gap;
+    }
+    const t = bubbleExpansionEased(model);
+    return collapsed + (expanded - collapsed) * t;
+}
+
+fn bubbleExpandedStackHeight(model: *const Model) f32 {
+    if (model.bubbles_len == 0) return bubbleMaxCardHeight(model);
+    var height: f32 = 0;
+    for (0..model.bubbles_len) |slot| height += bubbleCardHeight(model, slot);
+    return height + bubble_stack_gap * @as(f32, @floatFromInt(model.bubbles_len - 1));
 }
 
 /// Height the window needs at a given expansion. Collapsed only has to
@@ -2711,11 +2754,12 @@ fn bubbleCardOffset(model: *const Model, slot: usize) f32 {
 /// column. The window is sized to the max of both (see syncBubbleWindow)
 /// so a resize never races the animation.
 fn bubbleStackHeightAt(model: *const Model, expansion: f32) f32 {
-    const card = bubbleMaxCardHeight(model);
-    if (!bubbleStackable(model)) return card;
+    if (!bubbleStackable(model)) return if (model.bubbles_len == 0) bubbleMaxCardHeight(model) else bubbleCardHeight(model, 0);
+    var tallest: f32 = 0;
+    for (0..model.bubbles_len) |slot| tallest = @max(tallest, bubbleCardHeight(model, slot));
     const behind: f32 = @floatFromInt(model.bubbles_len - 1);
-    const collapsed = card + bubble_peek_offset * @min(behind, bubble_peek_max_depth);
-    const expanded = card * @as(f32, @floatFromInt(model.bubbles_len)) + bubble_stack_gap * behind;
+    const collapsed = tallest + bubble_peek_offset * @min(behind, bubble_peek_max_depth);
+    const expanded = bubbleExpandedStackHeight(model);
     return collapsed + (expanded - collapsed) * expansion;
 }
 
@@ -2732,8 +2776,7 @@ fn bubbleStackHeightAt(model: *const Model, expansion: f32) f32 {
 /// the front card, which costs nothing: the window is click-through and
 /// fully transparent already.
 fn bubbleWindowHeight(model: *const Model) f32 {
-    const count: f32 = @floatFromInt(@max(model.bubbles_len, 1));
-    const cards = bubbleMaxCardHeight(model) * count + bubble_stack_gap * (count - 1);
+    const cards = if (model.bubbles_len == 0) bubbleMaxCardHeight(model) else bubbleExpandedStackHeight(model);
     return cards + @as(f32, @floatFromInt(tail_h)) + bubble_head_gap + bubble_canvas_margin * 2;
 }
 
@@ -2948,7 +2991,7 @@ fn bubbleCardsRect(model: *const Model) BubbleRect {
     var min_x = bubbleCardCenterDx(model, front);
     var max_x = min_x + bubbleRenderedCardWidth(model, front);
     var min_y = bubbleCardOffset(model, front);
-    var max_y = min_y + bubbleMaxCardHeight(model);
+    var max_y = min_y + bubbleCardHeight(model, front);
     // The peeks behind the front card stick out; they are visible and so
     // they are hoverable.
     if (bubbleStackable(model)) {
@@ -2958,7 +3001,7 @@ fn bubbleCardsRect(model: *const Model) BubbleRect {
             min_x = @min(min_x, x0);
             max_x = @max(max_x, x0 + bubbleRenderedCardWidth(model, slot));
             min_y = @min(min_y, y0);
-            max_y = @max(max_y, y0 + bubbleMaxCardHeight(model));
+            max_y = @max(max_y, y0 + bubbleCardHeight(model, slot));
         }
     }
     return .{
@@ -3547,7 +3590,7 @@ fn bubbleCard(ui: *AppUi, model: *const Model, slot: usize) AppUi.Node {
     if (bubbleStackable(model)) {
         const scale = bubbleCardScale(model, slot);
         const w = bubbleRenderedCardWidth(model, slot);
-        const h = bubbleMaxCardHeight(model);
+        const h = bubbleCardHeight(model, slot);
         const cx = w / 2;
         const cy = h / 2;
         card.widget.transform = canvas.Affine.translate(bubbleCardCenterDx(model, slot), bubbleCardOffset(model, slot))
@@ -3968,7 +4011,7 @@ test "transparent surfaces clear independently from settings" {
 test "one image slot covers every agent" {
     // agent_art is what loadAgentsAtlas walks, so a new AgentKind without
     // artwork would pack short and leave the last agent blank.
-    try std.testing.expectEqual(agent_hooks.agent_count + 1, agent_art.len);
+    try std.testing.expectEqual(agent_hooks.agent_count + 2, agent_art.len);
 }
 
 test "Herdr agent aliases resolve to their Petdex artwork" {
@@ -3976,7 +4019,7 @@ test "Herdr agent aliases resolve to their Petdex artwork" {
     try std.testing.expectEqual(agent_hooks.AgentKind.opencode, agentKindForName("open-code").?);
     try std.testing.expectEqual(agent_hooks.AgentKind.qoder, agentKindForName("qodercli").?);
     try std.testing.expectEqual(agent_hooks.AgentKind.kimi_code, agentKindForName("kimi").?);
-    try std.testing.expectEqual(agent_fallback_index, agentIconIndex("herdr"));
+    try std.testing.expectEqual(herdr_icon_index, agentIconIndex("herdr"));
 }
 
 test "bubble title and status stay in one compact text block" {
@@ -4360,7 +4403,7 @@ test "collapsed cards recede behind the front one" {
     try std.testing.expectEqual(@as(f32, 1), bubbleCardAlpha(&model, 1));
     // The container reserves the whole fan, and unflipped the front card
     // sits at its bottom edge, nearest the pet.
-    try std.testing.expectEqual(bubbleStackHeightAt(&model, 1) - bubbleMaxCardHeight(&model), bubbleCardOffset(&model, 1));
+    try std.testing.expectEqual(bubbleStackHeightAt(&model, 1) - bubbleCardHeight(&model, 1), bubbleCardOffset(&model, 1));
 
     // The one behind is smaller, dimmer and pushed up by the peek offset.
     try std.testing.expect(bubbleCardScale(&model, 0) < 1);
@@ -4385,8 +4428,8 @@ test "expanded restores the slice 1 column" {
         try std.testing.expectEqual(@as(f32, 1), bubbleCardScale(&model, i));
         try std.testing.expectEqual(@as(f32, 1), bubbleCardAlpha(&model, i));
     }
-    try std.testing.expectEqual(bubbleStackHeightAt(&model, 1) - bubbleMaxCardHeight(&model), bubbleCardOffset(&model, 1));
-    try std.testing.expectEqual(bubbleMaxCardHeight(&model) + bubble_stack_gap, bubbleCardOffset(&model, 1) - bubbleCardOffset(&model, 0));
+    try std.testing.expectEqual(bubbleStackHeightAt(&model, 1) - bubbleCardHeight(&model, 1), bubbleCardOffset(&model, 1));
+    try std.testing.expectEqual(bubbleCardHeight(&model, 0) + bubble_stack_gap, bubbleCardOffset(&model, 1) - bubbleCardOffset(&model, 0));
 }
 
 test "hover waits out the delay, and leaving collapses at once" {
@@ -4464,8 +4507,10 @@ test "hover hit tests the drawn cards, not the tall transparent window" {
 
     // Expanded, the live band reaches much higher up the window.
     model.bubble_expansion = 1;
-    const high = bottom - @as(f64, @floatCast(bubbleMaxCardHeight(&model))) - 10;
-    try std.testing.expect(bubbleHoverHit(&model, win_x, win_y, win_height, win_x + 20, high));
+    const expanded_rect = bubbleCardsRect(&model);
+    const high_x = win_x + @as(f64, @floatCast(expanded_rect.x + expanded_rect.w / 2));
+    const high_y = win_y + @as(f64, @floatCast(expanded_rect.y + 2));
+    try std.testing.expect(bubbleHoverHit(&model, win_x, win_y, win_height, high_x, high_y));
 }
 
 test "collapsed peeks are clamped to the front card and centered" {
@@ -4751,7 +4796,7 @@ test "the hover rect covers the whole visible card, not just its text" {
             const cx = bubble_canvas_margin + bubbleCardCenterDx(&model, slot);
             const cy = bubbleStackOriginY(&model) + bubbleCardOffset(&model, slot);
             const cw = bubbleRenderedCardWidth(&model, slot);
-            const chh = bubbleMaxCardHeight(&model);
+            const chh = bubbleCardHeight(&model, slot);
             try std.testing.expect(r.x <= cx);
             try std.testing.expect(r.y <= cy);
             try std.testing.expect(r.x + r.w >= cx + cw);
@@ -4777,7 +4822,7 @@ test "the hover rect covers the whole visible card, not just its text" {
         const fx0 = bubble_canvas_margin + bubbleCardCenterDx(&model, model.bubbles_len - 1);
         const fy0 = bubbleStackOriginY(&model) + bubbleCardOffset(&model, model.bubbles_len - 1);
         const fw = bubbleRenderedCardWidth(&model, model.bubbles_len - 1);
-        const fh = bubbleMaxCardHeight(&model);
+        const fh = bubbleCardHeight(&model, model.bubbles_len - 1);
         const wh: f64 = @floatCast(bubbleWindowHeight(&model));
         for ([_][2]f32{
             .{ fx0 + 1, fy0 + 1 },
@@ -4861,7 +4906,7 @@ test "the hover rect starts at the stack container, not at the canvas margin" {
         const front = model.bubbles_len - 1;
         const fy0 = origin_y + bubbleCardOffset(&model, front);
         const fx = bubble_canvas_margin + bubbleCardCenterDx(&model, front) + 4;
-        const bottom = fy0 + bubbleMaxCardHeight(&model);
+        const bottom = fy0 + bubbleCardHeight(&model, front);
         const wh: f64 = @floatCast(bubbleWindowHeight(&model));
         // One point inside the bottom edge: live.
         try std.testing.expect(bubbleHoverHit(&model, 0, 0, wh, fx, bottom - 1));
@@ -4871,11 +4916,11 @@ test "the hover rect starts at the stack container, not at the canvas margin" {
         // card unflipped and the deepest peek once flipped: the peeks are
         // drawn, so they are hoverable, and the rect is their union.
         var drawn_top = origin_y + bubbleCardOffset(&model, 0);
-        var drawn_bottom = drawn_top + bubbleMaxCardHeight(&model);
+        var drawn_bottom = drawn_top + bubbleCardHeight(&model, 0);
         for (0..model.bubbles_len) |slot| {
             const top = origin_y + bubbleCardOffset(&model, slot);
             drawn_top = @min(drawn_top, top);
-            drawn_bottom = @max(drawn_bottom, top + bubbleMaxCardHeight(&model));
+            drawn_bottom = @max(drawn_bottom, top + bubbleCardHeight(&model, slot));
         }
         // Well past the slop below everything drawn: dead, so the fix
         // widened the rect onto the cards rather than onto the window.
@@ -5017,11 +5062,11 @@ test "a stacked card keeps its own height, never the container's" {
     testPushBubble(&model, "alpha", "older", false, -1);
     testPushBubble(&model, "beta", "newer", true, -1);
 
-    const card_h = bubbleMaxCardHeight(&model);
     const container = bubbleStackHeightAt(&model, 1);
-    try std.testing.expect(container > card_h);
     for (0..model.bubbles_len) |i| {
+        const card_h = bubbleCardHeight(&model, i);
         try std.testing.expectEqual(card_h, bubbleRenderedCardHeight(&model, i));
+        try std.testing.expect(card_h < bubbleMaxCardHeight(&model));
         try std.testing.expect(bubbleRenderedCardHeight(&model, i) < container);
     }
 
@@ -5044,7 +5089,6 @@ test "a flipped stack stays inside its container at both ends" {
     model.bubble_flipped = true;
 
     const container = bubbleStackHeightAt(&model, 1);
-    const card_h = bubbleMaxCardHeight(&model);
 
     // Every card, at every point of the animation, must sit fully
     // inside the container: top edge at or below 0, bottom edge at or
@@ -5054,7 +5098,7 @@ test "a flipped stack stays inside its container at both ends" {
         for (0..model.bubbles_len) |i| {
             const top = bubbleCardOffset(&model, i);
             try std.testing.expect(top >= -0.01);
-            try std.testing.expect(top + card_h <= container + 0.01);
+            try std.testing.expect(top + bubbleCardHeight(&model, i) <= container + 0.01);
         }
         // Flipped, the FRONT card leads at the top, hard against the
         // head gap, and the rest hang below it.
@@ -5068,9 +5112,10 @@ test "a flipped stack stays inside its container at both ends" {
         for (0..model.bubbles_len) |i| {
             const top = bubbleCardOffset(&model, i);
             try std.testing.expect(top >= -0.01);
-            try std.testing.expect(top + card_h <= container + 0.01);
+            try std.testing.expect(top + bubbleCardHeight(&model, i) <= container + 0.01);
         }
-        try std.testing.expectEqual(container - card_h, bubbleCardOffset(&model, model.bubbles_len - 1));
+        const front = model.bubbles_len - 1;
+        try std.testing.expectEqual(container - bubbleCardHeight(&model, front), bubbleCardOffset(&model, front));
     }
 }
 
@@ -5145,7 +5190,7 @@ test "an empty stack still reserves one card of window height" {
     var model: Model = .{};
     const empty = bubbleWindowHeight(&model);
     testPushBubble(&model, "alpha", "reading", true, -1);
-    try std.testing.expectEqual(empty, bubbleWindowHeight(&model));
+    try std.testing.expect(bubbleWindowHeight(&model) < empty);
 }
 
 test "expiry drops only the bubbles past their deadline" {
