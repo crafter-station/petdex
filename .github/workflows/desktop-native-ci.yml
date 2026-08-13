@@ -265,6 +265,12 @@ jobs:
           APP_PID=$!
           sleep 10
           kill -0 "$APP_PID" || { echo "app died"; cat run.log; exit 1; }
+          for _ in $(seq 1 60); do
+            test -s ~/.petdex/runtime/update-token && break
+            kill -0 "$APP_PID" || { echo "app died"; cat run.log; exit 1; }
+            sleep 1
+          done
+          test -s ~/.petdex/runtime/update-token || { cat run.log; exit 1; }
           TOKEN=$(cat ~/.petdex/runtime/update-token)
           bun run integrations/herdr/managed-smoke.ts action
           curl -fsS -X POST -H "x-petdex-update-token: $TOKEN" \

@@ -400,6 +400,13 @@ fn handleConnectionThread(server: *Server, stream: std.Io.net.Stream) void {
     var conn: Conn = .{ .stream = stream, .io = io };
     handleConnection(server, &conn);
     stream.shutdown(io, .send) catch {};
+    if (builtin.os.tag == .windows) {
+        var drain: [1]u8 = undefined;
+        while (true) {
+            const message = stream.socket.receive(io, &drain) catch break;
+            if (message.data.len == 0) break;
+        }
+    }
     stream.close(io);
 }
 
@@ -597,14 +604,10 @@ fn respond(conn: *Conn, status: u16, body: []const u8) void {
         else => "OK",
     };
     const head = std.fmt.bufPrint(&buf, "HTTP/1.1 {d} {s}\r\ncontent-type: application/json\r\ncontent-length: {d}\r\nconnection: close\r\n\r\n", .{ status, reason, body.len }) catch return;
-    writeAll(conn, head);
-    writeAll(conn, body);
-}
-
-fn writeAll(conn: *Conn, bytes: []const u8) void {
     var write_buf: [64]u8 = undefined;
     var writer = conn.stream.writer(conn.io, &write_buf);
-    writer.interface.writeAll(bytes) catch return;
+    writer.interface.writeAll(head) catch return;
+    writer.interface.writeAll(body) catch return;
     writer.interface.flush() catch return;
 }
 
