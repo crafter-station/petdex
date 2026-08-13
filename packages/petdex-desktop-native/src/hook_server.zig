@@ -27,6 +27,7 @@ const Conn = struct {
 };
 
 pub const max_pending = 50;
+const max_active_connections: u32 = 64;
 const max_request_bytes: usize = 8192;
 const connection_timeout_ms: i64 = 5_000;
 
@@ -296,6 +297,7 @@ const Server = struct {
     mirror_lock: BlockingMutex = .{},
     last_state_mirror: u64 = 0,
     last_bubble_mirror: u64 = 0,
+    active_connections: std.atomic.Value(u32) = .init(0),
     // Token-bucket limiter, sidecar budget: 30/s shared by state+bubble.
     bucket: f64 = 30,
     bucket_stamp_ms: i64 = 0,
@@ -371,10 +373,33 @@ fn run(server: *Server) void {
 
     while (true) {
         const stream = listener.accept(io) catch continue;
-        var conn: Conn = .{ .stream = stream, .io = io };
-        handleConnection(server, &conn);
-        stream.close(io);
+        const active = server.active_connections.fetchAdd(1, .acq_rel);
+        if (active >= max_active_connections) {
+            _ = server.active_connections.fetchSub(1, .release);
+            stream.close(io);
+            continue;
+        }
+        // A client can disappear after sending only part of a request. Keep
+        // that blocking read off the accept loop so later hooks still reach
+        // the server while the abandoned connection drains or closes.
+        const thread = std.Thread.spawn(.{}, handleConnectionThread, .{ server, stream }) catch {
+            _ = server.active_connections.fetchSub(1, .release);
+            stream.close(io);
+            continue;
+        };
+        thread.detach();
     }
+}
+
+fn handleConnectionThread(server: *Server, stream: std.Io.net.Stream) void {
+    defer _ = server.active_connections.fetchSub(1, .release);
+    var scope = plat.Scope.init();
+    defer scope.deinit();
+    const io = scope.io();
+    var conn: Conn = .{ .stream = stream, .io = io };
+    handleConnection(server, &conn);
+    stream.shutdown(io, .send) catch {};
+    stream.close(io);
 }
 
 fn handleConnection(server: *Server, conn: *Conn) void {
