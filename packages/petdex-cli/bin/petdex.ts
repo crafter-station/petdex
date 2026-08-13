@@ -8,6 +8,7 @@ import pc from "picocolors";
 
 import pkg from "../package.json";
 import { isTrustedAssetUrl } from "../src/asset-hosts.js";
+import { resolveAuthConfig } from "../src/auth-config.js";
 import { ClerkCliAuth } from "../src/cli-auth/index.js";
 import {
   parseImageDims,
@@ -21,7 +22,6 @@ import {
   maybeShowFirstRunNotice,
   setEnabled,
 } from "../src/telemetry.js";
-import { resolveAuthConfig } from "../src/auth-config.js";
 
 // ─── config ────────────────────────────────────────────────────────────────
 const PETDEX_URL = process.env.PETDEX_URL ?? "https://petdex.dev";
@@ -50,9 +50,16 @@ const RETIRED_COMMANDS = new Map<string, string>([
   ["hooks", "Install agent hooks from Petdex Settings, one click per agent."],
 ]);
 let _auth: ClerkCliAuth | null = null;
-async function getAuth(): Promise<ClerkCliAuth> {
+async function getAuth({
+  warnOnFallback = true,
+}: {
+  warnOnFallback?: boolean;
+} = {}): Promise<ClerkCliAuth> {
   if (_auth) return _auth;
-  const cfg = await resolveAuthConfig({ petdexUrl: PETDEX_URL });
+  const cfg = await resolveAuthConfig({
+    petdexUrl: PETDEX_URL,
+    warnOnFallback,
+  });
   _auth = new ClerkCliAuth({
     clientId: cfg.clientId,
     issuer: cfg.issuer,
@@ -233,7 +240,7 @@ async function cmdLogin() {
 }
 
 async function cmdLogout() {
-  const auth = await getAuth();
+  const auth = await getAuth({ warnOnFallback: false });
   await auth.logout();
   console.log(`${pc.green("✓ ")}Signed out`);
 }

@@ -17,7 +17,7 @@ export const FALLBACK_CLIENT_ID = "LcThwEayl6KAA1Qm";
 export const DEFAULT_SCOPES = ["profile", "email", "openid", "offline_access"];
 
 export const AUTH_CONFIG_FALLBACK_WARNING =
-  "petdex: unable to refresh auth configuration; using built-in defaults.";
+  "petdex: unable to refresh auth configuration; using fallback authentication values.";
 
 // Resolve OAuth config in this order:
 // 1. Environment overrides (advanced users, CI)
@@ -28,10 +28,12 @@ export async function resolveAuthConfig({
   petdexUrl,
   env = process.env,
   fetchImpl = fetch,
+  warnOnFallback = true,
 }: {
   petdexUrl: string;
   env?: NodeJS.ProcessEnv;
   fetchImpl?: AuthConfigFetch;
+  warnOnFallback?: boolean;
 }): Promise<AuthConfig> {
   const envIssuer = env.CLERK_ISSUER;
   const envClientId = env.CLERK_OAUTH_CLIENT_ID;
@@ -58,7 +60,9 @@ export async function resolveAuthConfig({
       const issuer = typeof data.issuer === "string" ? data.issuer : null;
       const clientId = typeof data.clientId === "string" ? data.clientId : null;
       const scopes = Array.isArray(data.scopes)
-        ? data.scopes.filter((scope): scope is string => typeof scope === "string")
+        ? data.scopes.filter(
+            (scope): scope is string => typeof scope === "string",
+          )
         : null;
 
       if (issuer && clientId) {
@@ -73,7 +77,7 @@ export async function resolveAuthConfig({
     // Fall through to the built-in defaults.
   }
 
-  console.error(AUTH_CONFIG_FALLBACK_WARNING);
+  if (warnOnFallback) console.error(AUTH_CONFIG_FALLBACK_WARNING);
   return {
     issuer: envIssuer ?? FALLBACK_ISSUER,
     clientId: envClientId ?? FALLBACK_CLIENT_ID,
