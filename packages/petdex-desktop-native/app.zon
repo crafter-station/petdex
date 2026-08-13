@@ -3,7 +3,7 @@
     .name = "petdex-desktop-native",
     .display_name = "Petdex",
     .description = "Petdex desktop pet on Native SDK: no WebView, no Node.",
-    .version = "0.6.0",
+    .version = "0.7.0",
     .icons = .{"assets/icon.png"},
     .platforms = .{ "macos", "windows", "linux" },
     .permissions = .{ "view", "command" },
