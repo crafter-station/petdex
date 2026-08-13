@@ -1582,6 +1582,10 @@ fn runRemoteAction(model: *Model, slot_idx: usize, action: remote_runtime.Action
             };
             const final_argv = argv orelse {
                 std.debug.print("petdex: remote '{s}': could not build ssh argv\n", .{slot.nameSlice()});
+                if (env_home) |home| {
+                    const recovery = remote_runtime.onSpawnBuildFailure(slot, slot_idx, spec.op, home);
+                    runRemoteAction(model, slot_idx, recovery, fx);
+                }
                 return;
             };
             const is_tunnel = spec.op == .tunnel;

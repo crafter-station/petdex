@@ -1461,6 +1461,10 @@ fn writeHermesHooks(allocator: std.mem.Allocator, path: []const u8, install: boo
                         break;
                     }
                 }
+                // A blank line immediately before the next top-level block is
+                // its separator, not part of `hooks`. Keep newly synthesized
+                // events ahead of it so reconnect installs are byte-stable.
+                while (end > hs.? + 1 and std.mem.trim(u8, kept.items[end - 1], " \t\r").len == 0) end -= 1;
                 kept.insert(end, key) catch return false;
                 kept.insert(end + 1, entry) catch return false;
             }
@@ -3111,6 +3115,7 @@ test "hermes YAML merge preserves foreign keys, refreshes ours" {
     try t.expect(installHermes(t.allocator, home));
     const again = readFileAlloc(t.allocator, cfg, 1024 * 1024).?;
     defer t.allocator.free(again);
+    try t.expectEqualStrings(written, again);
     try t.expectEqual(std.mem.count(u8, written, "petdex-hook"), std.mem.count(u8, again, "petdex-hook"));
 
     const agents = scan(t.allocator, home);

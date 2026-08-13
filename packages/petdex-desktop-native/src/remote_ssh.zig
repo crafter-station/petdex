@@ -194,9 +194,11 @@ fn appendBase(buf: *[max_argv][]const u8, scratch: *Scratch, remote: *const Remo
 
 /// Long-lived reverse tunnel: remote 127.0.0.1:7777 back to the desktop hook
 /// server. The remote command probes `/health`, emits `tunnel_ready_marker`,
-/// then sleeps for the connection lifetime. OpenSSH starts that command only
-/// after it has requested the reverse forward; ExitOnForwardFailure makes a
-/// rejected bind a fast failure rather than a false-ready connection.
+/// and keeps probing while it owns the lease. Repeated health failures revoke
+/// the remote feed even if a hard desktop crash leaves a local ssh process
+/// orphaned. OpenSSH starts that command only after it has requested the
+/// reverse forward; ExitOnForwardFailure makes a rejected bind a fast failure
+/// rather than a false-ready connection.
 pub fn tunnelArgv(
     buf: *[max_argv][]const u8,
     scratch: *Scratch,
@@ -218,7 +220,7 @@ pub fn tunnelArgv(
     buf[destination_idx + 1] = std.fmt.bufPrint(&scratch.reverse, "-R{s}", .{tunnel_spec}) catch return null;
     buf[destination_idx + 2] = separator;
     buf[destination_idx + 3] = destination;
-    buf[destination_idx + 4] = std.fmt.bufPrint(&scratch.cmd, "umask 077; runtime=\"$HOME/.petdex/runtime\"; lease=\"$runtime/tunnel-lease\"; token=\"$runtime/update-token\"; mkdir -p \"$runtime\" || exit; command -v ps >/dev/null 2>&1 || exit 69; owner=$PPID; owner_alive() {{ kill -0 \"$owner\" 2>/dev/null || return 1; state=$(ps -o stat= -p \"$owner\" 2>/dev/null) || return 1; case \"$state\" in *Z*) return 1 ;; esac; return 0; }}; rm -f \"$lease\"; trap 'rm -f \"$lease\" \"$token\"' 0; trap 'trap - 0 1 2 15; rm -f \"$lease\" \"$token\"; exit 143' 1 2 15; i=0; while owner_alive; do if command -v curl >/dev/null 2>&1; then curl -fsS --max-time 1 http://127.0.0.1:7777/health >/dev/null 2>&1 && break; elif command -v python3 >/dev/null 2>&1; then python3 -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:7777/health\",timeout=1).read()' >/dev/null 2>&1 && break; else exit 69; fi; i=$((i+1)); test \"$i\" -ge 20 && exit 75; sleep 1; done; owner_alive || exit 75; : > \"$lease\" || exit; printf '{s}\\n'; while owner_alive; do : > \"$lease\" || exit; sleep 2; done", .{tunnel_ready_marker}) catch return null;
+    buf[destination_idx + 4] = std.fmt.bufPrint(&scratch.cmd, "umask 077; runtime=\"$HOME/.petdex/runtime\"; lease=\"$runtime/tunnel-lease\"; token=\"$runtime/update-token\"; mkdir -p \"$runtime\" || exit; command -v ps >/dev/null 2>&1 || exit 69; if command -v curl >/dev/null 2>&1; then healthy() {{ curl -fsS --max-time 1 http://127.0.0.1:7777/health >/dev/null 2>&1; }}; elif command -v python3 >/dev/null 2>&1; then healthy() {{ python3 -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:7777/health\",timeout=1).read()' >/dev/null 2>&1; }}; else exit 69; fi; owner=$PPID; owner_alive() {{ kill -0 \"$owner\" 2>/dev/null || return 1; state=$(ps -o stat= -p \"$owner\" 2>/dev/null) || return 1; case \"$state\" in *Z*) return 1 ;; esac; return 0; }}; rm -f \"$lease\"; trap 'rm -f \"$lease\" \"$token\"' 0; trap 'trap - 0 1 2 15; rm -f \"$lease\" \"$token\"; exit 143' 1 2 15; i=0; until healthy; do owner_alive || exit 75; i=$((i+1)); test \"$i\" -ge 20 && exit 75; sleep 1; done; owner_alive || exit 75; : > \"$lease\" || exit; printf '{s}\\n'; missed=0; while owner_alive; do if healthy; then missed=0; : > \"$lease\" || exit; else missed=$((missed+1)); test \"$missed\" -ge 3 && exit 75; fi; sleep 2; done", .{tunnel_ready_marker}) catch return null;
 
     const ssh_len = n + 3;
     var i = ssh_len;
@@ -241,7 +243,7 @@ pub fn tunnelArgv(
 pub fn quiesceArgv(buf: *[max_argv][]const u8, scratch: *Scratch, remote: *const Remote) ?[]const []const u8 {
     const n = appendBase(buf, scratch, remote) orelse return null;
     if (n + 1 > max_argv) return null;
-    buf[n] = "umask 077; runtime=\"$HOME/.petdex/runtime\"; mkdir -p \"$runtime\" || exit; rm -f \"$runtime/update-token\" \"$runtime/tunnel-lease\"; is_owned() { old=$1; needle=$2; case \"$old\" in ''|*[!0-9]*) return 1 ;; esac; command=$(ps -ww -p \"$old\" -o command= 2>/dev/null) || return 1; case \"$command\" in *\"$needle\"*) return 0 ;; *) return 1 ;; esac; }; stop_one() { p=$1; needle=$2; if test -r \"$p\"; then old=$(cat \"$p\"); if is_owned \"$old\" \"$needle\"; then kill \"$old\" 2>/dev/null || true; fi; fi; rm -f \"$p\"; }; stop_one \"$runtime/codex-watch.pid\" \"$HOME/.petdex/bin/petdex-codex-watch\"; stop_one \"$runtime/hermes-watch.pid\" \"$HOME/.petdex/bin/petdex-hermes-watch\"; sleep 2";
+    buf[n] = "umask 077; runtime=\"$HOME/.petdex/runtime\"; mkdir -p \"$runtime\" || exit; rm -f \"$runtime/update-token\" \"$runtime/tunnel-lease\"; is_owned() { old=$1; needle=$2; case \"$old\" in ''|*[!0-9]*) return 1 ;; esac; command=$(ps -ww -p \"$old\" -o command= 2>/dev/null) || return 1; case \"$command\" in *\"$needle\"*) return 0 ;; *) return 1 ;; esac; }; stop_one() { p=$1; needle=$2; if test -r \"$p\"; then old=$(cat \"$p\"); if is_owned \"$old\" \"$needle\"; then kill \"$old\" 2>/dev/null || true; fi; fi; }; stop_one \"$runtime/codex-watch.pid\" \"$HOME/.petdex/bin/petdex-codex-watch\"; stop_one \"$runtime/hermes-watch.pid\" \"$HOME/.petdex/bin/petdex-hermes-watch\"; sleep 2";
     return buf[0 .. n + 1];
 }
 
@@ -327,7 +329,7 @@ pub fn watcherArgv(
     const n = appendBase(buf, scratch, remote) orelse return null;
     if (n + 1 > max_argv) return null;
     const hermes_home = shQuote(&scratch.quote_a, remote.agents.hermes.home orelse remote_agents.default_hermes_home) orelse return null;
-    const helper = "umask 077; for x in python3 curl ps; do command -v \"$x\" >/dev/null 2>&1 || exit 69; done; r=\"$HOME/.petdex/runtime\"; l=\"$r/tunnel-lease\"; mkdir -p \"$r\" || exit; test -f \"$l\" || exit 75; own() { q=$1; n=$2; case \"$q\" in ''|*[!0-9]*) return 1 ;; esac; c=$(ps -ww -p \"$q\" -o command= 2>/dev/null) || return 1; case \"$c\" in *\"$n\"*) return 0 ;; *) return 1 ;; esac; }; start_one() { p=$1; exe=$2; shift 2; if test -r \"$p\"; then old=$(cat \"$p\"); if own \"$old\" \"$exe\"; then kill \"$old\" 2>/dev/null || true; fi; fi; rm -f \"$p\"; nohup \"$exe\" \"$@\" >/dev/null 2>&1 </dev/null & child=$!; i=0; stable=0; while test \"$i\" -lt 30; do if test -r \"$p\"; then actual=$(cat \"$p\"); if test \"$actual\" = \"$child\" && kill -0 \"$actual\" 2>/dev/null && own \"$actual\" \"$exe\"; then stable=$((stable+1)); test \"$stable\" -ge 3 && return 0; else stable=0; fi; fi; i=$((i+1)); sleep 0.1; done; if own \"$child\" \"$exe\"; then kill \"$child\" 2>/dev/null || true; fi; test \"$(cat \"$p\" 2>/dev/null)\" = \"$child\" && rm -f \"$p\"; return 1; }; ";
+    const helper = "umask 077; for x in python3 curl ps; do command -v \"$x\" >/dev/null 2>&1 || exit 69; done; r=\"$HOME/.petdex/runtime\"; l=\"$r/tunnel-lease\"; mkdir -p \"$r\" || exit; test -f \"$l\" || exit 75; own() { q=$1; n=$2; case \"$q\" in ''|*[!0-9]*) return 1 ;; esac; c=$(ps -ww -p \"$q\" -o command= 2>/dev/null) || return 1; case \"$c\" in *\"$n\"*) return 0 ;; *) return 1 ;; esac; }; start_one() { p=$1; exe=$2; shift 2; if test -r \"$p\"; then old=$(cat \"$p\"); if own \"$old\" \"$exe\"; then kill \"$old\" 2>/dev/null || true; fi; fi; nohup \"$exe\" \"$@\" >/dev/null 2>&1 </dev/null & child=$!; i=0; stable=0; while test \"$i\" -lt 30; do if test -r \"$p\"; then actual=$(cat \"$p\"); if test \"$actual\" = \"$child\" && kill -0 \"$actual\" 2>/dev/null && own \"$actual\" \"$exe\"; then stable=$((stable+1)); test \"$stable\" -ge 3 && return 0; else stable=0; fi; fi; i=$((i+1)); sleep 0.1; done; if own \"$child\" \"$exe\"; then kill \"$child\" 2>/dev/null || true; fi; test \"$(cat \"$p\" 2>/dev/null)\" = \"$child\" && rm -f \"$p\"; return 1; }; ";
     if (start_codex and start_hermes) {
         const codex = shQuote(&scratch.quote_b, remote_codex_watcher) orelse return null;
         const codex_pid = shQuote(&scratch.quote_c, "~/.petdex/runtime/codex-watch.pid") orelse return null;
@@ -454,6 +456,9 @@ test "tunnelArgv requests the reverse forward with fast failure" {
     try t.expect(std.mem.indexOf(u8, argv[argv.len - 1], "exit 143' 1 2 15") != null);
     try t.expect(std.mem.indexOf(u8, argv[argv.len - 1], "owner=$PPID") != null);
     try t.expect(std.mem.indexOf(u8, argv[argv.len - 1], "while owner_alive") != null);
+    try t.expect(std.mem.indexOf(u8, argv[argv.len - 1], "until healthy") != null);
+    try t.expect(std.mem.indexOf(u8, argv[argv.len - 1], "missed=$((missed+1))") != null);
+    try t.expect(std.mem.indexOf(u8, argv[argv.len - 1], "test \"$missed\" -ge 3 && exit 75") != null);
     var line: [4096]u8 = undefined;
     const text = joined(argv, &line);
     try t.expect(std.mem.indexOf(u8, text, "-N") == null);
@@ -472,6 +477,7 @@ test "quiesceArgv removes token and stops both feed watchers" {
     try t.expect(std.mem.indexOf(u8, command, "hermes-watch.pid") != null);
     try t.expect(std.mem.indexOf(u8, command, "kill \"$old\"") != null);
     try t.expect(std.mem.indexOf(u8, command, "ps -ww -p \"$old\" -o command=") != null);
+    try t.expect(std.mem.indexOf(u8, command, "rm -f \"$p\"") == null);
     try t.expect(std.mem.endsWith(u8, command, "sleep 2"));
 }
 

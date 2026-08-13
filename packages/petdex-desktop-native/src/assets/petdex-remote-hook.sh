@@ -179,12 +179,56 @@ def is_subagent(row):
     return bool(row.get("parent_session_id")) and not bool(row.get("session_key"))
 try:
     if agent == "codex":
+        # Codex writes explicit multi-agent ancestry into the rollout prefix,
+        # while session_index contains only display titles. Read one bounded
+        # metadata record so child Stop/Permission hooks cannot create cards
+        # even when the rollout watcher correctly suppresses that same child.
+        meta = {}
+        session_root = Path.home() / ".codex" / "sessions"
+        for candidate in session_root.glob(f"*/*/*/rollout-*{sid}.jsonl"):
+            with candidate.open("rb") as handle:
+                prefix = handle.read(65536)
+            for encoded in prefix.splitlines():
+                try:
+                    envelope = json.loads(encoded.decode("utf-8", "ignore"))
+                except Exception:
+                    continue
+                if envelope.get("type") == "session_meta" and isinstance(envelope.get("payload"), dict):
+                    meta = envelope["payload"]
+                    break
+            if meta:
+                break
+        source = meta.get("source")
+        if isinstance(source, dict):
+            source_kind = "subagent" if "subagent" in source else str(source.get("type") or source.get("kind") or "")
+        else:
+            source_kind = str(source or "")
+        source_kind = source_kind.strip().lower().replace("-", "_")
+        thread_source = str(meta.get("thread_source") or "").strip().lower().replace("-", "_")
+        codex_child = (
+            thread_source == "subagent"
+            or source_kind in {"subagent", "sub_agent", "child", "worker"}
+            or (bool(meta.get("parent_thread_id")) and bool(meta.get("agent_nickname")))
+        )
+        if codex_child:
+            kind = "subagent"
+            parent = str(meta.get("parent_thread_id") or force_parent or "")
+            conversation = parent or sid
+            label = explicit_label or str(meta.get("agent_nickname") or "")
+
         path = Path.home() / ".codex" / "session_index.jsonl"
-        lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
-        for line in reversed(lines[-2000:]):
+        with path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            handle.seek(max(0, size - 4 * 1024 * 1024))
+            raw_index = handle.read(4 * 1024 * 1024)
+        if size > len(raw_index):
+            newline = raw_index.find(b"\n")
+            raw_index = raw_index[newline + 1 :] if newline >= 0 else b""
+        for line in reversed(raw_index.decode("utf-8", "ignore").splitlines()[-2000:]):
             row = json.loads(line)
-            if str(row.get("id") or "") == sid:
-                title = str(row.get("thread_name") or "")
+            if str(row.get("id") or "") == conversation:
+                title = str(row.get("thread_name") or row.get("title") or "")
                 break
     elif agent == "hermes":
         configured_home = ""
@@ -329,9 +373,9 @@ normalize_key() {
 conversation_key=$(normalize_key "$conversation_key")
 
 # This PR targets the base card model, which has no nested child hierarchy.
-# Suppress every confidently classified Hermes worker at the source instead
-# of opening standalone cards for delegated tool progress.
-if [ "$agent" = "hermes" ] && [ "$session_kind" = "subagent" ]; then
+# Suppress every confidently classified worker at the source instead of
+# opening standalone cards for delegated tool progress.
+if [ "$session_kind" = "subagent" ]; then
     exit 0
 fi
 

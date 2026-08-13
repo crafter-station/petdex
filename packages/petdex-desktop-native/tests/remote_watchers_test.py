@@ -68,6 +68,75 @@ class CodexWatcherTests(unittest.TestCase):
             self.assertEqual(size, offset)
             self.assertEqual("Done now", event["text"])
 
+    def test_subagent_rollouts_do_not_hide_an_older_primary(self) -> None:
+        watcher = load("petdex_codex_subagent_test", "petdex-codex-watch.py")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+
+            def rollout(session_id: str, metadata: dict[str, object]) -> Path:
+                path = root / f"rollout-{session_id}.jsonl"
+                rows = [
+                    {"type": "session_meta", "payload": {"id": session_id, **metadata}},
+                    {"type": "event_msg", "payload": {"type": "task_started", "turn_id": "t1"}},
+                    {"type": "event_msg", "payload": {"type": "agent_reasoning", "text": "Working"}},
+                ]
+                path.write_text(
+                    "".join(json.dumps(row) + "\n" for row in rows),
+                    encoding="utf-8",
+                )
+                return path
+
+            primary_id = "00000000-0000-0000-0000-000000000001"
+            catalog = {primary_id: rollout(primary_id, {"thread_source": "user"})}
+            for index in range(watcher.MAX_WATCHES):
+                child_id = f"00000000-0000-0000-0000-{index + 2:012d}"
+                catalog[child_id] = rollout(
+                    child_id,
+                    {
+                        "thread_source": "subagent",
+                        "source": {"subagent": "worker"},
+                        "parent_thread_id": primary_id,
+                        "agent_nickname": f"worker-{index}",
+                    },
+                )
+                # Make every child newer than the real parent.
+                modified = time.time() + index + 1
+                os.utime(catalog[child_id], (modified, modified))
+
+            selected = watcher.discovery_paths(catalog, {}, {})
+            self.assertEqual({primary_id}, set(selected))
+            for child_id, path in catalog.items():
+                if child_id != primary_id:
+                    self.assertIsNone(watcher.parse_rollout(path, "Child"))
+
+    def test_large_rollout_keeps_subagent_metadata_outside_the_tail(self) -> None:
+        watcher = load("petdex_codex_large_subagent_test", "petdex-codex-watch.py")
+        watcher.MAX_ROLLOUT_BYTES = 256
+        with tempfile.TemporaryDirectory() as directory:
+            session_id = "00000000-0000-0000-0000-000000000099"
+            rollout = Path(directory) / f"rollout-{session_id}.jsonl"
+            rows = [
+                {
+                    "type": "session_meta",
+                    "payload": {
+                        "thread_source": "subagent",
+                        "source": {"subagent": "worker"},
+                        "parent_thread_id": "00000000-0000-0000-0000-000000000001",
+                        "agent_nickname": "worker",
+                    },
+                },
+                *(
+                    {"type": "event_msg", "payload": {"type": "agent_reasoning", "text": "filler"}}
+                    for _ in range(12)
+                ),
+            ]
+            rollout.write_text(
+                "".join(json.dumps(row) + "\n" for row in rows),
+                encoding="utf-8",
+            )
+            self.assertGreater(rollout.stat().st_size, watcher.MAX_ROLLOUT_BYTES)
+            self.assertIsNone(watcher.parse_rollout(rollout, "Child"))
+
 
 class HermesWatcherTests(unittest.TestCase):
     def test_custom_home_yields_canonical_active_and_terminal_events(self) -> None:
@@ -95,13 +164,30 @@ class HermesWatcherTests(unittest.TestCase):
                     "INSERT INTO sessions VALUES (?,?,?,?,?,?,?,?,?,?)",
                     ("ended", "ended-key", "Done", "primary", "{}", "", now, now, "Finished", now),
                 )
+                database.execute(
+                    "INSERT INTO sessions VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    ("child", "", "Worker", "subagent", '{"_delegate_from":"raw"}', "raw", now, now, "Tool noise", None),
+                )
+                database.execute(
+                    "INSERT INTO sessions VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    ("delegated", "delegated-key", "Worker", "desktop", '{"_delegate_from":"raw"}', "raw", now, now, "Tool noise", None),
+                )
+                # A keyed parent-linked continuation without delegation
+                # metadata is a real conversation, not a worker.
+                database.execute(
+                    "INSERT INTO sessions VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    ("continuation", "continuation-key", "Continued", "desktop", "{}", "raw", now, now, "Working", None),
+                )
 
             result = watcher.snapshot()
             self.assertIsNotNone(result)
             active, terminals = result
             canonical = watcher.canonical_key("stable.key")
             self.assertEqual(64, len(canonical))
-            self.assertEqual(canonical, active[0]["session_id"])
+            self.assertEqual(
+                {canonical, "continuation-key"},
+                {event["session_id"] for event in active},
+            )
             self.assertEqual("completed", terminals["ended-key"]["status"])
 
 

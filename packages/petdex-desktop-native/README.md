@@ -59,10 +59,12 @@ At launch the desktop probes each enabled remote (`ssh` with `BatchMode=yes`,
 no password prompts ever), then runs a fetch-merge-writeback: the remote's
 existing hook configs are read, merged locally by the exact installers a local
 connect uses, and written back. Foreign hooks are preserved, never clobbered.
-It then pushes the hook-server update token and holds a reverse tunnel
-(`ssh -R 127.0.0.1:7777:127.0.0.1:7777`, with a bounded remote health/lease
-command and supervised backoff) so hook
-POSTs from the remote reach the desktop's loopback hook server.
+The desktop first verifies a supervised reverse tunnel
+(`ssh -R 127.0.0.1:7777:127.0.0.1:7777`), installs executable dependencies
+before the configs that enable them, starts the session reconcilers, and only
+then atomically publishes the hook-server update token. Hook POSTs from the
+remote can reach the desktop's loopback server only after that complete gated
+patch pass succeeds.
 
 Remote shell-exec agents (codex, hermes) invoke `~/.petdex/bin/petdex-hook` on
 the remote, where a small POSIX sh + curl script (`src/assets/petdex-remote-hook.sh`)

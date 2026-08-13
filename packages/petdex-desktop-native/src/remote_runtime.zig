@@ -431,6 +431,14 @@ pub fn onSpawnExit(slot: *Slot, slot_idx: usize, op: Op, code: i32, output: []co
     return onSpawnExitDetailed(slot, slot_idx, op, code, output, false, home);
 }
 
+/// Recover when main cannot construct argv for an action the state machine has
+/// already entered. Treat it like a failed spawn so the slot releases any
+/// staged output and enters bounded backoff instead of remaining permanently
+/// stuck in an in-flight operation that will never produce an exit message.
+pub fn onSpawnBuildFailure(slot: *Slot, slot_idx: usize, op: Op, home: []const u8) Action {
+    return onSpawnExitDetailed(slot, slot_idx, op, 70, "", false, home);
+}
+
 pub fn onSpawnExitDetailed(slot: *Slot, slot_idx: usize, op: Op, code: i32, output: []const u8, output_truncated: bool, home: []const u8) Action {
     // Tunnel teardown can race a short sync SSH process. The teardown resets
     // `slot.op`; ignore that stale completion so it cannot reopen the token
@@ -835,8 +843,9 @@ test "driver gates feed until tunnel-ready patch pass completes" {
     try t.expect(act == .spawn and act.spawn.op == .fetch);
     try t.expectEqualStrings("~/.codex/hooks.json", act.spawn.path);
 
-    // Codex: two fetches, then pushes (hooks.json, config.toml, hook
-    // script), then starts watchers before atomically opening the token gate.
+    // Codex: two fetches, then pushes dependencies before hooks.json and its
+    // enabling config.toml, then starts watchers before atomically opening the
+    // token gate.
     act = onSpawnExit(&slot, idx, .fetch, remote_ssh.missing_file_exit_code, "", home);
     try t.expect(act == .spawn and act.spawn.op == .fetch);
     try t.expectEqualStrings("~/.codex/config.toml", act.spawn.path);
@@ -926,6 +935,24 @@ test "watcher startup failure never advances to the token gate" {
     try t.expect(slot.wb_failed);
     try t.expect(!slot.sync_complete);
     try t.expect(slot.op == .none);
+}
+
+test "argv construction failure cannot strand an in-flight remote operation" {
+    const home = ".zig-cache/petdex-rt-home";
+    var slot = testSlot();
+    _ = startAction(&slot);
+    const probe = onSpawnBuildFailure(&slot, 6, .probe, home);
+    try t.expect(probe == .backoff);
+    try t.expect(slot.op == .none);
+    try t.expect(slot.probe_failed);
+
+    slot.tunnel_ready = true;
+    slot.op = .profile;
+    const sync = onSpawnBuildFailure(&slot, 6, .profile, home);
+    try t.expect(sync == .backoff);
+    try t.expect(slot.op == .none);
+    try t.expect(slot.wb_failed);
+    try t.expect(!slot.sync_complete);
 }
 
 test "missing local update token schedules a gated retry" {

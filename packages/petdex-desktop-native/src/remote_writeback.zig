@@ -168,9 +168,49 @@ pub fn runInstaller(allocator: std.mem.Allocator, kind: AgentKind, fake_home: []
     };
 }
 
+fn stagedOutput(
+    allocator: std.mem.Allocator,
+    kind: AgentKind,
+    fake_home: []const u8,
+    rel: []const u8,
+    hermes_profile: []const u8,
+    hermes_home: []const u8,
+) ?Output {
+    var path_buf: [512]u8 = undefined;
+    const path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ fake_home, rel }) catch return null;
+    const bytes = plat.readFileAlloc(allocator, path, 1024 * 1024) orelse return null;
+    var remote_buf: [512]u8 = undefined;
+    const remote = remotePath(&remote_buf, kind, rel, hermes_profile, hermes_home) orelse return null;
+    return .{
+        .rel = allocator.dupe(u8, rel) catch return null,
+        .remote = allocator.dupe(u8, remote) catch return null,
+        .bytes = bytes,
+        .executable = false,
+    };
+}
+
+fn embeddedOutput(
+    allocator: std.mem.Allocator,
+    rel: []const u8,
+    remote: []const u8,
+    bytes: []const u8,
+) ?Output {
+    return .{
+        .rel = rel,
+        .remote = remote,
+        .bytes = allocator.dupe(u8, bytes) catch return null,
+        .executable = true,
+    };
+}
+
 /// Read back everything a push must carry: the agent's files, plus the
 /// hook script for shell-exec agents. Null on any read failure. A
 /// partial push set would leave the remote half-configured.
+///
+/// Output order is also activation order. Dependencies are installed first;
+/// the agent config that enables them is atomically renamed into place last.
+/// That matters even while the feed token is closed: an already-running agent
+/// can reload its config in the middle of a reconnect patch pass.
 pub fn collectOutputs(
     allocator: std.mem.Allocator,
     kind: AgentKind,
@@ -183,45 +223,28 @@ pub fn collectOutputs(
         @as(usize, if (needsCodexWatcher(kind)) 1 else 0) +
         @as(usize, if (needsHermesWatcher(kind)) 1 else 0);
     var out = allocator.alloc(Output, files.len + extra) catch return null;
-    for (files, 0..) |rel, i| {
-        var path_buf: [512]u8 = undefined;
-        const path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ fake_home, rel }) catch return null;
-        const bytes = plat.readFileAlloc(allocator, path, 1024 * 1024) orelse return null;
-        var remote_buf: [512]u8 = undefined;
-        const remote = remotePath(&remote_buf, kind, rel, hermes_profile, hermes_home) orelse return null;
-        out[i] = .{
-            .rel = allocator.dupe(u8, rel) catch return null,
-            .remote = allocator.dupe(u8, remote) catch return null,
-            .bytes = bytes,
-            .executable = false,
-        };
-    }
-    if (needsHookScript(kind)) {
-        out[files.len] = .{
-            .rel = ".petdex/bin/petdex-hook",
-            .remote = remote_ssh.remote_hook_script,
-            .bytes = allocator.dupe(u8, hook_script) catch return null,
-            .executable = true,
-        };
-    }
-    if (needsCodexWatcher(kind)) {
-        const index = files.len + @as(usize, if (needsHookScript(kind)) 1 else 0);
-        out[index] = .{
-            .rel = ".petdex/bin/petdex-codex-watch",
-            .remote = remote_ssh.remote_codex_watcher,
-            .bytes = allocator.dupe(u8, codex_watcher_script) catch return null,
-            .executable = true,
-        };
-    }
-    if (needsHermesWatcher(kind)) {
-        const index = files.len + @as(usize, if (needsHookScript(kind)) 1 else 0) +
-            @as(usize, if (needsCodexWatcher(kind)) 1 else 0);
-        out[index] = .{
-            .rel = ".petdex/bin/petdex-hermes-watch",
-            .remote = remote_ssh.remote_hermes_watcher,
-            .bytes = allocator.dupe(u8, hermes_watcher_script) catch return null,
-            .executable = true,
-        };
+    switch (kind) {
+        .opencode => {
+            out[0] = stagedOutput(allocator, kind, fake_home, opencode_files[0], hermes_profile, hermes_home) orelse return null;
+        },
+        .codex => {
+            out[0] = embeddedOutput(allocator, ".petdex/bin/petdex-hook", remote_ssh.remote_hook_script, hook_script) orelse return null;
+            out[1] = embeddedOutput(allocator, ".petdex/bin/petdex-codex-watch", remote_ssh.remote_codex_watcher, codex_watcher_script) orelse return null;
+            // hooks.json is inert until config.toml enables hooks, so the
+            // feature flag is the final activation write.
+            out[2] = stagedOutput(allocator, kind, fake_home, codex_files[0], hermes_profile, hermes_home) orelse return null;
+            out[3] = stagedOutput(allocator, kind, fake_home, codex_files[1], hermes_profile, hermes_home) orelse return null;
+        },
+        .hermes => {
+            out[0] = embeddedOutput(allocator, ".petdex/bin/petdex-hook", remote_ssh.remote_hook_script, hook_script) orelse return null;
+            out[1] = embeddedOutput(allocator, ".petdex/bin/petdex-hermes-watch", remote_ssh.remote_hermes_watcher, hermes_watcher_script) orelse return null;
+            out[2] = stagedOutput(allocator, kind, fake_home, hermes_files[2], hermes_profile, hermes_home) orelse return null;
+            out[3] = stagedOutput(allocator, kind, fake_home, hermes_files[3], hermes_profile, hermes_home) orelse return null;
+            out[4] = stagedOutput(allocator, kind, fake_home, hermes_files[1], hermes_profile, hermes_home) orelse return null;
+            // config.yaml enables both the shell hook and desktop plugin.
+            out[5] = stagedOutput(allocator, kind, fake_home, hermes_files[0], hermes_profile, hermes_home) orelse return null;
+        },
+        else => return null,
     }
     return out;
 }
@@ -248,22 +271,23 @@ test "codex writeback merges a fetched remote hooks.json" {
     defer arena.deinit();
     const outs = collectOutputs(arena.allocator(), .codex, fake, "", "~/.hermes").?;
     try t.expectEqual(@as(usize, 4), outs.len);
-    try t.expectEqualStrings(".codex/hooks.json", outs[0].rel);
-    try t.expectEqualStrings("~/.codex/hooks.json", outs[0].remote);
-    try t.expect(std.mem.indexOf(u8, outs[0].bytes, "my-own") != null);
-    try t.expect(std.mem.indexOf(u8, outs[0].bytes, "petdex-hook") != null);
-    try t.expect(std.mem.indexOf(u8, outs[1].bytes, "hooks = true") != null);
-    // The sh script rides along, executable, at the shared hook path.
-    try t.expectEqualStrings(remote_ssh.remote_hook_script, outs[2].remote);
-    try t.expect(outs[2].executable);
-    try t.expect(std.mem.indexOf(u8, outs[2].bytes, "petdex-update-token") != null);
-    try t.expectEqualStrings(remote_ssh.remote_codex_watcher, outs[3].remote);
-    try t.expect(outs[3].executable);
-    try t.expect(std.mem.indexOf(u8, outs[3].bytes, "request_user_input") != null);
-    try t.expect(std.mem.indexOf(u8, outs[3].bytes, "recent_rollouts(catalog)") != null);
-    try t.expect(std.mem.indexOf(u8, outs[3].bytes, "title or state[\"fallback_title\"]") != null);
-    try t.expect(std.mem.indexOf(u8, outs[3].bytes, "initial_publishable(event, path)") != null);
-    try t.expect(std.mem.indexOf(u8, outs[3].bytes, "INITIAL_RUNNING_MAX_AGE_SECONDS") != null);
+    // Dependencies first, hooks.json next, enabling config.toml last.
+    try t.expectEqualStrings(remote_ssh.remote_hook_script, outs[0].remote);
+    try t.expect(outs[0].executable);
+    try t.expect(std.mem.indexOf(u8, outs[0].bytes, "petdex-update-token") != null);
+    try t.expectEqualStrings(remote_ssh.remote_codex_watcher, outs[1].remote);
+    try t.expect(outs[1].executable);
+    try t.expect(std.mem.indexOf(u8, outs[1].bytes, "request_user_input") != null);
+    try t.expect(std.mem.indexOf(u8, outs[1].bytes, "recent_rollouts(catalog)") != null);
+    try t.expect(std.mem.indexOf(u8, outs[1].bytes, "title or state[\"fallback_title\"]") != null);
+    try t.expect(std.mem.indexOf(u8, outs[1].bytes, "initial_publishable(event, path)") != null);
+    try t.expect(std.mem.indexOf(u8, outs[1].bytes, "INITIAL_RUNNING_MAX_AGE_SECONDS") != null);
+    try t.expectEqualStrings(".codex/hooks.json", outs[2].rel);
+    try t.expectEqualStrings("~/.codex/hooks.json", outs[2].remote);
+    try t.expect(std.mem.indexOf(u8, outs[2].bytes, "my-own") != null);
+    try t.expect(std.mem.indexOf(u8, outs[2].bytes, "petdex-hook") != null);
+    try t.expectEqualStrings(".codex/config.toml", outs[3].rel);
+    try t.expect(std.mem.indexOf(u8, outs[3].bytes, "hooks = true") != null);
 }
 
 test "remote hook script accepts the shared desktop bubble CLI" {
@@ -279,6 +303,8 @@ test "remote watcher initial reconciliation excludes stale unfinished work" {
     try t.expect(std.mem.indexOf(u8, codex_watcher_script, "should_publish = initial_publishable(event, path)") != null);
     try t.expect(std.mem.indexOf(u8, codex_watcher_script, "append_rollout_state") != null);
     try t.expect(std.mem.indexOf(u8, codex_watcher_script, "event_hash == previous.get(\"delivered_hash\")") != null);
+    try t.expect(std.mem.indexOf(u8, codex_watcher_script, "is_subagent_metadata") != null);
+    try t.expect(std.mem.indexOf(u8, codex_watcher_script, "discovery_paths(catalog, titles, watched)") != null);
 }
 
 test "Hermes watcher reconciles only current metadata" {
@@ -339,16 +365,18 @@ test "hermes writeback preserves foreign YAML and allowlist entries" {
     defer arena.deinit();
     const outs = collectOutputs(arena.allocator(), .hermes, fake, "", "~/.hermes").?;
     try t.expectEqual(@as(usize, 6), outs.len);
-    try t.expect(std.mem.indexOf(u8, outs[0].bytes, "my-own-linter") != null);
-    try t.expect(std.mem.indexOf(u8, outs[0].bytes, "petdex-hook") != null);
-    try t.expect(std.mem.indexOf(u8, outs[0].bytes, "petdex-desktop") != null);
-    try t.expect(std.mem.indexOf(u8, outs[1].bytes, "my-own-linter") != null);
+    try t.expectEqualStrings(remote_ssh.remote_hook_script, outs[0].remote);
+    try t.expect(outs[0].executable);
+    try t.expectEqualStrings(remote_ssh.remote_hermes_watcher, outs[1].remote);
+    try t.expect(outs[1].executable);
+    try t.expect(std.mem.indexOf(u8, outs[1].bytes, "metadata-only") != null);
     try t.expect(std.mem.indexOf(u8, outs[2].bytes, "name: petdex-desktop") != null);
     try t.expect(std.mem.indexOf(u8, outs[3].bytes, "ctx.register_hook") != null);
-    try t.expect(outs[4].executable);
-    try t.expectEqualStrings(remote_ssh.remote_hermes_watcher, outs[5].remote);
-    try t.expect(outs[5].executable);
-    try t.expect(std.mem.indexOf(u8, outs[5].bytes, "metadata-only") != null);
+    try t.expect(std.mem.indexOf(u8, outs[4].bytes, "my-own-linter") != null);
+    try t.expectEqualStrings(".hermes/config.yaml", outs[5].rel);
+    try t.expect(std.mem.indexOf(u8, outs[5].bytes, "my-own-linter") != null);
+    try t.expect(std.mem.indexOf(u8, outs[5].bytes, "petdex-hook") != null);
+    try t.expect(std.mem.indexOf(u8, outs[5].bytes, "petdex-desktop") != null);
 }
 
 test "remote Hermes writeback ignores the local HERMES_HOME" {
@@ -366,6 +394,49 @@ test "remote Hermes writeback ignores the local HERMES_HOME" {
     try t.expect(runInstaller(t.allocator, .hermes, fake));
     try t.expect(plat.fileExists(fake ++ "/.hermes/config.yaml"));
     try t.expect(!plat.fileExists(live ++ "/config.yaml"));
+}
+
+test "Hermes writeback output is byte-idempotent across remote reconnects" {
+    if (@import("builtin").os.tag == .windows) return;
+    const first_fake = ".zig-cache/petdex-wb-hermes-reconnect-first";
+    const second_fake = ".zig-cache/petdex-wb-hermes-reconnect-second";
+    cleanupStaging(first_fake);
+    cleanupStaging(second_fake);
+    try t.expect(prepareStaging(first_fake));
+    try t.expect(stageFetched(first_fake, ".hermes/config.yaml",
+        \\model: foreign-model
+        \\hooks:
+        \\  pre_tool_call:
+        \\    - my-own-hermes-hook
+        \\
+    ));
+    try t.expect(stageFetched(first_fake, ".hermes/shell-hooks-allowlist.json",
+        \\{"approvals":[{"event":"pre_tool_call","command":"my-own-hermes-hook"}]}
+    ));
+    try t.expect(runInstaller(t.allocator, .hermes, first_fake));
+
+    var first_arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer first_arena.deinit();
+    const first = collectOutputs(first_arena.allocator(), .hermes, first_fake, "snoop", "~/.hermes-ci").?;
+
+    try t.expect(prepareStaging(second_fake));
+    for (hermes_files) |rel| {
+        const prior = for (first) |out| {
+            if (std.mem.eql(u8, out.rel, rel)) break out.bytes;
+        } else unreachable;
+        try t.expect(stageFetched(second_fake, rel, prior));
+    }
+    try t.expect(runInstaller(t.allocator, .hermes, second_fake));
+
+    var second_arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer second_arena.deinit();
+    const second = collectOutputs(second_arena.allocator(), .hermes, second_fake, "snoop", "~/.hermes-ci").?;
+    try t.expectEqual(first.len, second.len);
+    for (first, second) |before, after| {
+        try t.expectEqualStrings(before.rel, after.rel);
+        try t.expectEqualStrings(before.remote, after.remote);
+        try t.expectEqualStrings(before.bytes, after.bytes);
+    }
 }
 
 test "staging rejects paths that escape the private fake home" {
@@ -398,10 +469,11 @@ test "Hermes writeback targets the active profile home" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const outs = collectOutputs(arena.allocator(), .hermes, fake, "snoop", "~/.hermes").?;
-    try t.expectEqualStrings("~/.hermes/profiles/snoop/config.yaml", outs[0].remote);
-    try t.expectEqualStrings("~/.hermes/profiles/snoop/shell-hooks-allowlist.json", outs[1].remote);
+    try t.expectEqualStrings(remote_ssh.remote_hook_script, outs[0].remote);
+    try t.expectEqualStrings(remote_ssh.remote_hermes_watcher, outs[1].remote);
     try t.expectEqualStrings("~/.hermes/profiles/snoop/plugins/petdex-desktop/plugin.yaml", outs[2].remote);
-    try t.expectEqualStrings(remote_ssh.remote_hermes_watcher, outs[5].remote);
+    try t.expectEqualStrings("~/.hermes/profiles/snoop/shell-hooks-allowlist.json", outs[4].remote);
+    try t.expectEqualStrings("~/.hermes/profiles/snoop/config.yaml", outs[5].remote);
 }
 
 test "non-remote-capable kinds stage nothing" {

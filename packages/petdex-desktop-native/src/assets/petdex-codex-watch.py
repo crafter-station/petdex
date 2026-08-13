@@ -34,6 +34,7 @@ DISCOVERY_SECONDS = 2.0
 FOLLOW_SECONDS = 0.25
 MAX_INDEX_BYTES = 4 * 1024 * 1024
 MAX_ROLLOUT_BYTES = 4 * 1024 * 1024
+MAX_SESSION_META_BYTES = 64 * 1024
 MAX_WATCHES = 8
 MAX_RECENT_IDS = 32
 # A rollout without a terminal event is not necessarily still alive. Codex can
@@ -58,6 +59,24 @@ def bounded_tail(path: Path, limit: int) -> bytes:
             return data
     except OSError:
         return b""
+
+
+def session_meta_prefix(path: Path) -> bytes:
+    """Return only the bounded session_meta record from a rollout prefix."""
+
+    try:
+        with path.open("rb") as handle:
+            data = handle.read(MAX_SESSION_META_BYTES)
+    except OSError:
+        return b""
+    for line in data.splitlines():
+        try:
+            envelope = json.loads(line.decode("utf-8", "ignore"))
+        except Exception:
+            continue
+        if envelope.get("type") == "session_meta":
+            return line + b"\n"
+    return b""
 
 
 def compact(value: Any, limit: int) -> str:
@@ -176,8 +195,36 @@ def new_rollout_state() -> dict[str, Any]:
         "newest_message_id": "",
         "resolved_request_id": "",
         "fallback_title": "",
+        "session_kind": "primary",
+        "parent_session_id": "",
+        "subagent_label": "",
         "partial": b"",
     }
+
+
+def is_subagent_metadata(payload: dict[str, Any]) -> bool:
+    thread_source = compact(payload.get("thread_source"), 32).lower().replace("-", "_")
+    source = payload.get("source")
+    source_kind = ""
+    if isinstance(source, dict):
+        if "subagent" in source:
+            source_kind = "subagent"
+        else:
+            source_kind = compact(source.get("type") or source.get("kind"), 32)
+    else:
+        source_kind = compact(source, 32)
+    source_kind = source_kind.lower().replace("-", "_")
+    # Current Codex rollouts provide both explicit source markers. The final
+    # parent+nickname fallback covers older multi-agent builds without treating
+    # ordinary fork/continuation metadata as a child session.
+    return (
+        thread_source == "subagent"
+        or source_kind in {"subagent", "sub_agent", "child", "worker"}
+        or (
+            bool(compact(payload.get("parent_thread_id"), 96))
+            and bool(compact(payload.get("agent_nickname"), 64))
+        )
+    )
 
 
 def apply_rollout_bytes(state: dict[str, Any], raw: bytes) -> None:
@@ -210,6 +257,10 @@ def apply_rollout_bytes(state: dict[str, Any], raw: bytes) -> None:
 
         if outer == "session_meta":
             state["cwd"] = compact(payload.get("cwd"), 512)
+            if is_subagent_metadata(payload):
+                state["session_kind"] = "subagent"
+                state["parent_session_id"] = compact(payload.get("parent_thread_id"), 96)
+                state["subagent_label"] = compact(payload.get("agent_nickname"), 64)
             continue
         if event_type == "user_message" and not state["fallback_title"]:
             state["fallback_title"] = compact(payload.get("message"), 256)
@@ -287,6 +338,11 @@ def apply_rollout_bytes(state: dict[str, Any], raw: bytes) -> None:
 
 
 def event_from_state(path: Path, title: str, state: dict[str, Any]) -> dict[str, Any] | None:
+    # The upstream card model has no nested-child hierarchy. Suppress Codex
+    # workers at the source just like Hermes workers instead of letting their
+    # tool progress evict top-level conversations from the bounded card stack.
+    if state.get("session_kind") == "subagent":
+        return None
     pending: dict[str, str] = state["pending"]
     status = state["status"]
     text = state["text"]
@@ -342,6 +398,12 @@ def initial_rollout_state(path: Path) -> tuple[dict[str, Any], int] | None:
     if not raw:
         return None
     state = new_rollout_state()
+    # Large rollouts can push the opening metadata outside the bounded tail.
+    # Read only that one prefix record so child classification survives without
+    # replaying old lifecycle/input events whose matching outputs may be in the
+    # omitted middle of the file.
+    if size > MAX_ROLLOUT_BYTES:
+        apply_rollout_bytes(state, session_meta_prefix(path))
     apply_rollout_bytes(state, raw)
     return state, size
 
@@ -424,6 +486,42 @@ def snapshot() -> list[dict[str, Any]]:
     return events
 
 
+def discovery_paths(
+    catalog: dict[str, Path],
+    titles: dict[str, str],
+    watched: dict[str, dict[str, Any]],
+) -> dict[str, Path]:
+    """Select bounded top-level work without letting stale/child files hide it."""
+
+    ordered: list[tuple[str, Path]] = []
+    seen: set[str] = set()
+    # Keep an already-visible wait/running session even when many newer rollout
+    # files push it outside the recent catalog window.
+    for session_id, previous in watched.items():
+        path = catalog.get(session_id)
+        if previous.get("visible") and path is not None:
+            ordered.append((session_id, path))
+            seen.add(session_id)
+    for session_id, path in recent_rollouts(catalog):
+        if session_id not in seen:
+            ordered.append((session_id, path))
+            seen.add(session_id)
+
+    selected: dict[str, Path] = {}
+    for session_id, path in ordered:
+        previous = watched.get(session_id)
+        if previous is not None and previous.get("visible"):
+            selected[session_id] = path
+        else:
+            event = parse_rollout(path, titles.get(session_id, ""))
+            if event is None or not initial_publishable(event, path):
+                continue
+            selected[session_id] = path
+        if len(selected) >= MAX_WATCHES:
+            break
+    return selected
+
+
 def run() -> int:
     RUNTIME.mkdir(parents=True, exist_ok=True)
     if not lease_alive():
@@ -445,12 +543,7 @@ def run() -> int:
                 rows = session_index()
                 titles = {row["id"]: row["title"] for row in rows}
                 catalog = rollout_catalog()
-                discovered: dict[str, Path] = {}
-                for session_id, path in recent_rollouts(catalog):
-                    discovered[session_id] = path
-                    if len(discovered) >= MAX_WATCHES:
-                        break
-                paths = discovered
+                paths = discovery_paths(catalog, titles, watched)
                 for stale_id in set(watched) - set(paths):
                     watched.pop(stale_id, None)
 
@@ -511,6 +604,11 @@ def run() -> int:
                     previous["visible"] = True
                 if post(event):
                     previous["delivered_hash"] = event_hash
+                    if event.get("status") in {"completed", "failed"}:
+                        # The desktop retains terminal cards. The watcher no
+                        # longer needs this slot, so another active parent can
+                        # enter the bounded follow set on next discovery.
+                        previous["visible"] = False
             time.sleep(FOLLOW_SECONDS)
     finally:
         remove_owned_pid()
