@@ -1561,14 +1561,25 @@ const HermesFileSnapshot = struct {
     path: []const u8,
     existed: bool,
     content: ?[]u8,
+    valid: bool,
 };
 
 fn snapshotHermesFile(allocator: std.mem.Allocator, path: []const u8) HermesFileSnapshot {
+    const existed = fileExists(path);
+    const content = readFileAlloc(allocator, path, 1024 * 1024);
     return .{
         .path = path,
-        .existed = fileExists(path),
-        .content = readFileAlloc(allocator, path, 1024 * 1024),
+        .existed = existed,
+        .content = content,
+        .valid = !existed or content != null,
     };
+}
+
+fn validHermesSnapshots(snapshots: []const HermesFileSnapshot) bool {
+    for (snapshots) |snapshot| {
+        if (!snapshot.valid) return false;
+    }
+    return true;
 }
 
 fn restoreHermesFiles(snapshots: []const HermesFileSnapshot) void {
@@ -1593,6 +1604,9 @@ pub fn installHermes(allocator: std.mem.Allocator, home: []const u8) bool {
     const manifest_path = hermesDesktopPluginPath(&manifest_buf, home, "plugin.yaml") orelse return false;
     var init_buf: [512]u8 = undefined;
     const init_path = hermesDesktopPluginPath(&init_buf, home, "__init__.py") orelse return false;
+    var plugin_dir_buf: [512]u8 = undefined;
+    const slash = std.mem.lastIndexOfScalar(u8, manifest_path, '/') orelse return false;
+    const plugin_dir = std.fmt.bufPrint(&plugin_dir_buf, "{s}", .{manifest_path[0..slash]}) catch return false;
 
     var snapshots = [_]HermesFileSnapshot{
         snapshotHermesFile(allocator, config_path),
@@ -1603,6 +1617,7 @@ pub fn installHermes(allocator: std.mem.Allocator, home: []const u8) bool {
     defer for (&snapshots) |*snapshot| {
         if (snapshot.content) |content| allocator.free(content);
     };
+    if (!validHermesSnapshots(&snapshots)) return false;
 
     plat.makeDir(dir);
     if (!writeHermesHooks(allocator, config_path, true)) {
@@ -1618,9 +1633,6 @@ pub fn installHermes(allocator: std.mem.Allocator, home: []const u8) bool {
         return false;
     }
 
-    var plugin_dir_buf: [512]u8 = undefined;
-    const slash = std.mem.lastIndexOfScalar(u8, manifest_path, '/') orelse return false;
-    const plugin_dir = std.fmt.bufPrint(&plugin_dir_buf, "{s}", .{manifest_path[0..slash]}) catch return false;
     plat.makeDir(plugin_dir);
     if (!backupOnce(allocator, manifest_path) or !backupOnce(allocator, init_path) or !writeFile(manifest_path, hermes_desktop_plugin_manifest) or !writeFile(init_path, hermes_desktop_plugin_init)) {
         restoreHermesFiles(&snapshots);
@@ -1634,14 +1646,34 @@ fn uninstallHermes(allocator: std.mem.Allocator, home: []const u8) bool {
     const config_path = hermesConfigPath(&path_buf, home) orelse return false;
     var allow_buf: [512]u8 = undefined;
     const allow_path = hermesAllowlistPath(&allow_buf, home) orelse return false;
-    const ok_hooks = writeHermesHooks(allocator, config_path, false);
-    const ok_plugin_config = writeHermesDesktopPluginEnabled(allocator, config_path, false);
-    const ok_allow = writeHermesAllowlist(allocator, allow_path, false);
     var manifest_buf: [512]u8 = undefined;
-    if (hermesDesktopPluginPath(&manifest_buf, home, "plugin.yaml")) |path| plat.deleteFile(path);
+    const manifest_path = hermesDesktopPluginPath(&manifest_buf, home, "plugin.yaml") orelse return false;
     var init_buf: [512]u8 = undefined;
-    if (hermesDesktopPluginPath(&init_buf, home, "__init__.py")) |path| plat.deleteFile(path);
-    return ok_hooks and ok_plugin_config and ok_allow;
+    const init_path = hermesDesktopPluginPath(&init_buf, home, "__init__.py") orelse return false;
+
+    var snapshots = [_]HermesFileSnapshot{
+        snapshotHermesFile(allocator, config_path),
+        snapshotHermesFile(allocator, allow_path),
+        snapshotHermesFile(allocator, manifest_path),
+        snapshotHermesFile(allocator, init_path),
+    };
+    defer for (&snapshots) |*snapshot| {
+        if (snapshot.content) |content| allocator.free(content);
+    };
+    if (!validHermesSnapshots(&snapshots)) return false;
+    if (snapshots[2].existed and !std.mem.eql(u8, snapshots[2].content.?, hermes_desktop_plugin_manifest)) return false;
+    if (snapshots[3].existed and !std.mem.eql(u8, snapshots[3].content.?, hermes_desktop_plugin_init)) return false;
+
+    if (!writeHermesHooks(allocator, config_path, false) or
+        !writeHermesDesktopPluginEnabled(allocator, config_path, false) or
+        !writeHermesAllowlist(allocator, allow_path, false))
+    {
+        restoreHermesFiles(&snapshots);
+        return false;
+    }
+    plat.deleteFile(manifest_path);
+    plat.deleteFile(init_path);
+    return true;
 }
 
 /// opencode has no hooks: it loads a self-contained JS plugin that
@@ -3260,4 +3292,55 @@ test "Hermes scan requires complete approvals and plugin assets" {
     const manifest = hermesDesktopPluginPath(&mb, home, "plugin.yaml").?;
     plat.deleteFile(manifest);
     try t.expectEqual(HookStatus.node, scan(t.allocator, home)[@intFromEnum(AgentKind.hermes)].status);
+}
+
+test "Hermes uninstall rolls back when user configuration cannot be preserved" {
+    if (builtin.os.tag == .windows) return;
+    const home = ".zig-cache/petdex-hermes-uninstall-rollback";
+    plat.makeDir(home);
+    plat.makeDir(home ++ "/.hermes");
+    var config_buf: [512]u8 = undefined;
+    const config = std.fmt.bufPrint(&config_buf, "{s}/.hermes/config.yaml", .{home}) catch unreachable;
+    var allow_buf: [512]u8 = undefined;
+    const allow = std.fmt.bufPrint(&allow_buf, "{s}/.hermes/shell-hooks-allowlist.json", .{home}) catch unreachable;
+    plat.deleteFile(config);
+    plat.deleteFile(allow);
+    try t.expect(installHermes(t.allocator, home));
+    const installed = readFileAlloc(t.allocator, config, 1024 * 1024).?;
+    defer t.allocator.free(installed);
+    try t.expect(writeFile(allow, "{broken-json\n"));
+
+    try t.expect(!uninstallHermes(t.allocator, home));
+    const after = readFileAlloc(t.allocator, config, 1024 * 1024).?;
+    defer t.allocator.free(after);
+    try t.expectEqualStrings(installed, after);
+    const allow_after = readFileAlloc(t.allocator, allow, 1024 * 1024).?;
+    defer t.allocator.free(allow_after);
+    try t.expectEqualStrings("{broken-json\n", allow_after);
+    var init_buf: [512]u8 = undefined;
+    try t.expect(fileExists(hermesDesktopPluginPath(&init_buf, home, "__init__.py").?));
+}
+
+test "Hermes uninstall preserves a user-modified plugin" {
+    if (builtin.os.tag == .windows) return;
+    const home = ".zig-cache/petdex-hermes-uninstall-owned-files";
+    plat.makeDir(home);
+    plat.makeDir(home ++ "/.hermes");
+    var config_buf: [512]u8 = undefined;
+    const config = std.fmt.bufPrint(&config_buf, "{s}/.hermes/config.yaml", .{home}) catch unreachable;
+    plat.deleteFile(config);
+    try t.expect(installHermes(t.allocator, home));
+    const installed = readFileAlloc(t.allocator, config, 1024 * 1024).?;
+    defer t.allocator.free(installed);
+    var init_buf: [512]u8 = undefined;
+    const init_file = hermesDesktopPluginPath(&init_buf, home, "__init__.py").?;
+    try t.expect(writeFile(init_file, "user-owned plugin\n"));
+
+    try t.expect(!uninstallHermes(t.allocator, home));
+    const after = readFileAlloc(t.allocator, config, 1024 * 1024).?;
+    defer t.allocator.free(after);
+    try t.expectEqualStrings(installed, after);
+    const plugin_after = readFileAlloc(t.allocator, init_file, 1024 * 1024).?;
+    defer t.allocator.free(plugin_after);
+    try t.expectEqualStrings("user-owned plugin\n", plugin_after);
 }

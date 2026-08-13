@@ -57,44 +57,50 @@ pub fn run(phase: []const u8, arg_agent: ?[]const u8, origin_app: plat.OriginApp
     var tty_buf: [64]u8 = undefined;
     const source_tty = if (origin_app == .terminal) (plat.controllingTty(&tty_buf) orelse "") else "";
     const source_cwd = plat.safeSourceCwd(source_cwd_raw) orelse "";
-    const session_id = safeSessionId(jsonString(payload, "session_id"));
+    const session_id = payloadSessionId(payload);
 
     // Session title: user-prompt seeds it, every event attaches it.
     var sessions_buf: [512]u8 = undefined;
     const sessions_dir = std.fmt.bufPrint(&sessions_buf, "{s}/.petdex/runtime/sessions", .{home}) catch return;
     if (session_id) |sid| {
         if (isPromptPhase(phase)) {
-            if (jsonString(payload, "prompt")) |prompt| rememberTitle(sessions_dir, sid, prompt);
+            if (jsonString(payload, "prompt") orelse jsonString(payload, "user_message")) |prompt| rememberTitle(sessions_dir, sid, prompt);
         }
     }
     var title_buf: [256]u8 = undefined;
-    const title: []const u8 = if (session_id) |sid| (readTitle(sessions_dir, sid, &title_buf) orelse "") else "";
+    const title: []const u8 = jsonString(payload, "petdex_session_title") orelse if (session_id) |sid| (readTitle(sessions_dir, sid, &title_buf) orelse "") else "";
 
     var text_buf: [256]u8 = undefined;
     var text = formatBubble(phase, payload, &text_buf) orelse "";
 
     var preview_buf: [512]u8 = undefined;
     var tail_buf: [transcript_tail_cap]u8 = undefined;
-    if (isStopPhase(phase)) {
+    if (isStopPhase(phase) or isAssistantPhase(phase) or isSubagentStopPhase(phase)) {
         // Close-of-turn preview: Codex ships last_assistant_message in
         // the payload; Claude Code needs the bounded transcript tail.
-        const written: ?[]const u8 = jsonString(payload, "last_assistant_message") orelse blk: {
-            const tp = jsonString(payload, "transcript_path") orelse break :blk null;
-            const tail = cReadTail(tp, &tail_buf) orelse break :blk null;
-            break :blk lastAssistantFromTail(tail);
-        };
+        const written: ?[]const u8 = if (isAssistantPhase(phase))
+            jsonString(payload, "assistant_response")
+        else if (isSubagentStopPhase(phase))
+            jsonString(payload, "child_summary")
+        else
+            jsonString(payload, "last_assistant_message") orelse blk: {
+                const tp = jsonString(payload, "transcript_path") orelse break :blk null;
+                const tail = cReadTail(tp, &tail_buf) orelse break :blk null;
+                break :blk lastAssistantFromTail(tail);
+            };
         if (written) |w| {
             if (clipEscaped(w, preview_max, &preview_buf)) |p| {
                 if (p.len > 0) text = p;
             }
         }
-        pruneSessions(sessions_dir);
+        if (!isSubagentStopPhase(phase)) pruneSessions(sessions_dir);
     }
 
     // A failed tool does not end the turn — the agent reacts to the error and
     // keeps working — so the bubble keeps its spinner, same as `post`.
     const busy = isPromptPhase(phase) or std.mem.eql(u8, phase, "pre") or
-        std.mem.eql(u8, phase, "post") or isToolFailurePhase(phase);
+        std.mem.eql(u8, phase, "post") or isToolFailurePhase(phase) or
+        std.mem.eql(u8, phase, "approval-response") or std.mem.eql(u8, phase, "subagent-start");
     const state = stateForEvent(phase, jsonString(payload, "tool_name"));
 
     var posts: [2]PostJob = undefined;
@@ -128,6 +134,14 @@ fn isPromptPhase(phase: []const u8) bool {
 
 fn isStopPhase(phase: []const u8) bool {
     return std.mem.eql(u8, phase, "stop") or std.mem.eql(u8, phase, "session-end");
+}
+
+fn isAssistantPhase(phase: []const u8) bool {
+    return std.mem.eql(u8, phase, "assistant");
+}
+
+fn isSubagentStopPhase(phase: []const u8) bool {
+    return std.mem.eql(u8, phase, "subagent-stop");
 }
 
 fn isToolFailurePhase(phase: []const u8) bool {
@@ -205,8 +219,11 @@ pub fn stateForEvent(phase: []const u8, tool_name: ?[]const u8) ?[]const u8 {
     if (std.mem.eql(u8, phase, "post")) return "idle";
     if (isToolFailurePhase(phase)) return "failed";
     if (isStopPhase(phase)) return "waving";
+    if (isAssistantPhase(phase)) return "waving";
     if (isPromptPhase(phase)) return "jumping";
-    if (std.mem.eql(u8, phase, "waiting") or std.mem.eql(u8, phase, "notification")) return "waiting";
+    if (std.mem.eql(u8, phase, "waiting") or std.mem.eql(u8, phase, "notification") or std.mem.eql(u8, phase, "approval-request")) return "waiting";
+    if (std.mem.eql(u8, phase, "approval-response") or std.mem.eql(u8, phase, "subagent-start")) return "running";
+    if (isSubagentStopPhase(phase)) return "idle";
     return null;
 }
 
@@ -218,7 +235,12 @@ pub fn stateForEvent(phase: []const u8, tool_name: ?[]const u8) ?[]const u8 {
 pub fn formatBubble(phase: []const u8, payload: []const u8, out: []u8) ?[]const u8 {
     if (isPromptPhase(phase)) return "Thinking…";
     if (isStopPhase(phase)) return "Done.";
+    if (isAssistantPhase(phase)) return "Done.";
     if (std.mem.eql(u8, phase, "waiting") or std.mem.eql(u8, phase, "notification")) return "Waiting for you…";
+    if (std.mem.eql(u8, phase, "approval-request")) return "Waiting for approval…";
+    if (std.mem.eql(u8, phase, "approval-response")) return "Approval received";
+    if (std.mem.eql(u8, phase, "subagent-start")) return "Subagent working…";
+    if (isSubagentStopPhase(phase)) return "Subagent done";
     // Tool name only, never the payload's `error` string. jsonString stops at
     // the first `"` or `\` and decodes neither, and error text routinely carries
     // both; tool_name is a controlled identifier from the agent's own registry.
@@ -396,6 +418,15 @@ fn safeSessionId(raw: ?[]const u8) ?[]const u8 {
         if (!(std.ascii.isAlphanumeric(c) or c == '-' or c == '_')) return null;
     }
     return sid;
+}
+
+fn payloadSessionId(payload: []const u8) ?[]const u8 {
+    return safeSessionId(
+        jsonString(payload, "petdex_conversation_key") orelse
+            jsonString(payload, "session_id") orelse
+            jsonString(payload, "session_key") orelse
+            jsonString(payload, "parent_session_id"),
+    );
 }
 
 fn rememberTitle(dir: []const u8, session_id: []const u8, prompt: []const u8) void {
@@ -681,6 +712,28 @@ test "session phases render fixed strings" {
     try t.expectEqualStrings("Thinking…", formatBubble("user-prompt", "", &out).?);
     try t.expectEqualStrings("Done.", formatBubble("stop", "", &out).?);
     try t.expectEqualStrings("Waiting for you…", formatBubble("notification", "", &out).?);
+}
+
+test "Hermes lifecycle phases render bubbles and states" {
+    var out: [256]u8 = undefined;
+    try t.expectEqualStrings("Done.", formatBubble("assistant", "{}", &out).?);
+    try t.expectEqualStrings("Waiting for approval…", formatBubble("approval-request", "{}", &out).?);
+    try t.expectEqualStrings("Approval received", formatBubble("approval-response", "{}", &out).?);
+    try t.expectEqualStrings("Subagent working…", formatBubble("subagent-start", "{}", &out).?);
+    try t.expectEqualStrings("Subagent done", formatBubble("subagent-stop", "{}", &out).?);
+    try t.expectEqualStrings("waving", stateForEvent("assistant", null).?);
+    try t.expectEqualStrings("waiting", stateForEvent("approval-request", null).?);
+    try t.expectEqualStrings("running", stateForEvent("approval-response", null).?);
+    try t.expectEqualStrings("running", stateForEvent("subagent-start", null).?);
+    try t.expectEqualStrings("idle", stateForEvent("subagent-stop", null).?);
+}
+
+test "Hermes metadata chooses canonical conversation identity" {
+    try t.expectEqualStrings(
+        "stable-session",
+        payloadSessionId("{\"session_id\":\"raw-session\",\"petdex_conversation_key\":\"stable-session\"}").?,
+    );
+    try t.expectEqualStrings("approval-session", payloadSessionId("{\"session_key\":\"approval-session\"}").?);
 }
 
 test "state mapping mirrors the TS runner" {

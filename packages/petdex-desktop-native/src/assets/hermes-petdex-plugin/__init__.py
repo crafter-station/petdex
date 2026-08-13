@@ -96,10 +96,7 @@ def _session_context(
     empty = {
         "conversation": session_id,
         "parent": "",
-        # Unknown Hermes rows are usually the child-persistence race. Prefer a
-        # missed first lifecycle event over a standalone ghost card; a real
-        # primary becomes visible on its next event once state.db resolves it.
-        "kind": "subagent",
+        "kind": "subagent" if force_subagent else "primary",
         "label": "",
         "title": "",
     }
@@ -216,7 +213,9 @@ def _callback(phase: str):
             )
             child_session_id = str(payload.get("child_session_id") or "")
             is_subagent_lifecycle = phase in {"subagent-start", "subagent-stop"} and bool(child_session_id)
-            session_id = child_session_id if is_subagent_lifecycle else str(payload.get("session_id") or "")
+            session_id = child_session_id if is_subagent_lifecycle else str(
+                payload.get("session_id") or payload.get("session_key") or ""
+            )
             context = _session_context(
                 session_id,
                 force_parent=parent_session_id if is_subagent_lifecycle else "",
@@ -225,7 +224,7 @@ def _callback(phase: str):
             )
             # The base Petdex card model has no nested child hierarchy. Drop
             # delegated work instead of opening one top-level card per worker.
-            if context["kind"] == "subagent":
+            if context["kind"] == "subagent" and not is_subagent_lifecycle:
                 return
             if context["title"]:
                 # Namespaced so a tool argument named `title` cannot be
