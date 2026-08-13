@@ -16,6 +16,7 @@
 //! once per event, nothing keeps sockets open.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const plat = @import("plat.zig");
 
 /// One connection, plus the Io that owns it. Everything downstream of
@@ -418,7 +419,10 @@ fn handleConnection(server: *Server, conn: *Conn) void {
             respond(conn, 413, "{\"ok\":false,\"error\":\"headers_too_large\"}");
             return;
         }
-        const got = receiveWithTimeout(conn, buf[total..], timeout) catch return;
+        const got = receiveWithTimeout(conn, buf[total..], timeout) catch |err| {
+            std.debug.print("petdex: hook receive failed ({s})\n", .{@errorName(err)});
+            return;
+        };
         if (got == 0) return;
         total += got;
         header_end = if (std.mem.indexOf(u8, buf[0..total], "\r\n\r\n")) |at| at + 4 else null;
@@ -436,7 +440,10 @@ fn handleConnection(server: *Server, conn: *Conn) void {
     }
     const request_len = head_len + content_length;
     while (total < request_len) {
-        const got = receiveWithTimeout(conn, buf[total..request_len], timeout) catch return;
+        const got = receiveWithTimeout(conn, buf[total..request_len], timeout) catch |err| {
+            std.debug.print("petdex: hook body receive failed ({s})\n", .{@errorName(err)});
+            return;
+        };
         if (got == 0) return;
         total += got;
     }
@@ -453,7 +460,10 @@ fn handleConnection(server: *Server, conn: *Conn) void {
 }
 
 fn receiveWithTimeout(conn: *Conn, buffer: []u8, timeout: std.Io.Timeout) !usize {
-    const message = try conn.stream.socket.receiveTimeout(conn.io, buffer, timeout);
+    const message = if (builtin.os.tag == .windows)
+        try conn.stream.socket.receive(conn.io, buffer)
+    else
+        try conn.stream.socket.receiveTimeout(conn.io, buffer, timeout);
     return message.data.len;
 }
 
