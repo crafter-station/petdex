@@ -85,6 +85,31 @@ function serverRunning(): boolean {
   return /^status:\s+running$/m.test(run(["status", "server"], true));
 }
 
+async function waitForPluginIdle(): Promise<void> {
+  let stable = 0;
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const logs = parse<PluginLogs>(
+      run([
+        "plugin",
+        "log",
+        "list",
+        "--plugin",
+        "dev.petdex.bridge",
+        "--limit",
+        "20",
+      ]),
+    );
+    if (logs.result?.logs?.some((entry) => entry.status === "running")) {
+      stable = 0;
+    } else {
+      stable += 1;
+      if (stable === 2) return;
+    }
+    await Bun.sleep(100);
+  }
+  throw new Error("Herdr plugin startup did not settle");
+}
+
 async function action(): Promise<void> {
   let server: ReturnType<typeof Bun.spawn> | undefined;
   if (!serverRunning()) {
@@ -95,6 +120,7 @@ async function action(): Promise<void> {
     if (!(await waitForServer())) throw new Error("Herdr server did not start");
   }
   try {
+    await waitForPluginIdle();
     const invoked = parse<ActionInvocation>(
       run([
         "plugin",
