@@ -1090,7 +1090,7 @@ var initial_pet_y: ?f64 = null;
 // assets/agents/, re-registered only when the agent changes.
 const avatar_image_id: u64 = 13;
 const tail_image_id: u64 = 14;
-// One slot for every agent logo, packed side by side and read back with
+// One slot for every agent logo plus fallback, packed side by side and read back with
 // `image_src` (the thumbnail atlas above does the same). Previously each
 // agent held its own registry id, which ran the app into the SDK's
 // 16-slot ceiling (canvas_limits.max_registered_canvas_images): ids
@@ -1120,7 +1120,7 @@ fn agentIconRect(index: usize) geometry.RectF {
 /// cannot go missing from a bundle or resolve against the wrong cwd.
 /// opencode ships light and dark glyphs; the rest read on both.
 const AgentArt = struct { light: []const u8, dark: []const u8 };
-const agent_art = [agent_hooks.agent_count]AgentArt{
+const agent_art = [agent_hooks.agent_count + 1]AgentArt{
     .{ .light = @embedFile("assets/agents/claude-code.png"), .dark = @embedFile("assets/agents/claude-code.png") },
     .{ .light = @embedFile("assets/agents/codex.png"), .dark = @embedFile("assets/agents/codex.png") },
     .{ .light = @embedFile("assets/agents/gemini.png"), .dark = @embedFile("assets/agents/gemini.png") },
@@ -1130,8 +1130,9 @@ const agent_art = [agent_hooks.agent_count]AgentArt{
     .{ .light = @embedFile("assets/agents/codebuddy.png"), .dark = @embedFile("assets/agents/codebuddy.png") },
     .{ .light = @embedFile("assets/agents/omp.png"), .dark = @embedFile("assets/agents/omp.png") },
     .{ .light = @embedFile("assets/agents/hermes.png"), .dark = @embedFile("assets/agents/hermes.png") },
+    .{ .light = @embedFile("assets/agents/fallback.png"), .dark = @embedFile("assets/agents/fallback.png") },
 };
-const agent_fallback_art: []const u8 = @embedFile("assets/agents/fallback.png");
+const agent_fallback_index = agent_hooks.agent_count;
 
 /// Pack every settings agent logo into one registry slot, themed like the
 /// bubble avatar and rebuilt on appearance flips. Each logo decodes
@@ -1254,23 +1255,25 @@ var avatar_theme_dark: bool = false;
 /// is looked up by name rather than by enum. An unknown name is the
 /// normal case for an agent we do not ship a glyph for, not an error.
 fn agentArtBytes(agent: []const u8, dark: bool) []const u8 {
-    for (std.enums.values(agent_hooks.AgentKind)) |kind| {
-        if (std.mem.eql(u8, kind.hookAgentName(), agent)) {
-            const art = agent_art[@intFromEnum(kind)];
-            return if (dark) art.dark else art.light;
-        }
-    }
-    return agent_fallback_art;
+    const index = if (agentKindForName(agent)) |kind| @intFromEnum(kind) else agent_fallback_index;
+    const art = agent_art[index];
+    return if (dark) art.dark else art.light;
 }
 
-/// Which cell of the packed logo strip belongs to this agent, or null
-/// for a name we ship no glyph for. The strip has exactly one cell per
-/// AgentKind and none for the fallback art, so an unknown agent has no
-/// tile to point at and the caller has to draw nothing.
-fn agentIconIndex(agent: []const u8) ?usize {
+/// Which cell of the packed logo strip belongs to this agent.
+fn agentIconIndex(agent: []const u8) usize {
+    if (agentKindForName(agent)) |kind| return @intFromEnum(kind);
+    return agent_fallback_index;
+}
+
+fn agentKindForName(agent: []const u8) ?agent_hooks.AgentKind {
     for (std.enums.values(agent_hooks.AgentKind)) |kind| {
-        if (std.mem.eql(u8, kind.hookAgentName(), agent)) return @intFromEnum(kind);
+        if (std.mem.eql(u8, kind.hookAgentName(), agent)) return kind;
     }
+    if (std.mem.eql(u8, agent, "claude")) return .claude_code;
+    if (std.mem.eql(u8, agent, "open-code")) return .opencode;
+    if (std.mem.eql(u8, agent, "qodercli")) return .qoder;
+    if (std.mem.eql(u8, agent, "kimi")) return .kimi_code;
     return null;
 }
 
@@ -2245,7 +2248,8 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
                 if (isTap(now - model.press_ms, read.x - model.press_x, read.y - model.press_y)) {
                     model.sample_len = 0;
                     if (newestBubble(model)) |bubble| {
-                        _ = plat.activateOriginApplication(bubble.origin_app, bubble.ttySlice(), bubble.cwdSlice());
+                        const focused = if (env_home) |home| plat.activateHerdrPane(home, bubble.herdrPaneSlice()) else false;
+                        if (!focused) _ = plat.activateOriginApplication(bubble.origin_app, bubble.ttySlice(), bubble.cwdSlice());
                     }
                     model.pat_flip = !model.pat_flip;
                     applyState(model, if (model.pat_flip) .jumping else .waving, pat_react_ms, fx);
@@ -2483,9 +2487,14 @@ fn bubbleMaxCardWidth(model: *const Model) f32 {
 }
 
 fn bubbleMaxCardHeight(model: *const Model) f32 {
-    const rows = @as(f32, @floatFromInt(@as(u16, model.bubble_answer_lines) + 1));
-    const line_height = bubbleFontSize(model) * 1.35;
-    return @ceil(rows * line_height + (rows - 1) * bubble_line_gap + bubble_card_padding * 2);
+    const rows = @as(usize, model.bubble_answer_lines) + 1;
+    return @ceil(bubbleContentHeight(model, rows) + bubble_card_padding * 2);
+}
+
+fn bubbleContentHeight(model: *const Model, row_count: usize) f32 {
+    if (row_count == 0) return 0;
+    const rows = @as(f32, @floatFromInt(row_count));
+    return rows * bubbleFontSize(model) * 1.35 + @as(f32, @floatFromInt(row_count - 1)) * bubble_line_gap;
 }
 
 /// Painted width of the widest line a card holds. The strings are the
@@ -3444,9 +3453,7 @@ fn bubbleCard(ui: *AppUi, model: *const Model, slot: usize) AppUi.Node {
     // included), which is strictly better than a strip cell, so the card
     // Hunter looks at most never degrades. Older cards read their logo
     // out of the shared strip via image_src, the same addressing
-    // settings_view uses for its rows. An agent with no cell in the
-    // strip draws an empty box of the same width, so the column still
-    // lines up.
+    // settings_view uses for its rows.
     const agent_name = bubble.agent[0..bubble.agent_len];
     const avatar = if (newest) blk: {
         var img = ui.image(.{
@@ -3457,14 +3464,14 @@ fn bubbleCard(ui: *AppUi, model: *const Model, slot: usize) AppUi.Node {
         });
         img.widget.image_fit = .contain;
         break :blk img;
-    } else if (agents_icons_ready and agentIconIndex(agent_name) != null) blk: {
+    } else if (agents_icons_ready) blk: {
         var img = ui.image(.{
             .width = bubble_avatar_width,
             .height = bubble_avatar_width,
             .image = agent_icon_atlas_id,
             .semantics = .{ .label = "Agent avatar" },
         });
-        img.widget.image_src = agentIconRect(agentIconIndex(agent_name).?);
+        img.widget.image_src = agentIconRect(agentIconIndex(agent_name));
         img.widget.image_fit = .contain;
         break :blk img;
     } else ui.el(.stack, .{ .width = bubble_avatar_width, .height = bubble_avatar_width }, .{});
@@ -3505,7 +3512,7 @@ fn bubbleCard(ui: *AppUi, model: *const Model, slot: usize) AppUi.Node {
     const content = [_]AppUi.Node{
         ui.row(.{ .gap = bubble_content_gap, .cross = .center }, .{
             avatar,
-            ui.column(.{ .grow = 1, .gap = bubble_line_gap, .cross = .start }, @as([]const AppUi.Node, rows[0..row_count])),
+            ui.column(.{ .grow = 1, .height = bubbleContentHeight(model, row_count), .gap = bubble_line_gap, .main = .start, .cross = .start }, @as([]const AppUi.Node, rows[0..row_count])),
             spinner_slot,
         }),
     };
@@ -3828,7 +3835,7 @@ pub fn main(init: std.process.Init) !void {
             const phase = args_it.next() orelse return;
             const agent: ?[]const u8 = args_it.next();
             const origin_app = plat.OriginApplication.fromTermProgram(init.environ_map.get("TERM_PROGRAM"));
-            hook_runner.run(phase, agent, origin_app, init.environ_map.get("PWD"), env_home orelse return);
+            hook_runner.run(phase, agent, origin_app, init.environ_map.get("PWD"), init.environ_map.get("HERDR_PANE_ID"), env_home orelse return);
             return;
         }
     }
@@ -3915,7 +3922,7 @@ pub fn main(init: std.process.Init) !void {
 test "every agent gets its own cell in the icon strip" {
     // One slot holds them all, so a wrong offset silently draws the
     // neighbouring agent's logo rather than failing to register.
-    for (0..agent_hooks.agent_count) |i| {
+    for (0..agent_art.len) |i| {
         const rect = agentIconRect(i);
         try std.testing.expectEqual(@as(f32, @floatFromInt(i * agent_icon_px)), rect.x);
         try std.testing.expectEqual(@as(f32, 0), rect.y);
@@ -3923,14 +3930,14 @@ test "every agent gets its own cell in the icon strip" {
         try std.testing.expectEqual(@as(f32, agent_icon_px), rect.height);
     }
     // Cells abut with no overlap: agent N ends exactly where N+1 begins.
-    if (agent_hooks.agent_count >= 2) {
+    if (agent_art.len >= 2) {
         const first = agentIconRect(0);
         const second = agentIconRect(1);
         try std.testing.expectEqual(first.x + first.width, second.x);
     }
     // The packed strip stays inside the SDK's per-image bounds, which is
     // the ceiling this atlas exists to avoid running into again.
-    const atlas_w = agent_hooks.agent_count * agent_icon_px;
+    const atlas_w = agent_art.len * agent_icon_px;
     try std.testing.expect(atlas_w * agent_icon_px * 4 <= 1024 * 1024);
     try std.testing.expect(atlas_w <= 512 * 512);
 }
@@ -3961,7 +3968,31 @@ test "transparent surfaces clear independently from settings" {
 test "one image slot covers every agent" {
     // agent_art is what loadAgentsAtlas walks, so a new AgentKind without
     // artwork would pack short and leave the last agent blank.
-    try std.testing.expectEqual(agent_hooks.agent_count, agent_art.len);
+    try std.testing.expectEqual(agent_hooks.agent_count + 1, agent_art.len);
+}
+
+test "Herdr agent aliases resolve to their Petdex artwork" {
+    try std.testing.expectEqual(agent_hooks.AgentKind.claude_code, agentKindForName("claude").?);
+    try std.testing.expectEqual(agent_hooks.AgentKind.opencode, agentKindForName("open-code").?);
+    try std.testing.expectEqual(agent_hooks.AgentKind.qoder, agentKindForName("qodercli").?);
+    try std.testing.expectEqual(agent_hooks.AgentKind.kimi_code, agentKindForName("kimi").?);
+    try std.testing.expectEqual(agent_fallback_index, agentIconIndex("herdr"));
+}
+
+test "bubble title and status stay in one compact text block" {
+    var model: Model = .{};
+    testPushBubble(&model, "herdr", "Thinking…", true, -1);
+    const title = "Execute sleep 30 in the terminal";
+    @memcpy(model.bubbles[0].title[0..title.len], title);
+    model.bubbles[0].title_len = title.len;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var ui = AppUi.init(arena.allocator());
+    const card = bubbleCard(&ui, &model, 0);
+    const text_column = card.nodes[0].nodes[1].widget;
+    try std.testing.expectEqual(bubbleContentHeight(&model, 2), text_column.layout.min_size.height);
+    try std.testing.expectEqual(text_column.layout.min_size.height, text_column.layout.max_size.height);
 }
 
 test "activating index 0 works before any sheet is loaded" {
@@ -5043,13 +5074,11 @@ test "a flipped stack stays inside its container at both ends" {
     }
 }
 
-test "an agent with no strip cell falls back to no tile" {
-    // Every shipped AgentKind has a cell, the fallback art does not: the
-    // strip is packed from agent_art alone.
-    try std.testing.expect(agentIconIndex("claude-code") != null);
-    try std.testing.expect(agentIconIndex("codex") != null);
-    try std.testing.expectEqual(@as(?usize, null), agentIconIndex("some-unknown-agent"));
-    try std.testing.expectEqual(@as(?usize, null), agentIconIndex(""));
+test "an agent with no dedicated art uses the fallback tile" {
+    try std.testing.expectEqual(@as(usize, @intFromEnum(agent_hooks.AgentKind.claude_code)), agentIconIndex("claude-code"));
+    try std.testing.expectEqual(@as(usize, @intFromEnum(agent_hooks.AgentKind.codex)), agentIconIndex("codex"));
+    try std.testing.expectEqual(agent_fallback_index, agentIconIndex("some-unknown-agent"));
+    try std.testing.expectEqual(agent_fallback_index, agentIconIndex(""));
 }
 
 test "clearing a bubble also cancels its lifetime" {

@@ -1,0 +1,19 @@
+id = "dev.petdex.bridge"
+name = "Petdex"
+version = "0.1.0"
+min_herdr_version = "0.7.0"
+description = "Mirror Herdr agent attention into Petdex."
+platforms = ["linux", "macos", "windows"]
+
+[[startup]]
+command = ["bun", "run", "bridge.ts", "snapshot"]
+
+[[actions]]
+id = "test"
+title = "Test Petdex bridge"
+contexts = ["workspace"]
+command = ["bun", "run", "bridge.ts", "test"]
+
+[[events]]
+on = "pane.agent_status_changed"
+command = ["bun", "run", "bridge.ts", "event"]

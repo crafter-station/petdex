@@ -31,6 +31,13 @@ CLI and SDK checkout used by the matching release workflow. The build scripts
 apply the Petdex-owned macOS Mach-O headerpad patch before compiling; they
 fail if the SDK source no longer matches the pinned patch.
 
+## Herdr
+
+The local Herdr plugin mirrors agent attention from Herdr into Petdex and
+preserves the exact pane ID so clicking the pet can focus that pane. Direct
+Petdex hooks remain preferred for supported agents. See
+[`integrations/herdr`](integrations/herdr/README.md) for setup and filtering.
+
 ## Remote agents (SSH)
 
 Agents running on other machines can drive the same pet. Declare remotes in

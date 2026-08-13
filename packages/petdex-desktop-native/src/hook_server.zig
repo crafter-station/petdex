@@ -58,6 +58,8 @@ pub const Bubble = struct {
     source_tty_len: usize = 0,
     source_cwd: [512]u8 = @splat(0),
     source_cwd_len: usize = 0,
+    herdr_pane: [64]u8 = @splat(0),
+    herdr_pane_len: usize = 0,
     busy: bool = false,
     counter: u64 = 0,
 
@@ -69,6 +71,9 @@ pub const Bubble = struct {
     }
     pub fn cwdSlice(self: *const Bubble) []const u8 {
         return self.source_cwd[0..self.source_cwd_len];
+    }
+    pub fn herdrPaneSlice(self: *const Bubble) []const u8 {
+        return self.herdr_pane[0..self.herdr_pane_len];
     }
 };
 
@@ -171,10 +176,10 @@ pub const Mailbox = struct {
     /// full the least recently updated entry is evicted: an abandoned
     /// session must not hold a slot against a live one.
     pub fn setBubble(self: *Mailbox, session: []const u8, text: []const u8, agent: []const u8, title: []const u8, busy: bool) u64 {
-        return self.setBubbleWithMetadata(session, text, agent, title, .none, "", "", busy);
+        return self.setBubbleWithMetadata(session, text, agent, title, .none, "", "", "", busy);
     }
 
-    pub fn setBubbleWithMetadata(self: *Mailbox, session: []const u8, text: []const u8, agent: []const u8, title: []const u8, origin_app: plat.OriginApplication, source_tty: []const u8, source_cwd: []const u8, busy: bool) u64 {
+    pub fn setBubbleWithMetadata(self: *Mailbox, session: []const u8, text: []const u8, agent: []const u8, title: []const u8, origin_app: plat.OriginApplication, source_tty: []const u8, source_cwd: []const u8, herdr_pane: []const u8, busy: bool) u64 {
         self.mutex.lock();
         defer self.mutex.unlock();
 
@@ -214,6 +219,9 @@ pub const Mailbox = struct {
         const cwd_n = @min(source_cwd.len, slot.source_cwd.len);
         @memcpy(slot.source_cwd[0..cwd_n], source_cwd[0..cwd_n]);
         slot.source_cwd_len = cwd_n;
+        const pane_n = @min(herdr_pane.len, slot.herdr_pane.len);
+        @memcpy(slot.herdr_pane[0..pane_n], herdr_pane[0..pane_n]);
+        slot.herdr_pane_len = pane_n;
         slot.busy = busy;
 
         self.bubble_counter += 1;
@@ -524,13 +532,14 @@ fn route(server: *Server, conn: *Conn, method: []const u8, path: []const u8, hea
         const origin_app = plat.OriginApplication.fromTermProgram(jsonString(body, "source_app"));
         const source_tty = plat.safeSourceTty(jsonString(body, "source_tty")) orelse "";
         const source_cwd = plat.safeSourceCwd(jsonString(body, "source_cwd")) orelse "";
+        const herdr_pane = plat.safeHerdrPaneId(jsonString(body, "herdr_pane_id")) orelse "";
         const busy = std.mem.indexOf(u8, body, "\"busy\":true") != null;
         // Canonical conversation metadata wins over raw continuation/session
         // ids. Arbitrary provider keys are normalized to the mailbox's fixed
         // 64-byte key instead of being truncated into possible collisions.
         var session_hash: [64]u8 = undefined;
         const session = bubbleSessionKey(body, &session_hash);
-        const counter = mailbox.setBubbleWithMetadata(session, capped, agent[0..@min(agent.len, 24)], title[0..@min(title.len, 96)], origin_app, source_tty, source_cwd, busy);
+        const counter = mailbox.setBubbleWithMetadata(session, capped, agent[0..@min(agent.len, 24)], title[0..@min(title.len, 96)], origin_app, source_tty, source_cwd, herdr_pane, busy);
         mirrorBubble(server, capped, counter, title[0..@min(title.len, 96)], agent[0..@min(agent.len, 24)], busy) catch {};
         const out = std.fmt.bufPrint(&scratch, "{{\"ok\":true,\"counter\":{d}}}", .{counter}) catch return;
         return respond(conn, 200, out);
@@ -808,6 +817,15 @@ test "two sessions hold two bubbles and neither overwrites the other" {
     try std.testing.expectEqualStrings("running tests", out[1].text[0..out[1].text_len]);
     try std.testing.expect(out[1].busy);
     try std.testing.expectEqual(beta_counter, out[1].counter);
+}
+
+test "bubble metadata preserves the Herdr pane id" {
+    var mb: Mailbox = .{};
+    _ = mb.setBubbleWithMetadata("herdr:w1:p5", "Needs approval", "cursor", "Fix auth", .terminal, "", "/repo", "w1:p5", false);
+
+    var out: [max_bubbles]Bubble = @splat(.{});
+    try std.testing.expectEqual(@as(?usize, 1), mb.takeBubbles(&out));
+    try std.testing.expectEqualStrings("w1:p5", out[0].herdrPaneSlice());
 }
 
 test "a sessionless agent keeps the single shared slot" {

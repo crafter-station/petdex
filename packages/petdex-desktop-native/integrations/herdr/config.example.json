@@ -1,0 +1,11 @@
+{
+  "includeAgents": [
+    "cursor",
+    "copilot",
+    "devin",
+    "droid",
+    "kilo",
+    "mastracode",
+    "grok"
+  ]
+}
