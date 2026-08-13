@@ -218,7 +218,7 @@ fn qoderStatus(allocator: std.mem.Allocator, home: []const u8) HookStatus {
         const status = blk: {
             const content = readFileAlloc(allocator, path, 512 * 1024) orelse break :blk HookStatus.none;
             defer allocator.free(content);
-            break :blk classifyConfig(allocator, content, &qoder_events);
+            break :blk classifyConfig(allocator, content);
         };
         folded = if (folded) |f| worseStatus(f, status) else status;
     }
@@ -248,13 +248,11 @@ const qoder_events = [_]HookEvent{
 };
 
 const codex_events = [_]HookEvent{
-    .{ .event = "SessionStart", .phase = "session-start" },
     .{ .event = "UserPromptSubmit", .phase = "user-prompt" },
     .{ .event = "PreToolUse", .phase = "pre" },
     .{ .event = "PostToolUse", .phase = "post" },
-    .{ .event = "PermissionRequest", .phase = "approval-request" },
+    .{ .event = "PermissionRequest", .phase = "notification" },
     .{ .event = "Stop", .phase = "stop" },
-    .{ .event = "SessionEnd", .phase = "session-end" },
 };
 
 /// Build the canonical hook command for one shell family. Unix keeps the
@@ -458,7 +456,7 @@ fn entryGeneration(entry: std.json.Value) ManagedHookGeneration {
     return if (current) .current else .none;
 }
 
-fn classifyConfig(allocator: std.mem.Allocator, content: []const u8, expected: []const HookEvent) HookStatus {
+fn classifyConfig(allocator: std.mem.Allocator, content: []const u8) HookStatus {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
     const root = std.json.parseFromSliceLeaky(std.json.Value, arena.allocator(), content, .{}) catch return .none;
@@ -478,26 +476,7 @@ fn classifyConfig(allocator: std.mem.Allocator, content: []const u8, expected: [
             }
         }
     }
-    if (!current) return .none;
-
-    // A recognized runner under one event is not enough: adapters evolve as
-    // harnesses expose richer lifecycle events (for example Gemini's
-    // BeforeAgent prompt and Hermes' pre_llm_call). Missing current entries
-    // must surface as Update, otherwise an older install appears connected
-    // while silently lacking title/session behavior.
-    for (expected) |wanted| {
-        const entries = hooks.object.get(wanted.event) orelse return .node;
-        if (entries != .array) return .node;
-        var found = false;
-        for (entries.array.items) |entry| {
-            if (entryGeneration(entry) == .current) {
-                found = true;
-                break;
-            }
-        }
-        if (!found) return .node;
-    }
-    return .current;
+    return if (current) .current else .none;
 }
 
 const dirExists = plat.dirExists;
@@ -537,6 +516,7 @@ pub fn scan(allocator: std.mem.Allocator, home: []const u8) [agent_count]AgentIn
     out[@intFromEnum(AgentKind.qoder)].status = qoderStatus(allocator, home);
     var path: [512]u8 = undefined;
     for (&out) |*info| {
+        if (info.kind == .hermes and builtin.os.tag == .windows) continue;
         const dir = switch (info.kind) {
             .claude_code => claudeConfigDir(&path, home) orelse continue,
             .codex => std.fmt.bufPrint(&path, "{s}/.codex", .{home}) catch continue,
@@ -585,38 +565,30 @@ pub fn scan(allocator: std.mem.Allocator, home: []const u8) [agent_count]AgentIn
                 else
                     .none;
             } else if (info.kind == .hermes) {
-                // YAML, so the JSON classifier cannot read it either. The
-                // substring rule is the kimi one: `petdex-hook` appears
-                // only in a command we wrote, and no legacy runner ever
-                // targeted hermes, so any other petdex mention is foreign
-                // config we did not write — leave the row at .none rather
-                // than claim it as outdated.
-                info.status = if (std.mem.indexOf(u8, content, "petdex-hook") != null) .current else .none;
-                if (info.status == .current) {
-                    var plugin_path_buf: [512]u8 = undefined;
-                    const plugin_path = hermesDesktopPluginPath(&plugin_path_buf, home, "__init__.py") orelse {
-                        info.status = .node;
-                        continue;
-                    };
-                    const installed = readFileAlloc(allocator, plugin_path, 512 * 1024) orelse {
-                        info.status = .node;
-                        continue;
-                    };
-                    defer allocator.free(installed);
-                    if (!std.mem.eql(u8, std.mem.trim(u8, installed, " \n"), std.mem.trim(u8, hermes_desktop_plugin_init, " \n"))) {
-                        info.status = .node;
-                    }
-                }
+                const hooks = scanHermesHooks(content);
+                const plugin_enabled = isHermesDesktopPluginEnabled(content);
+                if (!hooks.any and !plugin_enabled) continue;
+                info.status = .node;
+                if (!hooks.current or !plugin_enabled) continue;
+
+                var allow_path_buf: [512]u8 = undefined;
+                const allow_path = hermesAllowlistPath(&allow_path_buf, home) orelse continue;
+                if (!hermesAllowlistCurrent(allocator, allow_path)) continue;
+
+                var manifest_path_buf: [512]u8 = undefined;
+                const manifest_path = hermesDesktopPluginPath(&manifest_path_buf, home, "plugin.yaml") orelse continue;
+                const manifest = readFileAlloc(allocator, manifest_path, 512 * 1024) orelse continue;
+                defer allocator.free(manifest);
+                if (!std.mem.eql(u8, std.mem.trim(u8, manifest, " \n"), std.mem.trim(u8, hermes_desktop_plugin_manifest, " \n"))) continue;
+
+                var plugin_path_buf: [512]u8 = undefined;
+                const plugin_path = hermesDesktopPluginPath(&plugin_path_buf, home, "__init__.py") orelse continue;
+                const installed = readFileAlloc(allocator, plugin_path, 512 * 1024) orelse continue;
+                defer allocator.free(installed);
+                if (!std.mem.eql(u8, std.mem.trim(u8, installed, " \n"), std.mem.trim(u8, hermes_desktop_plugin_init, " \n"))) continue;
+                info.status = .current;
             } else {
-                const expected: []const HookEvent = switch (info.kind) {
-                    .claude_code => &claude_events,
-                    .codex => &codex_events,
-                    .gemini => &gemini_events,
-                    .qoder => &qoder_events,
-                    .codebuddy => &codebuddy_events,
-                    else => &.{},
-                };
-                info.status = classifyConfig(allocator, content, expected);
+                info.status = classifyConfig(allocator, content);
             }
         }
     }
@@ -665,15 +637,9 @@ fn uninstallQoder(allocator: std.mem.Allocator, home: []const u8) bool {
 /// Gemini rides the exact same settings.json hook shape as Claude,
 /// with its own event names.
 const gemini_events = [_]HookEvent{
-    // BeforeAgent contains the submitted `prompt`; it gives Gemini the same
-    // per-session title fallback as every Claude-shaped harness.
-    .{ .event = "BeforeAgent", .phase = "user-prompt" },
     .{ .event = "BeforeTool", .phase = "pre" },
     .{ .event = "AfterTool", .phase = "post" },
-    // AfterAgent fires once per completed response. SessionEnd is retained for
-    // an explicit exit/clear after a turn that did not reach AfterAgent.
-    .{ .event = "AfterAgent", .phase = "stop" },
-    .{ .event = "SessionEnd", .phase = "session-end" },
+    .{ .event = "SessionEnd", .phase = "stop" },
 };
 
 pub fn installGemini(allocator: std.mem.Allocator, home: []const u8) bool {
@@ -915,7 +881,7 @@ pub fn installKimiCode(allocator: std.mem.Allocator, home: []const u8) bool {
 /// (agent/shell_hooks.py). Two consequences:
 ///
 ///   * The canonical shell snippet every other agent gets cannot parse here
-///     — there is no shell — so hermes commands are direct executable
+///     because there is no shell, so hermes commands are direct executable
 ///     invocations. The killswitch and the bounded stdin drain both live in
 ///     the hook binary itself, so dropping the wrapper loses nothing.
 ///   * Every (event, command) pair needs consent from
@@ -924,7 +890,7 @@ pub fn installKimiCode(allocator: std.mem.Allocator, home: []const u8) bool {
 ///     exact strings it writes; uninstall removes them again.
 ///
 /// `$HERMES_HOME` relocates the whole data dir (config, allowlist,
-/// sessions), so it wins over the default `~/.hermes` — same env-snapshot
+/// sessions), so it wins over the default `~/.hermes`, following the same env-snapshot
 /// pattern as KIMI_CODE_HOME. Snapshotted once in main().
 pub var env_hermes_home: ?[]const u8 = null;
 
@@ -991,30 +957,30 @@ fn hermesCommand(buf: []u8, phase: []const u8) ?[]const u8 {
     return std.fmt.bufPrint(buf, "~/.petdex/bin/petdex-hook bubble {s} hermes", .{phase}) catch null;
 }
 
+fn hermesKeyRest(line: []const u8, key: []const u8) ?[]const u8 {
+    const trimmed = std.mem.trim(u8, line, " \t\r");
+    if (!std.mem.startsWith(u8, trimmed, key) or trimmed.len <= key.len or trimmed[key.len] != ':') return null;
+    return std.mem.trim(u8, trimmed[key.len + 1 ..], " \t");
+}
+
 /// True when a YAML line opens the top-level `hooks:` mapping, tolerating
 /// trailing comments. Anything with leading whitespace is a child.
 fn isHermesHooksKey(line: []const u8) bool {
     if (line.len == 0 or line[0] == ' ' or line[0] == '\t' or line[0] == '#') return false;
-    const trimmed = std.mem.trimEnd(u8, line, " \t\r");
-    if (!std.mem.startsWith(u8, trimmed, "hooks:")) return false;
-    const rest = std.mem.trim(u8, trimmed["hooks:".len..], " \t");
+    const rest = hermesKeyRest(line, "hooks") orelse return false;
     return rest.len == 0 or rest[0] == '#';
 }
 
 fn isHermesPluginsKey(line: []const u8) bool {
     if (line.len == 0 or line[0] == ' ' or line[0] == '\t' or line[0] == '#') return false;
-    const trimmed = std.mem.trimEnd(u8, line, " \t\r");
-    if (!std.mem.startsWith(u8, trimmed, "plugins:")) return false;
-    const rest = std.mem.trim(u8, trimmed["plugins:".len..], " \t");
+    const rest = hermesKeyRest(line, "plugins") orelse return false;
     return rest.len == 0 or rest[0] == '#';
 }
 
 fn hermesEnabledRest(line: []const u8) ?[]const u8 {
     const indent = lineIndent(line);
     if (indent == 0 or indent > 4) return null;
-    const trimmed = std.mem.trim(u8, line, " \t\r");
-    if (!std.mem.startsWith(u8, trimmed, "enabled:")) return null;
-    return std.mem.trim(u8, trimmed["enabled:".len..], " \t");
+    return hermesKeyRest(line, "enabled");
 }
 
 fn isHermesPluginListItem(line: []const u8) bool {
@@ -1025,6 +991,102 @@ fn isHermesPluginListItem(line: []const u8) bool {
     if (value.len >= 2 and ((value[0] == '\'' and value[value.len - 1] == '\'') or (value[0] == '"' and value[value.len - 1] == '"')))
         value = value[1 .. value.len - 1];
     return std.mem.eql(u8, value, hermes_desktop_plugin_name);
+}
+
+const HermesHookScan = struct {
+    any: bool = false,
+    current: bool = false,
+};
+
+fn scanHermesHooks(content: []const u8) HermesHookScan {
+    var found: [hermes_events.len]bool = @splat(false);
+    var in_hooks = false;
+    var active_event: ?usize = null;
+    var active_indent: usize = 0;
+    var it = std.mem.splitScalar(u8, content, '\n');
+    while (it.next()) |line| {
+        if (!in_hooks) {
+            if (isHermesHooksKey(line)) in_hooks = true;
+            continue;
+        }
+        if (line.len > 0 and isTopLevelKey(line)) break;
+        if (hermesEventKey(line)) |name| {
+            active_event = null;
+            for (hermes_events, 0..) |event, index| {
+                if (std.mem.eql(u8, event.event, name)) {
+                    active_event = index;
+                    active_indent = lineIndent(line);
+                    break;
+                }
+            }
+            continue;
+        }
+        const index = active_event orelse continue;
+        if (lineIndent(line) <= active_indent) {
+            active_event = null;
+            continue;
+        }
+        var cmd_buf: [128]u8 = undefined;
+        const command = hermesCommand(&cmd_buf, hermes_events[index].phase) orelse continue;
+        var line_buf: [192]u8 = undefined;
+        const expected = std.fmt.bufPrint(&line_buf, "- command: \"{s}\"", .{command}) catch continue;
+        if (std.mem.eql(u8, std.mem.trim(u8, line, " \t\r"), expected)) found[index] = true;
+    }
+    var result: HermesHookScan = .{ .current = true };
+    for (found) |present| {
+        result.any = result.any or present;
+        result.current = result.current and present;
+    }
+    return result;
+}
+
+fn isHermesDesktopPluginEnabled(content: []const u8) bool {
+    var in_plugins = false;
+    var enabled_indent: ?usize = null;
+    var it = std.mem.splitScalar(u8, content, '\n');
+    while (it.next()) |line| {
+        if (!in_plugins) {
+            if (isHermesPluginsKey(line)) in_plugins = true;
+            continue;
+        }
+        if (line.len > 0 and isTopLevelKey(line)) break;
+        if (enabled_indent == null) {
+            if (hermesEnabledRest(line)) |_| enabled_indent = lineIndent(line);
+            continue;
+        }
+        const trimmed = std.mem.trim(u8, line, " \t\r");
+        if (trimmed.len == 0 or trimmed[0] == '#') continue;
+        if (lineIndent(line) <= enabled_indent.?) break;
+        if (isHermesPluginListItem(line)) return true;
+    }
+    return false;
+}
+
+fn hermesAllowlistCurrent(allocator: std.mem.Allocator, path: []const u8) bool {
+    const content = readFileAlloc(allocator, path, 1024 * 1024) orelse return false;
+    defer allocator.free(content);
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const root = std.json.parseFromSliceLeaky(std.json.Value, arena.allocator(), content, .{}) catch return false;
+    if (root != .object) return false;
+    const approvals = root.object.get("approvals") orelse return false;
+    if (approvals != .array) return false;
+    for (hermes_events) |event| {
+        var cmd_buf: [128]u8 = undefined;
+        const expected = hermesCommand(&cmd_buf, event.phase) orelse return false;
+        var found = false;
+        for (approvals.array.items) |approval| {
+            if (approval != .object) continue;
+            const approval_event = approval.object.get("event") orelse continue;
+            const command = approval.object.get("command") orelse continue;
+            if (approval_event == .string and command == .string and std.mem.eql(u8, approval_event.string, event.event) and std.mem.eql(u8, command.string, expected)) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) return false;
+    }
+    return true;
 }
 
 fn writeHermesYamlLines(allocator: std.mem.Allocator, path: []const u8, lines: []const []const u8) bool {
@@ -1047,9 +1109,8 @@ fn writeHermesYamlLines(allocator: std.mem.Allocator, path: []const u8, lines: [
 fn writeHermesDesktopPluginEnabled(allocator: std.mem.Allocator, path: []const u8, install: bool) bool {
     const existing = readFileAlloc(allocator, path, 1024 * 1024);
     defer if (existing) |e| allocator.free(e);
+    if (existing == null and fileExists(path)) return false;
     if (existing == null and !install) return true;
-    if (existing != null and std.mem.indexOf(u8, existing.?, "plugins: {") != null) return false;
-
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
     const a = arena.allocator();
@@ -1069,19 +1130,21 @@ fn writeHermesDesktopPluginEnabled(allocator: std.mem.Allocator, path: []const u
             // duplicate top-level key that would invalidate the YAML.
             if (lineIndent(line) == 0) {
                 const trimmed = std.mem.trim(u8, line, " \t\r");
-                if (std.mem.startsWith(u8, trimmed, "plugins:")) return false;
+                if (hermesKeyRest(line, "plugins") != null or std.mem.startsWith(u8, trimmed, "\"plugins\":") or std.mem.startsWith(u8, trimmed, "'plugins':")) return false;
             }
             continue;
         }
+        if (plugins_start != null) return false;
         plugins_start = i;
-        var j = i + 1;
+    }
+    if (plugins_start) |start| {
+        var j = start + 1;
         while (j < lines.items.len) : (j += 1) {
             if (lines.items[j].len > 0 and isTopLevelKey(lines.items[j])) {
                 plugins_end = j;
                 break;
             }
         }
-        break;
     }
 
     if (plugins_start == null) {
@@ -1190,7 +1253,7 @@ fn lineIndent(line: []const u8) usize {
 }
 
 /// True when `line` is an event key (`  pre_tool_call:`) under the hooks
-/// block: indented, ends with ':', and names one of our five events.
+/// block: indented, ends with ':', and names one of our events.
 fn hermesEventKey(line: []const u8) ?[]const u8 {
     const indent = lineIndent(line);
     if (indent == 0 or indent > 4) return null;
@@ -1203,13 +1266,6 @@ fn hermesEventKey(line: []const u8) ?[]const u8 {
     return null;
 }
 
-fn isHermesEventName(name: []const u8) bool {
-    for (hermes_events) |ev| {
-        if (std.mem.eql(u8, name, ev.event)) return true;
-    }
-    return false;
-}
-
 /// Rewrite the hermes hooks Petdex owns, preserving everything else in
 /// config.yaml. Mirrors the Kimi TOML discipline: strip every line that is
 /// ours, then append fresh entries when installing, so a re-install
@@ -1217,22 +1273,20 @@ fn isHermesEventName(name: []const u8) bool {
 ///
 /// Strip rules, applied only inside the top-level `hooks:` block:
 ///   * any line mentioning petdex-hook or petdex.js (our command lines)
-///   * any of our five event keys left with an empty list as a result
+///   * any of our event keys left with an empty list as a result
 ///   * the `hooks:` key itself when the whole block became empty AND we
 ///     are uninstalling (on install it is refilled immediately)
 ///
 /// Install inserts each missing event key at the end of the existing
 /// hooks block (before the next top-level key), or appends a complete
 /// block at EOF when the file has no `hooks:` key at all. Flow-style
-/// `hooks: {...}` content is left untouched and refuses the install —
+/// `hooks: {...}` content is left untouched and refuses the install;
 /// mangling exotic YAML is worse than asking the user to convert it.
 fn writeHermesHooks(allocator: std.mem.Allocator, path: []const u8, install: bool) bool {
     const existing = readFileAlloc(allocator, path, 1024 * 1024);
     defer if (existing) |e| allocator.free(e);
+    if (existing == null and fileExists(path)) return false;
     if (existing == null and !install) return true;
-    if (existing != null and std.mem.indexOf(u8, existing.?, "hooks: {") != null) return false;
-    if (!backupOnce(allocator, path)) return false;
-
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
     const a = arena.allocator();
@@ -1252,22 +1306,33 @@ fn writeHermesHooks(allocator: std.mem.Allocator, path: []const u8, install: boo
     var hooks_end: usize = 0;
     for (lines.items, 0..) |line, i| {
         if (isHermesHooksKey(line)) {
+            if (hooks_start != null) return false;
             hooks_start = i;
-            hooks_end = lines.items.len;
-            var j = i + 1;
-            while (j < lines.items.len) : (j += 1) {
-                const l = lines.items[j];
-                if (l.len > 0 and isTopLevelKey(l)) {
-                    hooks_end = j;
-                    break;
-                }
+            continue;
+        }
+        if (lineIndent(line) != 0) continue;
+        if (hermesKeyRest(line, "hooks")) |rest| {
+            if (!std.mem.eql(u8, rest, "[]") or hooks_start != null) return false;
+            lines.items[i] = "hooks:";
+            hooks_start = i;
+            continue;
+        }
+        const trimmed = std.mem.trim(u8, line, " \t\r");
+        if (std.mem.startsWith(u8, trimmed, "\"hooks\":") or std.mem.startsWith(u8, trimmed, "'hooks':")) return false;
+    }
+    if (hooks_start) |start| {
+        hooks_end = lines.items.len;
+        var j = start + 1;
+        while (j < lines.items.len) : (j += 1) {
+            const l = lines.items[j];
+            if (l.len > 0 and isTopLevelKey(l)) {
+                hooks_end = j;
+                break;
             }
-            break;
         }
     }
 
     var kept = std.array_list.Managed([]const u8).init(a);
-    var removed_event_keys: usize = 0;
     if (hooks_start) |hs| {
         // Pass 1: copy everything, dropping petdex command lines inside
         // the block.
@@ -1276,7 +1341,7 @@ fn writeHermesHooks(allocator: std.mem.Allocator, path: []const u8, install: boo
         var i = hs + 1;
         while (i < hooks_end) : (i += 1) {
             const l = lines.items[i];
-            if (std.mem.indexOf(u8, l, "petdex-hook") != null or std.mem.indexOf(u8, l, "petdex.js") != null) continue;
+            if ((containsCommandPath(l, "~/.petdex/bin/petdex-hook") or containsCommandPath(l, "~/.petdex/bin/petdex.js")) and std.mem.indexOf(u8, l, " bubble ") != null) continue;
             kept.append(l) catch return false;
         }
         kept.appendSlice(lines.items[hooks_end..]) catch return false;
@@ -1293,7 +1358,6 @@ fn writeHermesHooks(allocator: std.mem.Allocator, path: []const u8, install: boo
                 while (next < kept.items.len and std.mem.trim(u8, kept.items[next], " \t\r").len == 0) next += 1;
                 const empty = next >= kept.items.len or lineIndent(kept.items[next]) <= lineIndent(l);
                 if (empty) {
-                    removed_event_keys += 1;
                     continue;
                 }
             }
@@ -1409,6 +1473,7 @@ fn writeHermesHooks(allocator: std.mem.Allocator, path: []const u8, install: boo
         out.appendSlice(line) catch return false;
     }
     if (out.items.len > 0) out.append('\n') catch return false;
+    if (!backupOnce(allocator, path)) return false;
     return writeFile(path, out.items);
 }
 
@@ -1421,6 +1486,7 @@ fn writeHermesHooks(allocator: std.mem.Allocator, path: []const u8, install: boo
 fn writeHermesAllowlist(allocator: std.mem.Allocator, path: []const u8, install: bool) bool {
     const existing = readFileAlloc(allocator, path, 1024 * 1024);
     defer if (existing) |e| allocator.free(e);
+    if (existing == null and fileExists(path)) return false;
     if (existing == null and !install) return true;
 
     var arena = std.heap.ArenaAllocator.init(allocator);
@@ -1429,8 +1495,8 @@ fn writeHermesAllowlist(allocator: std.mem.Allocator, path: []const u8, install:
 
     var root: std.json.Value = blk: {
         if (existing) |bytes| {
-            const parsed = std.json.parseFromSliceLeaky(std.json.Value, a, bytes, .{}) catch break :blk emptyObject(a);
-            if (parsed != .object) break :blk emptyObject(a);
+            const parsed = std.json.parseFromSliceLeaky(std.json.Value, a, bytes, .{}) catch return false;
+            if (parsed != .object) return false;
             break :blk parsed;
         }
         break :blk emptyObject(a);
@@ -1452,7 +1518,18 @@ fn writeHermesAllowlist(allocator: std.mem.Allocator, path: []const u8, install:
     for (approvals.items) |item| {
         if (item == .object) {
             if (item.object.get("command")) |cmd| {
-                if (cmd == .string and std.mem.indexOf(u8, cmd.string, "petdex") != null) continue;
+                if (cmd == .string) {
+                    var managed = false;
+                    var cmd_buf: [128]u8 = undefined;
+                    for (hermes_events) |ev| {
+                        const expected = hermesCommand(&cmd_buf, ev.phase) orelse return false;
+                        if (std.mem.eql(u8, cmd.string, expected)) {
+                            managed = true;
+                            break;
+                        }
+                    }
+                    if (managed) continue;
+                }
             }
         }
         kept.append(item) catch return false;
@@ -1480,29 +1557,76 @@ fn writeHermesAllowlist(allocator: std.mem.Allocator, path: []const u8, install:
     return writeFile(path, out.items);
 }
 
+const HermesFileSnapshot = struct {
+    path: []const u8,
+    existed: bool,
+    content: ?[]u8,
+};
+
+fn snapshotHermesFile(allocator: std.mem.Allocator, path: []const u8) HermesFileSnapshot {
+    return .{
+        .path = path,
+        .existed = fileExists(path),
+        .content = readFileAlloc(allocator, path, 1024 * 1024),
+    };
+}
+
+fn restoreHermesFiles(snapshots: []const HermesFileSnapshot) void {
+    for (snapshots) |snapshot| {
+        if (snapshot.existed) {
+            _ = writeFile(snapshot.path, snapshot.content orelse "");
+        } else {
+            plat.deleteFile(snapshot.path);
+        }
+    }
+}
+
 pub fn installHermes(allocator: std.mem.Allocator, home: []const u8) bool {
     if (builtin.os.tag == .windows) return false;
     var dir_buf: [512]u8 = undefined;
     const dir = hermesHome(&dir_buf, home) orelse return false;
-    plat.makeDir(dir);
     var path_buf: [512]u8 = undefined;
     const config_path = hermesConfigPath(&path_buf, home) orelse return false;
-    if (!writeHermesHooks(allocator, config_path, true)) return false;
-    if (!writeHermesDesktopPluginEnabled(allocator, config_path, true)) return false;
     var allow_buf: [512]u8 = undefined;
     const allow_path = hermesAllowlistPath(&allow_buf, home) orelse return false;
-    if (!writeHermesAllowlist(allocator, allow_path, true)) return false;
-
     var manifest_buf: [512]u8 = undefined;
     const manifest_path = hermesDesktopPluginPath(&manifest_buf, home, "plugin.yaml") orelse return false;
     var init_buf: [512]u8 = undefined;
     const init_path = hermesDesktopPluginPath(&init_buf, home, "__init__.py") orelse return false;
+
+    var snapshots = [_]HermesFileSnapshot{
+        snapshotHermesFile(allocator, config_path),
+        snapshotHermesFile(allocator, allow_path),
+        snapshotHermesFile(allocator, manifest_path),
+        snapshotHermesFile(allocator, init_path),
+    };
+    defer for (&snapshots) |*snapshot| {
+        if (snapshot.content) |content| allocator.free(content);
+    };
+
+    plat.makeDir(dir);
+    if (!writeHermesHooks(allocator, config_path, true)) {
+        restoreHermesFiles(&snapshots);
+        return false;
+    }
+    if (!writeHermesDesktopPluginEnabled(allocator, config_path, true)) {
+        restoreHermesFiles(&snapshots);
+        return false;
+    }
+    if (!writeHermesAllowlist(allocator, allow_path, true)) {
+        restoreHermesFiles(&snapshots);
+        return false;
+    }
+
     var plugin_dir_buf: [512]u8 = undefined;
     const slash = std.mem.lastIndexOfScalar(u8, manifest_path, '/') orelse return false;
     const plugin_dir = std.fmt.bufPrint(&plugin_dir_buf, "{s}", .{manifest_path[0..slash]}) catch return false;
     plat.makeDir(plugin_dir);
-    if (!backupOnce(allocator, manifest_path) or !backupOnce(allocator, init_path)) return false;
-    return writeFile(manifest_path, hermes_desktop_plugin_manifest) and writeFile(init_path, hermes_desktop_plugin_init);
+    if (!backupOnce(allocator, manifest_path) or !backupOnce(allocator, init_path) or !writeFile(manifest_path, hermes_desktop_plugin_manifest) or !writeFile(init_path, hermes_desktop_plugin_init)) {
+        restoreHermesFiles(&snapshots);
+        return false;
+    }
+    return true;
 }
 
 fn uninstallHermes(allocator: std.mem.Allocator, home: []const u8) bool {
@@ -1731,20 +1855,6 @@ fn inspectFeatureHooks(toml: []const u8) FeatureHooksInspection {
         const line = toml[line_start..line_end];
         const trimmed = std.mem.trim(u8, line, " \t\r\n");
         if (trimmed.len > 0 and trimmed[0] == '[') {
-            if (std.mem.startsWith(u8, trimmed, "[[")) {
-                const name = arraySectionName(trimmed) orelse return .{ .state = .unsafe };
-                // `[features]` is a regular table in Codex. Refuse to edit a
-                // malformed array-table spelling of that namespace, but do
-                // not reject unrelated, valid arrays such as
-                // `[[skills.config]]` later in the user's config.
-                if (std.mem.eql(u8, name, "features") or std.mem.startsWith(u8, name, "features."))
-                    return .{ .state = .unsafe };
-                current_features = false;
-                at_root = false;
-                if (relative_end == null) break;
-                line_start = line_end + 1;
-                continue;
-            }
             const name = sectionName(trimmed) orelse return .{ .state = .unsafe };
             if (std.mem.eql(u8, name, "features")) {
                 // A child table before its parent makes an insertion at the
@@ -1809,16 +1919,6 @@ fn sectionName(line: []const u8) ?[]const u8 {
     const suffix = std.mem.trim(u8, line[close_index + 1 ..], " \t");
     if (suffix.len > 0 and suffix[0] != '#') return null;
     return std.mem.trim(u8, line[1..close_index], " \t");
-}
-
-fn arraySectionName(line: []const u8) ?[]const u8 {
-    if (line.len < 5 or !std.mem.startsWith(u8, line, "[[")) return null;
-    const close = std.mem.indexOf(u8, line[2..], "]]") orelse return null;
-    const close_index = close + 2;
-    const suffix = std.mem.trim(u8, line[close_index + 2 ..], " \t");
-    if (suffix.len > 0 and suffix[0] != '#') return null;
-    const name = std.mem.trim(u8, line[2..close_index], " \t");
-    return if (name.len == 0) null else name;
 }
 
 const HooksAssignment = union(enum) {
@@ -1902,10 +2002,10 @@ pub const LegacyMigration = struct {
     failed: usize = 0,
 };
 
-/// Refresh only recognized Petdesk-owned integrations when the desktop app
-/// starts. This covers both legacy runner commands and older adapter snapshots
-/// missing a newly supported lifecycle event. Unrelated hooks and
-/// configurations are left untouched.
+/// Update only recognized legacy CLI hook commands when the desktop app
+/// starts. This closes the gap for users who upgrade the app but never open
+/// Settings to press Update; unrelated hooks and configurations are left
+/// untouched.
 pub fn migrateLegacyHooks(allocator: std.mem.Allocator, home: []const u8) LegacyMigration {
     const agents = scan(allocator, home);
     var result: LegacyMigration = .{};
@@ -1915,16 +2015,17 @@ pub fn migrateLegacyHooks(allocator: std.mem.Allocator, home: []const u8) Legacy
             .claude_code => installClaude(allocator, home),
             .codex => installCodex(allocator, home),
             .gemini => installGemini(allocator, home),
-            // Whole-file plugins are byte-classified, so `.node` here means a
-            // Petdesk-owned older snapshot and is safe to refresh in place.
-            .opencode => installOpencode(allocator, home),
+            // An outdated OpenCode plugin has no subprocess stdin path.
+            // Keep its existing explicit Update action rather than changing
+            // it as part of this bubble-runner migration.
+            .opencode => continue,
             // Unreachable: no legacy runner ever wrote these hooks, so this
             // cannot scan as .node. Install is the consistent answer anyway.
             .qoder => installQoder(allocator, home),
             .kimi_code => installKimiCode(allocator, home),
             .codebuddy => installCodeBuddy(allocator, home),
             .omp => installOmp(allocator, home),
-            .hermes => installHermes(allocator, home),
+            .hermes => continue,
         };
         if (migrated) result.migrated += 1 else result.failed += 1;
     }
@@ -2054,8 +2155,6 @@ test "installCodex migrates legacy hooks without dropping a foreign hook" {
     const hooks = readFileAlloc(t.allocator, hooks_path, 64 * 1024).?;
     defer t.allocator.free(hooks);
     try t.expect(std.mem.indexOf(u8, hooks, "bubble stop codex") != null);
-    try t.expect(std.mem.indexOf(u8, hooks, "bubble session-start codex") != null);
-    try t.expect(std.mem.indexOf(u8, hooks, "bubble session-end codex") != null);
     try t.expect(std.mem.indexOf(u8, hooks, "PermissionRequest") != null);
     try t.expect(std.mem.indexOf(u8, hooks, "\"timeout\": 2") != null);
     try t.expect(std.mem.indexOf(u8, hooks, "my-own-hook") != null);
@@ -2538,11 +2637,6 @@ test "installGemini enables hooks and uses a millisecond timeout" {
     try t.expect(std.mem.indexOf(u8, written, "\"timeout\": 2000") != null);
     try t.expect(std.mem.indexOf(u8, written, "\"enabled\": true") != null);
     try t.expect(std.mem.indexOf(u8, written, "\"keep\": true") != null);
-    try t.expect(std.mem.indexOf(u8, written, "\"BeforeAgent\"") != null);
-    try t.expect(std.mem.indexOf(u8, written, "bubble user-prompt gemini") != null);
-    try t.expect(std.mem.indexOf(u8, written, "\"AfterAgent\"") != null);
-    try t.expect(std.mem.indexOf(u8, written, "bubble stop gemini") != null);
-    try t.expectEqual(HookStatus.current, scan(t.allocator, home)[@intFromEnum(AgentKind.gemini)].status);
 }
 
 test "legacy curl migration requires the complete Petdex command signature" {
@@ -2607,40 +2701,14 @@ test "codex feature inspection is section-aware and conservative" {
     try t.expectEqual(FeatureHooksState.insert_after_features, inspectFeatureHooks("[features]\nmemories = true\n[features.multi_agent_v2]\nenabled = true\n").state);
     try t.expectEqual(FeatureHooksState.replace_line, inspectFeatureHooks("[features]\nhooks = false\n").state);
     try t.expectEqual(FeatureHooksState.insert_after_features, inspectFeatureHooks("[features]\nmemories = true\n").state);
-    try t.expectEqual(
-        FeatureHooksState.insert_after_features,
-        inspectFeatureHooks("[features]\nmulti_agent = true\n[[skills.config]]\nenabled = true\n").state,
-    );
     try t.expectEqual(FeatureHooksState.append_features, inspectFeatureHooks("[other]\nhooks = true\n").state);
     try t.expectEqual(FeatureHooksState.unsafe, inspectFeatureHooks("[features]\nhooks =\n").state);
     try t.expectEqual(FeatureHooksState.unsafe, inspectFeatureHooks("[features]\nhooks = true\nhooks = false\n").state);
     try t.expectEqual(FeatureHooksState.unsafe, inspectFeatureHooks("[features]\nhooks = true\n[features]\n").state);
     try t.expectEqual(FeatureHooksState.unsafe, inspectFeatureHooks("[features\nhooks = true\n").state);
     try t.expectEqual(FeatureHooksState.unsafe, inspectFeatureHooks("[features.extra]\nvalue = true\n").state);
-    try t.expectEqual(FeatureHooksState.unsafe, inspectFeatureHooks("[[features]]\nhooks = true\n").state);
     try t.expectEqual(FeatureHooksState.unsafe, inspectFeatureHooks("features.hooks = true\n").state);
     try t.expectEqual(FeatureHooksState.unsafe, inspectFeatureHooks("features = { hooks = true }\n").state);
-}
-
-test "installCodex accepts unrelated TOML array tables" {
-    const home = ".zig-cache/petdex-agenthooks-codex-array-table";
-    plat.makeDir(home ++ "/.codex");
-    var path_buf: [512]u8 = undefined;
-    const toml = std.fmt.bufPrint(&path_buf, "{s}/.codex/config.toml", .{home}) catch unreachable;
-    try t.expect(writeFile(toml,
-        \\[features]
-        \\multi_agent = true
-        \\[[skills.config]]
-        \\path = "skills/example"
-        \\
-    ));
-
-    try t.expect(installCodex(t.allocator, home));
-    const after = readFileAlloc(t.allocator, toml, 64 * 1024).?;
-    defer t.allocator.free(after);
-    try t.expect(std.mem.indexOf(u8, after, "hooks = true") != null);
-    try t.expect(std.mem.indexOf(u8, after, "[[skills.config]]") != null);
-    try t.expect(std.mem.indexOf(u8, after, "path = \"skills/example\"") != null);
 }
 
 test "installCodex replaces a false feature flag without duplicating it" {
@@ -2975,7 +3043,7 @@ test "hermes YAML merge preserves foreign keys, refreshes ours" {
     try t.expect(std.mem.indexOf(u8, written, "my-own-hook --flag") != null);
     try t.expect(std.mem.indexOf(u8, written, "model: kimi-for-coding/k3-256k") != null);
     try t.expect(std.mem.indexOf(u8, written, "other: 42") != null);
-    // All four events wired to the direct-exec hook binary.
+    // Every event is wired to the direct-exec hook binary.
     for (hermes_events) |ev| {
         try t.expect(std.mem.indexOf(u8, written, ev.event) != null);
         try t.expect(std.mem.indexOf(u8, written, ev.phase) != null);
@@ -3111,4 +3179,85 @@ test "HERMES_HOME redirects install and detection" {
     env_hermes_home = "";
     const blank = scan(t.allocator, home);
     try t.expectEqual(HookStatus.absent, blank[@intFromEnum(AgentKind.hermes)].status);
+}
+
+test "Hermes empty flow hooks install without duplicate YAML keys" {
+    if (builtin.os.tag == .windows) return;
+    const home = ".zig-cache/petdex-hermes-empty-flow";
+    plat.makeDir(home);
+    plat.makeDir(home ++ "/.hermes");
+    var pb: [512]u8 = undefined;
+    const cfg = std.fmt.bufPrint(&pb, "{s}/.hermes/config.yaml", .{home}) catch unreachable;
+    plat.deleteFile(cfg);
+    try t.expect(writeFile(cfg, "hooks: []\nmodel: test\n"));
+
+    try t.expect(installHermes(t.allocator, home));
+    const installed = readFileAlloc(t.allocator, cfg, 1024 * 1024).?;
+    defer t.allocator.free(installed);
+    try t.expectEqual(@as(usize, 1), std.mem.count(u8, installed, "hooks:"));
+    try t.expect(std.mem.indexOf(u8, installed, "model: test") != null);
+}
+
+test "Hermes unsupported plugin YAML fails without partial writes" {
+    if (builtin.os.tag == .windows) return;
+    const home = ".zig-cache/petdex-hermes-unsupported-plugin-yaml";
+    plat.makeDir(home);
+    plat.makeDir(home ++ "/.hermes");
+    var pb: [512]u8 = undefined;
+    const cfg = std.fmt.bufPrint(&pb, "{s}/.hermes/config.yaml", .{home}) catch unreachable;
+    plat.deleteFile(cfg);
+    const original = "plugins:\n  enabled: [basic]\n";
+    try t.expect(writeFile(cfg, original));
+
+    try t.expect(!installHermes(t.allocator, home));
+    const after = readFileAlloc(t.allocator, cfg, 1024 * 1024).?;
+    defer t.allocator.free(after);
+    try t.expectEqualStrings(original, after);
+}
+
+test "Hermes malformed allowlist and foreign petdex names are preserved" {
+    if (builtin.os.tag == .windows) return;
+    const home = ".zig-cache/petdex-hermes-allow-safety";
+    plat.makeDir(home);
+    plat.makeDir(home ++ "/.hermes");
+    var pb: [512]u8 = undefined;
+    const allow = std.fmt.bufPrint(&pb, "{s}/.hermes/shell-hooks-allowlist.json", .{home}) catch unreachable;
+    plat.deleteFile(allow);
+    const malformed = "{not-json\n";
+    try t.expect(writeFile(allow, malformed));
+    try t.expect(!writeHermesAllowlist(t.allocator, allow, true));
+    const unchanged = readFileAlloc(t.allocator, allow, 1024 * 1024).?;
+    defer t.allocator.free(unchanged);
+    try t.expectEqualStrings(malformed, unchanged);
+
+    try t.expect(writeFile(allow,
+        \\{"approvals":[{"event":"pre_tool_call","command":"petdex-audit-helper"}]}
+    ));
+    try t.expect(writeHermesAllowlist(t.allocator, allow, true));
+    const merged = readFileAlloc(t.allocator, allow, 1024 * 1024).?;
+    defer t.allocator.free(merged);
+    try t.expect(std.mem.indexOf(u8, merged, "petdex-audit-helper") != null);
+}
+
+test "Hermes scan requires complete approvals and plugin assets" {
+    if (builtin.os.tag == .windows) return;
+    const home = ".zig-cache/petdex-hermes-scan-complete";
+    plat.makeDir(home);
+    plat.makeDir(home ++ "/.hermes");
+    var pb: [512]u8 = undefined;
+    const cfg = std.fmt.bufPrint(&pb, "{s}/.hermes/config.yaml", .{home}) catch unreachable;
+    plat.deleteFile(cfg);
+    try t.expect(installHermes(t.allocator, home));
+    try t.expectEqual(HookStatus.current, scan(t.allocator, home)[@intFromEnum(AgentKind.hermes)].status);
+
+    var ab: [512]u8 = undefined;
+    const allow = std.fmt.bufPrint(&ab, "{s}/.hermes/shell-hooks-allowlist.json", .{home}) catch unreachable;
+    try t.expect(writeFile(allow, "{\"approvals\":[]}\n"));
+    try t.expectEqual(HookStatus.node, scan(t.allocator, home)[@intFromEnum(AgentKind.hermes)].status);
+
+    try t.expect(installHermes(t.allocator, home));
+    var mb: [512]u8 = undefined;
+    const manifest = hermesDesktopPluginPath(&mb, home, "plugin.yaml").?;
+    plat.deleteFile(manifest);
+    try t.expectEqual(HookStatus.node, scan(t.allocator, home)[@intFromEnum(AgentKind.hermes)].status);
 }
