@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   aggregateState,
@@ -6,12 +9,15 @@ import {
   type HerdrEvent,
   herdrAgents,
   parseCliAgents,
+  postState,
   postUpdate,
+  reconcileEvent,
   safePaneId,
   safeText,
   shouldBridge,
   statusState,
   updateFromEvent,
+  withBridgeLock,
 } from "./bridge";
 
 const agent: HerdrAgent = {
@@ -100,6 +106,27 @@ describe("Herdr Petdex bridge", () => {
     ).toBe("idle");
   });
 
+  test("reconciles a stale event against Herdr's current pane state", () => {
+    const stale: HerdrEvent = {
+      data: {
+        agent: "cursor",
+        agent_status: "working",
+        pane_id: "w1:p5",
+        title: "Old work",
+      },
+    };
+    const current: HerdrAgent = {
+      agent: "cursor",
+      agent_status: "blocked",
+      pane_id: "w1:p5",
+      terminal_title_stripped: "Needs approval",
+    };
+    const reconciled = reconcileEvent(stale, [current]);
+    expect(reconciled.aggregate).toBe("waiting");
+    expect(reconciled.event.data?.agent_status).toBe("blocked");
+    expect(reconciled.event.data?.title).toBe("Needs approval");
+  });
+
   test("rejects malformed pane ids and sanitizes Petdex flat JSON text", () => {
     expect(safePaneId("w1:p5")).toBe("w1:p5");
     expect(safePaneId("w1:p5;open")).toBe("");
@@ -154,5 +181,44 @@ describe("Herdr Petdex bridge", () => {
       agent_source: "claude",
       state: "waiting",
     });
+  });
+
+  test("posts idle independently when no bubble exists", async () => {
+    const requests: Array<{ body: string; url: string }> = [];
+    const fetcher = async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      requests.push({ body: String(init?.body), url: String(input) });
+      return new Response("{}", { status: 200 });
+    };
+    await postState("idle", "herdr", "secret", fetcher as typeof fetch);
+    expect(requests).toEqual([
+      {
+        body: '{"state":"idle","agent_source":"herdr"}',
+        url: "http://127.0.0.1:7777/state",
+      },
+    ]);
+  });
+
+  test("serializes concurrent bridge reconciliations", async () => {
+    const stateRoot = await mkdtemp(join(tmpdir(), "petdex-herdr-"));
+    let active = 0;
+    let maximum = 0;
+    try {
+      await Promise.all(
+        Array.from({ length: 6 }, () =>
+          withBridgeLock(async () => {
+            active += 1;
+            maximum = Math.max(maximum, active);
+            await Bun.sleep(10);
+            active -= 1;
+          }, stateRoot),
+        ),
+      );
+      expect(maximum).toBe(1);
+    } finally {
+      await rm(stateRoot, { recursive: true, force: true });
+    }
   });
 });

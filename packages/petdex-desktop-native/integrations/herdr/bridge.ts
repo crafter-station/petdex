@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { mkdir, open, readFile, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 
 export type AgentStatus = "idle" | "working" | "blocked" | "done" | "unknown";
@@ -204,19 +204,92 @@ export async function postUpdate(
       body: JSON.stringify(update.bubble),
       signal: AbortSignal.timeout(500),
     }),
-    fetcher("http://127.0.0.1:7777/state", {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        state: update.state,
-        agent_source: update.bubble.agent_source,
-      }),
-      signal: AbortSignal.timeout(500),
-    }),
+    postState(update.state, update.bubble.agent_source, token, fetcher),
   ];
   const responses = await Promise.all(requests);
-  if (responses.some((response) => !response.ok))
-    throw new Error("Petdex rejected Herdr update");
+  if (!responses[0].ok) throw new Error("Petdex rejected Herdr update");
+}
+
+export async function postState(
+  state: PetdexUpdate["state"],
+  agentSource: string,
+  token: string,
+  fetcher: typeof fetch = fetch,
+): Promise<Response> {
+  const response = await fetcher("http://127.0.0.1:7777/state", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-petdex-update-token": token,
+    },
+    body: JSON.stringify({ state, agent_source: agentSource }),
+    signal: AbortSignal.timeout(500),
+  });
+  if (!response.ok) throw new Error("Petdex rejected Herdr state");
+  return response;
+}
+
+export async function withBridgeLock<T>(
+  run: () => Promise<T>,
+  stateRoot = process.env.HERDR_PLUGIN_STATE_DIR,
+): Promise<T> {
+  if (!stateRoot) return run();
+  await mkdir(stateRoot, { recursive: true });
+  const lockPath = join(stateRoot, "petdex-bridge.lock");
+  let lock: Awaited<ReturnType<typeof open>> | undefined;
+  for (let attempt = 0; attempt < 250; attempt += 1) {
+    try {
+      lock = await open(lockPath, "wx");
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      const lockStat = await stat(lockPath).catch(() => undefined);
+      if (lockStat && Date.now() - lockStat.mtimeMs > 30_000) {
+        await rm(lockPath, { force: true });
+        continue;
+      }
+      if (attempt === 249)
+        throw new Error("Timed out waiting for Petdex bridge");
+      await Bun.sleep(20);
+    }
+  }
+  if (!lock) throw new Error("Could not lock Petdex bridge");
+  try {
+    return await run();
+  } finally {
+    await lock.close();
+    await rm(lockPath, { force: true });
+  }
+}
+
+export function reconcileEvent(
+  event: HerdrEvent,
+  agents: HerdrAgent[],
+): {
+  aggregate: PetdexUpdate["state"];
+  event: HerdrEvent;
+  info: HerdrAgent | undefined;
+} {
+  const pane = safePaneId(event.data?.pane_id);
+  const info = agents.find((agent) => safePaneId(agent.pane_id) === pane);
+  const reconciled: HerdrEvent = info
+    ? {
+        ...event,
+        data: {
+          ...event.data,
+          agent: info.agent ?? event.data?.agent,
+          agent_status: info.agent_status ?? event.data?.agent_status,
+          pane_id: info.pane_id ?? event.data?.pane_id,
+          state_labels: info.state_labels ?? event.data?.state_labels,
+          title: info.terminal_title_stripped ?? event.data?.title,
+        },
+      }
+    : event;
+  return {
+    aggregate: aggregateState(agents, info ? undefined : reconciled.data),
+    event: reconciled,
+    info,
+  };
 }
 
 async function loadConfig(): Promise<BridgeConfig> {
@@ -259,12 +332,11 @@ async function token(): Promise<string> {
 async function deliver(event: HerdrEvent, config: BridgeConfig): Promise<void> {
   if (event.data?.agent && !shouldBridge(event.data.agent, config)) return;
   const agents = herdrAgents();
-  const pane = safePaneId(event.data?.pane_id);
-  const info = agents.find((agent) => safePaneId(agent.pane_id) === pane);
+  const reconciled = reconcileEvent(event, agents);
   const update = updateFromEvent(
-    event,
-    info,
-    aggregateState(agents, event.data),
+    reconciled.event,
+    reconciled.info,
+    reconciled.aggregate,
     config,
   );
   const secret = update ? await token() : "";
@@ -276,6 +348,7 @@ async function snapshot(config: BridgeConfig): Promise<void> {
   const secret = await token();
   if (!secret) return;
   const aggregate = aggregateState(agents);
+  await postState(aggregate, "herdr", secret);
   for (const agent of agents) {
     if (agent.agent_status !== "working" && agent.agent_status !== "blocked")
       continue;
@@ -317,11 +390,13 @@ async function testBridge(): Promise<void> {
 async function main(): Promise<void> {
   const mode = process.argv[2] ?? "event";
   const config = await loadConfig();
-  if (mode === "snapshot") return snapshot(config);
+  if (mode === "snapshot") return withBridgeLock(() => snapshot(config));
   if (mode === "test") return testBridge();
   const eventName = process.env.HERDR_PLUGIN_EVENT;
   if (eventName && eventName !== "pane.agent_status_changed") return;
-  return deliver(parseEvent(process.env.HERDR_PLUGIN_EVENT_JSON), config);
+  return withBridgeLock(() =>
+    deliver(parseEvent(process.env.HERDR_PLUGIN_EVENT_JSON), config),
+  );
 }
 
 if (import.meta.main) {

@@ -17,9 +17,7 @@ pub const Status = enum(u8) {
 
 pub fn detect(allocator: std.mem.Allocator, home: []const u8) Status {
     if (!plat.herdrAvailable(home)) return .absent;
-    var path_buf: [768]u8 = undefined;
-    const path = std.fmt.bufPrint(&path_buf, "{s}/.config/herdr/plugins.json", .{home}) catch return .available;
-    const source = plat.readFileAlloc(allocator, path, 1024 * 1024) orelse return .available;
+    const source = plat.herdrPluginListAlloc(allocator, home) orelse return .available;
     defer allocator.free(source);
     return if (petdexPluginEnabled(allocator, source)) .connected else .available;
 }
@@ -27,8 +25,12 @@ pub fn detect(allocator: std.mem.Allocator, home: []const u8) Status {
 fn petdexPluginEnabled(allocator: std.mem.Allocator, source: []const u8) bool {
     const parsed = std.json.parseFromSlice(std.json.Value, allocator, source, .{}) catch return false;
     defer parsed.deinit();
-    if (parsed.value != .array) return false;
-    for (parsed.value.array.items) |entry| {
+    if (parsed.value != .object) return false;
+    const result = parsed.value.object.get("result") orelse return false;
+    if (result != .object) return false;
+    const plugins = result.object.get("plugins") orelse return false;
+    if (plugins != .array) return false;
+    for (plugins.array.items) |entry| {
         if (entry != .object) continue;
         const id = entry.object.get("plugin_id") orelse continue;
         if (id != .string or !std.mem.eql(u8, id.string, "dev.petdex.bridge")) continue;
@@ -40,7 +42,8 @@ fn petdexPluginEnabled(allocator: std.mem.Allocator, source: []const u8) bool {
 
 test "Petdex Herdr plugin status follows its enabled field" {
     const allocator = std.testing.allocator;
-    try std.testing.expect(petdexPluginEnabled(allocator, "[{\"plugin_id\":\"dev.petdex.bridge\",\"enabled\":true}]"));
-    try std.testing.expect(!petdexPluginEnabled(allocator, "[{\"plugin_id\":\"dev.petdex.bridge\",\"enabled\":false}]"));
-    try std.testing.expect(!petdexPluginEnabled(allocator, "[{\"plugin_id\":\"other\",\"enabled\":true}]"));
+    try std.testing.expect(petdexPluginEnabled(allocator, "{\"result\":{\"plugins\":[{\"plugin_id\":\"dev.petdex.bridge\",\"enabled\":true,\"source\":{\"kind\":\"github\"}}]}}"));
+    try std.testing.expect(!petdexPluginEnabled(allocator, "{\"result\":{\"plugins\":[{\"plugin_id\":\"dev.petdex.bridge\",\"enabled\":false}]}}"));
+    try std.testing.expect(!petdexPluginEnabled(allocator, "{\"result\":{\"plugins\":[{\"plugin_id\":\"other\",\"enabled\":true}]}}"));
+    try std.testing.expect(!petdexPluginEnabled(allocator, "{\"result\":{\"plugins\":[]}}"));
 }

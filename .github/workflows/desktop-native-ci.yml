@@ -68,10 +68,38 @@ jobs:
           - platform: windows
             runner: windows-2022
             expected_to_fail: false
+    env:
+      HERDR_PLUGIN_SOURCE: ${{ (github.event.pull_request.head.repo.full_name || github.repository) }}/packages/petdex-desktop-native/integrations/herdr
+      HERDR_PLUGIN_REF: ${{ github.event.pull_request.head.sha || github.sha }}
 
     steps:
       - name: Checkout petdex
         uses: actions/checkout@v7
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install Herdr (Unix)
+        if: matrix.platform != 'windows'
+        shell: bash
+        run: |
+          curl -fsSL https://herdr.dev/install.sh -o "$RUNNER_TEMP/install-herdr.sh"
+          HERDR_INSTALL_DIR="$RUNNER_TEMP/herdr" sh "$RUNNER_TEMP/install-herdr.sh"
+          echo "$RUNNER_TEMP/herdr" >> "$GITHUB_PATH"
+
+      - name: Install Herdr (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $installer = "$env:RUNNER_TEMP\install-herdr.ps1"
+          Invoke-WebRequest -Uri "https://herdr.dev/install.ps1" -OutFile $installer
+          & $installer -InstallDir "$env:RUNNER_TEMP\herdr"
+          "$env:RUNNER_TEMP\herdr" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Install managed Herdr plugin
+        shell: bash
+        working-directory: packages/petdex-desktop-native/integrations/herdr
+        run: bun run managed-smoke.ts install
 
       - name: Install Linux GUI libraries
         # The SDK's Linux host links gtk4. Cross-compiling this from
@@ -202,6 +230,24 @@ jobs:
             Set-Content -Path "$dir\pet.json" -NoNewline
           Get-ChildItem $dir | Select-Object Name, Length | Format-Table -AutoSize
 
+      - name: Exercise managed Herdr plugin (macOS)
+        if: matrix.platform == 'macos'
+        shell: bash
+        working-directory: packages/petdex-desktop-native
+        run: |
+          set -euo pipefail
+          PETDEX_PET=ci-pet ./zig-out/bin/petdex-desktop-native > herdr-smoke.log 2>&1 &
+          APP_PID=$!
+          for _ in $(seq 1 60); do
+            test -s "$HOME/.petdex/runtime/update-token" && break
+            kill -0 "$APP_PID" || { cat herdr-smoke.log; exit 1; }
+            sleep 1
+          done
+          test -s "$HOME/.petdex/runtime/update-token"
+          bun run integrations/herdr/managed-smoke.ts action
+          kill "$APP_PID" || true
+          wait "$APP_PID" 2>/dev/null || true
+
       - name: Run and exercise the hook server (Linux)
         if: matrix.platform == 'linux'
         shell: bash
@@ -220,6 +266,7 @@ jobs:
           sleep 10
           kill -0 "$APP_PID" || { echo "app died"; cat run.log; exit 1; }
           TOKEN=$(cat ~/.petdex/runtime/update-token)
+          bun run integrations/herdr/managed-smoke.ts action
           curl -fsS -X POST -H "x-petdex-update-token: $TOKEN" \
             -H "Content-Type: application/json" -d '{"state":"running"}' \
             http://127.0.0.1:7777/state
@@ -462,6 +509,7 @@ jobs:
           $tokenPath = "$env:USERPROFILE\.petdex\runtime\update-token"
           if (Test-Path $tokenPath) {
             $token = Get-Content $tokenPath -Raw
+            bun run integrations/herdr/managed-smoke.ts action
             "=== hook round trip ==="
             Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:7777/state" `
               -Headers @{ "x-petdex-update-token" = $token } `

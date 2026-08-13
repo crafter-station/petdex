@@ -492,6 +492,31 @@ fn spawnAndWait(argv: []const []const u8) bool {
     };
 }
 
+fn runHerdrPluginList(allocator: std.mem.Allocator, binary: []const u8) ?[]u8 {
+    var scope = Scope.init();
+    defer scope.deinit();
+    const result = std.process.run(allocator, scope.io(), .{
+        .argv = &.{ binary, "plugin", "list", "--plugin", "dev.petdex.bridge", "--json" },
+        .stdout_limit = .limited(1024 * 1024),
+        .stderr_limit = .limited(64 * 1024),
+    }) catch return null;
+    allocator.free(result.stderr);
+    if (result.term != .exited or result.term.exited != 0) {
+        allocator.free(result.stdout);
+        return null;
+    }
+    return result.stdout;
+}
+
+pub fn herdrPluginListAlloc(allocator: std.mem.Allocator, home: []const u8) ?[]u8 {
+    if (runHerdrPluginList(allocator, "herdr")) |source| return source;
+    var local_buf: [768]u8 = undefined;
+    const local = std.fmt.bufPrint(&local_buf, "{s}/.local/bin/herdr", .{home}) catch return null;
+    if (runHerdrPluginList(allocator, local)) |source| return source;
+    if (runHerdrPluginList(allocator, "/opt/homebrew/bin/herdr")) |source| return source;
+    return runHerdrPluginList(allocator, "/usr/local/bin/herdr");
+}
+
 pub fn herdrAvailable(home: []const u8) bool {
     if (spawnAndWait(&.{ "herdr", "--version" })) return true;
     var local_buf: [768]u8 = undefined;
