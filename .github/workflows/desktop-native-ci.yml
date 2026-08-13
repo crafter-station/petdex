@@ -515,6 +515,10 @@ jobs:
           $tokenPath = "$env:USERPROFILE\.petdex\runtime\update-token"
           if (Test-Path $tokenPath) {
             $token = Get-Content $tokenPath -Raw
+            "=== pre-Herdr health probe ==="
+            Invoke-RestMethod -Uri "http://127.0.0.1:7777/health" | ConvertTo-Json -Compress
+            "=== pre-Herdr stderr ==="
+            Get-Content run.err -ErrorAction SilentlyContinue
             $herdrServer = Start-Process -FilePath (Get-Command herdr).Source `
               -ArgumentList "server" -RedirectStandardOutput herdr.log `
               -RedirectStandardError herdr.err -PassThru
@@ -540,6 +544,13 @@ jobs:
               -Headers @{ "x-petdex-update-token" = $token } `
               -ContentType "application/json" -Body '{"state":"running"}' | ConvertTo-Json -Compress
             Invoke-RestMethod -Uri "http://127.0.0.1:7777/state" | ConvertTo-Json -Compress
+            "=== runtime mirrors after requests ==="
+            Get-Content "$env:USERPROFILE\.petdex\runtime\state.json" -ErrorAction SilentlyContinue
+            Get-Content "$env:USERPROFILE\.petdex\runtime\bubble.json" -ErrorAction SilentlyContinue
+            "=== stderr after requests ==="
+            Get-Content run.err -ErrorAction SilentlyContinue
+            "=== process after requests ==="
+            if ($app.HasExited) { "EXITED, code $($app.ExitCode)" } else { "alive, pid $($app.Id)" }
             herdr server stop
             $herdrServer.WaitForExit(10000) | Out-Null
             if ($bridgeExit -ne 0) { throw "managed Herdr action failed" }
