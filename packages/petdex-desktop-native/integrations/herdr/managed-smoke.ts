@@ -75,15 +75,19 @@ async function install(): Promise<void> {
 
 async function waitForServer(): Promise<boolean> {
   for (let attempt = 0; attempt < 80; attempt += 1) {
-    if (run(["status", "server"], true)) return true;
+    if (serverRunning()) return true;
     await Bun.sleep(100);
   }
   return false;
 }
 
+function serverRunning(): boolean {
+  return /^status:\s+running$/m.test(run(["status", "server"], true));
+}
+
 async function action(): Promise<void> {
   let server: ReturnType<typeof Bun.spawn> | undefined;
-  if (!run(["status", "server"], true)) {
+  if (!serverRunning()) {
     server = Bun.spawn([herdr, "server"], {
       stderr: "pipe",
       stdout: "pipe",
