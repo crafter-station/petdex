@@ -57,7 +57,8 @@ pub fn run(phase: []const u8, arg_agent: ?[]const u8, origin_app: plat.OriginApp
     var tty_buf: [64]u8 = undefined;
     const source_tty = if (origin_app == .terminal) (plat.controllingTty(&tty_buf) orelse "") else "";
     const source_cwd = plat.safeSourceCwd(source_cwd_raw) orelse "";
-    const session_id = payloadSessionId(payload);
+    var session_hash_buf: [64]u8 = undefined;
+    const session_id = payloadSessionId(payload, &session_hash_buf);
 
     // Session title: user-prompt seeds it, every event attaches it.
     var sessions_buf: [512]u8 = undefined;
@@ -420,13 +421,21 @@ fn safeSessionId(raw: ?[]const u8) ?[]const u8 {
     return sid;
 }
 
-fn payloadSessionId(payload: []const u8) ?[]const u8 {
-    return safeSessionId(
-        jsonString(payload, "petdex_conversation_key") orelse
-            jsonString(payload, "session_id") orelse
-            jsonString(payload, "session_key") orelse
-            jsonString(payload, "parent_session_id"),
-    );
+fn normalizedConversationKey(raw: ?[]const u8, hash_buf: *[64]u8) ?[]const u8 {
+    const value = raw orelse return null;
+    if (safeSessionId(value)) |safe| return safe;
+    if (value.len == 0) return null;
+    var digest: [std.crypto.hash.sha2.Sha256.digest_length]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(value, &digest, .{});
+    hash_buf.* = std.fmt.bytesToHex(digest, .lower);
+    return hash_buf;
+}
+
+fn payloadSessionId(payload: []const u8, hash_buf: *[64]u8) ?[]const u8 {
+    if (jsonString(payload, "petdex_conversation_key")) |key| return normalizedConversationKey(key, hash_buf);
+    if (safeSessionId(jsonString(payload, "session_id"))) |session| return session;
+    if (jsonString(payload, "session_key")) |key| return normalizedConversationKey(key, hash_buf);
+    return safeSessionId(jsonString(payload, "parent_session_id"));
 }
 
 fn rememberTitle(dir: []const u8, session_id: []const u8, prompt: []const u8) void {
@@ -729,11 +738,15 @@ test "Hermes lifecycle phases render bubbles and states" {
 }
 
 test "Hermes metadata chooses canonical conversation identity" {
+    var hash_buf: [64]u8 = undefined;
     try t.expectEqualStrings(
         "stable-session",
-        payloadSessionId("{\"session_id\":\"raw-session\",\"petdex_conversation_key\":\"stable-session\"}").?,
+        payloadSessionId("{\"session_id\":\"raw-session\",\"petdex_conversation_key\":\"stable-session\"}", &hash_buf).?,
     );
-    try t.expectEqualStrings("approval-session", payloadSessionId("{\"session_key\":\"approval-session\"}").?);
+    try t.expectEqualStrings("approval-session", payloadSessionId("{\"session_key\":\"approval-session\"}", &hash_buf).?);
+    const gateway = payloadSessionId("{\"session_key\":\"agent:main:telegram:dm:123\"}", &hash_buf).?;
+    try t.expectEqual(@as(usize, 64), gateway.len);
+    try t.expect(std.mem.indexOfScalar(u8, gateway, ':') == null);
 }
 
 test "state mapping mirrors the TS runner" {
