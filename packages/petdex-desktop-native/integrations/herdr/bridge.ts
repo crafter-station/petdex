@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { mkdir, open, readFile, rm, stat } from "node:fs/promises";
+import { request } from "node:http";
 import { join } from "node:path";
 
 export type AgentStatus = "idle" | "working" | "blocked" | "done" | "unknown";
@@ -44,6 +45,12 @@ export type PetdexUpdate = {
     title: string;
   };
   state: "idle" | "jumping" | "running" | "waiting";
+};
+
+export type PetdexResponse = {
+  body: string;
+  ok: boolean;
+  status: number;
 };
 
 const directPetdexAgents = new Set([
@@ -188,21 +195,77 @@ export function parseEvent(raw: string | undefined): HerdrEvent {
   }
 }
 
+export function petdexRequest(
+  path: string,
+  options: { body?: string; method?: "GET" | "POST"; token?: string } = {},
+): Promise<PetdexResponse> {
+  return new Promise((resolve, reject) => {
+    const body = options.body ?? "";
+    const headers: Record<string, string | number> = {
+      connection: "close",
+    };
+    if (body) {
+      headers["content-length"] = Buffer.byteLength(body);
+      headers["content-type"] = "application/json";
+    }
+    if (options.token) headers["x-petdex-update-token"] = options.token;
+    const req = request(
+      {
+        hostname: "127.0.0.1",
+        port: 7777,
+        path,
+        method: options.method ?? "GET",
+        headers,
+      },
+      (response) => {
+        const chunks: Buffer[] = [];
+        response.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+        response.on("end", () => {
+          const status = response.statusCode ?? 0;
+          resolve({
+            body: Buffer.concat(chunks).toString("utf8"),
+            ok: status >= 200 && status < 300,
+            status,
+          });
+        });
+      },
+    );
+    req.setTimeout(5_000, () => req.destroy(new Error("Petdex timed out")));
+    req.on("error", reject);
+    if (body) req.write(body);
+    req.end();
+  });
+}
+
+async function postJson(
+  path: string,
+  body: string,
+  token: string,
+  fetcher?: typeof fetch,
+): Promise<{ ok: boolean }> {
+  if (!fetcher) return petdexRequest(path, { body, method: "POST", token });
+  return fetcher(`http://127.0.0.1:7777${path}`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-petdex-update-token": token,
+    },
+    body,
+    signal: AbortSignal.timeout(5_000),
+  });
+}
+
 export async function postUpdate(
   update: PetdexUpdate,
   token: string,
-  fetcher: typeof fetch = fetch,
+  fetcher?: typeof fetch,
 ): Promise<void> {
-  const headers = {
-    "content-type": "application/json",
-    "x-petdex-update-token": token,
-  };
-  const bubble = await fetcher("http://127.0.0.1:7777/bubble", {
-    method: "POST",
-    headers,
-    body: JSON.stringify(update.bubble),
-    signal: AbortSignal.timeout(500),
-  });
+  const bubble = await postJson(
+    "/bubble",
+    JSON.stringify(update.bubble),
+    token,
+    fetcher,
+  );
   if (!bubble.ok) throw new Error("Petdex rejected Herdr update");
   await postState(update.state, update.bubble.agent_source, token, fetcher);
 }
@@ -211,17 +274,14 @@ export async function postState(
   state: PetdexUpdate["state"],
   agentSource: string,
   token: string,
-  fetcher: typeof fetch = fetch,
-): Promise<Response> {
-  const response = await fetcher("http://127.0.0.1:7777/state", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-petdex-update-token": token,
-    },
-    body: JSON.stringify({ state, agent_source: agentSource }),
-    signal: AbortSignal.timeout(500),
-  });
+  fetcher?: typeof fetch,
+): Promise<{ ok: boolean }> {
+  const response = await postJson(
+    "/state",
+    JSON.stringify({ state, agent_source: agentSource }),
+    token,
+    fetcher,
+  );
   if (!response.ok) throw new Error("Petdex rejected Herdr state");
   return response;
 }

@@ -1,6 +1,8 @@
 const decoder = new TextDecoder();
 const herdr = process.env.HERDR_BIN_PATH || "herdr";
 
+import { petdexRequest } from "./bridge";
+
 type PluginList = {
   result?: {
     plugins?: Array<{
@@ -154,9 +156,9 @@ async function action(): Promise<void> {
       throw new Error(
         finished?.stderr || `Herdr action did not succeed: ${finished?.status}`,
       );
-    const response = await fetch("http://127.0.0.1:7777/state");
+    const response = await petdexRequest("/state");
     if (!response.ok) throw new Error("Petdex state endpoint is unavailable");
-    const state = (await response.json()) as { state?: string };
+    const state = JSON.parse(response.body) as { state?: string };
     if (state.state !== "jumping")
       throw new Error(`Petdex did not receive Herdr action: ${state.state}`);
   } finally {
