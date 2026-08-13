@@ -509,12 +509,34 @@ jobs:
           $tokenPath = "$env:USERPROFILE\.petdex\runtime\update-token"
           if (Test-Path $tokenPath) {
             $token = Get-Content $tokenPath -Raw
+            $herdrServer = Start-Process -FilePath (Get-Command herdr).Source `
+              -ArgumentList "server" -RedirectStandardOutput herdr.log `
+              -RedirectStandardError herdr.err -PassThru
+            $herdrReady = $false
+            for ($attempt = 0; $attempt -lt 80; $attempt++) {
+              if ((herdr status server) -match "status:\s+running") {
+                $herdrReady = $true
+                break
+              }
+              Start-Sleep -Milliseconds 100
+            }
+            if (-not $herdrReady) {
+              Get-Content herdr.log -ErrorAction SilentlyContinue
+              Get-Content herdr.err -ErrorAction SilentlyContinue
+              throw "Herdr server did not start"
+            }
             bun run integrations/herdr/managed-smoke.ts action
+            $bridgeExit = $LASTEXITCODE
+            "=== Herdr plugin logs ==="
+            herdr plugin log list --plugin dev.petdex.bridge --limit 20
             "=== hook round trip ==="
             Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:7777/state" `
               -Headers @{ "x-petdex-update-token" = $token } `
               -ContentType "application/json" -Body '{"state":"running"}' | ConvertTo-Json -Compress
             Invoke-RestMethod -Uri "http://127.0.0.1:7777/state" | ConvertTo-Json -Compress
+            herdr server stop
+            $herdrServer.WaitForExit(10000) | Out-Null
+            if ($bridgeExit -ne 0) { throw "managed Herdr action failed" }
           } else {
             "NO TOKEN at $tokenPath"
           }

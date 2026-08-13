@@ -243,7 +243,14 @@ async function postJson(
   token: string,
   fetcher?: typeof fetch,
 ): Promise<{ ok: boolean }> {
-  if (!fetcher) return petdexRequest(path, { body, method: "POST", token });
+  if (!fetcher) {
+    try {
+      return await petdexRequest(path, { body, method: "POST", token });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Petdex ${path} request failed: ${message}`);
+    }
+  }
   return fetcher(`http://127.0.0.1:7777${path}`, {
     method: "POST",
     headers: {
