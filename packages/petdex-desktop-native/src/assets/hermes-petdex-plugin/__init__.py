@@ -10,6 +10,7 @@ native shell-hook configuration and are deliberately not duplicated here.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sqlite3
@@ -78,6 +79,15 @@ def _source_marks_subagent(row: dict[str, str]) -> bool:
     # durable `_delegate_from` marker. Continuations keep a session_key;
     # parent-linked, unkeyed rows are therefore safe to suppress as children.
     return bool(row.get("parent_session_id")) and not bool(row.get("session_key"))
+
+
+def _conversation_key(value: str) -> str:
+    cleaned = " ".join(str(value or "").split())
+    if cleaned and len(cleaned) <= 64 and all(
+        char.isascii() and (char.isalnum() or char in "-_") for char in cleaned
+    ):
+        return cleaned
+    return hashlib.sha256(cleaned.encode("utf-8")).hexdigest() if cleaned else ""
 
 
 def _session_context(
@@ -190,7 +200,7 @@ def _session_context(
         return " ".join(str(value or "").split())[:limit]
 
     return {
-        "conversation": clean(conversation, 96),
+        "conversation": _conversation_key(conversation),
         "parent": clean(parent, 96),
         "kind": kind,
         "label": clean(label, 48),
@@ -212,8 +222,8 @@ def _callback(phase: str):
                 payload.get("parent_session_id") or payload.get("session_id") or ""
             )
             child_session_id = str(payload.get("child_session_id") or "")
-            is_subagent_lifecycle = phase in {"subagent-start", "subagent-stop"} and bool(child_session_id)
-            session_id = child_session_id if is_subagent_lifecycle else str(
+            is_subagent_lifecycle = phase in {"subagent-start", "subagent-stop"}
+            session_id = (child_session_id or parent_session_id) if is_subagent_lifecycle else str(
                 payload.get("session_id") or payload.get("session_key") or ""
             )
             context = _session_context(
