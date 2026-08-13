@@ -78,6 +78,24 @@ def lease_alive() -> bool:
         return False
 
 
+def remove_owned_pid() -> None:
+    try:
+        if PID.read_text(encoding="utf-8").strip() == str(os.getpid()):
+            PID.unlink()
+    except OSError:
+        pass
+
+
+def acquire_lock(lock_handle: Any) -> bool:
+    for _ in range(30):
+        try:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except OSError:
+            time.sleep(0.1)
+    return False
+
+
 def active_home() -> Path:
     """Return the active Hermes profile home without trusting arbitrary text."""
 
@@ -249,10 +267,8 @@ def run() -> int:
     if not lease_alive():
         return 75
     with LOCK.open("w", encoding="utf-8") as lock:
-        try:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            return 0
+        if not acquire_lock(lock):
+            return 75
         PID.write_text(str(os.getpid()), encoding="utf-8")
         previous: dict[str, dict[str, Any]] = {}
         try:
@@ -289,10 +305,7 @@ def run() -> int:
                             previous.pop(key, None)
                 time.sleep(DISCOVERY_SECONDS)
         finally:
-            try:
-                PID.unlink()
-            except OSError:
-                pass
+            remove_owned_pid()
     return 0
 
 

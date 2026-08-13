@@ -1598,7 +1598,7 @@ fn runRemoteAction(model: *Model, slot_idx: usize, action: remote_runtime.Action
 }
 
 /// Boot entry: load remote-agents.json, fill slots, and kick each
-/// remote's probe. A missing or unparsable config is a no-op — local
+/// remote's probe. A missing or unparsable config is a no-op. Local
 /// pets never depend on remotes.
 fn startRemotes(model: *Model, fx: *Effects) void {
     const home = env_home orelse return;

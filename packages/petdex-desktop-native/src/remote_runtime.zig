@@ -134,7 +134,8 @@ pub const Slot = struct {
 /// token stdin bytes (the exit Msg's slices die with the update call,
 /// so anything a later spawn needs must live here).
 var outputs: [max_remotes]?[]remote_writeback.Output = .{null} ** max_remotes;
-var token_bufs: [max_remotes][128]u8 = undefined;
+const max_token_len = 128;
+var token_bufs: [max_remotes][max_token_len + 1]u8 = undefined;
 var token_lens: [max_remotes]usize = .{0} ** max_remotes;
 
 /// One resettable arena per remote. Its current output survives until the
@@ -184,7 +185,7 @@ pub const Spawn = struct {
 };
 
 /// Fill slots from a loaded config, skipping invalid remotes (logged,
-/// not fatal — one bad entry must not cost the rest). Returns how many
+/// not fatal. One bad entry must not cost the rest). Returns how many
 /// slots went active.
 pub fn fillFromConfig(slots: *[max_remotes]Slot, cfg: *const remote_agents.Config) usize {
     var n: usize = 0;
@@ -234,7 +235,7 @@ pub fn fillFromConfig(slots: *[max_remotes]Slot, cfg: *const remote_agents.Confi
 }
 
 /// Rebuild the config-shaped Remote a slot carries, for the argv
-/// builders. Identity slice points into the slot — valid for the call.
+/// builders. Identity slice points into the slot and is valid for the call.
 pub fn remoteFor(slot: *const Slot) remote_agents.Remote {
     return .{
         .name = slot.nameSlice(),
@@ -301,6 +302,7 @@ fn tokenAction(slot: *Slot, slot_idx: usize, home: []const u8) Action {
     var path_buf: [512]u8 = undefined;
     const token_path = std.fmt.bufPrint(&path_buf, "{s}/.petdex/runtime/update-token", .{home}) catch return retry(slot, true);
     const bytes = plat.readFile(token_path, &token_bufs[slot_idx]) orelse return retry(slot, true);
+    if (bytes.len > max_token_len) return retry(slot, true);
     const trimmed = std.mem.trim(u8, bytes, " \t\r\n");
     token_lens[slot_idx] = trimmed.len;
     if (trimmed.len == 0) return retry(slot, true);
@@ -423,7 +425,7 @@ fn retry(slot: *Slot, sync_failed: bool) Action {
 }
 
 /// Drive one slot past a finished spawn. `output` is the collected
-/// stdout (valid only during this call — staging copies it to disk
+/// stdout (valid only during this call; staging copies it to disk
 /// before returning).
 pub fn onSpawnExit(slot: *Slot, slot_idx: usize, op: Op, code: i32, output: []const u8, home: []const u8) Action {
     return onSpawnExitDetailed(slot, slot_idx, op, code, output, false, home);
@@ -930,6 +932,19 @@ test "missing local update token schedules a gated retry" {
     var slot = testSlot();
     slot.tunnel_ready = true;
     const action = tokenAction(&slot, 4, ".zig-cache/petdex-no-token-home");
+    try t.expect(action == .backoff);
+    try t.expect(slot.wb_failed);
+    try t.expect(!slot.sync_complete);
+}
+
+test "oversized local update token remains gated" {
+    const home = ".zig-cache/petdex-oversized-token-home";
+    plat.makeDir(home ++ "/.petdex/runtime");
+    const oversized: [max_token_len + 2]u8 = @splat('a');
+    try t.expect(plat.writeFile(home ++ "/.petdex/runtime/update-token", &oversized));
+    var slot = testSlot();
+    slot.tunnel_ready = true;
+    const action = tokenAction(&slot, 5, home);
     try t.expect(action == .backoff);
     try t.expect(slot.wb_failed);
     try t.expect(!slot.sync_complete);

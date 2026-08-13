@@ -58,7 +58,7 @@ Agents running on other machines can drive the same pet. Declare remotes in
 At launch the desktop probes each enabled remote (`ssh` with `BatchMode=yes`,
 no password prompts ever), then runs a fetch-merge-writeback: the remote's
 existing hook configs are read, merged locally by the exact installers a local
-connect uses, and written back — foreign hooks are preserved, never clobbered.
+connect uses, and written back. Foreign hooks are preserved, never clobbered.
 It then pushes the hook-server update token and holds a reverse tunnel
 (`ssh -R 127.0.0.1:7777:127.0.0.1:7777`, with a bounded remote health/lease
 command and supervised backoff) so hook

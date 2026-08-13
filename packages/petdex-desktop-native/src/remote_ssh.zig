@@ -38,7 +38,7 @@ pub const stdin_chunk = 3072;
 /// The remote hook script deliberately lands at the SAME path the
 /// desktop's hook binary occupies locally: the merged hook configs
 /// (codex hooks.json, hermes config.yaml) name this path, so one
-/// config works on both sides of the tunnel — a symlinked Zig binary
+/// config works on both sides of the tunnel. A symlinked Zig binary
 /// on the desktop, a POSIX sh script on the remote.
 pub const remote_hook_script = "~/.petdex/bin/petdex-hook";
 pub const remote_codex_watcher = "~/.petdex/bin/petdex-codex-watch";
@@ -258,7 +258,7 @@ pub fn probeArgv(buf: *[max_argv][]const u8, scratch: *Scratch, remote: *const R
     return buf[0 .. n + 1];
 }
 
-/// `cat -- '<path>'` on the remote; stdout is collected by the spawn.
+/// `cat` reads the quoted path on the remote; stdout is collected by the spawn.
 pub fn readArgv(buf: *[max_argv][]const u8, scratch: *Scratch, remote: *const Remote, path: []const u8) ?[]const []const u8 {
     const n = appendBase(buf, scratch, remote) orelse return null;
     if (n + 1 > max_argv) return null;
@@ -327,7 +327,7 @@ pub fn watcherArgv(
     const n = appendBase(buf, scratch, remote) orelse return null;
     if (n + 1 > max_argv) return null;
     const hermes_home = shQuote(&scratch.quote_a, remote.agents.hermes.home orelse remote_agents.default_hermes_home) orelse return null;
-    const helper = "umask 077; for x in python3 curl ps; do command -v \"$x\" >/dev/null 2>&1 || exit 69; done; runtime=\"$HOME/.petdex/runtime\"; lease=\"$runtime/tunnel-lease\"; mkdir -p \"$runtime\" || exit; test -f \"$lease\" || exit 75; is_owned() { old=$1; needle=$2; case \"$old\" in ''|*[!0-9]*) return 1 ;; esac; command=$(ps -ww -p \"$old\" -o command= 2>/dev/null) || return 1; case \"$command\" in *\"$needle\"*) return 0 ;; *) return 1 ;; esac; }; start_one() { p=$1; exe=$2; shift 2; if test -r \"$p\"; then old=$(cat \"$p\"); if is_owned \"$old\" \"$exe\"; then kill \"$old\" 2>/dev/null || true; fi; fi; rm -f \"$p\"; nohup \"$exe\" \"$@\" >/dev/null 2>&1 </dev/null & child=$!; i=0; stable=0; while test \"$i\" -lt 30; do if test -r \"$p\"; then actual=$(cat \"$p\"); if test \"$actual\" = \"$child\" && kill -0 \"$actual\" 2>/dev/null && is_owned \"$actual\" \"$exe\"; then stable=$((stable+1)); test \"$stable\" -ge 3 && return 0; else stable=0; fi; fi; i=$((i+1)); sleep 0.1; done; if is_owned \"$child\" \"$exe\"; then kill \"$child\" 2>/dev/null || true; fi; rm -f \"$p\"; return 1; }; ";
+    const helper = "umask 077; for x in python3 curl ps; do command -v \"$x\" >/dev/null 2>&1 || exit 69; done; r=\"$HOME/.petdex/runtime\"; l=\"$r/tunnel-lease\"; mkdir -p \"$r\" || exit; test -f \"$l\" || exit 75; own() { q=$1; n=$2; case \"$q\" in ''|*[!0-9]*) return 1 ;; esac; c=$(ps -ww -p \"$q\" -o command= 2>/dev/null) || return 1; case \"$c\" in *\"$n\"*) return 0 ;; *) return 1 ;; esac; }; start_one() { p=$1; exe=$2; shift 2; if test -r \"$p\"; then old=$(cat \"$p\"); if own \"$old\" \"$exe\"; then kill \"$old\" 2>/dev/null || true; fi; fi; rm -f \"$p\"; nohup \"$exe\" \"$@\" >/dev/null 2>&1 </dev/null & child=$!; i=0; stable=0; while test \"$i\" -lt 30; do if test -r \"$p\"; then actual=$(cat \"$p\"); if test \"$actual\" = \"$child\" && kill -0 \"$actual\" 2>/dev/null && own \"$actual\" \"$exe\"; then stable=$((stable+1)); test \"$stable\" -ge 3 && return 0; else stable=0; fi; fi; i=$((i+1)); sleep 0.1; done; if own \"$child\" \"$exe\"; then kill \"$child\" 2>/dev/null || true; fi; test \"$(cat \"$p\" 2>/dev/null)\" = \"$child\" && rm -f \"$p\"; return 1; }; ";
     if (start_codex and start_hermes) {
         const codex = shQuote(&scratch.quote_b, remote_codex_watcher) orelse return null;
         const codex_pid = shQuote(&scratch.quote_c, "~/.petdex/runtime/codex-watch.pid") orelse return null;
@@ -539,6 +539,8 @@ test "watcherArgv replaces the selected Petdesk watchers and detaches cleanly" {
     try t.expect(std.mem.indexOf(u8, command, ".petdex/bin/petdex-hermes-watch") == null);
     try t.expect(std.mem.indexOf(u8, command, "nohup") != null);
     try t.expect(std.mem.indexOf(u8, command, "</dev/null &") != null);
+    try t.expect(std.mem.indexOf(u8, command, "own() { q=$1;") != null);
+    try t.expect(std.mem.indexOf(u8, command, "start_one() { p=$1;") != null);
     try t.expect(std.mem.indexOf(u8, command, "kill -0 \"$actual\"") != null);
     try t.expect(std.mem.indexOf(u8, command, "tunnel-lease") != null);
 

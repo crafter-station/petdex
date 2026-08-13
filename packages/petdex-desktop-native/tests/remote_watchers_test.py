@@ -4,9 +4,12 @@
 from __future__ import annotations
 
 import importlib.util
+import fcntl
 import json
+import os
 import sqlite3
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -100,6 +103,38 @@ class HermesWatcherTests(unittest.TestCase):
             self.assertEqual(64, len(canonical))
             self.assertEqual(canonical, active[0]["session_id"])
             self.assertEqual("completed", terminals["ended-key"]["status"])
+
+
+class WatcherOwnershipTests(unittest.TestCase):
+    def test_pid_cleanup_never_removes_another_process(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            for name, filename in (
+                ("codex_pid_test", "petdex-codex-watch.py"),
+                ("hermes_pid_test", "petdex-hermes-watch.py"),
+            ):
+                watcher = load(name, filename)
+                watcher.PID = Path(directory) / f"{name}.pid"
+                watcher.PID.write_text("999999", encoding="ascii")
+                watcher.remove_owned_pid()
+                self.assertTrue(watcher.PID.exists())
+                watcher.PID.write_text(str(os.getpid()), encoding="ascii")
+                watcher.remove_owned_pid()
+                self.assertFalse(watcher.PID.exists())
+
+    def test_lock_acquisition_waits_for_previous_owner(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            for name, filename in (
+                ("codex_lock_test", "petdex-codex-watch.py"),
+                ("hermes_lock_test", "petdex-hermes-watch.py"),
+            ):
+                watcher = load(name, filename)
+                path = Path(directory) / f"{name}.lock"
+                with path.open("a+") as first, path.open("a+") as second:
+                    fcntl.flock(first.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    release = threading.Timer(0.2, lambda: fcntl.flock(first.fileno(), fcntl.LOCK_UN))
+                    release.start()
+                    self.assertTrue(watcher.acquire_lock(second))
+                    release.join()
 
 
 if __name__ == "__main__":

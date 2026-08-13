@@ -196,7 +196,7 @@ fn agentsSection(ui: *AppUi, model: *const Model, icons: IconAtlas) AppUi.Node {
 /// Read-only by design: remotes are declared in
 /// ~/.petdex/remote-agents.json and the section only reports what the
 /// runtime is doing with them. Hidden entirely when nothing is
-/// configured — a user without the feature gets no noise.
+/// configured. A user without the feature gets no noise.
 fn remoteSection(ui: *AppUi, model: *const Model) AppUi.Node {
     if (model.remote_count == 0) return ui.el(.stack, .{}, .{});
     var rows: [remote_runtime.max_remotes]AppUi.Node = undefined;

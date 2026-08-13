@@ -71,6 +71,24 @@ def lease_alive() -> bool:
         return False
 
 
+def remove_owned_pid() -> None:
+    try:
+        if PID.read_text(encoding="ascii").strip() == str(os.getpid()):
+            PID.unlink()
+    except OSError:
+        pass
+
+
+def acquire_lock(lock_handle: Any) -> bool:
+    for _ in range(30):
+        try:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except OSError:
+            time.sleep(0.1)
+    return False
+
+
 def session_index() -> list[dict[str, str]]:
     rows: dict[str, dict[str, str]] = {}
     raw = bounded_tail(INDEX, MAX_INDEX_BYTES).decode("utf-8", "ignore")
@@ -411,10 +429,8 @@ def run() -> int:
     if not lease_alive():
         return 75
     lock_handle = LOCK.open("a+")
-    try:
-        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        return 0
+    if not acquire_lock(lock_handle):
+        return 75
     PID.write_text(str(os.getpid()), encoding="ascii")
     watched: dict[str, dict[str, Any]] = {}
     paths: dict[str, Path] = {}
@@ -497,10 +513,7 @@ def run() -> int:
                     previous["delivered_hash"] = event_hash
             time.sleep(FOLLOW_SECONDS)
     finally:
-        try:
-            PID.unlink()
-        except OSError:
-            pass
+        remove_owned_pid()
     return 0
 
 

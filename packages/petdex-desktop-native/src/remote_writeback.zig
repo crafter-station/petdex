@@ -106,7 +106,7 @@ fn needsHermesWatcher(kind: AgentKind) bool {
 }
 
 /// Stage one fetched remote file into the fake home. Null bytes mean
-/// the remote file does not exist (ssh cat failed) — nothing staged,
+/// the remote file does not exist (ssh cat failed), nothing staged,
 /// and the installer treats it as a fresh install.
 pub fn prepareStaging(fake_home: []const u8) bool {
     if (!plat.deleteTree(fake_home)) return false;
@@ -144,7 +144,7 @@ fn safeRelativePath(rel: []const u8) bool {
     return true;
 }
 
-/// Run the agent's own installer against the fake home — the same
+/// Run the agent's own installer against the fake home. The same
 /// merge, consent, and validation rules as a local connect. Parent
 /// dirs are pre-created for every file the agent touches: locally the
 /// agent's own install created them, but a fresh fake home (or a fresh
@@ -169,7 +169,7 @@ pub fn runInstaller(allocator: std.mem.Allocator, kind: AgentKind, fake_home: []
 }
 
 /// Read back everything a push must carry: the agent's files, plus the
-/// hook script for shell-exec agents. Null on any read failure — a
+/// hook script for shell-exec agents. Null on any read failure. A
 /// partial push set would leave the remote half-configured.
 pub fn collectOutputs(
     allocator: std.mem.Allocator,
@@ -296,6 +296,7 @@ test "Hermes watcher reconciles only current metadata" {
 
 test "remote hook preserves Codex conversation metadata and rich updates" {
     try t.expect(std.mem.indexOf(u8, hook_script, "text_field prompt 60") != null);
+    try t.expectEqual(@as(usize, 2), std.mem.count(u8, hook_script, "ord(ch) < 32 or ord(ch) == 127"));
     try t.expect(std.mem.indexOf(u8, hook_script, "$session_id.title") != null);
     try t.expect(std.mem.indexOf(u8, hook_script, "last_assistant_message 960") != null);
     try t.expect(std.mem.indexOf(u8, hook_script, "pre|post)") != null);
