@@ -3046,7 +3046,9 @@ test "Hermes desktop plugin forwards authoritative titles and prompt events" {
     try t.expect(std.mem.indexOf(u8, hermes_desktop_plugin_init, "force_subagent") != null);
     try t.expect(std.mem.indexOf(u8, hermes_desktop_plugin_init, "\"kind\": \"subagent\"") != null);
     try t.expect(std.mem.indexOf(u8, hermes_desktop_plugin_init, "not bool(row.get(\"session_key\"))") != null);
-    try t.expect(std.mem.indexOf(u8, hermes_desktop_plugin_init, "context[\"kind\"] == \"subagent\"") != null);
+    try t.expect(std.mem.indexOf(u8, hermes_desktop_plugin_init, "\"kind\": \"subagent\" if force_subagent else \"primary\"") != null);
+    try t.expect(std.mem.indexOf(u8, hermes_desktop_plugin_init, "payload.get(\"session_key\")") != null);
+    try t.expect(std.mem.indexOf(u8, hermes_desktop_plugin_init, "context[\"kind\"] == \"subagent\" and not is_subagent_lifecycle") != null);
 }
 
 test "hermes YAML merge preserves foreign keys, refreshes ours" {
