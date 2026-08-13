@@ -197,17 +197,14 @@ export async function postUpdate(
     "content-type": "application/json",
     "x-petdex-update-token": token,
   };
-  const requests = [
-    fetcher("http://127.0.0.1:7777/bubble", {
-      method: "POST",
-      headers,
-      body: JSON.stringify(update.bubble),
-      signal: AbortSignal.timeout(500),
-    }),
-    postState(update.state, update.bubble.agent_source, token, fetcher),
-  ];
-  const responses = await Promise.all(requests);
-  if (!responses[0].ok) throw new Error("Petdex rejected Herdr update");
+  const bubble = await fetcher("http://127.0.0.1:7777/bubble", {
+    method: "POST",
+    headers,
+    body: JSON.stringify(update.bubble),
+    signal: AbortSignal.timeout(500),
+  });
+  if (!bubble.ok) throw new Error("Petdex rejected Herdr update");
+  await postState(update.state, update.bubble.agent_source, token, fetcher);
 }
 
 export async function postState(
