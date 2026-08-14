@@ -271,7 +271,7 @@ fn updatesSection(ui: *AppUi, model: *const Model) AppUi.Node {
         else
             ui.button(.{ .variant = .primary, .on_press = .download_update }, "Download update")
     else
-        ui.button(.{ .variant = .secondary, .on_press = .check_updates, .disabled = model.update_phase == .checking }, "Check now");
+        ui.button(.{ .variant = .secondary, .on_press = .check_updates, .disabled = model.update_phase == .checking or model.update_cancel_pending }, "Check now");
     const warning_title = if (builtin.os.tag == .macos and model.install_source == .homebrew)
         "Homebrew manages updates"
     else

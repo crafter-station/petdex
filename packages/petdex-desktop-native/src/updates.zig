@@ -89,6 +89,9 @@ test "semantic versions compare numerically" {
     try std.testing.expect(!isNewer("0.7.0", "0.7.0"));
     try std.testing.expect(!isNewer("0.6.9", "0.7.0"));
     try std.testing.expect(!isNewer("0.8.0-beta.1", "0.7.0"));
+    try std.testing.expect(parseVersion("v0.8.0") == null);
+    try std.testing.expect(parseVersion("0.8.0.1") == null);
+    try std.testing.expect(parseVersion("4294967296.0.0") == null);
 }
 
 test "latest release payload accepts null and valid versions" {

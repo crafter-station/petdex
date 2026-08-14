@@ -128,12 +128,13 @@ pub const Msg = union(enum) {
     toggle_update_checks,
     update_response: native_sdk.EffectResponse,
     homebrew_done: native_sdk.EffectExit,
+    homebrew_timeout: native_sdk.EffectTimer,
     download_update,
     copy_brew_command,
     brew_command_copied: native_sdk.EffectClipboardResult,
     noop,
 
-    pub const view_unbound = .{ "frame_tick", "poll_tick", "physics_tick", "frame_clock", "cycle_state", "native_drag_watchdog", "chime_done", "quit_app", "toggle_focus_mode", "shuffle_pet", "remote_line", "remote_done", "remote_backoff", "update_boot_check", "update_response", "homebrew_done", "brew_command_copied" };
+    pub const view_unbound = .{ "frame_tick", "poll_tick", "physics_tick", "frame_clock", "cycle_state", "native_drag_watchdog", "chime_done", "quit_app", "toggle_focus_mode", "shuffle_pet", "remote_line", "remote_done", "remote_backoff", "update_boot_check", "update_response", "homebrew_done", "homebrew_timeout", "brew_command_copied" };
 };
 
 pub const Model = struct {
@@ -298,6 +299,8 @@ pub const Model = struct {
     latest_version_len: usize = 0,
     last_update_check_ms: i64 = 0,
     install_source: updates.InstallSource = .unknown,
+    update_cancel_pending: bool = false,
+    update_restart_after_cancel: bool = false,
     brew_command_copied: bool = false,
     agents_prompted: bool = false,
     codex_trust_note: bool = false,
@@ -763,9 +766,12 @@ const update_fetch_key: u64 = 30;
 const homebrew_check_key: u64 = 31;
 const brew_clipboard_key: u64 = 32;
 const update_boot_timer_key: u64 = 33;
+const homebrew_timeout_timer_key: u64 = 34;
 const update_boot_delay_ms: u32 = 5000;
 const update_background_interval_ms: i64 = 24 * 60 * 60 * 1000;
 const update_settings_interval_ms: i64 = 5 * 60 * 1000;
+const update_failure_retry_ms: u64 = 60 * 60 * 1000;
+const homebrew_timeout_ms: u64 = 8000;
 
 fn updateCachePhase(model: *Model) void {
     if (model.latest_version_len == 0) {
@@ -780,8 +786,33 @@ fn updateCheckStale(last_check_ms: i64, now_ms: i64, interval_ms: i64) bool {
     return last_check_ms <= 0 or now_ms < last_check_ms or now_ms - last_check_ms >= interval_ms;
 }
 
+fn updateCheckDelay(last_check_ms: i64, now_ms: i64) u64 {
+    if (updateCheckStale(last_check_ms, now_ms, update_background_interval_ms)) return update_boot_delay_ms;
+    return @intCast(update_background_interval_ms - (now_ms - last_check_ms));
+}
+
+fn armNextUpdateCheck(model: *const Model, fx: *Effects) void {
+    if (!model.update_checks_enabled) return;
+    fx.startTimer(.{
+        .key = update_boot_timer_key,
+        .interval_ms = updateCheckDelay(model.last_update_check_ms, fx.wallMs()),
+        .mode = .one_shot,
+        .on_fire = Effects.timerMsg(.update_boot_check),
+    });
+}
+
+fn armUpdateRetry(model: *const Model, fx: *Effects) void {
+    if (!model.update_checks_enabled) return;
+    fx.startTimer(.{
+        .key = update_boot_timer_key,
+        .interval_ms = update_failure_retry_ms,
+        .mode = .one_shot,
+        .on_fire = Effects.timerMsg(.update_boot_check),
+    });
+}
+
 fn startUpdateCheck(model: *Model, manual: bool, fx: *Effects) void {
-    if (model.update_phase == .checking) return;
+    if (model.update_phase == .checking or model.update_cancel_pending) return;
     model.update_manual = manual;
     model.update_phase = .checking;
     fx.fetch(.{
@@ -802,7 +833,7 @@ fn finishUpdateFailure(model: *Model) void {
 }
 
 fn startHomebrewCheck(model: *Model, fx: *Effects) void {
-    if (builtin.target.os.tag != .macos or model.install_source != .unknown) return;
+    if (builtin.target.os.tag != .macos or model.install_source == .checking or model.install_source == .homebrew) return;
     const brew = if (plat.fileExists("/opt/homebrew/bin/brew"))
         "/opt/homebrew/bin/brew"
     else if (plat.fileExists("/usr/local/bin/brew"))
@@ -817,6 +848,12 @@ fn startHomebrewCheck(model: *Model, fx: *Effects) void {
         .argv = &.{ brew, "list", "--cask", "petdex" },
         .output = .collect,
         .on_exit = Effects.exitMsg(.homebrew_done),
+    });
+    fx.startTimer(.{
+        .key = homebrew_timeout_timer_key,
+        .interval_ms = homebrew_timeout_ms,
+        .mode = .one_shot,
+        .on_fire = Effects.timerMsg(.homebrew_timeout),
     });
 }
 
@@ -1773,14 +1810,7 @@ pub fn boot(model: *Model, fx: *Effects) void {
     @memcpy(model.latest_version[0..initial_latest_version_len], initial_latest_version[0..initial_latest_version_len]);
     model.latest_version_len = initial_latest_version_len;
     updateCachePhase(model);
-    if (model.update_checks_enabled and updateCheckStale(model.last_update_check_ms, fx.wallMs(), update_background_interval_ms)) {
-        fx.startTimer(.{
-            .key = update_boot_timer_key,
-            .interval_ms = update_boot_delay_ms,
-            .mode = .one_shot,
-            .on_fire = Effects.timerMsg(.update_boot_check),
-        });
-    }
+    armNextUpdateCheck(model, fx);
     model.launch_at_login = plat.launchAtLoginEnabled();
     // Applied via the main queue, so the flip lands as soon as the
     // host's runloop spins up; a Regular-policy Dock icon may blink in
@@ -2028,46 +2058,78 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
         .check_updates => startUpdateCheck(model, true, fx),
         .toggle_update_checks => {
             model.update_checks_enabled = !model.update_checks_enabled;
-            if (!model.update_checks_enabled and model.update_phase == .checking) {
-                model.update_manual = false;
-                fx.cancel(update_fetch_key);
-                updateCachePhase(model);
-            } else if (model.update_checks_enabled and updateCheckStale(model.last_update_check_ms, fx.wallMs(), update_background_interval_ms)) {
+            if (!model.update_checks_enabled) {
+                fx.cancelTimer(update_boot_timer_key);
+                if (model.update_phase == .checking and !model.update_manual) {
+                    model.update_cancel_pending = true;
+                    model.update_restart_after_cancel = false;
+                    fx.cancel(update_fetch_key);
+                    updateCachePhase(model);
+                }
+            } else if (model.update_cancel_pending) {
+                model.update_restart_after_cancel = true;
+            } else if (updateCheckStale(model.last_update_check_ms, fx.wallMs(), update_background_interval_ms)) {
                 startUpdateCheck(model, false, fx);
+            } else {
+                armNextUpdateCheck(model, fx);
             }
             saveSettings(model);
         },
         .update_response => |response| {
-            model.last_update_check_ms = fx.wallMs();
+            if (model.update_cancel_pending) {
+                const restart = model.update_restart_after_cancel and model.update_checks_enabled;
+                model.update_cancel_pending = false;
+                model.update_restart_after_cancel = false;
+                model.update_manual = false;
+                updateCachePhase(model);
+                if (restart) startUpdateCheck(model, false, fx);
+                saveSettings(model);
+                return;
+            }
             if (response.outcome != .ok or response.status != 200 or response.truncated) {
                 finishUpdateFailure(model);
+                armUpdateRetry(model, fx);
                 saveSettings(model);
                 return;
             }
             var parsed = updates.parseLatest(boot_allocator, response.body) orelse {
                 finishUpdateFailure(model);
+                armUpdateRetry(model, fx);
                 saveSettings(model);
                 return;
             };
             defer parsed.deinit();
             const version = parsed.value.version orelse {
                 finishUpdateFailure(model);
+                armUpdateRetry(model, fx);
                 saveSettings(model);
                 return;
             };
             if (version.len > model.latest_version.len) {
                 finishUpdateFailure(model);
+                armUpdateRetry(model, fx);
                 saveSettings(model);
                 return;
             }
             @memcpy(model.latest_version[0..version.len], version);
             model.latest_version_len = version.len;
+            model.last_update_check_ms = fx.wallMs();
             model.update_phase = if (updates.isNewer(version, updates.current_version)) .available else .current;
             model.update_manual = false;
+            armNextUpdateCheck(model, fx);
             saveSettings(model);
         },
         .homebrew_done => |exit| {
-            model.install_source = if (exit.reason == .exited and exit.code == 0) .homebrew else .direct;
+            fx.cancelTimer(homebrew_timeout_timer_key);
+            if (model.install_source == .checking) {
+                model.install_source = if (exit.reason == .exited and exit.code == 0) .homebrew else .direct;
+            }
+        },
+        .homebrew_timeout => |timer| {
+            if (timer.outcome == .fired and model.install_source == .checking) {
+                model.install_source = .direct;
+                fx.cancel(homebrew_check_key);
+            }
         },
         .download_update => plat.openExternal(updates.downloadUrl()),
         .copy_brew_command => {
@@ -4232,6 +4294,27 @@ test "empty-state copy fits the pet window" {
     while (it.next()) |line| {
         try std.testing.expect(line.len <= 14);
     }
+}
+
+test "update checks stay daily across a long-lived process" {
+    try std.testing.expectEqual(@as(u64, update_boot_delay_ms), updateCheckDelay(0, 1000));
+    try std.testing.expectEqual(@as(u64, update_boot_delay_ms), updateCheckDelay(2000, 1000));
+    try std.testing.expectEqual(@as(u64, 23 * 60 * 60 * 1000), updateCheckDelay(1000, 1000 + 60 * 60 * 1000));
+    try std.testing.expectEqual(@as(u64, update_boot_delay_ms), updateCheckDelay(1000, 1000 + update_background_interval_ms));
+}
+
+test "cached update versions restore the correct phase" {
+    var model: Model = .{};
+    updateCachePhase(&model);
+    try std.testing.expectEqual(updates.Phase.idle, model.update_phase);
+    @memcpy(model.latest_version[0.."0.9.0".len], "0.9.0");
+    model.latest_version_len = "0.9.0".len;
+    updateCachePhase(&model);
+    try std.testing.expectEqual(updates.Phase.available, model.update_phase);
+    @memcpy(model.latest_version[0.."0.8.0".len], "0.8.0");
+    model.latest_version_len = "0.8.0".len;
+    updateCachePhase(&model);
+    try std.testing.expectEqual(updates.Phase.current, model.update_phase);
 }
 
 test "bubble text default is its own value, not the range floor" {
