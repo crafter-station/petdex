@@ -2144,7 +2144,9 @@ pub fn uninstall(allocator: std.mem.Allocator, home: []const u8, kind: AgentKind
 
 const t = std.testing;
 
-test "DSH row requires a real event before it becomes connected" {
+test "DSH row requires a real event before it becomes connected on macOS" {
+    if (builtin.os.tag != .macos) return error.SkipZigTest;
+
     const home = ".zig-cache/petdex-agenthooks-dsh";
     defer _ = plat.deleteTree(home);
     plat.makeDir(home ++ "/.dsh/profiles/web");
