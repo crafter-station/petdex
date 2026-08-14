@@ -20,6 +20,7 @@ const native_sdk = @import("native_sdk");
 const hook_server = @import("hook_server.zig");
 const hook_runner = @import("hook_runner.zig");
 const agent_hooks = @import("agent_hooks.zig");
+const dsh_integration = @import("dsh_integration.zig");
 const plat = @import("plat.zig");
 const installer = @import("installer.zig");
 const remote_agents = @import("remote_agents.zig");
@@ -110,6 +111,8 @@ pub const Msg = union(enum) {
     quit_app,
     install_agent: u32,
     uninstall_agent: u32,
+    dsh_install_done: native_sdk.EffectExit,
+    dsh_remove_done: native_sdk.EffectExit,
     pet_filter: canvas.TextInputEvent,
     toggle_pets_expanded,
     manifest_done: native_sdk.EffectExit,
@@ -134,7 +137,7 @@ pub const Msg = union(enum) {
     brew_command_copied: native_sdk.EffectClipboardResult,
     noop,
 
-    pub const view_unbound = .{ "frame_tick", "poll_tick", "physics_tick", "frame_clock", "cycle_state", "native_drag_watchdog", "chime_done", "quit_app", "toggle_focus_mode", "shuffle_pet", "remote_line", "remote_done", "remote_backoff", "update_boot_check", "update_response", "homebrew_done", "homebrew_timeout", "brew_command_copied" };
+    pub const view_unbound = .{ "frame_tick", "poll_tick", "physics_tick", "frame_clock", "cycle_state", "native_drag_watchdog", "chime_done", "quit_app", "toggle_focus_mode", "shuffle_pet", "dsh_install_done", "dsh_remove_done", "remote_line", "remote_done", "remote_backoff", "update_boot_check", "update_response", "homebrew_done", "homebrew_timeout", "brew_command_copied" };
 };
 
 pub const Model = struct {
@@ -290,7 +293,10 @@ pub const Model = struct {
         .{ .kind = .codebuddy },
         .{ .kind = .omp },
         .{ .kind = .hermes },
+        .{ .kind = .dsh },
     },
+    dsh_busy: bool = false,
+    dsh_error: bool = false,
     herdr_status: herdr_status.Status = .absent,
     update_checks_enabled: bool = true,
     update_phase: updates.Phase = .idle,
@@ -767,6 +773,8 @@ const homebrew_check_key: u64 = 31;
 const brew_clipboard_key: u64 = 32;
 const update_boot_timer_key: u64 = 33;
 const homebrew_timeout_timer_key: u64 = 34;
+const dsh_install_key: u64 = 35;
+const dsh_remove_key: u64 = 36;
 const update_boot_delay_ms: u32 = 5000;
 const update_background_interval_ms: i64 = 24 * 60 * 60 * 1000;
 const update_settings_interval_ms: i64 = 5 * 60 * 1000;
@@ -1251,6 +1259,8 @@ const agent_art = [agent_hooks.agent_count + 2]AgentArt{
     .{ .light = @embedFile("assets/agents/codebuddy.png"), .dark = @embedFile("assets/agents/codebuddy.png") },
     .{ .light = @embedFile("assets/agents/omp.png"), .dark = @embedFile("assets/agents/omp.png") },
     .{ .light = @embedFile("assets/agents/hermes.png"), .dark = @embedFile("assets/agents/hermes.png") },
+    // DSH has no bundled brand asset in this clean-room slice.
+    .{ .light = @embedFile("assets/agents/fallback.png"), .dark = @embedFile("assets/agents/fallback.png") },
     .{ .light = @embedFile("assets/agents/herdr.png"), .dark = @embedFile("assets/agents/herdr.png") },
     .{ .light = @embedFile("assets/agents/fallback.png"), .dark = @embedFile("assets/agents/fallback.png") },
 };
@@ -2010,6 +2020,20 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
         .uninstall_agent => |index| {
             if (index >= agent_hooks.agent_count) return;
             const home = env_home orelse return;
+            if (model.agents[index].kind == .dsh) {
+                if (model.dsh_busy or builtin.os.tag != .macos) return;
+                const official = dsh_integration.removeArgv();
+                const command = dsh_integration.macLoginShellArgv(official.slice());
+                model.dsh_busy = true;
+                model.dsh_error = false;
+                fx.spawn(.{
+                    .key = dsh_remove_key,
+                    .argv = command.slice(),
+                    .output = .collect,
+                    .on_exit = Effects.exitMsg(.dsh_remove_done),
+                });
+                return;
+            }
             _ = agent_hooks.uninstall(boot_allocator, home, model.agents[index].kind);
             if (model.agents[index].kind == .codex) model.codex_trust_note = false;
             model.agents = agent_hooks.scan(boot_allocator, home);
@@ -2018,6 +2042,26 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             if (index >= agent_hooks.agent_count) return;
             const kind = model.agents[index].kind;
             const home = env_home orelse return;
+            if (kind == .dsh) {
+                if (model.dsh_busy or builtin.os.tag != .macos) return;
+                var path_buf: [768]u8 = undefined;
+                const tarball = dsh_integration.materialize(boot_allocator, home, &path_buf) orelse {
+                    model.dsh_error = true;
+                    return;
+                };
+                dsh_integration.clearHandshake(home);
+                const official = dsh_integration.addArgv(tarball);
+                const command = dsh_integration.macLoginShellArgv(official.slice());
+                model.dsh_busy = true;
+                model.dsh_error = false;
+                fx.spawn(.{
+                    .key = dsh_install_key,
+                    .argv = command.slice(),
+                    .output = .collect,
+                    .on_exit = Effects.exitMsg(.dsh_install_done),
+                });
+                return;
+            }
             const ok = switch (kind) {
                 .claude_code => agent_hooks.installClaude(boot_allocator, home),
                 .codex => agent_hooks.installCodex(boot_allocator, home),
@@ -2028,9 +2072,29 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
                 .codebuddy => agent_hooks.installCodeBuddy(boot_allocator, home),
                 .omp => agent_hooks.installOmp(boot_allocator, home),
                 .hermes => agent_hooks.installHermes(boot_allocator, home),
+                .dsh => unreachable,
             };
             if (ok and kind == .codex) model.codex_trust_note = true;
             model.agents = agent_hooks.scan(boot_allocator, home);
+        },
+        .dsh_install_done => |exit| {
+            model.dsh_busy = false;
+            model.dsh_error = exit.reason != .exited or exit.code != 0;
+            if (model.dsh_error and exit.output.len > 0) {
+                std.debug.print("petdex: DSH plugin install failed: {s}\n", .{exit.output});
+            }
+            if (env_home) |home| model.agents = agent_hooks.scan(boot_allocator, home);
+        },
+        .dsh_remove_done => |exit| {
+            model.dsh_busy = false;
+            model.dsh_error = exit.reason != .exited or exit.code != 0;
+            if (env_home) |home| {
+                if (!model.dsh_error) dsh_integration.clearHandshake(home);
+                model.agents = agent_hooks.scan(boot_allocator, home);
+            }
+            if (model.dsh_error and exit.output.len > 0) {
+                std.debug.print("petdex: DSH plugin removal failed: {s}\n", .{exit.output});
+            }
         },
         .open_settings => {
             if (env_home) |home| {
@@ -2550,6 +2614,14 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             const now = fx.wallMs();
             var drained: [hook_server.max_bubbles]hook_server.Bubble = undefined;
             if (hook_server.mailbox.takeBubbles(&drained)) |raw_count| {
+                if (model.settings_open) {
+                    for (drained[0..raw_count]) |bubble| {
+                        if (std.mem.eql(u8, bubble.agent[0..bubble.agent_len], "dsh")) {
+                            if (env_home) |home| model.agents = agent_hooks.scan(boot_allocator, home);
+                            break;
+                        }
+                    }
+                }
                 if (!model.bubbles_enabled or model.focus_mode) {
                     clearBubble(model);
                 } else {
@@ -4095,6 +4167,7 @@ pub fn main(init: std.process.Init) !void {
     agent_hooks.env_qoder_cli_home = init.environ_map.get("QODER_CLI_HOME");
     agent_hooks.env_qoder_cn_cli_home = init.environ_map.get("QODERCN_CLI_HOME");
     agent_hooks.env_hermes_home = init.environ_map.get("HERMES_HOME");
+    dsh_integration.env_dsh_home = init.environ_map.get("DSH_HOME");
     // Hook hot path: `<binary> bubble <phase> [agent]` runs the
     // in-binary runner and exits before any UI machinery spins up.
     // initAllocator, not init: on Windows the command line arrives as
@@ -4242,6 +4315,16 @@ test "one image slot covers every agent" {
     // agent_art is what loadAgentsAtlas walks, so a new AgentKind without
     // artwork would pack short and leave the last agent blank.
     try std.testing.expectEqual(agent_hooks.agent_count + 2, agent_art.len);
+}
+
+test "DSH bubbles keep the companion window click through" {
+    var model: Model = .{};
+    model.bubbles_len = 1;
+    model.bubbles[0].origin_app = .default_browser;
+    var scratch: PetdexApp.WindowsScratch = .{};
+    const windows = petdexWindows(&model, &scratch);
+    try std.testing.expect(windows.len > 0);
+    try std.testing.expect(windows[0].click_through);
 }
 
 test "Herdr agent aliases resolve to their Petdex artwork" {

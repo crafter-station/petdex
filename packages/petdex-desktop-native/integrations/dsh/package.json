@@ -1,0 +1,21 @@
+{
+  "name": "@petdex/dsh-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.js",
+  "files": [
+    "src/index.js",
+    "src/normalize.js",
+    "cordis.patch.yml",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "test": "bun test"
+  }
+}

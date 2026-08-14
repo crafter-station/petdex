@@ -13,6 +13,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const plat = @import("plat.zig");
+const dsh_integration = @import("dsh_integration.zig");
 
 pub const AgentKind = enum(u8) {
     claude_code,
@@ -30,6 +31,9 @@ pub const AgentKind = enum(u8) {
     // strip are indexed by @intFromEnum, so inserting anywhere earlier
     // would re-map every existing glyph.
     hermes,
+    // DSH Web is macOS-only in the first integration slice. Appended so the
+    // existing icon atlas indices remain stable.
+    dsh,
 
     pub fn displayName(self: AgentKind) []const u8 {
         return switch (self) {
@@ -42,6 +46,7 @@ pub const AgentKind = enum(u8) {
             .codebuddy => "CodeBuddy",
             .omp => "OMP",
             .hermes => "Hermes",
+            .dsh => "DeepSeek Harness",
         };
     }
 
@@ -56,6 +61,7 @@ pub const AgentKind = enum(u8) {
             .codebuddy => "codebuddy",
             .omp => "omp",
             .hermes => "hermes",
+            .dsh => "dsh",
         };
     }
 };
@@ -76,7 +82,7 @@ pub const AgentInfo = struct {
     status: HookStatus = .absent,
 };
 
-pub const agent_count = 9;
+pub const agent_count = 10;
 
 /// Claude Code keeps everything under ~/.claude unless CLAUDE_CONFIG_DIR
 /// points elsewhere — that env var is how people run several fully
@@ -508,6 +514,7 @@ pub fn scan(allocator: std.mem.Allocator, home: []const u8) [agent_count]AgentIn
         .{ .kind = .codebuddy },
         .{ .kind = .omp },
         .{ .kind = .hermes },
+        .{ .kind = .dsh },
     };
     // Several roots behind one row: cannot ride the single-dir/single-config
     // shape below, so it is resolved up front. The arms `continue` rather than
@@ -516,6 +523,16 @@ pub fn scan(allocator: std.mem.Allocator, home: []const u8) [agent_count]AgentIn
     out[@intFromEnum(AgentKind.qoder)].status = qoderStatus(allocator, home);
     var path: [512]u8 = undefined;
     for (&out) |*info| {
+        if (info.kind == .dsh) {
+            if (builtin.os.tag != .macos) continue;
+            info.status = switch (dsh_integration.detect(allocator, home)) {
+                .absent => .absent,
+                .not_installed => .none,
+                .restart_required => .node,
+                .connected => .current,
+            };
+            continue;
+        }
         if (info.kind == .hermes and builtin.os.tag == .windows) continue;
         const dir = switch (info.kind) {
             .claude_code => claudeConfigDir(&path, home) orelse continue,
@@ -527,6 +544,7 @@ pub fn scan(allocator: std.mem.Allocator, home: []const u8) [agent_count]AgentIn
             .codebuddy => std.fmt.bufPrint(&path, "{s}/.codebuddy", .{home}) catch continue,
             .omp => ompAgentDir(&path, home) orelse continue,
             .hermes => hermesHome(&path, home) orelse continue,
+            .dsh => unreachable,
         };
         if (!dirExists(dir)) continue;
         info.status = .none;
@@ -540,6 +558,7 @@ pub fn scan(allocator: std.mem.Allocator, home: []const u8) [agent_count]AgentIn
             .codebuddy => std.fmt.bufPrint(&path, "{s}/.codebuddy/settings.json", .{home}) catch continue,
             .omp => ompExtensionPath(&path, home) orelse continue,
             .hermes => hermesConfigPath(&path, home) orelse continue,
+            .dsh => unreachable,
         };
         if (readFileAlloc(allocator, cfg, 512 * 1024)) |content| {
             defer allocator.free(content);
@@ -2073,6 +2092,7 @@ pub fn migrateLegacyHooks(allocator: std.mem.Allocator, home: []const u8) Legacy
             .codebuddy => installCodeBuddy(allocator, home),
             .omp => installOmp(allocator, home),
             .hermes => continue,
+            .dsh => continue,
         };
         if (migrated) result.migrated += 1 else result.failed += 1;
     }
@@ -2115,12 +2135,34 @@ pub fn uninstall(allocator: std.mem.Allocator, home: []const u8, kind: AgentKind
             return true;
         },
         .hermes => return uninstallHermes(allocator, home),
+        // DSH removal is an async official CLI operation owned by main.zig.
+        .dsh => return false,
     }
 }
 
 // -------------------------------------------------------------- tests
 
 const t = std.testing;
+
+test "DSH row requires a real event before it becomes connected" {
+    const home = ".zig-cache/petdex-agenthooks-dsh";
+    defer _ = plat.deleteTree(home);
+    plat.makeDir(home ++ "/.dsh/profiles/web");
+    plat.makeDir(home ++ "/.petdex/runtime");
+    try t.expect(plat.writeFile(
+        home ++ "/.dsh/profiles/web/package.json",
+        "{\"dependencies\":{\"@petdex/dsh-plugin\":\"file:/plugin.tgz\"},\"dsh\":{\"profile\":{\"bundles\":[\"@petdex/dsh-plugin\"]}}}",
+    ));
+
+    var agents = scan(t.allocator, home);
+    try t.expectEqual(HookStatus.node, agents[@intFromEnum(AgentKind.dsh)].status);
+    try t.expect(plat.writeFile(
+        home ++ "/.petdex/runtime/dsh-handshake.json",
+        "{\"integrationVersion\":\"0.1.0\"}",
+    ));
+    agents = scan(t.allocator, home);
+    try t.expectEqual(HookStatus.current, agents[@intFromEnum(AgentKind.dsh)].status);
+}
 
 /// The Windows command contains mutually exclusive HOME and USERPROFILE
 /// branches, so its phase/agent text is present twice even though cmd.exe

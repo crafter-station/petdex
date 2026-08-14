@@ -79,6 +79,10 @@ jobs:
       - name: Install Bun
         uses: oven-sh/setup-bun@v2
 
+      - name: Test DSH plugin and embedded archive
+        working-directory: packages/petdex-desktop-native/integrations/dsh
+        run: bun test
+
       - name: Install Herdr (Unix)
         if: matrix.platform != 'windows'
         shell: bash

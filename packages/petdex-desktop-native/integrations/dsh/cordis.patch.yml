@@ -1,0 +1,3 @@
+- insert:
+    - id: petdex-dsh-bridge
+      name: '@petdex/dsh-plugin'

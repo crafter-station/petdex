@@ -64,7 +64,17 @@ fn mutedParagraph(ui: *AppUi, content: []const u8) AppUi.Node {
     }, &.{.{ .text = content }});
 }
 
-fn agentStatusCaption(info: agent_hooks.AgentInfo, codex_note: bool) []const u8 {
+fn agentStatusCaption(info: agent_hooks.AgentInfo, codex_note: bool, dsh_busy: bool, dsh_error: bool) []const u8 {
+    if (info.kind == .dsh) {
+        if (dsh_busy) return "Running the DSH plugin command";
+        if (dsh_error) return "Plugin command failed - check npx and network";
+        return switch (info.status) {
+            .absent => "Not detected",
+            .none => "Plugin not installed",
+            .node => "Restart DSH Web, then start a task",
+            .current => "Connected",
+        };
+    }
     if (info.kind == .codex and codex_note) return "Installed - restart Codex and approve its hooks once";
     if (info.kind == .opencode) {
         return switch (info.status) {
@@ -146,7 +156,11 @@ fn agentsSection(ui: *AppUi, model: *const Model, icons: IconAtlas) AppUi.Node {
     var count: usize = 0;
     for (model.agents, 0..) |info, i| {
         if (info.status == .absent) continue;
-        const trailing = if (info.status == .current)
+        const trailing = if (info.kind == .dsh and model.dsh_busy)
+            ui.button(.{ .size = .sm, .variant = .secondary, .disabled = true }, "Working")
+        else if (info.kind == .dsh and info.status == .node)
+            ui.button(.{ .size = .sm, .variant = .secondary, .disabled = true }, "Restart DSH")
+        else if (info.status == .current)
             ui.button(.{
                 .size = .sm,
                 .variant = .secondary,
@@ -177,7 +191,7 @@ fn agentsSection(ui: *AppUi, model: *const Model, icons: IconAtlas) AppUi.Node {
                 logo,
                 ui.column(.{ .grow = 1, .main = .center }, .{
                     ui.text(.{}, info.kind.displayName()),
-                    mutedParagraph(ui, agentStatusCaption(info, model.codex_trust_note)),
+                    mutedParagraph(ui, agentStatusCaption(info, model.codex_trust_note, model.dsh_busy, model.dsh_error)),
                 }),
                 trailing,
             }),
@@ -601,4 +615,12 @@ test "settings descriptions use wrapped paragraphs" {
     try std.testing.expectEqual(@as(usize, 1), node.widget.spans.len);
     try std.testing.expectEqualStrings(copy, node.widget.text);
     try std.testing.expect(!node.widget.text_no_wrap);
+}
+
+test "DSH command errors do not ask for a global pnpm install" {
+    const info = agent_hooks.AgentInfo{ .kind = .dsh, .status = .none };
+    try std.testing.expectEqualStrings(
+        "Plugin command failed - check npx and network",
+        agentStatusCaption(info, false, false, true),
+    );
 }

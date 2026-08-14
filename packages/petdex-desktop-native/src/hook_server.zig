@@ -18,6 +18,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const plat = @import("plat.zig");
+const dsh_integration = @import("dsh_integration.zig");
 
 /// One connection, plus the Io that owns it. Everything downstream of
 /// accept() needs both, and passing them as a pair keeps the response
@@ -370,6 +371,9 @@ fn run(server: *Server) void {
         return;
     };
     defer listener.deinit(io);
+    // Installation is not connection. Each Petdex process requires a fresh
+    // event from the plugin before Settings may show DSH as connected.
+    deleteRuntimeFile(server, "dsh-handshake.json");
     std.debug.print("petdex: hook server on 127.0.0.1:7777 (in-process)\n", .{});
 
     while (true) {
@@ -561,6 +565,14 @@ fn route(server: *Server, conn: *Conn, method: []const u8, path: []const u8, hea
         // 64-byte key instead of being truncated into possible collisions.
         var session_hash: [64]u8 = undefined;
         const session = bubbleSessionKey(body, &session_hash);
+        if (isDshHandshakeBubble(body)) {
+            writeRuntimeFile(
+                server,
+                "dsh-handshake.json",
+                "{\"integrationVersion\":\"" ++ dsh_integration.integration_version ++ "\"}",
+                0o600,
+            ) catch {};
+        }
         const counter = mailbox.setBubbleWithMetadata(session, capped, agent[0..@min(agent.len, 24)], title[0..@min(title.len, 96)], origin_app, source_tty, source_cwd, herdr_pane, busy);
         mirrorBubble(server, capped, counter, title[0..@min(title.len, 96)], agent[0..@min(agent.len, 24)], busy) catch {};
         const out = std.fmt.bufPrint(&scratch, "{{\"ok\":true,\"counter\":{d}}}", .{counter}) catch return;
@@ -936,6 +948,18 @@ test "duration parser distinguishes missing and invalid values" {
     try std.testing.expect(std.meta.activeTag(parseDuration("{\"duration\":\"100\"}")) == .invalid);
 }
 
+test "only a real current DSH bubble completes the connection handshake" {
+    try std.testing.expect(!isDshHandshakeBubble(
+        "{\"agent_source\":\"dsh\",\"integration_version\":\"0.0.9\"}",
+    ));
+    try std.testing.expect(!isDshHandshakeBubble(
+        "{\"agent_source\":\"codex\",\"integration_version\":\"0.1.0\"}",
+    ));
+    try std.testing.expect(isDshHandshakeBubble(
+        "{\"agent_source\":\"dsh\",\"integration_version\":\"0.1.0\"}",
+    ));
+}
+
 test "mailbox returns the counter while holding its lock" {
     var box: Mailbox = .{};
     var event = StateEvent{};
@@ -990,7 +1014,20 @@ fn parseDuration(body: []const u8) DurationResult {
     };
 }
 
+fn isDshHandshakeBubble(body: []const u8) bool {
+    const agent = jsonString(body, "agent_source") orelse return false;
+    const version = jsonString(body, "integration_version") orelse return false;
+    return std.mem.eql(u8, agent, "dsh") and
+        std.mem.eql(u8, version, dsh_integration.integration_version);
+}
+
 // --------------------------------------------------------- runtime files
+
+fn deleteRuntimeFile(server: *Server, name: []const u8) void {
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ server.runtime_dir, name }) catch return;
+    plat.deleteFile(path);
+}
 
 fn writeRuntimeFile(server: *Server, name: []const u8, bytes: []const u8, mode: u16) !void {
     plat.makeDir(server.runtime_dir);
