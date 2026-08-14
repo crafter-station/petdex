@@ -27,6 +27,7 @@ const remote_ssh = @import("remote_ssh.zig");
 const remote_writeback = @import("remote_writeback.zig");
 const remote_runtime = @import("remote_runtime.zig");
 const herdr_status = @import("herdr_status.zig");
+pub const updates = @import("updates.zig");
 
 pub const panic = std.debug.FullPanic(native_sdk.debug.capturePanic);
 
@@ -122,9 +123,17 @@ pub const Msg = union(enum) {
     remote_line: native_sdk.EffectLine,
     remote_done: native_sdk.EffectExit,
     remote_backoff: native_sdk.EffectTimer,
+    update_boot_check: native_sdk.EffectTimer,
+    check_updates,
+    toggle_update_checks,
+    update_response: native_sdk.EffectResponse,
+    homebrew_done: native_sdk.EffectExit,
+    download_update,
+    copy_brew_command,
+    brew_command_copied: native_sdk.EffectClipboardResult,
     noop,
 
-    pub const view_unbound = .{ "frame_tick", "poll_tick", "physics_tick", "frame_clock", "cycle_state", "native_drag_watchdog", "chime_done", "quit_app", "toggle_focus_mode", "shuffle_pet", "remote_line", "remote_done", "remote_backoff" };
+    pub const view_unbound = .{ "frame_tick", "poll_tick", "physics_tick", "frame_clock", "cycle_state", "native_drag_watchdog", "chime_done", "quit_app", "toggle_focus_mode", "shuffle_pet", "remote_line", "remote_done", "remote_backoff", "update_boot_check", "update_response", "homebrew_done", "brew_command_copied" };
 };
 
 pub const Model = struct {
@@ -282,6 +291,14 @@ pub const Model = struct {
         .{ .kind = .hermes },
     },
     herdr_status: herdr_status.Status = .absent,
+    update_checks_enabled: bool = true,
+    update_phase: updates.Phase = .idle,
+    update_manual: bool = false,
+    latest_version: [32]u8 = @splat(0),
+    latest_version_len: usize = 0,
+    last_update_check_ms: i64 = 0,
+    install_source: updates.InstallSource = .unknown,
+    brew_command_copied: bool = false,
     agents_prompted: bool = false,
     codex_trust_note: bool = false,
     pet_filter: [48]u8 = @splat(0),
@@ -742,6 +759,66 @@ pub const Effects = native_sdk.Effects(Msg);
 const frame_timer_key: u64 = 1;
 const native_drag_watchdog_key: u64 = 4;
 const native_drag_watchdog_ms: u32 = 5000;
+const update_fetch_key: u64 = 30;
+const homebrew_check_key: u64 = 31;
+const brew_clipboard_key: u64 = 32;
+const update_boot_timer_key: u64 = 33;
+const update_boot_delay_ms: u32 = 5000;
+const update_background_interval_ms: i64 = 24 * 60 * 60 * 1000;
+const update_settings_interval_ms: i64 = 5 * 60 * 1000;
+
+fn updateCachePhase(model: *Model) void {
+    if (model.latest_version_len == 0) {
+        model.update_phase = .idle;
+        return;
+    }
+    const latest = model.latest_version[0..model.latest_version_len];
+    model.update_phase = if (updates.isNewer(latest, updates.current_version)) .available else .current;
+}
+
+fn updateCheckStale(last_check_ms: i64, now_ms: i64, interval_ms: i64) bool {
+    return last_check_ms <= 0 or now_ms < last_check_ms or now_ms - last_check_ms >= interval_ms;
+}
+
+fn startUpdateCheck(model: *Model, manual: bool, fx: *Effects) void {
+    if (model.update_phase == .checking) return;
+    model.update_manual = manual;
+    model.update_phase = .checking;
+    fx.fetch(.{
+        .key = update_fetch_key,
+        .url = updates.endpoint,
+        .timeout_ms = 8000,
+        .on_response = Effects.responseMsg(.update_response),
+    });
+}
+
+fn finishUpdateFailure(model: *Model) void {
+    if (model.update_manual) {
+        model.update_phase = .failed;
+    } else {
+        updateCachePhase(model);
+    }
+    model.update_manual = false;
+}
+
+fn startHomebrewCheck(model: *Model, fx: *Effects) void {
+    if (builtin.target.os.tag != .macos or model.install_source != .unknown) return;
+    const brew = if (plat.fileExists("/opt/homebrew/bin/brew"))
+        "/opt/homebrew/bin/brew"
+    else if (plat.fileExists("/usr/local/bin/brew"))
+        "/usr/local/bin/brew"
+    else {
+        model.install_source = .direct;
+        return;
+    };
+    model.install_source = .checking;
+    fx.spawn(.{
+        .key = homebrew_check_key,
+        .argv = &.{ brew, "list", "--cask", "petdex" },
+        .output = .collect,
+        .on_exit = Effects.exitMsg(.homebrew_done),
+    });
+}
 
 fn armFrameTimer(model: *const Model, fx: *Effects) void {
     const def = stateDef(model.state);
@@ -914,7 +991,7 @@ fn saveSettings(model: *const Model) void {
     // drops the whole save): keep room for the configurable bubble
     // fields, rotation state, a long slug, and negative coordinates.
     // Grown with every key added; `font_path` alone can escape to 1024.
-    var buf: [1792]u8 = undefined;
+    var buf: [2304]u8 = undefined;
     const active = if (model.active_pet < catalog_mod.catalog_len) catalog[model.active_pet].slice() else "";
     // The position keys only exist once the window has been fitted and
     // read: a save fired on the very first frame would otherwise
@@ -928,7 +1005,8 @@ fn saveSettings(model: *const Model) void {
     var escaped_font_buf: [1024]u8 = undefined;
     const font_path = std.mem.trim(u8, model.font_path[0..model.font_path_len], " \t\r\n");
     const escaped_font = jsonEscapeString(font_path, &escaped_font_buf) orelse return;
-    const json = std.fmt.bufPrint(&buf, "{{\"active_pet\":\"{s}\",\"scale\":{d:.2},\"bubbles\":{},\"bubbles_per_conversation\":{},\"waiting_sound\":{},\"bubble_text\":{d:.1},\"bubble_lifetime\":{d:.0},\"bubble_columns\":{},\"bubble_answer_lines\":{},\"font_path\":\"{s}\",\"hide_dock\":{},\"rotate_pets\":{},\"rotation_day\":{d}{s},\"agents_prompted\":{}}}", .{ active, model.scale, model.bubbles_enabled, model.bubbles_per_conversation, model.waiting_sound, model.bubble_text_px, model.bubble_lifetime_secs, model.bubble_columns, model.bubble_answer_lines, escaped_font, model.hide_dock, model.rotate_pets, model.rotation_day, pos, model.agents_prompted }) catch return;
+    const latest = model.latest_version[0..model.latest_version_len];
+    const json = std.fmt.bufPrint(&buf, "{{\"active_pet\":\"{s}\",\"scale\":{d:.2},\"bubbles\":{},\"bubbles_per_conversation\":{},\"waiting_sound\":{},\"bubble_text\":{d:.1},\"bubble_lifetime\":{d:.0},\"bubble_columns\":{},\"bubble_answer_lines\":{},\"font_path\":\"{s}\",\"hide_dock\":{},\"rotate_pets\":{},\"rotation_day\":{d},\"update_checks\":{},\"last_update_check_ms\":{d},\"latest_desktop_version\":\"{s}\"{s},\"agents_prompted\":{}}}", .{ active, model.scale, model.bubbles_enabled, model.bubbles_per_conversation, model.waiting_sound, model.bubble_text_px, model.bubble_lifetime_secs, model.bubble_columns, model.bubble_answer_lines, escaped_font, model.hide_dock, model.rotate_pets, model.rotation_day, model.update_checks_enabled, model.last_update_check_ms, latest, pos, model.agents_prompted }) catch return;
     cWriteFile(path, json);
 }
 
@@ -1078,6 +1156,10 @@ var initial_hide_dock: bool = false;
 var initial_rotate_pets: bool = false;
 var initial_rotation_day: u32 = 0;
 var initial_agents_prompted: bool = false;
+var initial_update_checks: bool = true;
+var initial_last_update_check_ms: i64 = 0;
+var initial_latest_version: [32]u8 = @splat(0);
+var initial_latest_version_len: usize = 0;
 /// Persisted pet window origin; null on first run (or a settings file
 /// from before positions were saved), which keeps the platform's
 /// default placement. Off-screen values from an unplugged monitor are
@@ -1351,7 +1433,7 @@ fn resolveInitialPet(io: std.Io, allocator: std.mem.Allocator, environ_map: *std
     if (catalog_mod.catalog_len == 0) return error.NoPetInstalled;
 
     var wanted: []const u8 = "";
-    var settings_buf: [512]u8 = undefined;
+    var settings_buf: [3072]u8 = undefined;
     var path_buf: [512]u8 = undefined;
     if (env_wanted_pet) |w| {
         wanted = w;
@@ -1415,6 +1497,18 @@ fn resolveInitialPet(io: std.Io, allocator: std.mem.Allocator, environ_map: *std
             }
             if (hook_server.jsonNumberPub(json, "rotation_day")) |v| {
                 if (v >= 0) initial_rotation_day = @intFromFloat(v);
+            }
+            if (std.mem.indexOf(u8, json, "\"update_checks\":false") != null) {
+                initial_update_checks = false;
+            }
+            if (hook_server.jsonNumberPub(json, "last_update_check_ms")) |v| {
+                if (v >= 0) initial_last_update_check_ms = @intFromFloat(v);
+            }
+            if (hook_server.jsonStringPub(json, "latest_desktop_version")) |version| {
+                if (version.len <= initial_latest_version.len and updates.isValidVersion(version)) {
+                    @memcpy(initial_latest_version[0..version.len], version);
+                    initial_latest_version_len = version.len;
+                }
             }
         }
     }
@@ -1674,6 +1768,19 @@ pub fn boot(model: *Model, fx: *Effects) void {
     model.hide_dock = initial_hide_dock;
     model.rotate_pets = initial_rotate_pets;
     model.rotation_day = initial_rotation_day;
+    model.update_checks_enabled = initial_update_checks;
+    model.last_update_check_ms = initial_last_update_check_ms;
+    @memcpy(model.latest_version[0..initial_latest_version_len], initial_latest_version[0..initial_latest_version_len]);
+    model.latest_version_len = initial_latest_version_len;
+    updateCachePhase(model);
+    if (model.update_checks_enabled and updateCheckStale(model.last_update_check_ms, fx.wallMs(), update_background_interval_ms)) {
+        fx.startTimer(.{
+            .key = update_boot_timer_key,
+            .interval_ms = update_boot_delay_ms,
+            .mode = .one_shot,
+            .on_fire = Effects.timerMsg(.update_boot_check),
+        });
+    }
     model.launch_at_login = plat.launchAtLoginEnabled();
     // Applied via the main queue, so the flip lands as soon as the
     // host's runloop spins up; a Regular-policy Dock icon may blink in
@@ -1900,6 +2007,10 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
                 model.agents = agent_hooks.scan(boot_allocator, home);
                 model.herdr_status = herdr_status.detect(boot_allocator, home);
             }
+            startHomebrewCheck(model, fx);
+            if (model.update_checks_enabled and updateCheckStale(model.last_update_check_ms, fx.wallMs(), update_settings_interval_ms)) {
+                startUpdateCheck(model, false, fx);
+            }
             loadAgentsAtlas(model.dark, fx);
             if (model.settings_open) {
                 // Already open, likely buried behind other windows:
@@ -1911,6 +2022,63 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             model.settings_open = true;
         },
         .settings_closed => model.settings_open = false,
+        .update_boot_check => |timer| {
+            if (timer.outcome == .fired and model.update_checks_enabled) startUpdateCheck(model, false, fx);
+        },
+        .check_updates => startUpdateCheck(model, true, fx),
+        .toggle_update_checks => {
+            model.update_checks_enabled = !model.update_checks_enabled;
+            if (!model.update_checks_enabled and model.update_phase == .checking) {
+                model.update_manual = false;
+                fx.cancel(update_fetch_key);
+                updateCachePhase(model);
+            } else if (model.update_checks_enabled and updateCheckStale(model.last_update_check_ms, fx.wallMs(), update_background_interval_ms)) {
+                startUpdateCheck(model, false, fx);
+            }
+            saveSettings(model);
+        },
+        .update_response => |response| {
+            model.last_update_check_ms = fx.wallMs();
+            if (response.outcome != .ok or response.status != 200 or response.truncated) {
+                finishUpdateFailure(model);
+                saveSettings(model);
+                return;
+            }
+            var parsed = updates.parseLatest(boot_allocator, response.body) orelse {
+                finishUpdateFailure(model);
+                saveSettings(model);
+                return;
+            };
+            defer parsed.deinit();
+            const version = parsed.value.version orelse {
+                finishUpdateFailure(model);
+                saveSettings(model);
+                return;
+            };
+            if (version.len > model.latest_version.len) {
+                finishUpdateFailure(model);
+                saveSettings(model);
+                return;
+            }
+            @memcpy(model.latest_version[0..version.len], version);
+            model.latest_version_len = version.len;
+            model.update_phase = if (updates.isNewer(version, updates.current_version)) .available else .current;
+            model.update_manual = false;
+            saveSettings(model);
+        },
+        .homebrew_done => |exit| {
+            model.install_source = if (exit.reason == .exited and exit.code == 0) .homebrew else .direct;
+        },
+        .download_update => plat.openExternal(updates.downloadUrl()),
+        .copy_brew_command => {
+            model.brew_command_copied = false;
+            fx.writeClipboard(.{
+                .key = brew_clipboard_key,
+                .text = updates.brew_command,
+                .on_result = Effects.clipboardMsg(.brew_command_copied),
+            });
+        },
+        .brew_command_copied => |result| model.brew_command_copied = result.outcome == .ok,
         .close_pet => closePet(model, fx),
         .select_pet => |index| {
             if (index >= catalog_mod.catalog_len) return;

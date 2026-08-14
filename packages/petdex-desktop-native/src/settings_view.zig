@@ -254,6 +254,70 @@ fn remoteSection(ui: *AppUi, model: *const Model) AppUi.Node {
     return ui.column(.{ .gap = 12 }, .{ heading, hint, list });
 }
 
+var update_status_buf: [96]u8 = undefined;
+
+fn updatesSection(ui: *AppUi, model: *const Model) AppUi.Node {
+    const latest = model.latest_version[0..model.latest_version_len];
+    const version_status = switch (model.update_phase) {
+        .idle => std.fmt.bufPrint(&update_status_buf, "{s} · Not checked yet", .{app.updates.current_version}) catch app.updates.current_version,
+        .checking => std.fmt.bufPrint(&update_status_buf, "{s} · Checking…", .{app.updates.current_version}) catch app.updates.current_version,
+        .current => std.fmt.bufPrint(&update_status_buf, "{s} · Up to date", .{app.updates.current_version}) catch app.updates.current_version,
+        .available => std.fmt.bufPrint(&update_status_buf, "{s} installed · {s} available", .{ app.updates.current_version, latest }) catch app.updates.current_version,
+        .failed => std.fmt.bufPrint(&update_status_buf, "{s} · Check failed", .{app.updates.current_version}) catch app.updates.current_version,
+    };
+    const version_action = if (model.update_phase == .available)
+        if (model.install_source == .homebrew)
+            ui.button(.{ .variant = .primary, .on_press = .copy_brew_command }, if (model.brew_command_copied) "Copied" else "Copy brew upgrade command")
+        else
+            ui.button(.{ .variant = .primary, .on_press = .download_update }, "Download update")
+    else
+        ui.button(.{ .variant = .secondary, .on_press = .check_updates, .disabled = model.update_phase == .checking }, "Check now");
+    const warning_title = if (builtin.os.tag == .macos and model.install_source == .homebrew)
+        "Homebrew manages updates"
+    else
+        "Updates stay manual";
+    const warning_copy = if (builtin.os.tag == .macos)
+        if (model.install_source == .homebrew)
+            "Petdex never runs Brew for you. Update with brew upgrade --cask petdex."
+        else
+            "Petdex never replaces itself. Homebrew users should install the petdex cask first."
+    else
+        "Petdex can download a release, but never replaces itself automatically.";
+    var warning = ui.el(.panel, .{ .padding = 12, .style_tokens = .{ .radius = .md } }, .{
+        ui.column(.{ .gap = 4 }, .{
+            ui.text(.{}, warning_title),
+            mutedParagraph(ui, warning_copy),
+        }),
+    });
+    warning.widget.style.background = if (model.dark) canvas.Color.rgb8(48, 38, 22) else canvas.Color.rgb8(255, 246, 214);
+    return ui.column(.{ .gap = 12 }, .{
+        ui.text(.{ .size = .lg }, "Updates"),
+        ui.el(.panel, .{ .style_tokens = .{ .background = .surface, .radius = .md } }, .{
+            ui.row(.{ .padding = 12, .cross = .center, .gap = 12 }, .{
+                ui.column(.{ .grow = 1 }, .{
+                    ui.text(.{}, "Current version"),
+                    mutedParagraph(ui, version_status),
+                }),
+                version_action,
+            }),
+        }),
+        ui.el(.panel, .{ .style_tokens = .{ .background = .surface, .radius = .md } }, .{
+            ui.row(.{ .padding = 12, .cross = .center, .gap = 12 }, .{
+                ui.column(.{ .grow = 1 }, .{
+                    ui.text(.{}, "Check automatically"),
+                    mutedParagraph(ui, "Quietly checks once per day"),
+                }),
+                ui.el(.switch_control, .{
+                    .selected = model.update_checks_enabled,
+                    .on_toggle = .toggle_update_checks,
+                    .semantics = .{ .label = "Check for updates automatically" },
+                }, .{}),
+            }),
+        }),
+        warning,
+    });
+}
+
 pub fn settingsView(ui: *AppUi, model: *const Model, icons: IconAtlas, thumbs: ThumbAtlas) AppUi.Node {
     var rows: [max_catalog]AppUi.Node = undefined;
     var shown: usize = 0;
@@ -516,6 +580,8 @@ pub fn settingsView(ui: *AppUi, model: *const Model, icons: IconAtlas, thumbs: T
                 ui.button(.{ .on_press = .open_pets_folder }, "Open folder"),
             }),
         }),
+        ui.el(.stack, .{ .height = 10 }, .{}),
+        updatesSection(ui, model),
         // Trailing spacer: the column's own bottom padding is not part
         // of the scroll extent, so the last card needs explicit air.
         ui.el(.stack, .{ .height = 8 }, .{}),
