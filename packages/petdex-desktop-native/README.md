@@ -42,6 +42,19 @@ dropped events and backend failure. Only relevant durable roots are watched,
 including configured `CLAUDE_CONFIG_DIR`, `PI_CODING_AGENT_DIR`, and
 `HERMES_HOME` locations.
 
+## Native session bubbles
+
+Concurrent agent sessions render as a bounded native card stack. Presentation
+updates are content- and geometry-deduplicated so a settled stack stops
+submitting work, while authored running animations remain responsive. Cards
+carry allowlisted agent, host, project, status, and subagent metadata and expose
+native accessibility roles and labels.
+
+The action rail supports opening the originating application when it can be
+identified safely, pinning a session, showing subagents, and dismissing a
+completed card. Legacy hook payloads continue to render through the canonical
+session contract.
+
 For the pinned desktop build, set `NATIVE_CLI` and `NATIVE_SDK_PATH` to the
 CLI and SDK checkout used by the matching release workflow. The build scripts
 apply the Petdex-owned macOS Mach-O headerpad patch before compiling; they

@@ -64,7 +64,7 @@ fn mutedParagraph(ui: *AppUi, content: []const u8) AppUi.Node {
     }, &.{.{ .text = content }});
 }
 
-fn agentStatusCaption(info: agent_hooks.AgentInfo, codex_note: bool, dsh_busy: bool, dsh_error: bool) []const u8 {
+fn agentStatusCaption(info: agent_hooks.AgentInfo, codex_note: bool, failed: ?agent_hooks.AgentKind, dsh_busy: bool, dsh_error: bool) []const u8 {
     if (info.kind == .dsh) {
         if (dsh_busy) return "Running the DSH plugin command";
         if (dsh_error) return "Plugin command failed - check npx and network";
@@ -75,6 +75,7 @@ fn agentStatusCaption(info: agent_hooks.AgentInfo, codex_note: bool, dsh_busy: b
             .current => "Connected",
         };
     }
+    if (failed == info.kind) return "Install failed - check this agent's config";
     if (info.kind == .codex and codex_note) return "Installed - restart Codex and approve its hooks once";
     if (info.kind == .opencode) {
         return switch (info.status) {
@@ -191,7 +192,7 @@ fn agentsSection(ui: *AppUi, model: *const Model, icons: IconAtlas) AppUi.Node {
                 logo,
                 ui.column(.{ .grow = 1, .main = .center }, .{
                     ui.text(.{}, info.kind.displayName()),
-                    mutedParagraph(ui, agentStatusCaption(info, model.codex_trust_note, model.dsh_busy, model.dsh_error)),
+                    mutedParagraph(ui, agentStatusCaption(info, model.codex_trust_note, model.agent_install_failed, model.dsh_busy, model.dsh_error)),
                 }),
                 trailing,
             }),
@@ -621,6 +622,6 @@ test "DSH command errors do not ask for a global pnpm install" {
     const info = agent_hooks.AgentInfo{ .kind = .dsh, .status = .none };
     try std.testing.expectEqualStrings(
         "Plugin command failed - check npx and network",
-        agentStatusCaption(info, false, false, true),
+        agentStatusCaption(info, false, null, false, true),
     );
 }

@@ -39,10 +39,16 @@ on:
   push:
     paths:
       - "packages/petdex-desktop-native/**"
+      - "patches/native-sdk-*.patch"
+      - "scripts/patch-native-sdk.sh"
+      - "scripts/release-desktop.ts"
       - ".github/workflows/desktop-native-ci.yml"
   pull_request:
     paths:
       - "packages/petdex-desktop-native/**"
+      - "patches/native-sdk-*.patch"
+      - "scripts/patch-native-sdk.sh"
+      - "scripts/release-desktop.ts"
       - ".github/workflows/desktop-native-ci.yml"
   workflow_dispatch:
 
@@ -78,6 +84,11 @@ jobs:
 
       - name: Install Bun
         uses: oven-sh/setup-bun@v2
+
+      - name: Install Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
 
       - name: Test DSH plugin and embedded archive
         if: matrix.platform == 'macos'
@@ -173,7 +184,7 @@ jobs:
           # Match the release build: baseline x86-64, so CI exercises
           # the same instruction set users actually get. See the note in
           # desktop-release.yml.
-          "$NATIVE_CLI" build -Dcpu=baseline -Dtrace=off
+          "$NATIVE_CLI" build -Dcpu=baseline -Dtrace=off -Dautomation=true
           ls -lh zig-out/bin/
 
       - name: Run the test suite
@@ -215,29 +226,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p ~/.petdex/pets/ci-pet
-          # A known-good v2 atlas from the live catalog, so a decode
-          # failure here is the platform codec, never a bad fixture.
-          curl -fsSL -o ~/.petdex/pets/ci-pet/spritesheet.webp \
-            "$(curl -fsSL https://petdex.dev/api/install-pet/boba | sed -n 's/.*"spritesheetUrl":"\([^"]*\)".*/\1/p')"
-          printf '{"id":"ci-pet","displayName":"CI Pet","description":"ci","spritesheetPath":"spritesheet.webp"}' \
-            > ~/.petdex/pets/ci-pet/pet.json
+          # Generate a fixed v2 atlas locally before runtime isolation. The
+          # desktop smoke has no catalog/CDN dependency and compares the same
+          # pixels on every run.
+          python3 packages/petdex-desktop-native/tests/linux_smoke_fixture.py --self-test
+          python3 packages/petdex-desktop-native/tests/linux_smoke_fixture.py \
+            --dest ~/.petdex/pets/ci-pet
           ls -lh ~/.petdex/pets/ci-pet/
 
       - name: Install a pet (Windows)
         # PowerShell, not bash: git-bash's `~` is not $env:USERPROFILE on
-        # this runner, so the bash version wrote the pet somewhere the
-        # app never looks and the app reported NoPetInstalled with the
-        # files sitting right there.
+        # this runner. Generate the same local fixture as Linux so catalog
+        # and CDN changes cannot make the Windows smoke flaky.
         if: matrix.platform == 'windows'
         shell: pwsh
         run: |
           $dir = "$env:USERPROFILE\.petdex\pets\ci-pet"
-          New-Item -ItemType Directory -Force -Path $dir | Out-Null
-          $meta = Invoke-RestMethod -Uri "https://petdex.dev/api/install-pet/boba"
-          Invoke-WebRequest -Uri $meta.pet.spritesheetUrl -OutFile "$dir\spritesheet.webp"
-          '{"id":"ci-pet","displayName":"CI Pet","description":"ci","spritesheetPath":"spritesheet.webp"}' |
-            Set-Content -Path "$dir\pet.json" -NoNewline
+          python packages/petdex-desktop-native/tests/linux_smoke_fixture.py --dest $dir
+          if ($LASTEXITCODE -ne 0) { throw "fixture generator failed" }
           Get-ChildItem $dir | Select-Object Name, Length | Format-Table -AutoSize
 
       - name: Exercise managed Herdr plugin (macOS)
