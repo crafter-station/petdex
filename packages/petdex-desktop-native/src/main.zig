@@ -152,6 +152,7 @@ pub const Msg = union(enum) {
     bubble_animation_tick: native_sdk.EffectTimer,
     bubble_presentation_tick: native_sdk.EffectTimer,
     cycle_state,
+    pet_tapped,
     open_settings,
     settings_closed,
     close_pet,
@@ -1007,6 +1008,20 @@ const pat_react_ms: u32 = 1200;
 
 fn isTap(held_ms: i64, dx: f64, dy: f64) bool {
     return held_ms <= tap_max_ms and @abs(dx) < tap_slop_px and @abs(dy) < tap_slop_px;
+}
+
+fn windowsCanvasTapIsPat(dragging: bool, held_ms: i64, dx: f64, dy: f64) bool {
+    return !dragging or isTap(held_ms, dx, dy);
+}
+
+fn reactToPetTap(model: *Model, fx: *Effects) void {
+    model.sample_len = 0;
+    if (frontBubble(model)) |bubble| {
+        const focused = if (env_home) |home| plat.activateHerdrPane(home, bubble.herdrPaneSlice()) else false;
+        if (!focused) _ = plat.activateOriginApplication(bubble.origin_app, bubble.ttySlice(), bubble.cwdSlice());
+    }
+    model.pat_flip = !model.pat_flip;
+    applyState(model, if (model.pat_flip) .jumping else .waving, pat_react_ms, fx);
 }
 
 const physics_tick_ms: u32 = 16;
@@ -2434,6 +2449,20 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
         .cycle_state => {
             applyState(model, model.state.next(), 0, fx);
         },
+        .pet_tapped => {
+            if (builtin.target.os.tag != .windows) return;
+            const now = fx.wallMs();
+            if (!windowsCanvasTapIsPat(
+                model.dragging,
+                now - model.press_ms,
+                model.pet_x - model.press_x,
+                model.pet_y - model.press_y,
+            )) return;
+            // Windows delivers the authoritative short-click edge through
+            // the canvas input stream. Polling GetAsyncKeyState alone can
+            // miss a normal press and release between two frame clocks.
+            reactToPetTap(model, fx);
+        },
         .toggle_pets_expanded => model.pets_expanded = !model.pets_expanded,
         .dismiss_install_error => model.install.error_len = 0,
         .install_first_pet => {
@@ -3175,13 +3204,10 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
                 // patted and reacts, alternating so it doesn't feel
                 // canned (#557's "pet" interaction).
                 if (isTap(now - model.press_ms, read.x - model.press_x, read.y - model.press_y)) {
-                    model.sample_len = 0;
-                    if (frontBubble(model)) |bubble| {
-                        const focused = if (env_home) |home| plat.activateHerdrPane(home, bubble.herdrPaneSlice()) else false;
-                        if (!focused) _ = plat.activateOriginApplication(bubble.origin_app, bubble.ttySlice(), bubble.cwdSlice());
-                    }
-                    model.pat_flip = !model.pat_flip;
-                    applyState(model, if (model.pat_flip) .jumping else .waving, pat_react_ms, fx);
+                    // Windows already consumed this exact release through
+                    // `pet_tapped`; the polling path remains the drag/throw
+                    // authority and the tap fallback for macOS.
+                    if (builtin.target.os.tag != .windows) reactToPetTap(model, fx);
                     return;
                 }
                 const velocity = releaseVelocity(model) orelse {
@@ -6327,6 +6353,10 @@ pub fn rootView(ui: *AppUi, model: *const Model) AppUi.Node {
         .width = w,
         .height = h,
         .image = @intCast(model.frame_index + 1),
+        // The image is the deepest canvas hit target. Bind the Windows
+        // short-click edge here so a normal press/release cannot be swallowed
+        // by the static image before it reaches the layout parent.
+        .on_press = if (builtin.target.os.tag == .windows) .pet_tapped else null,
         .semantics = .{ .label = "Petdex pet" },
     });
     node.widget.image_fit = .stretch;
@@ -6344,8 +6374,16 @@ pub fn rootView(ui: *AppUi, model: *const Model) AppUi.Node {
     }
     // Win/mac keep the app-owned drag path and canvas context menu. Unlike the
     // Win32 modal move loop, this keeps frame callbacks running so the
-    // companion bubble can be repositioned in the same frame as the pet.
-    return ui.column(.{ .grow = 1, .main = .end, .cross = .center, .on_press = .noop, .context_menu = &pet_menu }, .{node});
+    // companion bubble can be repositioned in the same frame as the pet. The
+    // sprite owns Windows' click handler above; the parent remains a harmless
+    // fallback for the rest of its transparent layout.
+    return ui.column(.{
+        .grow = 1,
+        .main = .end,
+        .cross = .center,
+        .on_press = .noop,
+        .context_menu = &pet_menu,
+    }, .{node});
 }
 
 // ----------------------------------------------------------- bubble
@@ -7473,6 +7511,12 @@ test "tap detection separates pats from drags" {
     // Moved: a drag, not a pat.
     try std.testing.expect(!isTap(120, tap_slop_px, 0));
     try std.testing.expect(!isTap(120, 0, -tap_slop_px));
+
+    // A short Windows click may land entirely between two frame-clock polls;
+    // the canvas press is authoritative when no polling drag began.
+    try std.testing.expect(windowsCanvasTapIsPat(false, tap_max_ms + 1, 99, 99));
+    try std.testing.expect(windowsCanvasTapIsPat(true, 120, 0, 0));
+    try std.testing.expect(!windowsCanvasTapIsPat(true, 120, tap_slop_px, 0));
 }
 
 test "epoch-day flips exactly at UTC midnight" {

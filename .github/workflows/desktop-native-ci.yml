@@ -470,23 +470,26 @@ jobs:
           # APP_PID out here is an unbound variable, and under set -u that
           # failed the step after every assertion had already passed.
 
-      - name: Run and exercise the hook server (Windows)
+      - name: Run Windows desktop and hook smoke
         if: matrix.platform == 'windows'
         shell: pwsh
         working-directory: packages/petdex-desktop-native
         run: |
-          # Everything diagnostic runs before anything that can throw.
-          # The first version put the log dump after the token read, so
-          # a missing token killed the step and the app's own output
-          # never reached the log, leaving nothing to diagnose.
-          $ErrorActionPreference = "Continue"
+          # Strict errors prevent a dead process or failed HTTP request from
+          # producing a green smoke result. The finally block still reaps both
+          # processes when any assertion fails.
+          $ErrorActionPreference = "Stop"
           $env:PETDEX_PET = "ci-pet"
-          $app = Start-Process -FilePath ".\zig-out\bin\petdex-desktop-native.exe" `
-            -RedirectStandardOutput run.log -RedirectStandardError run.err -PassThru
+          $app = $null
+          $herdrServer = $null
+          try {
+            $app = Start-Process -FilePath ".\zig-out\bin\petdex-desktop-native.exe" `
+              -RedirectStandardOutput run.log -RedirectStandardError run.err -PassThru
           Start-Sleep -Seconds 12
 
           "=== process ==="
-          if ($app.HasExited) { "EXITED, code $($app.ExitCode)" } else { "alive, pid $($app.Id)" }
+          if ($app.HasExited) { throw "desktop exited before smoke probes, code $($app.ExitCode)" }
+          "alive, pid $($app.Id)"
 
           "=== stdout ==="; Get-Content run.log -ErrorAction SilentlyContinue
           "=== stderr ==="; Get-Content run.err -ErrorAction SilentlyContinue
@@ -496,8 +499,13 @@ jobs:
             Select-Object -First 40 FullName, Length | Format-Table -AutoSize
 
           "=== listening on 7777 ==="
-          Get-NetTCPConnection -LocalPort 7777 -State Listen -ErrorAction SilentlyContinue |
-            Select-Object LocalAddress, OwningProcess | Format-Table -AutoSize
+          $listener = Get-NetTCPConnection -LocalPort 7777 -State Listen -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if ($null -eq $listener) { throw "desktop did not bind port 7777" }
+          if ($listener.OwningProcess -ne $app.Id) {
+            throw "port 7777 belongs to PID $($listener.OwningProcess), expected $($app.Id)"
+          }
+          $listener | Select-Object LocalAddress, OwningProcess | Format-Table -AutoSize
 
           "=== titled windows ==="
           Get-Process | Where-Object { $_.MainWindowTitle } |
@@ -510,14 +518,45 @@ jobs:
           $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
           $g = [System.Drawing.Graphics]::FromImage($bmp)
           $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
-          $bmp.Save("$env:TEMP\windows-screen.png")
+          $bmp.Save("$env:RUNNER_TEMP\windows-screen.png")
+          $g.Dispose()
+          $bmp.Dispose()
           "screenshot saved"
 
           $tokenPath = "$env:USERPROFILE\.petdex\runtime\update-token"
           if (Test-Path $tokenPath) {
             $token = Get-Content $tokenPath -Raw
             "=== pre-Herdr health probe ==="
-            Invoke-RestMethod -Uri "http://127.0.0.1:7777/health" | ConvertTo-Json -Compress
+            $health = Invoke-RestMethod -Uri "http://127.0.0.1:7777/health"
+            if (-not $health.ok) { throw "health probe did not report ok" }
+            $health | ConvertTo-Json -Compress
+            $whoami = Invoke-RestMethod -Uri "http://127.0.0.1:7777/whoami"
+            if ($whoami.pid -ne $app.Id) {
+              throw "whoami PID $($whoami.pid) did not match launched PID $($app.Id)"
+            }
+            $whoami | ConvertTo-Json -Compress
+            "=== stalled-request deadline and recovery ==="
+            $slow = [System.Net.Sockets.TcpClient]::new()
+            $slow.ReceiveTimeout = 6000
+            $clock = [System.Diagnostics.Stopwatch]::StartNew()
+            try {
+              $slow.Connect("127.0.0.1", 7777)
+              $slowStream = $slow.GetStream()
+              $partial = [System.Text.Encoding]::ASCII.GetBytes("POST /state HTTP/1.1`r`nContent-Length: 32`r`n")
+              $slowStream.Write($partial, 0, $partial.Length)
+              $discard = New-Object byte[] 512
+              try { $null = $slowStream.Read($discard, 0, $discard.Length) } catch [System.IO.IOException] {}
+            } finally {
+              $clock.Stop()
+              $slow.Dispose()
+            }
+            if ($clock.ElapsedMilliseconds -lt 1000 -or $clock.ElapsedMilliseconds -gt 5500) {
+              throw "stalled request closed outside deadline window: $($clock.ElapsedMilliseconds) ms"
+            }
+            if ($app.HasExited) { throw "desktop exited while expiring a stalled request" }
+            $afterTimeout = Invoke-RestMethod -Uri "http://127.0.0.1:7777/health"
+            if (-not $afterTimeout.ok) { throw "health failed after stalled request" }
+            $afterTimeout | ConvertTo-Json -Compress
             "=== pre-Herdr stderr ==="
             Get-Content run.err -ErrorAction SilentlyContinue
             $herdrServer = Start-Process -FilePath (Get-Command herdr).Source `
@@ -541,26 +580,223 @@ jobs:
             "=== Herdr plugin logs ==="
             herdr plugin log list --plugin dev.petdex.bridge --limit 20
             "=== hook round trip ==="
-            Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:7777/state" `
+            $posted = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:7777/state" `
               -Headers @{ "x-petdex-update-token" = $token } `
-              -ContentType "application/json" -Body '{"state":"running"}' | ConvertTo-Json -Compress
-            Invoke-RestMethod -Uri "http://127.0.0.1:7777/state" | ConvertTo-Json -Compress
+              -ContentType "application/json" -Body '{"state":"running"}'
+            if (-not $posted.ok) { throw "state update was not accepted" }
+            $posted | ConvertTo-Json -Compress
+            $state = Invoke-RestMethod -Uri "http://127.0.0.1:7777/state"
+            if ($state.state -ne "running") { throw "state round trip did not persist running" }
+            $state | ConvertTo-Json -Compress
+            "=== real Win32 mouse input regression (#703) ==="
+            & tests/windows_input_smoke.ps1 `
+              -ProcessId $app.Id `
+              -Token $token `
+              -ArtifactsDirectory $env:RUNNER_TEMP
+            "=== rounded overlay pixel assertion ==="
+            Add-Type -AssemblyName UIAutomationClient
+            function Find-PetdexUiaElement {
+              param([string]$Name)
+              try {
+                $rootElement = [System.Windows.Automation.AutomationElement]::RootElement
+                $processCondition = New-Object System.Windows.Automation.PropertyCondition(
+                  [System.Windows.Automation.AutomationElement]::ProcessIdProperty,
+                  $app.Id)
+                $elements = $rootElement.FindAll(
+                  [System.Windows.Automation.TreeScope]::Descendants,
+                  $processCondition)
+                for ($index = 0; $index -lt $elements.Count; $index++) {
+                  $candidate = $elements.Item($index)
+                  if ($candidate.Current.Name -eq $Name) { return $candidate }
+                }
+              } catch [System.Windows.Automation.ElementNotAvailableException] {}
+              return $null
+            }
+            function Wait-PetdexUiaElement {
+              param([string]$Name, [AllowNull()][string]$HelpText = $null)
+              # A [string] parameter coerces an omitted $null default to an
+              # empty string. Track whether the caller supplied HelpText so
+              # card lookups match any value while disclosure lookups still
+              # wait for one exact state.
+              $matchAnyHelpText = -not $PSBoundParameters.ContainsKey("HelpText")
+              for ($attempt = 0; $attempt -lt 80; $attempt++) {
+                $candidate = Find-PetdexUiaElement -Name $Name
+                if ($null -ne $candidate) {
+                  try {
+                    if ($matchAnyHelpText -or $candidate.Current.HelpText -eq $HelpText) {
+                      return $candidate
+                    }
+                  } catch [System.Windows.Automation.ElementNotAvailableException] {}
+                }
+                Start-Sleep -Milliseconds 100
+              }
+              if ($matchAnyHelpText) { throw "UIA omitted $Name" }
+              throw "UIA $Name did not reach '$HelpText'"
+            }
+            function Toggle-PetdexDisclosure {
+              param([string]$From, [string]$To)
+              $element = Wait-PetdexUiaElement -Name "Show or hide agent sessions" -HelpText $From
+              $pattern = $element.GetCurrentPattern(
+                [System.Windows.Automation.TogglePattern]::Pattern)
+              $pattern.Toggle()
+              return Wait-PetdexUiaElement -Name "Show or hide agent sessions" -HelpText $To
+            }
+
+            # Herdr leaves an active card in the stack. Hide it before taking
+            # the baseline; otherwise the new card replaces the same painted
+            # pixels and a valid rounded center has a zero before/after delta.
+            $disclosureElement = Toggle-PetdexDisclosure `
+              -From "All sessions shown" -To "Recent sessions shown"
+            $disclosureElement = Toggle-PetdexDisclosure `
+              -From "Recent sessions shown" -To "Sessions hidden"
+            Start-Sleep -Milliseconds 500
+            # The real-input probe can foreground the originating application.
+            # Capture the corner baseline after that focus change so transparent
+            # overlay pixels are compared with the same background underneath,
+            # and after the existing native card windows have been hidden.
+            $beforeBubbleBitmap = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+            $beforeBubbleGraphics = [System.Drawing.Graphics]::FromImage($beforeBubbleBitmap)
+            $beforeBubbleGraphics.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+            $beforeBubbleBitmap.Save("$env:RUNNER_TEMP\windows-bubble-before.png")
+            $beforeBubbleGraphics.Dispose()
+            $beforeBubbleBitmap.Dispose()
+            $bubbleRequest = @{
+              session_id = "windows-rounded-corner-ci"
+              title = "Rounded corner CI"
+              text = "Inspecting native overlay corners"
+              status = "running"
+              remote = $false
+            } | ConvertTo-Json -Compress
+            $bubbleReply = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:7777/bubble" `
+              -Headers @{ "x-petdex-update-token" = $token } `
+              -ContentType "application/json" -Body $bubbleRequest
+            if (-not $bubbleReply.ok) { throw "rounded-corner bubble was not accepted" }
+
+            $disclosureElement = Toggle-PetdexDisclosure `
+              -From "Sessions hidden" -To "All sessions shown"
+
+            # Query the native UIA fragment, not the portable canvas snapshot:
+            # Windows cards are real overlay HWNDs and intentionally do not
+            # duplicate themselves into the canvas semantics tree.
+            $cardElement = Wait-PetdexUiaElement -Name "Agent session: Rounded corner CI"
+            $disclosureElement = Wait-PetdexUiaElement `
+              -Name "Show or hide agent sessions" -HelpText "All sessions shown"
+            $cardBounds = $cardElement.Current.BoundingRectangle
+            $left = [int][Math]::Round($cardBounds.Left)
+            $top = [int][Math]::Round($cardBounds.Top)
+            $width = [int][Math]::Round($cardBounds.Width)
+            $height = [int][Math]::Round($cardBounds.Height)
+            if ($width -lt 20 -or $height -lt 20) { throw "invalid rounded card bounds ${width}x${height}" }
+
+            Start-Sleep -Milliseconds 500
+            $bubbleBitmap = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+            $bubbleGraphics = [System.Drawing.Graphics]::FromImage($bubbleBitmap)
+            $bubbleGraphics.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+            $bubbleBitmap.Save("$env:RUNNER_TEMP\windows-bubble.png")
+            $bubbleGraphics.Dispose()
+            $bubbleBitmap.Dispose()
+
+            $before = [System.Drawing.Bitmap]::FromFile("$env:RUNNER_TEMP\windows-bubble-before.png")
+            $after = [System.Drawing.Bitmap]::FromFile("$env:RUNNER_TEMP\windows-bubble.png")
+            try {
+              $points = @(
+                [System.Drawing.Point]::new($left + 1, $top + 1)
+                [System.Drawing.Point]::new($left + $width - 2, $top + 1)
+                [System.Drawing.Point]::new($left + 1, $top + $height - 2)
+                [System.Drawing.Point]::new($left + $width - 2, $top + $height - 2)
+              )
+              $cornerDeltas = @()
+              foreach ($point in $points) {
+                $old = $before.GetPixel($point.X, $point.Y)
+                $new = $after.GetPixel($point.X, $point.Y)
+                $delta = [Math]::Abs($old.R - $new.R) + [Math]::Abs($old.G - $new.G) + [Math]::Abs($old.B - $new.B)
+                $cornerDeltas += $delta
+                if ($delta -gt 50) { throw "square corner leakage at $($point.X),$($point.Y); RGB delta $delta" }
+              }
+              $centerX = $left + [int]($width / 2)
+              $centerY = $top + [int]($height / 2)
+              $oldCenter = $before.GetPixel($centerX, $centerY)
+              $newCenter = $after.GetPixel($centerX, $centerY)
+              $centerDelta = [Math]::Abs($oldCenter.R - $newCenter.R) + [Math]::Abs($oldCenter.G - $newCenter.G) + [Math]::Abs($oldCenter.B - $newCenter.B)
+              if ($centerDelta -lt 25) { throw "rounded overlay did not paint its center; RGB delta $centerDelta" }
+              @{
+                bounds = @($left, $top, $width, $height)
+                cornerDeltas = $cornerDeltas
+                centerDelta = $centerDelta
+              } | ConvertTo-Json -Compress | Set-Content "$env:RUNNER_TEMP\windows-rounded-corners.json"
+            } finally {
+              $before.Dispose()
+              $after.Dispose()
+            }
+
+            "=== UIA nonactivating Toggle ==="
+            Add-Type @'
+            using System;
+            using System.Runtime.InteropServices;
+            public static class PetdexCiForeground {
+              [DllImport("user32.dll")]
+              public static extern IntPtr GetForegroundWindow();
+            }
+          '@
+            $foregroundBefore = [PetdexCiForeground]::GetForegroundWindow()
+            $toggle = $disclosureElement.GetCurrentPattern(
+              [System.Windows.Automation.TogglePattern]::Pattern)
+            if ($disclosureElement.Current.HelpText -ne "All sessions shown") {
+              throw "unexpected initial UIA disclosure value: $($disclosureElement.Current.HelpText)"
+            }
+            $toggle.Toggle()
+            $disclosureElement = Wait-PetdexUiaElement `
+              -Name "Show or hide agent sessions" -HelpText "Recent sessions shown"
+            $toggle = $disclosureElement.GetCurrentPattern(
+              [System.Windows.Automation.TogglePattern]::Pattern)
+            $toggle.Toggle()
+            $disclosureElement = Wait-PetdexUiaElement `
+              -Name "Show or hide agent sessions" -HelpText "Sessions hidden"
+            $toggle = $disclosureElement.GetCurrentPattern(
+              [System.Windows.Automation.TogglePattern]::Pattern)
+            if ($disclosureElement.Current.HelpText -ne "Sessions hidden" -or
+                $toggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::Off) {
+              throw "UIA Toggle did not advance Recent to Hidden/Off"
+            }
+            $toggle.Toggle()
+            $disclosureElement = Wait-PetdexUiaElement `
+              -Name "Show or hide agent sessions" -HelpText "All sessions shown"
+            $toggle = $disclosureElement.GetCurrentPattern(
+              [System.Windows.Automation.TogglePattern]::Pattern)
+            if ($disclosureElement.Current.HelpText -ne "All sessions shown" -or
+                $toggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::On) {
+              throw "UIA Toggle did not restore Hidden to All/On"
+            }
+            $foregroundAfter = [PetdexCiForeground]::GetForegroundWindow()
+            if ($foregroundAfter -ne $foregroundBefore) { throw "UIA Toggle stole foreground focus" }
+            @(
+              "All -> Recent -> Hidden -> All: PASS",
+              "Foreground unchanged: PASS"
+            ) | Set-Content "$env:RUNNER_TEMP\windows-uia-toggle.txt"
             "=== runtime mirrors after requests ==="
             Get-Content "$env:USERPROFILE\.petdex\runtime\state.json" -ErrorAction SilentlyContinue
             Get-Content "$env:USERPROFILE\.petdex\runtime\bubble.json" -ErrorAction SilentlyContinue
             "=== stderr after requests ==="
             Get-Content run.err -ErrorAction SilentlyContinue
             "=== process after requests ==="
-            if ($app.HasExited) { "EXITED, code $($app.ExitCode)" } else { "alive, pid $($app.Id)" }
+            if ($app.HasExited) { throw "desktop exited during hook round trip, code $($app.ExitCode)" }
+            "alive, pid $($app.Id)"
             herdr server stop
             $herdrServer.WaitForExit(10000) | Out-Null
             if ($bridgeExit -ne 0) { throw "managed Herdr action failed" }
           } else {
-            "NO TOKEN at $tokenPath"
+            throw "token was never written: $tokenPath"
           }
 
-          Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue
-          if (-not (Test-Path $tokenPath)) { throw "token was never written" }
+          } finally {
+            if ($null -ne $herdrServer -and -not $herdrServer.HasExited) {
+              herdr server stop 2>$null
+              Stop-Process -Id $herdrServer.Id -Force -ErrorAction SilentlyContinue
+            }
+            if ($null -ne $app -and -not $app.HasExited) {
+              Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue
+            }
+          }
 
       - name: Fire a real deep link (Windows)
         if: matrix.platform == 'windows'
@@ -676,7 +912,7 @@ jobs:
           $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
           $g = [System.Drawing.Graphics]::FromImage($bmp)
           $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
-          $bmp.Save("$env:TEMP\windows-screen-deeplink.png")
+          $bmp.Save("$env:RUNNER_TEMP\windows-screen-deeplink.png")
 
           Stop-Process -Id $cold.Id -Force -ErrorAction SilentlyContinue
 
@@ -802,11 +1038,11 @@ jobs:
           }
           APP_PID=
 
-      - name: Upload the screenshot
-        if: always() && matrix.platform != 'macos'
+      - name: Upload Linux screenshots
+        if: always() && matrix.platform == 'linux'
         uses: actions/upload-artifact@v7
         with:
-          name: screen-${{ matrix.platform }}
+          name: screen-linux
           path: |
             packages/petdex-desktop-native/.zig-cache/ci-linux-smoke/idle/
             packages/petdex-desktop-native/.zig-cache/ci-linux-smoke/bubble/
@@ -815,7 +1051,22 @@ jobs:
             packages/petdex-desktop-native/.zig-cache/ci-linux-smoke/wayland/
             packages/petdex-desktop-native/.zig-cache/ci-linux-smoke/perf/
             /tmp/linux-screen-deeplink.png
+          if-no-files-found: warn
+
+      - name: Upload Windows screenshots
+        if: always() && matrix.platform == 'windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: screen-windows
+          path: |
             ${{ runner.temp }}/windows-screen.png
+            ${{ runner.temp }}/windows-bubble-before.png
+            ${{ runner.temp }}/windows-bubble.png
+            ${{ runner.temp }}/windows-rounded-corners.json
+            ${{ runner.temp }}/windows-uia-toggle.txt
+            ${{ runner.temp }}/windows-input-before.png
+            ${{ runner.temp }}/windows-input-left-click.png
+            ${{ runner.temp }}/windows-input-smoke.json
             ${{ runner.temp }}/windows-screen-deeplink.png
           if-no-files-found: warn
 

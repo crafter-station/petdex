@@ -346,6 +346,7 @@ function preflightTree(): void {
       "patches/native-sdk-macos-accessibility-element.patch",
       "patches/native-sdk-linux-popup-surface.patch",
       "patches/native-sdk-secondary-window-generation.patch",
+      "patches/native-sdk-windows-canvas-drag.patch",
       "packages/petdex-desktop-native/assets",
       "scripts/patch-native-sdk.sh",
       "scripts/release-desktop.ts",

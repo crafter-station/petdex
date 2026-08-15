@@ -10,6 +10,7 @@ HEADERPAD_PATCH="$ROOT/patches/native-sdk-macos-headerpad.patch"
 ACCESSIBILITY_PATCH="$ROOT/patches/native-sdk-macos-accessibility-element.patch"
 LINUX_POPUP_PATCH="$ROOT/patches/native-sdk-linux-popup-surface.patch"
 SECONDARY_WINDOW_GENERATION_PATCH="$ROOT/patches/native-sdk-secondary-window-generation.patch"
+WINDOWS_CANVAS_DRAG_PATCH="$ROOT/patches/native-sdk-windows-canvas-drag.patch"
 SDK="${NATIVE_SDK_PATH:-}"
 
 if [[ -z "$SDK" ]]; then
@@ -44,3 +45,4 @@ apply_patch "$HEADERPAD_PATCH" "macOS Mach-O headerpad"
 apply_patch "$ACCESSIBILITY_PATCH" "macOS accessibility element"
 apply_patch "$LINUX_POPUP_PATCH" "Linux popup surface"
 apply_patch "$SECONDARY_WINDOW_GENERATION_PATCH" "secondary-window content generation"
+apply_patch "$WINDOWS_CANVAS_DRAG_PATCH" "Windows canvas, drag, and window services"
