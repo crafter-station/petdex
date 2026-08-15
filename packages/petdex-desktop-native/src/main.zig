@@ -5177,8 +5177,8 @@ fn bubbleDisclosureFrame(model: *const Model) BubbleRect {
     return bubbleDisclosureFrameForPlatform(model, builtin.target.os.tag);
 }
 
-fn bubblePortableCardUsesWindowDrag(os: std.Target.Os.Tag) bool {
-    return os == .linux;
+fn bubblePortableCardUsesWindowDrag(os: std.Target.Os.Tag, presented: bool) bool {
+    return os == .linux and presented;
 }
 
 /// The union of the cards as they are ACTUALLY DRAWN, in window-local
@@ -6724,7 +6724,18 @@ fn bubbleCard(ui: *AppUi, model: *const Model, slot: usize) AppUi.Node {
     // On Linux the bubble is a parent-local compositor popup. Its card body
     // therefore moves the owning pet window through the SDK's window-drag
     // channel; nested icon buttons remain press exclusions automatically.
-    card.widget.window_drag = bubblePortableCardUsesWindowDrag(builtin.target.os.tag);
+    // A hidden/recently filtered card must not leave an invisible native drag
+    // rectangle over the sibling disclosure control after the popup shrinks.
+    const card_presented = bubbleCardPresented(model, slot);
+    card.widget.window_drag = bubblePortableCardUsesWindowDrag(
+        builtin.target.os.tag,
+        card_presented,
+    );
+    // Filtering to Recent/Hidden must remove the card from the portable
+    // accessibility tree as well as the compositor input region. Retaining
+    // an invisible `Agent session` node let AT and automation target content
+    // outside the shrunken popup after the disclosure hid it.
+    card.widget.semantics.hidden = !card_presented;
     card.widget.style.radius = bubble_card_radius;
     card.widget.layout.clip_content = true;
     if (builtin.target.os.tag == .macos) {
@@ -6880,8 +6891,34 @@ fn bubbleView(ui: *AppUi, model: *const Model) AppUi.Node {
             .completed => canvas.Color.rgba8(52, 199, 89, 52),
             .idle => if (model.dark) canvas.Color.rgba8(0, 0, 0, 96) else canvas.Color.rgba8(0, 0, 0, 44),
         };
-        control.widget.transform = canvas.Affine.translate(disclosure.x, disclosure.y);
-        root_layers[root_count] = control;
+        if (bubblePortableUsesLayoutSpacers(builtin.target.os.tag)) {
+            // Native SDK automation and AT bounds are derived from layout
+            // frames. A transform-only disclosure painted in the right place
+            // but still advertised (and synthesized clicks) at (0,0), where
+            // it overlapped the card. Express the popup-local offset as
+            // ordinary layout on Linux, matching the card stack above.
+            const disclosure_left = ui.el(.stack, .{
+                .width = disclosure.x,
+                .height = 1,
+            }, .{});
+            const disclosure_top = ui.el(.stack, .{
+                .width = 1,
+                .height = disclosure.y,
+            }, .{});
+            const disclosure_row = ui.row(.{
+                .width = bubbleWindowWidth(model),
+                .height = disclosure.h,
+                .cross = .start,
+            }, .{ disclosure_left, control });
+            root_layers[root_count] = ui.column(.{
+                .width = bubbleWindowWidth(model),
+                .height = bubbleWindowHeight(model),
+                .cross = .start,
+            }, .{ disclosure_top, disclosure_row });
+        } else {
+            control.widget.transform = canvas.Affine.translate(disclosure.x, disclosure.y);
+            root_layers[root_count] = control;
+        }
         root_count += 1;
     }
 
@@ -8755,9 +8792,10 @@ test "linux centers the disclosure and bubble drag on the pet anchored popover" 
     model.bubble_pet_center_local = 0;
     const disclosure = bubbleDisclosureFrameForPlatform(&model, .linux);
     try std.testing.expectApproxEqAbs(bubbleWindowWidth(&model) / 2, disclosure.x + disclosure.w / 2, 0.01);
-    try std.testing.expect(bubblePortableCardUsesWindowDrag(.linux));
-    try std.testing.expect(!bubblePortableCardUsesWindowDrag(.macos));
-    try std.testing.expect(!bubblePortableCardUsesWindowDrag(.windows));
+    try std.testing.expect(bubblePortableCardUsesWindowDrag(.linux, true));
+    try std.testing.expect(!bubblePortableCardUsesWindowDrag(.linux, false));
+    try std.testing.expect(!bubblePortableCardUsesWindowDrag(.macos, true));
+    try std.testing.expect(!bubblePortableCardUsesWindowDrag(.windows, true));
 }
 
 test "closed cards converge into the disclosure and open to intrinsic frames" {

@@ -57,8 +57,60 @@ session contract.
 
 For the pinned desktop build, set `NATIVE_CLI` and `NATIVE_SDK_PATH` to the
 CLI and SDK checkout used by the matching release workflow. The build scripts
-apply the Petdex-owned macOS Mach-O headerpad patch before compiling; they
-fail if the SDK source no longer matches the pinned patch.
+apply the Petdex-owned macOS, Linux, and shared runtime patches before compiling;
+they fail if the SDK source no longer matches the pinned patches.
+
+## Linux desktop smoke
+
+The Linux harness launches the exact built ELF in a fresh mode-700 home and
+runtime directory, a private D-Bus session, and a composited Xvfb display. It
+verifies that the ELF, process, D-Bus owner, `/whoami`, and port-7777 listener
+all identify the same process. It never prints or stores the hook update token.
+
+Generate the repository-local deterministic pet fixture before the runtime scenario, then run:
+
+```bash
+python3 tests/linux_smoke_fixture.py --dest .zig-cache/linux-smoke-fixture
+sh tests/linux_desktop_smoke.sh --self-test
+sh tests/linux_desktop_smoke.sh \
+  --scenario idle \
+  --artifacts .zig-cache/linux-smoke-idle \
+  --fixture .zig-cache/linux-smoke-fixture
+sh tests/linux_desktop_smoke.sh \
+  --scenario bubble \
+  --artifacts .zig-cache/linux-smoke-bubble \
+  --fixture .zig-cache/linux-smoke-fixture
+sh tests/linux_desktop_smoke.sh \
+  --scenario interaction \
+  --artifacts .zig-cache/linux-smoke-interaction \
+  --fixture .zig-cache/linux-smoke-fixture
+sh tests/linux_perf_smoke.sh --quick
+```
+
+`interaction` adds real X11 pointer input, while `perf` records bounded process
+samples (`--duration` defaults to 10 seconds). The performance wrapper covers
+idle, settled static, busy/shimmer, and rapid update/hover workloads; its long
+`--soak SECONDS` form limits the soak to settled idle/static states. RSS,
+thread, and file-descriptor growth are bounded for every workload. The
+deterministic Xvfb/cairo idle and static profiles also use a generous 35%
+cumulative-CPU ceiling to catch presentation loops; busy/rapid work is excluded
+because its authored software-rendering load is machine-specific. The harness
+fails rather than reusing an existing port-7777 listener or silently running
+without a compositor.
+
+Bubble cards on Linux use the portable UI library's panels, text, icons, and
+buttons with semantic solid/translucent fills and no Liquid Glass/backdrop blur.
+The same bounded presentation snapshot also retains GTK-native keyboard and
+assistive-technology controls. Those controls stay pointer-transparent until
+focus paints the platform theme's focus-visible affordance, so Wayland never
+depends on global cursor polling and an invisible action rail cannot steal a
+click from the canvas or an application underneath a transparent gap. The GTK
+bridge has shared-model, serialization, pinned-patch, and cross-compile
+coverage. Real Orca/Accerciser traversal and activation remain manual release
+checks. X11 origin activation is likewise cross-compiled, not proven against a
+real window manager in CI. Linux browser Open remains hidden: it will not be
+offered until the registered default handler can be resolved to one exact
+executable/window identity.
 
 ## Herdr
 

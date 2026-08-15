@@ -1,0 +1,977 @@
+diff --git a/src/platform/linux/gtk_host.c b/src/platform/linux/gtk_host.c
+index 45eac2a..9ef7441 100644
+--- a/src/platform/linux/gtk_host.c
++++ b/src/platform/linux/gtk_host.c
+@@ -77,14 +77,15 @@ typedef struct native_sdk_absent_content_manager WebKitUserContentManager;
+
+ /* Companion-window chrome flags, the SAME bitmask the AppKit host
+  * applies in native_sdk_appkit_create (bit 0 floating, bit 1
+- * transparent, bit 2 click-through). The two hosts are meant to be read
+- * side by side: same bits, same order, same create-time-only semantics
++ * transparent, bit 2 click-through, bit 3 fullscreen overlay). The two
++ * hosts are meant to be read side by side: same bits, same order, same create-time-only semantics
+  * (a flag is fixed when the window is born, never toggled after). The
+  * packing lives in the Zig seam (windowFlagsInt) on both platforms; C
+  * only ever unpacks. */
+ #define NATIVE_SDK_WINDOW_FLAG_FLOATING (1 << 0)
+ #define NATIVE_SDK_WINDOW_FLAG_TRANSPARENT (1 << 1)
+ #define NATIVE_SDK_WINDOW_FLAG_CLICK_THROUGH (1 << 2)
++#define NATIVE_SDK_WINDOW_FLAG_FULLSCREEN_OVERLAY (1 << 3)
+
+ #define NATIVE_SDK_MAX_WINDOWS 16
+ #define NATIVE_SDK_MAX_WEBVIEWS 16
+@@ -350,6 +351,14 @@ typedef struct native_sdk_gtk_window {
+     double emitted_width;
+     double emitted_height;
+     double emitted_scale;
++    /* A click-through compositor popup still needs its app-drawn controls to
++     * receive input. Its presented alpha becomes the GdkSurface input shape;
++     * ordinary click-through toplevels retain the historical empty region. */
++    int alpha_shaped_input;
++    double popup_pointer_x;
++    double popup_pointer_y;
++    int popup_pointer_inside;
++    int popup_primary_down;
+     /* The window WebView's z-position among the overlay children. 0 is
+      * the classic bottom-most main child; apps that layer native views
+      * UNDER the WebView (or the WebView over a canvas) set it through
+@@ -418,6 +427,7 @@ struct native_sdk_gtk_host {
+     GtkWidget *context_popover;
+     native_sdk_gtk_tray_t tray;
+     native_sdk_gtk_audio_t audio;
++    int petdex_bubble_css_installed;
+ };
+
+ static void native_sdk_emit(native_sdk_gtk_host_t *host, native_sdk_gtk_event_t event);
+@@ -1193,6 +1203,12 @@ static void native_sdk_gpu_surface_draw(GtkDrawingArea *area, cairo_t *cr, int w
+         cairo_set_source_surface(cr, surface, 0, 0);
+         cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_BILINEAR);
+     }
++    /* This host always receives and blits the complete RGBA frame (dirty
++     * metadata is intentionally ignored below). SOURCE is therefore the
++     * required operator: transparent source pixels must replace stale or
++     * toolkit-initialized destination pixels. OVER would leave an opaque
++     * black popup backing untouched wherever the app frame has alpha zero. */
++    cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
+     cairo_paint(cr);
+     cairo_restore(cr);
+     cairo_surface_destroy(surface);
+@@ -1202,10 +1218,22 @@ static void native_sdk_gpu_surface_draw(GtkDrawingArea *area, cairo_t *cr, int w
+  * recorded pointer press. Shared by the runtime `window_drag` channel
+  * (native_sdk_gtk_start_window_drag) and the press-time drag-mirror
+  * claim below. */
++static native_sdk_gtk_window_t *native_sdk_window_drag_owner(native_sdk_gtk_window_t *win) {
++    if (!win) return NULL;
++    if (win->gtk_window) return win;
++    if (!win->host || win->popup_parent_id == 0) return NULL;
++    for (int i = 0; i < win->host->window_count; i++) {
++        native_sdk_gtk_window_t *candidate = &win->host->windows[i];
++        if (candidate->id == win->popup_parent_id && candidate->gtk_window) return candidate;
++    }
++    return NULL;
++}
++
+ static void native_sdk_window_begin_interactive_move(native_sdk_gtk_window_t *win) {
+-    if (!win || !win->gtk_window) return;
++    native_sdk_gtk_window_t *owner = native_sdk_window_drag_owner(win);
++    if (!owner) return;
+     if (!win->last_press_device || win->last_press_time == 0) return;
+-    GdkSurface *surface = gtk_native_get_surface(GTK_NATIVE(win->gtk_window));
++    GdkSurface *surface = gtk_native_get_surface(GTK_NATIVE(owner->gtk_window));
+     if (!surface || !GDK_IS_TOPLEVEL(surface)) return;
+     gdk_toplevel_begin_move(GDK_TOPLEVEL(surface), win->last_press_device,
+                             win->last_press_button > 0 ? win->last_press_button : 1,
+@@ -1218,21 +1246,22 @@ static void native_sdk_window_begin_interactive_move(native_sdk_gtk_window_t *wi
+  * minimize/lower as configured, none disables it. The maximize variants
+  * all toggle; a non-resizable window never maximizes. */
+ static void native_sdk_window_apply_titlebar_double_click(native_sdk_gtk_window_t *win) {
+-    if (!win || !win->gtk_window) return;
++    native_sdk_gtk_window_t *owner = native_sdk_window_drag_owner(win);
++    if (!owner) return;
+     char *configured = NULL;
+     GtkSettings *settings = gtk_settings_get_default();
+     if (settings) g_object_get(settings, "gtk-titlebar-double-click", &configured, NULL);
+     const char *action = configured ? configured : "toggle-maximize";
+     if (strncmp(action, "toggle-maximize", strlen("toggle-maximize")) == 0) {
+-        if (gtk_window_is_maximized(win->gtk_window)) {
+-            gtk_window_unmaximize(win->gtk_window);
+-        } else if (gtk_window_get_resizable(win->gtk_window)) {
+-            gtk_window_maximize(win->gtk_window);
++        if (gtk_window_is_maximized(owner->gtk_window)) {
++            gtk_window_unmaximize(owner->gtk_window);
++        } else if (gtk_window_get_resizable(owner->gtk_window)) {
++            gtk_window_maximize(owner->gtk_window);
+         }
+     } else if (strcmp(action, "minimize") == 0) {
+-        gtk_window_minimize(win->gtk_window);
++        gtk_window_minimize(owner->gtk_window);
+     } else if (strcmp(action, "lower") == 0) {
+-        GdkSurface *surface = gtk_native_get_surface(GTK_NATIVE(win->gtk_window));
++        GdkSurface *surface = gtk_native_get_surface(GTK_NATIVE(owner->gtk_window));
+         if (surface && GDK_IS_TOPLEVEL(surface)) gdk_toplevel_lower(GDK_TOPLEVEL(surface));
+     }
+     g_free(configured);
+@@ -1271,8 +1300,8 @@ static void native_sdk_gpu_pointer_pressed(GtkGestureClick *gesture, int n_press
+         GdkEvent *event = gtk_event_controller_get_current_event(GTK_EVENT_CONTROLLER(gesture));
+         graphene_point_t window_point = { (float)x, (float)y };
+         graphene_point_t translated;
+-        if (view->window->gtk_window &&
+-            gtk_widget_compute_point(view->widget, GTK_WIDGET(view->window->gtk_window), &window_point, &translated)) {
++        native_sdk_gtk_window_t *owner = native_sdk_window_drag_owner(view->window);
++        if (owner && gtk_widget_compute_point(view->widget, GTK_WIDGET(owner->gtk_window), &window_point, &translated)) {
+             window_point = translated;
+         }
+         view->window->last_press_device = event ? gdk_event_get_device(event) : NULL;
+@@ -1348,11 +1377,25 @@ static void native_sdk_gpu_pointer_motion(GtkEventControllerMotion *controller,
+     }
+     view->gpu_pointer_x = x;
+     view->gpu_pointer_y = y;
++    if (view->window) {
++        view->window->popup_pointer_x = view->x + x;
++        view->window->popup_pointer_y = view->y + y;
++        view->window->popup_pointer_inside = 1;
++        view->window->popup_primary_down = view->gpu_pointer_down;
++    }
+     const uint32_t modifiers = native_sdk_gpu_modifier_flags(gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(controller)));
+     const int kind = view->gpu_pointer_down ? NATIVE_SDK_GTK_GPU_INPUT_POINTER_DRAG : NATIVE_SDK_GTK_GPU_INPUT_POINTER_MOVE;
+     native_sdk_emit_gpu_surface_input(view, kind, x, y, 0, 0, 0, "", "", modifiers);
+ }
+
++static void native_sdk_gpu_pointer_leave(GtkEventControllerMotion *controller, gpointer data) {
++    (void)controller;
++    native_sdk_gtk_native_view_t *view = data;
++    if (!view || !view->window) return;
++    view->window->popup_pointer_inside = 0;
++    view->window->popup_primary_down = 0;
++}
++
+ static gboolean native_sdk_gpu_scroll(GtkEventControllerScroll *controller, double dx, double dy, gpointer data) {
+     native_sdk_gtk_native_view_t *view = data;
+     if (!view) return FALSE;
+@@ -1454,6 +1497,7 @@ static void native_sdk_setup_gpu_surface_view(native_sdk_gtk_native_view_t *view
+
+     GtkEventController *motion = gtk_event_controller_motion_new();
+     g_signal_connect(motion, "motion", G_CALLBACK(native_sdk_gpu_pointer_motion), view);
++    g_signal_connect(motion, "leave", G_CALLBACK(native_sdk_gpu_pointer_leave), view);
+     gtk_widget_add_controller(view->widget, motion);
+
+     GtkEventController *scroll = gtk_event_controller_scroll_new(GTK_EVENT_CONTROLLER_SCROLL_BOTH_AXES);
+@@ -1590,6 +1634,45 @@ static void native_sdk_configure_native_view_action(native_sdk_gtk_native_view_t
+     }
+ }
+
++static int native_sdk_is_petdex_bubble_control(const char *label) {
++    static const char prefix[] = "petdex-bubble-a11y-";
++    return label && strncmp(label, prefix, sizeof(prefix) - 1) == 0;
++}
++
++static void native_sdk_configure_petdex_bubble_control(native_sdk_gtk_host_t *host, native_sdk_gtk_native_view_t *view) {
++    if (!host || !view || !view->widget || !native_sdk_is_petdex_bubble_control(view->label)) return;
++    if (!host->petdex_bubble_css_installed) {
++        GtkCssProvider *provider = gtk_css_provider_new();
++        gtk_css_provider_load_from_string(
++            provider,
++            ".petdex-bubble-a11y-control {"
++            " min-width: 0; min-height: 0; padding: 0;"
++            " border: 1px solid transparent; border-radius: 9999px;"
++            " background: transparent; background-image: none;"
++            " box-shadow: none; color: transparent;"
++            "}"
++            ".petdex-bubble-a11y-control:focus-visible {"
++            " background: @theme_selected_bg_color;"
++            " border-color: @theme_selected_fg_color;"
++            " box-shadow: 0 0 0 2px @theme_selected_bg_color;"
++            " color: @theme_selected_fg_color;"
++            "}");
++        gtk_style_context_add_provider_for_display(
++            gtk_widget_get_display(view->widget),
++            GTK_STYLE_PROVIDER(provider),
++            GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
++        g_object_unref(provider);
++        host->petdex_bubble_css_installed = 1;
++    }
++    gtk_widget_add_css_class(view->widget, "petdex-bubble-a11y-control");
++    /* Canvas owns pointer hit testing and the compositor input region. This
++     * parallel GTK control is keyboard/AT-only until focus-visible paints its
++     * native themed affordance, so it must not steal an invisible click. */
++    gtk_widget_set_can_target(view->widget, FALSE);
++    gtk_widget_set_focusable(view->widget, TRUE);
++    gtk_widget_set_tooltip_text(view->widget, native_sdk_native_accessibility_label(view));
++}
++
+ static void native_sdk_reorder_overlays(native_sdk_gtk_window_t *win) {
+     if (!win || !win->stack_root) return;
+     int placed[NATIVE_SDK_MAX_WEBVIEWS] = {0};
+@@ -3074,16 +3157,12 @@ static WebKitWebView *native_sdk_ensure_main_webview(native_sdk_gtk_window_t *wi
+  * property, so the equivalent is an EWMH state hint the window manager
+  * reads: _NET_WM_STATE containing _NET_WM_STATE_ABOVE.
+  *
+- * This runs at REALIZE time, before the surface is mapped, and writes
+- * the property directly with XChangeProperty instead of sending the
+- * _NET_WM_STATE ClientMessage. That is deliberate and it is the ordering
+- * the spec calls for: a client changing the state of an ALREADY MAPPED
+- * window must send the client message, but for a window that has not
+- * been mapped yet the WM "SHOULD honor _NET_WM_STATE whenever a
+- * withdrawn window requests to be mapped" (wm-spec 5.8). Setting the
+- * property pre-map means the window comes up above from its first
+- * frame; the ClientMessage route would map it at normal level and raise
+- * it one round trip later, which reads as a visible pop.
++ * REALIZE writes the property directly before the surface maps, which
++ * lets a conforming window manager place the first frame above. MAP also
++ * sends the EWMH ClientMessage required for an already-mapped window.
++ * Some window managers (including KWin configurations observed in the
++ * wild) normalize the client-owned property during mapping, so the
++ * mapped retry is necessary even though the pre-map property was valid.
+  *
+  * A window manager is free to ignore the hint (the spec calls ABOVE a
+  * user preference), and a bare Xvfb with no WM running honors nothing at
+@@ -3114,6 +3193,92 @@ static void native_sdk_window_apply_x11_above(GtkWidget *widget, gpointer data)
+     XChangeProperty(xdisplay, xid, net_wm_state, XA_ATOM, 32, PropModeAppend,
+                     (const unsigned char *)&above, 1);
+ }
++
++static void native_sdk_window_request_x11_above(GtkWidget *widget, gpointer data) {
++    (void)data;
++    GdkSurface *surface = gtk_native_get_surface(GTK_NATIVE(widget));
++    if (!surface || !GDK_IS_X11_SURFACE(surface)) return;
++    GdkDisplay *display = gdk_surface_get_display(surface);
++    if (!display || !GDK_IS_X11_DISPLAY(display)) return;
++
++    Display *xdisplay = GDK_DISPLAY_XDISPLAY(display);
++    Window xid = GDK_SURFACE_XID(surface);
++    if (!xdisplay || xid == None) return;
++
++    Atom net_wm_state = gdk_x11_get_xatom_by_name_for_display(display, "_NET_WM_STATE");
++    Atom above = gdk_x11_get_xatom_by_name_for_display(display, "_NET_WM_STATE_ABOVE");
++    if (net_wm_state == None || above == None) return;
++
++    XEvent event;
++    memset(&event, 0, sizeof(event));
++    event.xclient.type = ClientMessage;
++    event.xclient.display = xdisplay;
++    event.xclient.window = xid;
++    event.xclient.message_type = net_wm_state;
++    event.xclient.format = 32;
++    event.xclient.data.l[0] = 1; /* _NET_WM_STATE_ADD */
++    event.xclient.data.l[1] = (long)above;
++    event.xclient.data.l[2] = (long)None;
++    event.xclient.data.l[3] = 1; /* normal application */
++    XSendEvent(xdisplay, DefaultRootWindow(xdisplay), False,
++               SubstructureRedirectMask | SubstructureNotifyMask, &event);
++    XFlush(xdisplay);
++}
++
++/* KWin can finish managing a newly mapped client after GTK's `map`
++ * signal. In that ordering the immediate ABOVE message is recorded, but
++ * the first stacking decision can still leave the companion underneath
++ * the window that was active while it launched. AppKit's bit-3 companion
++ * panel has a stronger, non-activating screen overlay level, so retry the
++ * standard X11 request once the WM has had a turn and ask it to restack
++ * the already-managed client. Neither request activates the window or
++ * changes the user's keyboard focus.
++ *
++ * XRaiseWindow is a compatibility fallback for window managers that do
++ * not implement _NET_RESTACK_WINDOW. On a managed client it becomes a
++ * ConfigureRequest to the WM; on a bare X server it raises directly. */
++static gboolean native_sdk_window_restack_x11_overlay(gpointer data) {
++    GtkWidget *widget = GTK_WIDGET(data);
++    if (!widget || !gtk_widget_get_mapped(widget)) return G_SOURCE_REMOVE;
++
++    native_sdk_window_request_x11_above(widget, NULL);
++
++    GdkSurface *surface = gtk_native_get_surface(GTK_NATIVE(widget));
++    if (!surface || !GDK_IS_X11_SURFACE(surface)) return G_SOURCE_REMOVE;
++    GdkDisplay *display = gdk_surface_get_display(surface);
++    if (!display || !GDK_IS_X11_DISPLAY(display)) return G_SOURCE_REMOVE;
++
++    Display *xdisplay = GDK_DISPLAY_XDISPLAY(display);
++    Window xid = GDK_SURFACE_XID(surface);
++    if (!xdisplay || xid == None) return G_SOURCE_REMOVE;
++
++    Atom net_restack = gdk_x11_get_xatom_by_name_for_display(display, "_NET_RESTACK_WINDOW");
++    if (net_restack != None) {
++        XEvent event;
++        memset(&event, 0, sizeof(event));
++        event.xclient.type = ClientMessage;
++        event.xclient.display = xdisplay;
++        event.xclient.window = xid;
++        event.xclient.message_type = net_restack;
++        event.xclient.format = 32;
++        event.xclient.data.l[0] = 1; /* normal application */
++        event.xclient.data.l[1] = (long)None; /* no sibling */
++        event.xclient.data.l[2] = Above;
++        XSendEvent(xdisplay, DefaultRootWindow(xdisplay), False,
++                   SubstructureRedirectMask | SubstructureNotifyMask, &event);
++    }
++    XRaiseWindow(xdisplay, xid);
++    XFlush(xdisplay);
++    return G_SOURCE_REMOVE;
++}
++
++static void native_sdk_window_schedule_x11_overlay_restack(GtkWidget *widget, gpointer data) {
++    (void)data;
++    native_sdk_window_request_x11_above(widget, NULL);
++    g_timeout_add_full(G_PRIORITY_DEFAULT, 100,
++                       native_sdk_window_restack_x11_overlay,
++                       g_object_ref(widget), g_object_unref);
++}
+ #endif /* NATIVE_SDK_HAS_X11 */
+
+ /* Transparent (bit 1). The AppKit host clears three properties
+@@ -3197,10 +3362,12 @@ static void native_sdk_window_apply_transparent(native_sdk_gtk_window_t *win) {
+  * backend implements input shapes (gdk_display_supports_input_shapes
+  * reports it); where it is unsupported the call is a no-op and the
+  * window keeps taking clicks, which is the honest degradation. */
+-static void native_sdk_window_apply_click_through(GtkWidget *widget, gpointer data) {
+-    (void)data;
++static GdkSurface *native_sdk_widget_surface(GtkWidget *widget) {
+     GtkNative *native = gtk_widget_get_native(widget);
+-    GdkSurface *surface = native ? gtk_native_get_surface(native) : NULL;
++    return native ? gtk_native_get_surface(native) : NULL;
++}
++
++static void native_sdk_surface_set_empty_input_region(GdkSurface *surface) {
+     if (!surface) return;
+     /* An EMPTY region, not a NULL one: passing NULL RESETS the input
+      * region to the whole surface, the opposite of the intent. */
+@@ -3210,19 +3377,99 @@ static void native_sdk_window_apply_click_through(GtkWidget *widget, gpointer da
+     cairo_region_destroy(empty);
+ }
+
++/* Turn the complete rendered RGBA frame into a logical-pixel input shape.
++ * The canvas is the authority for both visible controls and transparent
++ * margins, so this remains correct as app layouts and display scales change.
++ * A low nonzero threshold includes antialiased rounded edges without making
++ * fully transparent window padding intercept input. */
++static void native_sdk_popup_apply_alpha_input_region(native_sdk_gtk_window_t *win) {
++    if (!win || !win->popup || !win->alpha_shaped_input) return;
++    GdkSurface *surface = native_sdk_widget_surface(win->popup);
++    if (!surface) return;
++    cairo_region_t *region = cairo_region_create();
++    if (!region) return;
++
++    for (int view_index = 0; view_index < NATIVE_SDK_MAX_NATIVE_VIEWS; view_index++) {
++        native_sdk_gtk_native_view_t *view = &win->native_views[view_index];
++        if (view->kind != NATIVE_SDK_GTK_VIEW_GPU_SURFACE || !view->visible ||
++            !view->gpu_argb || view->gpu_buf_width <= 0 || view->gpu_buf_height <= 0)
++            continue;
++
++        const int logical_width = gtk_widget_get_width(view->widget);
++        const int logical_height = gtk_widget_get_height(view->widget);
++        const int origin_x = (int)floor(view->x);
++        const int origin_y = (int)floor(view->y);
++        if (logical_width <= 0 || logical_height <= 0) continue;
++
++        for (int logical_y = 0; logical_y < logical_height; logical_y++) {
++            const size_t pixel_y0 = (size_t)logical_y * (size_t)view->gpu_buf_height / (size_t)logical_height;
++            size_t pixel_y1 = (size_t)(logical_y + 1) * (size_t)view->gpu_buf_height / (size_t)logical_height;
++            if (pixel_y1 <= pixel_y0) pixel_y1 = pixel_y0 + 1;
++            if (pixel_y1 > (size_t)view->gpu_buf_height) pixel_y1 = (size_t)view->gpu_buf_height;
++            int run_start = -1;
++            for (int logical_x = 0; logical_x <= logical_width; logical_x++) {
++                int opaque = 0;
++                if (logical_x < logical_width) {
++                    const size_t pixel_x0 = (size_t)logical_x * (size_t)view->gpu_buf_width / (size_t)logical_width;
++                    size_t pixel_x1 = (size_t)(logical_x + 1) * (size_t)view->gpu_buf_width / (size_t)logical_width;
++                    if (pixel_x1 <= pixel_x0) pixel_x1 = pixel_x0 + 1;
++                    if (pixel_x1 > (size_t)view->gpu_buf_width) pixel_x1 = (size_t)view->gpu_buf_width;
++                    for (size_t pixel_y = pixel_y0; pixel_y < pixel_y1 && !opaque; pixel_y++) {
++                        const uint32_t *row = (const uint32_t *)(view->gpu_argb + pixel_y * (size_t)view->gpu_buf_stride);
++                        for (size_t pixel_x = pixel_x0; pixel_x < pixel_x1; pixel_x++) {
++                            if ((row[pixel_x] >> 24) >= 8) {
++                                opaque = 1;
++                                break;
++                            }
++                        }
++                    }
++                }
++                if (opaque && run_start < 0) run_start = logical_x;
++                if (!opaque && run_start >= 0) {
++                    const cairo_rectangle_int_t rect = {
++                        .x = origin_x + run_start,
++                        .y = origin_y + logical_y,
++                        .width = logical_x - run_start,
++                        .height = 1,
++                    };
++                    cairo_region_union_rectangle(region, &rect);
++                    run_start = -1;
++                }
++            }
++        }
++    }
++
++    gdk_surface_set_input_region(surface, region);
++    cairo_region_destroy(region);
++}
++
++static void native_sdk_window_apply_click_through(GtkWidget *widget, gpointer data) {
++    native_sdk_gtk_window_t *win = data;
++    if (win && win->alpha_shaped_input) {
++        native_sdk_popup_apply_alpha_input_region(win);
++        return;
++    }
++    native_sdk_surface_set_empty_input_region(native_sdk_widget_surface(widget));
++}
++
+ /* Unpack the companion-window flags onto a freshly built window, in the
+  * same bit order the AppKit host reads them. Split by WHEN each one can
+  * be applied: transparency is pure CSS and lands immediately, while
+- * floating and click-through both need a live GdkSurface (an X11 window
+- * id, an input region) that only exists from realize onward, so they
+- * ride the realize signal. Create-time only, like the titlebar style. */
++ * floating, fullscreen overlay, and click-through need a live GdkSurface
++ * (an X11 window id, stacking requests, an input region) that only exists
++ * from realize onward. Create-time only, like the titlebar style. */
+ static void native_sdk_window_apply_flags(native_sdk_gtk_window_t *win, int window_flags) {
+     if (!win || !win->gtk_window || window_flags == 0) return;
+     GtkWidget *widget = GTK_WIDGET(win->gtk_window);
+
+-    if (window_flags & NATIVE_SDK_WINDOW_FLAG_FLOATING) {
++    if (window_flags & (NATIVE_SDK_WINDOW_FLAG_FLOATING | NATIVE_SDK_WINDOW_FLAG_FULLSCREEN_OVERLAY)) {
+ #if NATIVE_SDK_HAS_X11
+         g_signal_connect(widget, "realize", G_CALLBACK(native_sdk_window_apply_x11_above), NULL);
++        if (window_flags & NATIVE_SDK_WINDOW_FLAG_FULLSCREEN_OVERLAY) {
++            g_signal_connect(widget, "map", G_CALLBACK(native_sdk_window_schedule_x11_overlay_restack), NULL);
++        } else {
++            g_signal_connect(widget, "map", G_CALLBACK(native_sdk_window_request_x11_above), NULL);
++        }
+ #endif
+     }
+     if (window_flags & NATIVE_SDK_WINDOW_FLAG_TRANSPARENT) {
+@@ -3269,6 +3516,7 @@ static native_sdk_gtk_window_t *native_sdk_create_popup_internal(
+     win->id = window_id;
+     win->host = host;
+     win->popup_parent_id = popup_parent_id;
++    win->alpha_shaped_input = (window_flags & NATIVE_SDK_WINDOW_FLAG_CLICK_THROUGH) != 0;
+     win->label = native_sdk_strndup(label && label[0] ? label : "popup", strlen(label && label[0] ? label : "popup"));
+     win->title = native_sdk_strndup(title ? title : "", strlen(title ? title : ""));
+     if (!win->label || !win->title) {
+@@ -3303,8 +3551,8 @@ static native_sdk_gtk_window_t *native_sdk_create_popup_internal(
+     gtk_popover_set_child(GTK_POPOVER(win->popup), win->root_box);
+
+     if (window_flags & NATIVE_SDK_WINDOW_FLAG_CLICK_THROUGH) {
+-        g_signal_connect(win->popup, "realize", G_CALLBACK(native_sdk_window_apply_click_through), NULL);
+-        g_signal_connect(win->popup, "map", G_CALLBACK(native_sdk_window_apply_click_through), NULL);
++        g_signal_connect(win->popup, "realize", G_CALLBACK(native_sdk_window_apply_click_through), win);
++        g_signal_connect(win->popup, "map", G_CALLBACK(native_sdk_window_apply_click_through), win);
+     }
+     if (window_flags & NATIVE_SDK_WINDOW_FLAG_TRANSPARENT) {
+         GtkCssProvider *provider = gtk_css_provider_new();
+@@ -4233,6 +4481,91 @@ int native_sdk_gtk_update_popup_window(native_sdk_gtk_host_t *host, uint64_t win
+     return 1;
+ }
+
++/* Linux companions use parent-local GTK popovers, so the runtime still
++ * needs a synchronous geometry/cursor sample for hover hit testing and
++ * the existing window-physics readback contract. Wayland intentionally
++ * returns unsupported here: a compositor does not expose global pointer
++ * coordinates or client-controlled toplevel movement. X11 can provide
++ * both without activating the window. */
++int native_sdk_gtk_move_window(native_sdk_gtk_host_t *host, uint64_t window_id, double dx, double dy, int clamp, double *out_x, double *out_y, int *out_hit_x, int *out_hit_y, int *out_primary_down, double *out_vx, double *out_vy, int *out_released, double *out_cursor_x, double *out_cursor_y) {
++    (void)clamp;
++    if (out_x) *out_x = 0;
++    if (out_y) *out_y = 0;
++    if (out_hit_x) *out_hit_x = 0;
++    if (out_hit_y) *out_hit_y = 0;
++    if (out_primary_down) *out_primary_down = 0;
++    if (out_vx) *out_vx = 0;
++    if (out_vy) *out_vy = 0;
++    if (out_released) *out_released = 0;
++    if (out_cursor_x) *out_cursor_x = 0;
++    if (out_cursor_y) *out_cursor_y = 0;
++#if NATIVE_SDK_HAS_X11
++    if (!host) return 0;
++    native_sdk_gtk_window_t *win = native_sdk_find_window(host, window_id);
++    if (!win) return 0;
++    GtkWidget *widget = win->gtk_window ? GTK_WIDGET(win->gtk_window) : win->popup;
++    if (!widget) return 0;
++    GtkNative *native = gtk_widget_get_native(widget);
++    GdkSurface *surface = native ? gtk_native_get_surface(native) : NULL;
++    if (!surface) return 0;
++    if (!GDK_IS_X11_SURFACE(surface)) {
++        /* Wayland forbids global pointer/window coordinates, but popup-local
++         * motion is sufficient for app-owned hover and action discovery. */
++        if (out_x) *out_x = win->x;
++        if (out_y) *out_y = win->y;
++        if (out_primary_down) *out_primary_down = win->popup_primary_down;
++        if (out_cursor_x) *out_cursor_x = win->popup_pointer_inside ? win->popup_pointer_x : -1000000.0;
++        if (out_cursor_y) *out_cursor_y = win->popup_pointer_inside ? win->popup_pointer_y : -1000000.0;
++        return 1;
++    }
++    GdkDisplay *display = gdk_surface_get_display(surface);
++    if (!display || !GDK_IS_X11_DISPLAY(display)) return 0;
++    Display *xdisplay = GDK_DISPLAY_XDISPLAY(display);
++    Window xid = GDK_SURFACE_XID(surface);
++    if (!xdisplay || xid == None) return 0;
++
++    Window root = DefaultRootWindow(xdisplay);
++    Window child = None;
++    int root_x = 0;
++    int root_y = 0;
++    int pointer_x = 0;
++    int pointer_y = 0;
++    unsigned int mask = 0;
++    if (!XQueryPointer(xdisplay, root, &child, &child, &root_x, &root_y, &pointer_x, &pointer_y, &mask)) return 0;
++    int window_x = 0;
++    int window_y = 0;
++    if (!XTranslateCoordinates(xdisplay, xid, root, 0, 0, &window_x, &window_y, &child)) return 0;
++
++    /* The caller uses nonzero deltas for the existing Linux pet physics.
++     * Keep that behavior useful on X11; popup children remain compositor-
++     * positioned and are only sampled. */
++    const int surface_scale = MAX(1, gdk_surface_get_scale_factor(surface));
++    if ((dx != 0 || dy != 0) && win->gtk_window) {
++        XMoveWindow(xdisplay, xid, window_x + (int)round(dx * surface_scale), window_y + (int)round(dy * surface_scale));
++        XFlush(xdisplay);
++        window_x += (int)round(dx * surface_scale);
++        window_y += (int)round(dy * surface_scale);
++    }
++    /* Xlib speaks root-device pixels while Native SDK view geometry is in
++     * GTK logical coordinates. Keep hover and motion in the same space on
++     * scaled X11 desktops. */
++    if (out_x) *out_x = (double)window_x / surface_scale;
++    if (out_y) *out_y = (double)window_y / surface_scale;
++    if (out_primary_down) *out_primary_down = (mask & Button1Mask) != 0;
++    if (out_cursor_x) *out_cursor_x = win->popup ?
++        (win->popup_pointer_inside ? win->popup_pointer_x : -1000000.0) : (double)root_x / surface_scale;
++    if (out_cursor_y) *out_cursor_y = win->popup ?
++        (win->popup_pointer_inside ? win->popup_pointer_y : -1000000.0) : (double)root_y / surface_scale;
++    return 1;
++#else
++    (void)host;
++    (void)window_id;
++    (void)dx;
++    (void)dy;
++    return 0;
++#endif
++}
++
+ static gboolean native_sdk_app_timer_tick(gpointer data) {
+     native_sdk_gtk_app_timer_t *slot = data;
+     if (!slot || !slot->in_use || !slot->host) return G_SOURCE_REMOVE;
+@@ -4286,10 +4619,10 @@ void native_sdk_gtk_cancel_timer(native_sdk_gtk_host_t *host, uint64_t timer_id)
+
+ int native_sdk_gtk_start_window_drag(native_sdk_gtk_host_t *host, uint64_t window_id) {
+     native_sdk_gtk_window_t *win = native_sdk_find_window(host, window_id);
+-    if (!win || !win->gtk_window) return 0;
++    if (!native_sdk_window_drag_owner(win)) return 0;
+     /* No recorded press (synthetic automation input, or a drag request
+      * outside any pointer gesture): succeed as a no-op — only an unknown
+-     * window is an error, matching the AppKit host. */
++     * window or an ownerless popup is an error, matching the AppKit host. */
+     native_sdk_window_begin_interactive_move(win);
+     return 1;
+ }
+@@ -4620,6 +4953,7 @@ int native_sdk_gtk_create_view(native_sdk_gtk_host_t *host, uint64_t window_id,
+     native_sdk_apply_native_view_frame(view);
+     native_sdk_apply_native_view_state(view, 1, display_text);
+     native_sdk_configure_native_view_action(view);
++    native_sdk_configure_petdex_bubble_control(host, view);
+     if (kind == NATIVE_SDK_GTK_VIEW_GPU_SURFACE) native_sdk_setup_gpu_surface_view(view);
+     win->native_view_count++;
+     native_sdk_reorder_overlays(win);
+@@ -4684,6 +5018,11 @@ int native_sdk_gtk_present_gpu_surface_pixels(native_sdk_gtk_host_t *host, uint6
+         }
+     }
+
++    /* Compositor popups use their rendered alpha as an input shape: visible
++     * canvas controls receive GTK events while fully transparent margins keep
++     * routing pointer input to the application underneath. */
++    if (win->alpha_shaped_input) native_sdk_popup_apply_alpha_input_region(win);
++
+     const size_t sample_index = ((height / 2) * width + width / 2) * 4;
+     const uint8_t sr = rgba8[sample_index + 0];
+     const uint8_t sg = rgba8[sample_index + 1];
+@@ -4737,6 +5076,7 @@ int native_sdk_gtk_update_view(native_sdk_gtk_host_t *host, uint64_t window_id,
+     int update_text = has_text || (has_role && !view->explicit_text);
+     const char *display_text = has_text ? (view->text ? view->text : "") : native_sdk_native_display_text(view);
+     if (has_visible || has_enabled || has_role || has_accessibility_label || update_text) native_sdk_apply_native_view_state(view, update_text, display_text);
++    if (native_sdk_is_petdex_bubble_control(view->label)) native_sdk_configure_petdex_bubble_control(host, view);
+     if (update_text && view->kind == NATIVE_SDK_GTK_VIEW_SEGMENTED_CONTROL) native_sdk_configure_native_view_action(view);
+     if (has_layer) native_sdk_reorder_overlays(win);
+     return 1;
+@@ -4750,6 +5090,37 @@ int native_sdk_gtk_set_view_visible(native_sdk_gtk_host_t *host, uint64_t window
+     return native_sdk_gtk_update_view(host, window_id, label, label_len, 0, 0, 0, 0, 0, 0, 0, 1, visible, 0, 1, 0, "", 0, 0, "", 0, 0, "", 0, 0, "", 0);
+ }
+
++int native_sdk_gtk_set_view_toggle_state(native_sdk_gtk_host_t *host, uint64_t window_id, const char *label, size_t label_len, int active) {
++    native_sdk_gtk_window_t *win = native_sdk_find_window(host, window_id);
++    char *label_copy = label_len > 0 ? native_sdk_strndup(label, label_len) : NULL;
++    native_sdk_gtk_native_view_t *view = native_sdk_find_native_view(win, label_copy);
++    free(label_copy);
++    if (!view || !view->widget || !GTK_IS_TOGGLE_BUTTON(view->widget)) return 0;
++    if (view->action_handler != 0) g_signal_handler_block(view->widget, view->action_handler);
++    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(view->widget), active != 0);
++    if (view->action_handler != 0) g_signal_handler_unblock(view->widget, view->action_handler);
++    return 1;
++}
++
++int native_sdk_gtk_set_view_accessibility_description(native_sdk_gtk_host_t *host, uint64_t window_id, const char *label, size_t label_len, const char *description, size_t description_len) {
++    native_sdk_gtk_window_t *win = native_sdk_find_window(host, window_id);
++    char *label_copy = label_len > 0 ? native_sdk_strndup(label, label_len) : NULL;
++    char *description_copy = description_len > 0 ? native_sdk_strndup(description, description_len) : NULL;
++    native_sdk_gtk_native_view_t *view = native_sdk_find_native_view(win, label_copy);
++    free(label_copy);
++    if (!view || !view->widget || (description_len > 0 && !description_copy)) {
++        free(description_copy);
++        return 0;
++    }
++    gtk_accessible_update_property(
++        GTK_ACCESSIBLE(view->widget),
++        GTK_ACCESSIBLE_PROPERTY_DESCRIPTION,
++        description_copy ? description_copy : "",
++        -1);
++    free(description_copy);
++    return 1;
++}
++
+ int native_sdk_gtk_focus_view(native_sdk_gtk_host_t *host, uint64_t window_id, const char *label, size_t label_len) {
+     native_sdk_gtk_window_t *win = native_sdk_find_window(host, window_id);
+     char *label_copy = label_len > 0 ? native_sdk_strndup(label, label_len) : NULL;
+diff --git a/src/platform/linux/gtk_host.h b/src/platform/linux/gtk_host.h
+index 8154002..5ff7654 100644
+--- a/src/platform/linux/gtk_host.h
++++ b/src/platform/linux/gtk_host.h
+@@ -196,6 +196,7 @@ void native_sdk_gtk_remove_tray(native_sdk_gtk_host_t *host);
+ void native_sdk_gtk_set_shortcuts(native_sdk_gtk_host_t *host, const char *const *ids, const size_t *id_lens, const char *const *keys, const size_t *key_lens, const uint32_t *modifiers, size_t count);
+ int native_sdk_gtk_create_window(native_sdk_gtk_host_t *host, uint64_t window_id, const char *window_title, size_t window_title_len, const char *window_label, size_t window_label_len, double x, double y, double width, double height, int restore_frame, int resizable, int titlebar_style, int window_flags, double min_width, double min_height, uint64_t popup_parent_id);
+ int native_sdk_gtk_update_popup_window(native_sdk_gtk_host_t *host, uint64_t window_id, double width, double height, double anchor_x, double anchor_y);
++int native_sdk_gtk_move_window(native_sdk_gtk_host_t *host, uint64_t window_id, double dx, double dy, int clamp, double *out_x, double *out_y, int *out_hit_x, int *out_hit_y, int *out_primary_down, double *out_vx, double *out_vy, int *out_released, double *out_cursor_x, double *out_cursor_y);
+ /* Ask the windowing system to start an interactive move from the last
+  * pointer press (the widget `window_drag` channel). Returns 0 when the
+  * window is unknown or no press has been recorded yet. */
+@@ -235,6 +236,8 @@ int native_sdk_gtk_create_view(native_sdk_gtk_host_t *host, uint64_t window_id,
+ int native_sdk_gtk_update_view(native_sdk_gtk_host_t *host, uint64_t window_id, const char *label, size_t label_len, int has_frame, double x, double y, double width, double height, int has_layer, int layer, int has_visible, int visible, int has_enabled, int enabled, int has_role, const char *role, size_t role_len, int has_accessibility_label, const char *accessibility_label, size_t accessibility_label_len, int has_text, const char *text, size_t text_len, int has_command, const char *command, size_t command_len);
+ int native_sdk_gtk_set_view_frame(native_sdk_gtk_host_t *host, uint64_t window_id, const char *label, size_t label_len, double x, double y, double width, double height);
+ int native_sdk_gtk_set_view_visible(native_sdk_gtk_host_t *host, uint64_t window_id, const char *label, size_t label_len, int visible);
++int native_sdk_gtk_set_view_toggle_state(native_sdk_gtk_host_t *host, uint64_t window_id, const char *label, size_t label_len, int active);
++int native_sdk_gtk_set_view_accessibility_description(native_sdk_gtk_host_t *host, uint64_t window_id, const char *label, size_t label_len, const char *description, size_t description_len);
+ int native_sdk_gtk_focus_view(native_sdk_gtk_host_t *host, uint64_t window_id, const char *label, size_t label_len);
+ int native_sdk_gtk_close_view(native_sdk_gtk_host_t *host, uint64_t window_id, const char *label, size_t label_len);
+ int native_sdk_gtk_request_gpu_surface_frame(native_sdk_gtk_host_t *host, uint64_t window_id, const char *label, size_t label_len);
+diff --git a/src/platform/linux/root.zig b/src/platform/linux/root.zig
+index d0acea6..18e9089 100644
+--- a/src/platform/linux/root.zig
++++ b/src/platform/linux/root.zig
+@@ -141,6 +141,7 @@ extern fn native_sdk_gtk_remove_tray(host: *GtkHost) void;
+ extern fn native_sdk_gtk_set_shortcuts(host: *GtkHost, ids: [*]const [*]const u8, id_lens: [*]const usize, keys: [*]const [*]const u8, key_lens: [*]const usize, modifiers: [*]const u32, count: usize) void;
+ extern fn native_sdk_gtk_create_window(host: *GtkHost, window_id: u64, window_title: [*]const u8, window_title_len: usize, window_label: [*]const u8, window_label_len: usize, x: f64, y: f64, width: f64, height: f64, restore_frame: c_int, resizable: c_int, titlebar_style: c_int, window_flags: c_int, min_width: f64, min_height: f64, popup_parent_id: u64) c_int;
+ extern fn native_sdk_gtk_update_popup_window(host: *GtkHost, window_id: u64, width: f64, height: f64, anchor_x: f64, anchor_y: f64) c_int;
++extern fn native_sdk_gtk_move_window(host: *GtkHost, window_id: u64, dx: f64, dy: f64, clamp: c_int, out_x: *f64, out_y: *f64, out_hit_x: *c_int, out_hit_y: *c_int, out_primary_down: *c_int, out_vx: *f64, out_vy: *f64, out_released: *c_int, out_cursor_x: *f64, out_cursor_y: *f64) c_int;
+ extern fn native_sdk_gtk_start_window_drag(host: *GtkHost, window_id: u64) c_int;
+ extern fn native_sdk_gtk_set_window_drag_regions(host: *GtkHost, window_id: u64, label: [*]const u8, label_len: usize, rects: [*]const f64, exclusions: [*]const c_int, count: usize) c_int;
+ extern fn native_sdk_gtk_show_context_menu(host: *GtkHost, window_id: u64, label: [*]const u8, label_len: usize, x: f64, y: f64, token: u64, items: [*]const GtkContextMenuItem, count: usize) c_int;
+@@ -154,6 +155,8 @@ extern fn native_sdk_gtk_create_view(host: *GtkHost, window_id: u64, label: [*]c
+ extern fn native_sdk_gtk_update_view(host: *GtkHost, window_id: u64, label: [*]const u8, label_len: usize, has_frame: c_int, x: f64, y: f64, width: f64, height: f64, has_layer: c_int, layer: c_int, has_visible: c_int, visible: c_int, has_enabled: c_int, enabled: c_int, has_role: c_int, role: [*]const u8, role_len: usize, has_accessibility_label: c_int, accessibility_label: [*]const u8, accessibility_label_len: usize, has_text: c_int, text: [*]const u8, text_len: usize, has_command: c_int, command: [*]const u8, command_len: usize) c_int;
+ extern fn native_sdk_gtk_set_view_frame(host: *GtkHost, window_id: u64, label: [*]const u8, label_len: usize, x: f64, y: f64, width: f64, height: f64) c_int;
+ extern fn native_sdk_gtk_set_view_visible(host: *GtkHost, window_id: u64, label: [*]const u8, label_len: usize, visible: c_int) c_int;
++extern fn native_sdk_gtk_set_view_toggle_state(host: *GtkHost, window_id: u64, label: [*]const u8, label_len: usize, active: c_int) c_int;
++extern fn native_sdk_gtk_set_view_accessibility_description(host: *GtkHost, window_id: u64, label: [*]const u8, label_len: usize, description: [*]const u8, description_len: usize) c_int;
+ extern fn native_sdk_gtk_focus_view(host: *GtkHost, window_id: u64, label: [*]const u8, label_len: usize) c_int;
+ extern fn native_sdk_gtk_close_view(host: *GtkHost, window_id: u64, label: [*]const u8, label_len: usize) c_int;
+ extern fn native_sdk_gtk_request_gpu_surface_frame(host: *GtkHost, window_id: u64, label: [*]const u8, label_len: usize) c_int;
+@@ -240,6 +243,10 @@ pub const LinuxPlatform = struct {
+     app_info: platform_mod.AppInfo,
+     surface_value: platform_mod.Surface,
+     state: RunState = .{},
++    petdex_bubble_window_id: platform_mod.WindowId = 0,
++    petdex_bubble_controls_created: [petdex_bubble_control_capacity]bool = @splat(false),
++    petdex_bubble_control_ids: [petdex_bubble_control_capacity]u64 = @splat(0),
++    petdex_bubble_control_actions: [petdex_bubble_control_capacity]u8 = @splat(0xff),
+
+     pub fn init(title: []const u8, size: geometry.SizeF) Error!LinuxPlatform {
+         return initWithEngine(title, size, .system);
+@@ -292,6 +299,7 @@ pub const LinuxPlatform = struct {
+                 .focus_window_fn = focusWindow,
+                 .close_window_fn = closeWindow,
+                 .update_popup_window_fn = updatePopupWindow,
++                .move_window_fn = moveWindow,
+                 .minimize_window_fn = minimizeWindow,
+                 .start_window_drag_fn = startWindowDrag,
+                 .set_window_drag_regions_fn = setWindowDragRegions,
+@@ -691,9 +699,155 @@ fn completeWebViewBridge(context: ?*anyopaque, window_id: platform_mod.WindowId,
+
+ fn emitWindowEvent(context: ?*anyopaque, window_id: platform_mod.WindowId, name: []const u8, detail_json: []const u8) anyerror!void {
+     const self: *LinuxPlatform = @ptrCast(@alignCast(context.?));
++    if (std.mem.eql(u8, name, petdex_bubble_presentation_event)) {
++        syncPetdexBubbleControls(self, window_id, detail_json);
++        return;
++    }
+     native_sdk_gtk_emit_window_event(self.host, window_id, name.ptr, name.len, detail_json.ptr, detail_json.len);
+ }
+
++const petdex_bubble_presentation_event = "petdex.bubble.presentation.v1";
++const petdex_bubble_control_capacity: usize = 41;
++const petdex_bubble_payload_capacity: usize = 64 * 1024;
++
++const PetdexBubbleWireControl = struct {
++    id: u64,
++    action: u8,
++    x: f32,
++    y: f32,
++    w: f32,
++    h: f32,
++    alpha: f32,
++    activation_inset: f32,
++    accessibility_label: []const u8,
++    accessibility_value: []const u8,
++    accessibility_role: u8,
++    enabled: bool,
++    toggled: bool,
++};
++
++const PetdexBubbleWirePayload = struct {
++    version: u8,
++    controls: []const PetdexBubbleWireControl,
++};
++
++fn petdexBubbleActionName(action: u8) ?[]const u8 {
++    return switch (action) {
++        0 => "toggle",
++        1 => "open",
++        2 => "pin",
++        3 => "subagents",
++        4 => "dismiss",
++        else => null,
++    };
++}
++
++fn petdexBubbleControlValid(control: PetdexBubbleWireControl) bool {
++    return petdexBubbleActionName(control.action) != null and
++        control.accessibility_label.len > 0 and control.accessibility_label.len <= 192 and
++        std.unicode.utf8ValidateSlice(control.accessibility_label) and
++        control.accessibility_value.len <= 192 and
++        std.unicode.utf8ValidateSlice(control.accessibility_value) and
++        std.math.isFinite(control.x) and std.math.isFinite(control.y) and
++        std.math.isFinite(control.w) and std.math.isFinite(control.h) and
++        std.math.isFinite(control.alpha) and std.math.isFinite(control.activation_inset) and
++        @abs(control.x) <= 16_384 and @abs(control.y) <= 16_384 and
++        control.w > 0 and control.w <= 512 and control.h > 0 and control.h <= 512 and
++        control.activation_inset >= 0 and control.activation_inset <= 32;
++}
++
++fn petdexBubbleControlLabel(buffer: *[48]u8, slot: usize) []const u8 {
++    return std.fmt.bufPrint(buffer, "petdex-bubble-a11y-{d}", .{slot}) catch unreachable;
++}
++
++fn petdexBubbleControlGlyph(action: u8) []const u8 {
++    return switch (action) {
++        0 => "▾",
++        1 => "↗",
++        2 => "●",
++        3 => "⋯",
++        4 => "×",
++        else => "",
++    };
++}
++
++fn petdexBubbleControlMustRecreate(created: bool, prior_id: u64, prior_action: u8, next: PetdexBubbleWireControl) bool {
++    return created and (prior_id != next.id or prior_action != next.action);
++}
++
++fn hidePetdexBubbleControl(self: *LinuxPlatform, window_id: platform_mod.WindowId, slot: usize) void {
++    if (!self.petdex_bubble_controls_created[slot]) return;
++    var label_buffer: [48]u8 = undefined;
++    const label = petdexBubbleControlLabel(&label_buffer, slot);
++    _ = native_sdk_gtk_set_view_visible(self.host, window_id, label.ptr, label.len, 0);
++}
++
++fn syncPetdexBubbleControls(self: *LinuxPlatform, window_id: platform_mod.WindowId, detail_json: []const u8) void {
++    if (detail_json.len == 0 or detail_json.len > petdex_bubble_payload_capacity) return;
++    if (self.petdex_bubble_window_id != window_id) {
++        self.petdex_bubble_window_id = window_id;
++        self.petdex_bubble_controls_created = @splat(false);
++        self.petdex_bubble_control_ids = @splat(0);
++        self.petdex_bubble_control_actions = @splat(0xff);
++    }
++    const parsed = std.json.parseFromSlice(PetdexBubbleWirePayload, std.heap.page_allocator, detail_json, .{ .ignore_unknown_fields = true }) catch return;
++    defer parsed.deinit();
++    if (parsed.value.version != 1 or parsed.value.controls.len > petdex_bubble_control_capacity) return;
++
++    var accepted: usize = 0;
++    for (parsed.value.controls) |control| {
++        if (!petdexBubbleControlValid(control)) continue;
++        const action_name = petdexBubbleActionName(control.action).?;
++        var label_buffer: [48]u8 = undefined;
++        const label = petdexBubbleControlLabel(&label_buffer, accepted);
++        var command_buffer: [96]u8 = undefined;
++        const command = std.fmt.bufPrint(&command_buffer, "petdex.bubble.control.{s}.{x:0>16}", .{ action_name, control.id }) catch continue;
++        const inset = control.activation_inset;
++        const x: f64 = control.x - inset;
++        const y: f64 = control.y - inset;
++        const width: f64 = control.w + inset * 2;
++        const height: f64 = control.h + inset * 2;
++        const role = if (control.accessibility_role == 2) "toggle button" else "button";
++        const glyph = petdexBubbleControlGlyph(control.action);
++        const kind: c_int = if (control.accessibility_role == 2) 14 else 17;
++        var created = self.petdex_bubble_controls_created[accepted];
++        if (petdexBubbleControlMustRecreate(
++            created,
++            self.petdex_bubble_control_ids[accepted],
++            self.petdex_bubble_control_actions[accepted],
++            control,
++        )) {
++            // A compact presentation slot may change from Open (button) to
++            // Pin (toggle), or move to another card. GTK cannot change a
++            // widget's concrete class in place, so recreate it before
++            // publishing the new role/state/command to accessibility.
++            _ = native_sdk_gtk_close_view(self.host, window_id, label.ptr, label.len);
++            self.petdex_bubble_controls_created[accepted] = false;
++            created = false;
++        }
++        const ok = if (!created)
++            native_sdk_gtk_create_view(self.host, window_id, label.ptr, label.len, kind, "".ptr, 0, x, y, width, height, 32_000, 1, if (control.enabled) 1 else 0, role.ptr, role.len, control.accessibility_label.ptr, control.accessibility_label.len, glyph.ptr, glyph.len, command.ptr, command.len)
++        else
++            native_sdk_gtk_update_view(self.host, window_id, label.ptr, label.len, 1, x, y, width, height, 1, 32_000, 1, 1, 1, if (control.enabled) 1 else 0, 1, role.ptr, role.len, 1, control.accessibility_label.ptr, control.accessibility_label.len, 1, glyph.ptr, glyph.len, 1, command.ptr, command.len);
++        if (ok == 0) continue;
++        _ = native_sdk_gtk_set_view_accessibility_description(
++            self.host,
++            window_id,
++            label.ptr,
++            label.len,
++            control.accessibility_value.ptr,
++            control.accessibility_value.len,
++        );
++        self.petdex_bubble_controls_created[accepted] = true;
++        self.petdex_bubble_control_ids[accepted] = control.id;
++        self.petdex_bubble_control_actions[accepted] = control.action;
++        if (control.accessibility_role == 2)
++            _ = native_sdk_gtk_set_view_toggle_state(self.host, window_id, label.ptr, label.len, if (control.toggled) 1 else 0);
++        accepted += 1;
++    }
++    for (accepted..petdex_bubble_control_capacity) |slot| hidePetdexBubbleControl(self, window_id, slot);
++}
++
+ /// Thread-safe: schedules an idle source on the GLib main loop, which
+ /// emits `.wake` there. One of the two services worker threads may call.
+ fn wake(context: ?*anyopaque) anyerror!void {
+@@ -785,6 +939,22 @@ fn updatePopupWindow(context: ?*anyopaque, window_id: platform_mod.WindowId, wid
+     if (native_sdk_gtk_update_popup_window(self.host, window_id, width, height, anchor_x, anchor_y) == 0) return error.UpdateFailed;
+ }
+
++fn moveWindow(context: ?*anyopaque, window_id: platform_mod.WindowId, dx: f64, dy: f64, clamp: bool) anyerror!platform_mod.MoveWindowResult {
++    const self: *LinuxPlatform = @ptrCast(@alignCast(context.?));
++    var out_x: f64 = 0;
++    var out_y: f64 = 0;
++    var out_hit_x: c_int = 0;
++    var out_hit_y: c_int = 0;
++    var out_primary: c_int = 0;
++    var out_vx: f64 = 0;
++    var out_vy: f64 = 0;
++    var out_released: c_int = 0;
++    var out_cursor_x: f64 = 0;
++    var out_cursor_y: f64 = 0;
++    if (native_sdk_gtk_move_window(self.host, window_id, dx, dy, if (clamp) 1 else 0, &out_x, &out_y, &out_hit_x, &out_hit_y, &out_primary, &out_vx, &out_vy, &out_released, &out_cursor_x, &out_cursor_y) == 0) return error.UnsupportedService;
++    return .{ .x = out_x, .y = out_y, .hit_x = out_hit_x != 0, .hit_y = out_hit_y != 0, .primary_down = out_primary != 0, .vx = out_vx, .vy = out_vy, .released = out_released != 0, .cursor_x = out_cursor_x, .cursor_y = out_cursor_y };
++}
++
+ fn minimizeWindow(context: ?*anyopaque, window_id: platform_mod.WindowId) anyerror!void {
+     const self: *LinuxPlatform = @ptrCast(@alignCast(context.?));
+     if (native_sdk_gtk_minimize_window(self.host, window_id) == 0) return error.WindowNotFound;
+@@ -1480,6 +1650,106 @@ test "linux supports native container and control kinds" {
+     try std.testing.expect(isSupportedNativeViewKind(.gpu_surface));
+ }
+
++test "linux full RGBA surface blits replace destination alpha" {
++    const source = @embedFile("gtk_host.c");
++    const draw_start = std.mem.indexOf(u8, source, "static void native_sdk_gpu_surface_draw(").?;
++    const draw_end_offset = std.mem.indexOf(u8, source[draw_start..], "static void native_sdk_window_begin_interactive_move(").?;
++    const draw = source[draw_start .. draw_start + draw_end_offset];
++    const source_operator = std.mem.indexOf(u8, draw, "cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);").?;
++    const paint = std.mem.indexOf(u8, draw, "cairo_paint(cr);").?;
++    try std.testing.expect(source_operator < paint);
++}
++
++test "linux popup drag resolves and moves its owning toplevel" {
++    const source = @embedFile("gtk_host.c");
++    const owner_start = std.mem.indexOf(u8, source, "static native_sdk_gtk_window_t *native_sdk_window_drag_owner(").?;
++    const owner_end_offset = std.mem.indexOf(u8, source[owner_start..], "static void native_sdk_window_begin_interactive_move(").?;
++    const owner = source[owner_start .. owner_start + owner_end_offset];
++    try std.testing.expect(std.mem.indexOf(u8, owner, "candidate->id == win->popup_parent_id") != null);
++    try std.testing.expect(std.mem.indexOf(u8, owner, "candidate->gtk_window") != null);
++
++    const move_start = owner_start + owner_end_offset;
++    const move_end_offset = std.mem.indexOf(u8, source[move_start..], "static void native_sdk_window_apply_titlebar_double_click(").?;
++    const move = source[move_start .. move_start + move_end_offset];
++    try std.testing.expect(std.mem.indexOf(u8, move, "native_sdk_window_drag_owner(win)") != null);
++    try std.testing.expect(std.mem.indexOf(u8, move, "GTK_NATIVE(owner->gtk_window)") != null);
++    try std.testing.expect(std.mem.indexOf(u8, move, "gdk_toplevel_begin_move") != null);
++
++    const public_start = std.mem.indexOf(u8, source, "int native_sdk_gtk_start_window_drag(").?;
++    const public_end_offset = std.mem.indexOf(u8, source[public_start..], "int native_sdk_gtk_set_window_drag_regions(").?;
++    const public_entrypoint = source[public_start .. public_start + public_end_offset];
++    try std.testing.expect(std.mem.indexOf(u8, public_entrypoint, "native_sdk_window_drag_owner(win)") != null);
++    try std.testing.expect(std.mem.indexOf(u8, public_entrypoint, "native_sdk_window_begin_interactive_move(win)") != null);
++}
++
++test "linux X11 window readback exposes popup geometry and global pointer" {
++    const source = @embedFile("gtk_host.c");
++    const readback_start = std.mem.indexOf(u8, source, "int native_sdk_gtk_move_window(").?;
++    const readback_end_offset = std.mem.indexOf(u8, source[readback_start..], "static gboolean native_sdk_app_timer_tick(").?;
++    const readback = source[readback_start .. readback_start + readback_end_offset];
++    try std.testing.expect(std.mem.indexOf(u8, readback, "gtk_widget_get_native(widget)") != null);
++    try std.testing.expect(std.mem.indexOf(u8, readback, "XQueryPointer") != null);
++    try std.testing.expect(std.mem.indexOf(u8, readback, "XTranslateCoordinates") != null);
++    try std.testing.expect(std.mem.indexOf(u8, readback, "gdk_surface_get_scale_factor") != null);
++    try std.testing.expect(std.mem.indexOf(u8, readback, "(double)root_x / surface_scale") != null);
++    try std.testing.expect(std.mem.indexOf(u8, readback, "popup_pointer_inside") != null);
++    try std.testing.expect(std.mem.indexOf(u8, source, "native_sdk_gpu_pointer_leave") != null);
++    try std.testing.expect(std.mem.indexOf(u8, readback, "out_cursor_x") != null);
++    try std.testing.expect(std.mem.indexOf(u8, source, ".move_window_fn = moveWindow") != null);
++}
++
++test "linux floating windows retry the above hint after mapping" {
++    const source = @embedFile("gtk_host.c");
++    const request_start = std.mem.indexOf(u8, source, "static void native_sdk_window_request_x11_above(").?;
++    const request_end_offset = std.mem.indexOf(u8, source[request_start..], "#endif /* NATIVE_SDK_HAS_X11 */").?;
++    const request = source[request_start .. request_start + request_end_offset];
++    try std.testing.expect(std.mem.indexOf(u8, request, "event.xclient.data.l[0] = 1") != null);
++    try std.testing.expect(std.mem.indexOf(u8, request, "_NET_WM_STATE_ABOVE") != null);
++    try std.testing.expect(std.mem.indexOf(u8, request, "XSendEvent") != null);
++    try std.testing.expect(std.mem.indexOf(u8, source, "g_signal_connect(widget, \"map\", G_CALLBACK(native_sdk_window_request_x11_above), NULL);") != null);
++}
++
++test "linux fullscreen overlays restack after the window manager maps them" {
++    const source = @embedFile("gtk_host.c");
++    try std.testing.expect(std.mem.indexOf(u8, source, "#define NATIVE_SDK_WINDOW_FLAG_FULLSCREEN_OVERLAY (1 << 3)") != null);
++
++    const restack_start = std.mem.indexOf(u8, source, "static gboolean native_sdk_window_restack_x11_overlay(").?;
++    const restack_end_offset = std.mem.indexOf(u8, source[restack_start..], "#endif /* NATIVE_SDK_HAS_X11 */").?;
++    const restack = source[restack_start .. restack_start + restack_end_offset];
++    try std.testing.expect(std.mem.indexOf(u8, restack, "native_sdk_window_request_x11_above(widget, NULL)") != null);
++    try std.testing.expect(std.mem.indexOf(u8, restack, "_NET_RESTACK_WINDOW") != null);
++    try std.testing.expect(std.mem.indexOf(u8, restack, "XRaiseWindow") != null);
++    try std.testing.expect(std.mem.indexOf(u8, restack, "_NET_ACTIVE_WINDOW") == null);
++
++    try std.testing.expect(std.mem.indexOf(u8, source, "g_timeout_add_full(G_PRIORITY_DEFAULT, 100,") != null);
++    try std.testing.expect(std.mem.indexOf(u8, source, "G_CALLBACK(native_sdk_window_schedule_x11_overlay_restack)") != null);
++    try std.testing.expect(std.mem.indexOf(u8, source, "window_flags & NATIVE_SDK_WINDOW_FLAG_FULLSCREEN_OVERLAY") != null);
++}
++
++test "linux click-through popups derive input from rendered alpha" {
++    const source = @embedFile("gtk_host.c");
++    try std.testing.expect(std.mem.indexOf(u8, source, "static void native_sdk_popup_apply_alpha_input_region(") != null);
++    try std.testing.expect(std.mem.indexOf(u8, source, "if ((row[pixel_x] >> 24) >= 8)") != null);
++    try std.testing.expect(std.mem.indexOf(u8, source, "if (win->alpha_shaped_input) native_sdk_popup_apply_alpha_input_region(win);") != null);
++    try std.testing.expect(std.mem.indexOf(u8, source, "native_sdk_surface_set_empty_input_region(native_sdk_widget_surface(widget));") != null);
++}
++
++test "linux Petdex accessibility controls recreate when slot semantics change" {
++    var control: PetdexBubbleWireControl = undefined;
++    control.id = 41;
++    control.action = 2;
++    try std.testing.expect(!petdexBubbleControlMustRecreate(false, 0, 0xff, control));
++    try std.testing.expect(!petdexBubbleControlMustRecreate(true, 41, 2, control));
++    try std.testing.expect(petdexBubbleControlMustRecreate(true, 42, 2, control));
++    try std.testing.expect(petdexBubbleControlMustRecreate(true, 41, 1, control));
++}
++
++test "linux Petdex accessibility patch publishes the semantic value" {
++    const source = @embedFile("gtk_host.c");
++    try std.testing.expect(std.mem.indexOf(u8, source, "native_sdk_gtk_set_view_accessibility_description") != null);
++    try std.testing.expect(std.mem.indexOf(u8, source, "GTK_ACCESSIBLE_PROPERTY_DESCRIPTION") != null);
++}
++
+ test "linux gpu surface input preserves key and text" {
+     const label = "canvas";
+     const key = "enter";

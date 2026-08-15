@@ -132,7 +132,10 @@ jobs:
           # by default, so every sheet in the catalog (60 of 63 are .webp)
           # fails to decode and the window comes up empty. libwebp alone is
           # not enough: that is the codec, this is the plugin that reaches it.
-          sudo apt-get install -y libgtk-4-dev libx11-dev pkg-config webp-pixbuf-loader
+          sudo apt-get install -y \
+            libgtk-4-dev libx11-dev pkg-config webp-pixbuf-loader \
+            xvfb xcompmgr imagemagick x11-utils x11-xserver-utils xdotool jq \
+            dbus-daemon tesseract-ocr weston
 
       - name: Clone the Native SDK
         # Pinned to the same commit desktop-release.yml uses: the
@@ -264,57 +267,39 @@ jobs:
           kill "$APP_PID" || true
           wait "$APP_PID" 2>/dev/null || true
 
-      - name: Run and exercise the hook server (Linux)
+      - name: Run Linux desktop interaction and performance smoke
         if: matrix.platform == 'linux'
         shell: bash
         working-directory: packages/petdex-desktop-native
         run: |
           set -euo pipefail
-          sudo apt-get install -y xvfb imagemagick x11-utils
-          # Xvfb gives the GTK host a real display to draw into; without
-          # one the app has nothing to present to and the screenshot
-          # would prove nothing.
-          export DISPLAY=:99
-          Xvfb :99 -screen 0 1280x800x24 &
-          sleep 3
-          PETDEX_PET=ci-pet ./zig-out/bin/petdex-desktop-native > run.log 2>&1 &
-          APP_PID=$!
-          sleep 10
-          kill -0 "$APP_PID" || { echo "app died"; cat run.log; exit 1; }
-          for _ in $(seq 1 60); do
-            test -s ~/.petdex/runtime/update-token && break
-            kill -0 "$APP_PID" || { echo "app died"; cat run.log; exit 1; }
-            sleep 1
-          done
-          test -s ~/.petdex/runtime/update-token || { cat run.log; exit 1; }
-          TOKEN=$(cat ~/.petdex/runtime/update-token)
-          bun run integrations/herdr/managed-smoke.ts action
-          curl -fsS -X POST -H "x-petdex-update-token: $TOKEN" \
-            -H "Content-Type: application/json" -d '{"state":"running"}' \
-            http://127.0.0.1:7777/state
-          echo
-          curl -fsS http://127.0.0.1:7777/state
-          echo
-          import -window root /tmp/linux-screen.png
-          # The first run drew a titled window with a blank interior:
-          # frames present, the sheet decodes, nothing paints. These
-          # narrow it down. GTK's renderer matters because the default
-          # picks GL, which has no driver under Xvfb; the cairo fallback
-          # says whether that is the reason.
-          echo "=== window tree ==="
-          xwininfo -root -tree | head -20 || true
-          echo "=== app log (full) ==="
-          cat run.log
-          kill "$APP_PID" || true
-          wait "$APP_PID" 2>/dev/null || true
-          sleep 2
-          echo "=== retry with the cairo renderer ==="
-          GSK_RENDERER=cairo PETDEX_PET=ci-pet ./zig-out/bin/petdex-desktop-native > cairo.log 2>&1 &
-          CAIRO_PID=$!
-          sleep 10
-          import -window root /tmp/linux-screen-cairo.png || true
-          kill "$CAIRO_PID" || true
-          tail -20 cairo.log
+          sh tests/linux_desktop_smoke.sh --self-test
+          sh tests/linux_desktop_smoke.sh \
+            --scenario idle \
+            --artifacts .zig-cache/ci-linux-smoke/idle \
+            --fixture "$HOME/.petdex/pets/ci-pet"
+          sh tests/linux_desktop_smoke.sh \
+            --scenario bubble \
+            --artifacts .zig-cache/ci-linux-smoke/bubble \
+            --fixture "$HOME/.petdex/pets/ci-pet"
+          sh tests/linux_desktop_smoke.sh \
+            --scenario interaction \
+            --artifacts .zig-cache/ci-linux-smoke/interaction \
+            --fixture "$HOME/.petdex/pets/ci-pet"
+          sh tests/linux_desktop_smoke.sh \
+            --scenario interaction \
+            --gdk-scale 2 \
+            --artifacts .zig-cache/ci-linux-smoke/x11-scale-2 \
+            --fixture "$HOME/.petdex/pets/ci-pet"
+          sh tests/linux_wayland_smoke.sh --self-test
+          sh tests/linux_wayland_smoke.sh \
+            --artifacts .zig-cache/ci-linux-smoke/wayland \
+            --fixture "$HOME/.petdex/pets/ci-pet" \
+            --native-cli "$NATIVE_CLI"
+          sh tests/linux_perf_smoke.sh \
+            --quick \
+            --artifacts .zig-cache/ci-linux-smoke/perf \
+            --fixture "$HOME/.petdex/pets/ci-pet"
 
       # Deep links were verified by hand on macOS only. GTK's ::open path
       # and Win32's argv path shipped with the SDK commit above carrying an
@@ -823,8 +808,12 @@ jobs:
         with:
           name: screen-${{ matrix.platform }}
           path: |
-            /tmp/linux-screen.png
-            /tmp/linux-screen-cairo.png
+            packages/petdex-desktop-native/.zig-cache/ci-linux-smoke/idle/
+            packages/petdex-desktop-native/.zig-cache/ci-linux-smoke/bubble/
+            packages/petdex-desktop-native/.zig-cache/ci-linux-smoke/interaction/
+            packages/petdex-desktop-native/.zig-cache/ci-linux-smoke/x11-scale-2/
+            packages/petdex-desktop-native/.zig-cache/ci-linux-smoke/wayland/
+            packages/petdex-desktop-native/.zig-cache/ci-linux-smoke/perf/
             /tmp/linux-screen-deeplink.png
             ${{ runner.temp }}/windows-screen.png
             ${{ runner.temp }}/windows-screen-deeplink.png

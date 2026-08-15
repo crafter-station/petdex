@@ -344,6 +344,7 @@ function preflightTree(): void {
       "packages/petdex-desktop-native/app.zon",
       "patches/native-sdk-macos-headerpad.patch",
       "patches/native-sdk-macos-accessibility-element.patch",
+      "patches/native-sdk-linux-popup-surface.patch",
       "patches/native-sdk-secondary-window-generation.patch",
       "packages/petdex-desktop-native/assets",
       "scripts/patch-native-sdk.sh",
