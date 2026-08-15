@@ -10,7 +10,14 @@
 // Each pi.on handler below maps one OMP event to one mascot state; edit
 // the state strings there to change what the pet does.
 
-import { existsSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+} from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -21,6 +28,46 @@ const RUNTIME_DIR = join(homedir(), ".petdex", "runtime");
 const TOKEN_PATH = join(RUNTIME_DIR, "update-token");
 const KILLSWITCH_PATH = join(RUNTIME_DIR, "hooks-disabled");
 const AGENT_SOURCE = "omp";
+const JOURNAL_DIR = join(RUNTIME_DIR, "session-journal");
+const JOURNAL_LIMIT = 4 * 1024 * 1024;
+
+function journalStem(
+  value: string | null | undefined,
+  fallback: string,
+): string {
+  const safe = String(value || fallback).replace(/[^a-zA-Z0-9_.-]/g, "_");
+  return safe.slice(0, 96) || fallback;
+}
+
+function appendJournal(body: Record<string, unknown>): void {
+  if (
+    typeof body.text !== "string" ||
+    body.text.length === 0 ||
+    typeof body.conversation_key !== "string"
+  )
+    return;
+  try {
+    mkdirSync(JOURNAL_DIR, { recursive: true, mode: 0o700 });
+    const path = join(
+      JOURNAL_DIR,
+      `${journalStem(String(body.agent_source ?? ""), "agent")}-${journalStem(body.conversation_key, "unkeyed")}.jsonl`,
+    );
+    const record = `${JSON.stringify({ journal_version: 1, event: body })}\n`;
+    if (
+      existsSync(path) &&
+      statSync(path).size + Buffer.byteLength(record) > JOURNAL_LIMIT
+    ) {
+      const previous = `${path}.1`;
+      try {
+        unlinkSync(previous);
+      } catch {}
+      renameSync(path, previous);
+    }
+    appendFileSync(path, record, { encoding: "utf8", mode: 0o600 });
+  } catch {
+    // Recovery is best-effort and must never stall the in-process extension.
+  }
+}
 
 // Read-only tools read as thinking rather than working, matching how the
 // other adapters split `review` from `running`.
@@ -64,6 +111,11 @@ type Notify = {
   title?: string;
   busy?: boolean;
   sessionId?: string | null;
+  status?: "idle" | "running" | "needs_input" | "completed" | "failed";
+  messageKind?: "status" | "prompt" | "tool" | "lifecycle";
+  eventKind?: string;
+  requestId?: string;
+  resolvesRequestId?: string;
 };
 
 type ExtensionContext = {
@@ -96,12 +148,15 @@ async function notify({
   title,
   busy,
   sessionId,
+  status,
+  messageKind,
+  eventKind,
+  requestId,
+  resolvesRequestId,
 }: Notify): Promise<void> {
   // Killswitch first, before the token read, so the disabled state costs
   // one existsSync and nothing else.
   if (existsSync(KILLSWITCH_PATH)) return;
-  const token = await readToken();
-  if (!token) return; // Hook server offline or missing; silently no-op.
   const stateBody: Record<string, unknown> =
     duration != null
       ? { state, duration, agent_source: AGENT_SOURCE }
@@ -113,9 +168,24 @@ async function notify({
   if (sessionId) {
     stateBody.session_id = sessionId;
     bubbleBody.session_id = sessionId;
+    bubbleBody.conversation_key = sessionId;
+    bubbleBody.source_session_id = sessionId;
+    bubbleBody.session_kind = "primary";
   }
-  if (title) bubbleBody.title = title;
+  if (title) {
+    bubbleBody.title = title;
+    bubbleBody.title_source = "prompt";
+  }
   if (busy !== undefined) bubbleBody.busy = busy;
+  if (status) bubbleBody.status = status;
+  if (messageKind) bubbleBody.message_kind = messageKind;
+  if (eventKind) bubbleBody.event_kind = eventKind;
+  if (requestId) bubbleBody.request_id = requestId;
+  if (resolvesRequestId) bubbleBody.resolves_request_id = resolvesRequestId;
+  bubbleBody.feed_source = "hook";
+  if (text) appendJournal(bubbleBody);
+  const token = await readToken();
+  if (!token) return; // Journal survives while the desktop is offline.
   await Promise.all([
     postJson(HOOK_SERVER_URL, stateBody, token),
     text
@@ -208,6 +278,8 @@ export default function petdex(pi: ExtensionAPI): void {
       state: "jumping",
       duration: 1200,
       busy: false,
+      status: "running",
+      eventKind: "session-start",
       sessionId: sessionIdFor(ctx),
     });
   }) as never);
@@ -221,6 +293,8 @@ export default function petdex(pi: ExtensionAPI): void {
       state: "jumping",
       duration: 900,
       busy: false,
+      status: "running",
+      eventKind: "user-prompt",
       sessionId,
     });
   }) as never);
@@ -233,6 +307,9 @@ export default function petdex(pi: ExtensionAPI): void {
       text: describeTool(name, event?.input ?? {}, false),
       title: titleFor(sessionId),
       busy: true,
+      status: "running",
+      messageKind: "tool",
+      eventKind: "tool-progress",
       sessionId,
     });
   }) as never);
@@ -249,6 +326,9 @@ export default function petdex(pi: ExtensionAPI): void {
         text: `${describeTool(event?.toolName ?? "", event?.input ?? {}, true)} failed`,
         title: titleFor(sessionId),
         busy: false,
+        status: "failed",
+        messageKind: "tool",
+        eventKind: "tool-failure",
         sessionId,
       });
       return;
@@ -258,6 +338,9 @@ export default function petdex(pi: ExtensionAPI): void {
       text: describeTool(event?.toolName ?? "", event?.input ?? {}, true),
       title: titleFor(sessionId),
       busy: true,
+      status: "running",
+      messageKind: "tool",
+      eventKind: "tool-progress",
       sessionId,
     });
   }) as never);
@@ -269,6 +352,9 @@ export default function petdex(pi: ExtensionAPI): void {
       text: "Waiting on you.",
       title: titleFor(sessionId),
       busy: false,
+      status: "needs_input",
+      messageKind: "prompt",
+      eventKind: "approval-request",
       sessionId,
     });
   }) as never);
@@ -281,6 +367,9 @@ export default function petdex(pi: ExtensionAPI): void {
       text: "Done.",
       title: titleFor(sessionId),
       busy: false,
+      status: "completed",
+      messageKind: "lifecycle",
+      eventKind: "session-end",
       sessionId,
     });
   }) as never);

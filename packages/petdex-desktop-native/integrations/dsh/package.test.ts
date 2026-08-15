@@ -11,6 +11,10 @@ const packagedFiles = [
   "src/normalize.js",
 ];
 
+function normalizeNewlines(value: string) {
+  return value.replaceAll("\r\n", "\n");
+}
+
 function tar(...args: string[]) {
   const result = Bun.spawnSync(["tar", ...args], {
     cwd: root,
@@ -18,7 +22,10 @@ function tar(...args: string[]) {
     stderr: "pipe",
   });
   expect(result.exitCode).toBe(0);
-  return result.stdout.toString();
+  // bsdtar follows the host text convention for listings and git may check
+  // source fixtures out with CRLF on Windows. The archive contract is textual
+  // content, not a platform-specific newline encoding.
+  return normalizeNewlines(result.stdout.toString());
 }
 
 describe("embedded DSH plugin archive", () => {
@@ -34,7 +41,7 @@ describe("embedded DSH plugin archive", () => {
   for (const file of packagedFiles) {
     test(`keeps ${file} in sync with source`, async () => {
       const packed = tar("-xOzf", archive, `package/${file}`);
-      const source = await Bun.file(join(root, file)).text();
+      const source = normalizeNewlines(await Bun.file(join(root, file)).text());
       expect(packed).toBe(source);
     });
   }

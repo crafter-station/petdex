@@ -121,6 +121,51 @@ pub fn writeFileMode(path: []const u8, bytes: []const u8, mode: u16) bool {
     return writeFileIo(scope.io(), path, bytes, mode);
 }
 
+/// Append one bounded record and retain one rotated generation. A sibling
+/// advisory lock serializes concurrent hook processes across size, rotation,
+/// and write operations.
+pub fn appendFileModeRotating(path: []const u8, bytes: []const u8, mode: u16, rotate_at: u64) bool {
+    if (bytes.len == 0 or @as(u64, @intCast(bytes.len)) > rotate_at) return false;
+    var scope = Scope.init();
+    defer scope.deinit();
+    const io = scope.io();
+    var cwd = std.Io.Dir.cwd();
+
+    var lock_path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const lock_path = std.fmt.bufPrint(&lock_path_buf, "{s}.lock", .{path}) catch return false;
+    var lock_file = cwd.createFile(io, lock_path, .{
+        .read = true,
+        .truncate = false,
+        .lock = .exclusive,
+        .permissions = permissionsFromMode(mode),
+    }) catch return false;
+    defer lock_file.close(io);
+
+    var current_size: u64 = 0;
+    if (cwd.statFile(io, path, .{})) |stat| {
+        if (stat.kind != .file) return false;
+        current_size = stat.size;
+    } else |_| {}
+
+    if (current_size + @as(u64, @intCast(bytes.len)) > rotate_at) {
+        var previous_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+        const previous = std.fmt.bufPrint(&previous_buf, "{s}.1", .{path}) catch return false;
+        cwd.deleteFile(io, previous) catch {};
+        cwd.rename(path, cwd, previous, io) catch return false;
+        current_size = 0;
+    }
+
+    var file = cwd.createFile(io, path, .{
+        .read = true,
+        .truncate = false,
+        .permissions = permissionsFromMode(mode),
+    }) catch return false;
+    defer file.close(io);
+    file.writePositionalAll(io, bytes, current_size) catch return false;
+    file.sync(io) catch return false;
+    return true;
+}
+
 fn writeFileIo(io: std.Io, path: []const u8, bytes: []const u8, mode: ?u16) bool {
     // Replacing a symlink path atomically replaces the link itself. Runtime
     // files are user-managed, and a symlink is a supported way to relocate
@@ -155,6 +200,22 @@ fn permissionsFromMode(mode: ?u16) std.Io.File.Permissions {
     const m = mode orelse return .default_file;
     if (builtin.os.tag == .windows) return .default_file;
     return @enumFromInt(m);
+}
+
+test "rotating append retains one private previous generation" {
+    const dir = ".zig-cache/petdex-plat-append";
+    const path = dir ++ "/journal.jsonl";
+    makeDir(dir);
+    deleteFile(path);
+    deleteFile(path ++ ".1");
+    deleteFile(path ++ ".lock");
+    try std.testing.expect(appendFileModeRotating(path, "one\n", 0o600, 9));
+    try std.testing.expect(appendFileModeRotating(path, "two\n", 0o600, 9));
+    try std.testing.expect(appendFileModeRotating(path, "three\n", 0o600, 9));
+    var current_buf: [32]u8 = undefined;
+    var prior_buf: [32]u8 = undefined;
+    try std.testing.expectEqualStrings("three\n", readFile(path, &current_buf).?);
+    try std.testing.expectEqualStrings("one\ntwo\n", readFile(path ++ ".1", &prior_buf).?);
 }
 
 pub fn makeDir(path: []const u8) void {
@@ -281,6 +342,14 @@ pub fn nowMs() i64 {
     return @intCast(@divTrunc(ns, std.time.ns_per_ms));
 }
 
+/// Process-local monotonic time for leases, rate limits, and deadlines.
+pub fn monotonicMs() i64 {
+    var scope = Scope.init();
+    defer scope.deinit();
+    const ns = std.Io.Timestamp.now(scope.io(), .boot).nanoseconds;
+    return @intCast(@divTrunc(ns, std.time.ns_per_ms));
+}
+
 pub fn nowSeconds() i64 {
     return @divTrunc(nowMs(), 1000);
 }
@@ -387,6 +456,32 @@ pub fn processId() u32 {
     };
 }
 
+/// Short machine name for session provenance. Invalid or unavailable host
+/// metadata is ignored by the caller.
+pub fn hostName(buf: []u8) ?[]const u8 {
+    if (comptime builtin.os.tag == .windows) {
+        const Win = struct {
+            extern "kernel32" fn GetComputerNameA(buffer: [*]u8, size: *u32) callconv(.winapi) c_int;
+        };
+        if (buf.len == 0 or buf.len > std.math.maxInt(u32)) return null;
+        var length: u32 = @intCast(buf.len);
+        if (Win.GetComputerNameA(buf.ptr, &length) == 0 or length == 0) return null;
+        const name = buf[0..length];
+        for (name) |ch| {
+            if (!std.ascii.isAlphanumeric(ch) and ch != '-' and ch != '_' and ch != '.') return null;
+        }
+        return name;
+    }
+    var raw: [std.posix.HOST_NAME_MAX]u8 = undefined;
+    const name = std.posix.gethostname(&raw) catch return null;
+    if (name.len == 0 or name.len > buf.len) return null;
+    for (name) |ch| {
+        if (!std.ascii.isAlphanumeric(ch) and ch != '-' and ch != '_' and ch != '.') return null;
+    }
+    @memcpy(buf[0..name.len], name);
+    return buf[0..name.len];
+}
+
 /// GUI application that owns the terminal hosting the latest agent event.
 /// Hook metadata is allowlisted and never becomes an arbitrary bundle id.
 pub const OriginApplication = enum(u8) {
@@ -397,21 +492,24 @@ pub const OriginApplication = enum(u8) {
     /// terminal rows this is intentionally not a bundle identifier: the
     /// active HTTP handler is resolved at click time on macOS.
     default_browser,
+    codex,
 
     pub fn fromTermProgram(value: ?[]const u8) OriginApplication {
         const name = value orelse return .none;
-        if (std.mem.eql(u8, name, "Apple_Terminal")) return .terminal;
-        if (std.mem.eql(u8, name, "vscode")) return .vscode;
-        if (std.mem.eql(u8, name, "default_browser")) return .default_browser;
+        if (std.mem.eql(u8, name, "Apple_Terminal") or std.ascii.eqlIgnoreCase(name, "Windows_Terminal") or std.ascii.eqlIgnoreCase(name, "WindowsTerminal")) return .terminal;
+        if (std.ascii.eqlIgnoreCase(name, "vscode") or std.ascii.eqlIgnoreCase(name, "Visual Studio Code")) return .vscode;
+        if (std.ascii.eqlIgnoreCase(name, "default_browser")) return .default_browser;
+        if (std.ascii.eqlIgnoreCase(name, "codex") or std.ascii.eqlIgnoreCase(name, "ChatGPT")) return .codex;
         return .none;
     }
 
     pub fn wireName(self: OriginApplication) []const u8 {
         return switch (self) {
             .none => "",
-            .terminal => "Apple_Terminal",
+            .terminal => if (builtin.os.tag == .windows) "Windows_Terminal" else "Apple_Terminal",
             .vscode => "vscode",
             .default_browser => "default_browser",
+            .codex => "codex",
         };
     }
 
@@ -421,9 +519,18 @@ pub const OriginApplication = enum(u8) {
             .terminal => "com.apple.Terminal",
             .vscode => "com.microsoft.VSCode",
             .default_browser => null,
+            .codex => "com.openai.codex",
         };
     }
 };
+
+test "origin metadata recognizes allowlisted desktop application hints" {
+    try std.testing.expectEqual(OriginApplication.terminal, OriginApplication.fromTermProgram("Windows_Terminal"));
+    try std.testing.expectEqual(OriginApplication.vscode, OriginApplication.fromTermProgram("Visual Studio Code"));
+    try std.testing.expectEqual(OriginApplication.codex, OriginApplication.fromTermProgram("ChatGPT"));
+    try std.testing.expectEqual(OriginApplication.none, OriginApplication.fromTermProgram("untrusted.exe"));
+    try std.testing.expectEqualStrings("com.openai.codex", OriginApplication.codex.bundleIdentifier().?);
+}
 
 pub const BrowserActivation = enum {
     unsupported,
@@ -485,12 +592,28 @@ pub fn safeSourceTty(value: ?[]const u8) ?[]const u8 {
 
 pub fn safeSourceCwd(value: ?[]const u8) ?[]const u8 {
     const cwd = value orelse return null;
-    if (cwd.len == 0 or cwd.len > 511 or cwd[0] != '/') return null;
+    if (cwd.len == 0 or cwd.len > 511) return null;
+    const absolute = if (builtin.os.tag == .windows)
+        (cwd.len >= 3 and std.ascii.isAlphabetic(cwd[0]) and cwd[1] == ':' and (cwd[2] == '/' or cwd[2] == '\\')) or
+            (cwd.len >= 3 and (std.mem.startsWith(u8, cwd, "//") or std.mem.startsWith(u8, cwd, "\\\\")))
+    else
+        cwd[0] == '/';
+    if (!absolute) return null;
     if (!std.unicode.utf8ValidateSlice(cwd)) return null;
     for (cwd) |ch| {
-        if (ch < 0x20 or ch == '"' or ch == '\\') return null;
+        if (ch < 0x20 or ch == '"' or (builtin.os.tag != .windows and ch == '\\')) return null;
     }
     return cwd;
+}
+
+test "source cwd accepts only native absolute paths" {
+    if (builtin.os.tag == .windows) {
+        try std.testing.expectEqualStrings("C:\\work\\petdex", safeSourceCwd("C:\\work\\petdex").?);
+        try std.testing.expectEqualStrings("\\\\server\\share", safeSourceCwd("\\\\server\\share").?);
+    } else {
+        try std.testing.expectEqualStrings("/work/petdex", safeSourceCwd("/work/petdex").?);
+        try std.testing.expect(safeSourceCwd("C:\\work\\petdex") == null);
+    }
 }
 
 pub fn safeHerdrPaneId(value: ?[]const u8) ?[]const u8 {
