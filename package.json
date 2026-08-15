@@ -13,6 +13,8 @@
     "start": "next start",
     "check": "biome check .",
     "format": "biome check --write .",
+    "hooks:install": "sh scripts/install-git-hooks.sh",
+    "hooks:test": "sh scripts/pre-commit-hook-self-test.sh",
     "generate-assets": "bun scripts/generate-assets.ts",
     "manifest:snapshot:check": "bun --env-file=.env.local --env-file=.env.production.local --conditions react-server scripts/publish-manifest-snapshots.ts check",
     "manifest:snapshot:apply": "bun --env-file=.env.local --env-file=.env.production.local --conditions react-server scripts/publish-manifest-snapshots.ts apply",

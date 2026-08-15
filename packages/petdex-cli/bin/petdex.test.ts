@@ -6,7 +6,7 @@ function runCli(...args: string[]): {
   stderr: string;
 } {
   const result = Bun.spawnSync({
-    cmd: [process.execPath, import.meta.dir + "/petdex.ts", ...args],
+    cmd: [process.execPath, `${import.meta.dir}/petdex.ts`, ...args],
     env: { ...process.env, NO_COLOR: "1" },
     stderr: "pipe",
     stdout: "pipe",
