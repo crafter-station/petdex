@@ -13,9 +13,46 @@ import {
 
 export const FALLBACK_HANDLE_LENGTH = 8;
 const HANDLE_CACHE_TTL_SECONDS = 300;
+const CLERK_USER_PAGE_SIZE = 500;
+
+type ClerkUserListPage = {
+  data: Array<{ id: string }>;
+  totalCount: number;
+};
+
+type GetClerkUsers = (params: {
+  limit: number;
+  offset: number;
+  query: string;
+}) => Promise<ClerkUserListPage>;
 
 export function fallbackHandle(userId: string): string {
   return userId.slice(-FALLBACK_HANDLE_LENGTH).toLowerCase();
+}
+
+export async function findUserIdByFallbackHandle(
+  normalized: string,
+  getUsers: GetClerkUsers,
+): Promise<string | null> {
+  let offset = 0;
+  let match: string | null = null;
+
+  while (true) {
+    const page = await getUsers({
+      limit: CLERK_USER_PAGE_SIZE,
+      offset,
+      query: normalized,
+    });
+
+    for (const user of page.data) {
+      if (fallbackHandle(user.id) !== normalized) continue;
+      if (match && match !== user.id) return null;
+      match = user.id;
+    }
+
+    offset += page.data.length;
+    if (page.data.length === 0 || offset >= page.totalCount) return match;
+  }
 }
 
 // Forward: userId -> handle. Used to build /u/<handle> URLs from a
@@ -121,6 +158,17 @@ async function resolveUserIdForHandle(
     normalized.length === FALLBACK_HANDLE_LENGTH &&
     /^[a-z0-9]+$/.test(normalized)
   ) {
+    try {
+      const client = await clerkClient();
+      const clerkUserId = await findUserIdByFallbackHandle(
+        normalized,
+        (params) => client.users.getUserList(params),
+      );
+      if (clerkUserId) return clerkUserId;
+    } catch {
+      if (cacheableOnly) return null;
+    }
+
     try {
       const { db, schema } = await import("@/lib/db/client");
       const { sql } = await import("drizzle-orm");
