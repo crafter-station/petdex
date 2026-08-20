@@ -16,7 +16,7 @@ import { getOwnerCollections } from "@/lib/collections";
 import { db, schema } from "@/lib/db/client";
 import { getMetricsBySlugs } from "@/lib/db/metrics";
 import { formatLocalizedNumber } from "@/lib/format-number";
-import { userIdForHandle } from "@/lib/handles";
+import { userIdForHandle, viewerIdForFallbackHandle } from "@/lib/handles";
 import { getOwnerRank } from "@/lib/leaderboard";
 import { buildLocaleAlternates } from "@/lib/locale-routing";
 import { type PetWithMetrics, rowToPet } from "@/lib/pets";
@@ -41,7 +41,11 @@ type PageProps = { params: Promise<{ handle: string; locale: string }> };
 
 export async function generateMetadata({ params }: PageProps) {
   const { handle, locale } = await params;
-  const userId = await userIdForHandle(handle);
+  const requestedHandle = handle.toLowerCase();
+  const { userId: viewerId } = await auth();
+  const userId =
+    viewerIdForFallbackHandle(requestedHandle, viewerId) ??
+    (await userIdForHandle(handle));
   if (!userId) return { title: "Profile not found", robots: { index: false } };
   let displayName = `@${handle}`;
   const profile = await db.query.userProfiles.findFirst({
@@ -87,7 +91,10 @@ export default async function UserProfilePage({ params }: PageProps) {
   const { handle, locale } = await params;
   const t = await getTranslations({ locale, namespace: "profile" });
   const requestedHandle = handle.toLowerCase();
-  const ownerId = await userIdForHandle(handle);
+  const { userId: viewerId } = await auth();
+  const ownerId =
+    viewerIdForFallbackHandle(requestedHandle, viewerId) ??
+    (await userIdForHandle(handle));
   if (!ownerId) notFound();
 
   // Pull Clerk profile.
@@ -142,7 +149,6 @@ export default async function UserProfilePage({ params }: PageProps) {
 
   // Viewer detection runs ahead of the pets query so the owner sees
   // their pending + rejected rows alongside the approved gallery.
-  const { userId: viewerId } = await auth();
   const isOwner = viewerId === ownerId;
 
   // Pets owned by this user. Visitors only see approved rows; the owner
