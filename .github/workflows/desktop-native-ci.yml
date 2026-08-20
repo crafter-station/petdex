@@ -271,7 +271,7 @@ jobs:
           sleep 10
           kill -0 "$APP_PID" || { echo "app died"; cat run.log; exit 1; }
           for _ in $(seq 1 60); do
-            test -s ~/.petdex/runtime/update-token && break
+            test -s "$HOME/.petdex/runtime/update-token" && break
             kill -0 "$APP_PID" || { echo "app died"; cat run.log; exit 1; }
             sleep 1
           done
@@ -851,6 +851,11 @@ jobs:
               asset=cuse-windows-x64.exe
               # Git Bash will not execute an extensionless binary here.
               bin=./cuse.exe
+              # git-bash's ~ is not $USERPROFILE on this runner, which is
+              # the same trap the "Install a pet (Windows)" step documents:
+              # the app reads its runtime out of USERPROFILE, so pointing
+              # HOME anywhere else looks like "the app never started".
+              export HOME="$USERPROFILE"
               ;;
           esac
 
@@ -867,15 +872,21 @@ jobs:
           # Earlier steps leave a token behind, so waiting on the file
           # would return instantly and prove nothing. Clear it first and
           # wait for THIS run to write a fresh one.
-          rm -f ~/.petdex/runtime/update-token
+          rm -f "$HOME/.petdex/runtime/update-token"
+          # Under Xvfb GTK's default GL renderer has no driver, which is
+          # why the hook-server step falls back to cairo. Without this the
+          # app runs and paints nothing.
+          if [ "${{ matrix.platform }}" = linux ]; then
+            export GSK_RENDERER=cairo
+          fi
           PETDEX_PET=ci-pet ./zig-out/bin/petdex-desktop-native > input.log 2>&1 &
           APP_PID=$!
           for _ in $(seq 1 60); do
-            test -s ~/.petdex/runtime/update-token && break
+            test -s "$HOME/.petdex/runtime/update-token" && break
             kill -0 "$APP_PID" 2>/dev/null || { echo "app died"; cat input.log; exit 1; }
             sleep 1
           done
-          test -s ~/.petdex/runtime/update-token || {
+          test -s "$HOME/.petdex/runtime/update-token" || {
             echo "app never came up"; cat input.log; exit 1; }
           "${bin}" settle 8 500 --json || true
 
