@@ -831,11 +831,21 @@ jobs:
             linux)
               asset=cuse-linux-x64
               bin=./cuse
-              # The hook-server step starts its own Xvfb and exits, so
-              # this one needs a display of its own.
+              # cuse reads the screen through xwd, which is not on the
+              # runner by default.
+              sudo apt-get install -y x11-apps xvfb
               export DISPLAY=:99
-              Xvfb :99 -screen 0 1280x800x24 &
-              sleep 3
+              # :99 may still be up from the hook-server step. Starting a
+              # second server on a live display is a fatal error, so only
+              # start one when nothing answers.
+              if ! xdpyinfo -display :99 >/dev/null 2>&1; then
+                Xvfb :99 -screen 0 1280x800x24 &
+                for _ in $(seq 1 30); do
+                  xdpyinfo -display :99 >/dev/null 2>&1 && break
+                  sleep 1
+                done
+              fi
+              xdpyinfo -display :99 >/dev/null 2>&1 || { echo "no display on :99"; exit 1; }
               ;;
             windows)
               asset=cuse-windows-x64.exe
@@ -854,20 +864,35 @@ jobs:
           chmod +x "${bin}"
           "${bin}" os --json
 
+          # Earlier steps leave a token behind, so waiting on the file
+          # would return instantly and prove nothing. Clear it first and
+          # wait for THIS run to write a fresh one.
+          rm -f ~/.petdex/runtime/update-token
           PETDEX_PET=ci-pet ./zig-out/bin/petdex-desktop-native > input.log 2>&1 &
           APP_PID=$!
-          # Same readiness gate the hook-server steps use: the token only
-          # lands once the app is actually up, so it beats a fixed sleep.
           for _ in $(seq 1 60); do
             test -s ~/.petdex/runtime/update-token && break
             kill -0 "$APP_PID" 2>/dev/null || { echo "app died"; cat input.log; exit 1; }
             sleep 1
           done
+          test -s ~/.petdex/runtime/update-token || {
+            echo "app never came up"; cat input.log; exit 1; }
           "${bin}" settle 8 500 --json || true
 
-          # Where the pet is, from the app itself rather than a guess.
+          # A window has to exist before a click can land on it. Without
+          # this the failure reads as "no window matching Petdex", which
+          # points at the click rather than at the app.
+          for _ in $(seq 1 30); do
+            "${bin}" windows --json | grep -q Petdex && break
+            sleep 1
+          done
           "${bin}" windows --json > windows.json
           cat windows.json
+          grep -q Petdex windows.json || {
+            echo "FAIL: the app is running but never opened a titled window"
+            cat input.log
+            exit 1
+          }
 
           "${bin}" capture before.png --json
 
