@@ -806,6 +806,107 @@ jobs:
           }
           APP_PID=
 
+      # The legs above prove the app launches, paints, and answers the
+      # hook server. None of them sends the pet a single click, which is
+      # the gap the header note calls "compile-and-launch verified only"
+      # and exactly where #703 hid: on Windows the pet renders correctly
+      # and ignores every mouse event, because the platform registers no
+      # move_window_fn and all pet input is routed through it.
+      #
+      # cuse drives real OS input (XTEST on X11, SendInput on Win32) and
+      # diffs the frames, so a pet that stops reacting fails here rather
+      # than reaching a user. The assertion is deliberately the CHANGED
+      # frame: a tap flips the pet between jumping and waving, and only
+      # a click that actually reached the window can produce that.
+      - name: Click the pet and prove it reacts
+        if: matrix.platform != 'macos'
+        shell: bash
+        working-directory: packages/petdex-desktop-native
+        env:
+          CUSE_VERSION: v0.1.0
+        run: |
+          set -euo pipefail
+
+          case "${{ matrix.platform }}" in
+            linux)
+              asset=cuse-linux-x64
+              bin=./cuse
+              # The hook-server step starts its own Xvfb and exits, so
+              # this one needs a display of its own.
+              export DISPLAY=:99
+              Xvfb :99 -screen 0 1280x800x24 &
+              sleep 3
+              ;;
+            windows)
+              asset=cuse-windows-x64.exe
+              # Git Bash will not execute an extensionless binary here.
+              bin=./cuse.exe
+              ;;
+          esac
+
+          base="https://github.com/crafter-agents/cuse/releases/download/${CUSE_VERSION}"
+          curl -fsSLo "${bin}" "${base}/${asset}"
+          curl -fsSLo SHA256SUMS "${base}/SHA256SUMS"
+          # A downloaded binary that drives OS input deserves the check
+          # the release already publishes.
+          awk -v a="$asset" -v b="${bin#./}" '$2 == a { print $1 "  " b }' SHA256SUMS > cuse.sha256
+          sha256sum -c cuse.sha256
+          chmod +x "${bin}"
+          "${bin}" os --json
+
+          PETDEX_PET=ci-pet ./zig-out/bin/petdex-desktop-native > input.log 2>&1 &
+          APP_PID=$!
+          # Same readiness gate the hook-server steps use: the token only
+          # lands once the app is actually up, so it beats a fixed sleep.
+          for _ in $(seq 1 60); do
+            test -s ~/.petdex/runtime/update-token && break
+            kill -0 "$APP_PID" 2>/dev/null || { echo "app died"; cat input.log; exit 1; }
+            sleep 1
+          done
+          "${bin}" settle 8 500 --json || true
+
+          # Where the pet is, from the app itself rather than a guess.
+          "${bin}" windows --json > windows.json
+          cat windows.json
+
+          "${bin}" capture before.png --json
+
+          # Two taps. One frame change could be an idle animation landing
+          # elsewhere by chance; the pet alternates jumping and waving on
+          # each pat, so a second tap has to move it again.
+          # The window title is "Petdex" (src/main.zig:59). cuse errors
+          # with the list of visible windows if it cannot find it, which
+          # is the diagnostic we want when this fails.
+          "${bin}" click --window=Petdex --json
+          sleep 1
+          "${bin}" capture after1.png --json
+          "${bin}" click --window=Petdex --json
+          sleep 1
+          "${bin}" capture after2.png --json
+
+          # Read the verdict field rather than grepping the line: SAME and
+          # CHANGED both contain "CHANGE" as a substring in other wordings.
+          verdict() { "${bin}" diff "$1" "$2" --json | bun -e \
+            'const r=JSON.parse(await Bun.stdin.text()); console.log(r.data.verdict, r.data.percent+"%")'; }
+
+          first=$(verdict before.png after1.png)
+          second=$(verdict after1.png after2.png)
+          echo "first tap:  $first"
+          echo "second tap: $second"
+
+          case "$first" in
+            CHANGED*) ;;
+            *) echo "FAIL: the pet did not react to a click (see #703)"
+               cat input.log; exit 1 ;;
+          esac
+          case "$second" in
+            CHANGED*) ;;
+            *) echo "FAIL: the pet reacted once and then stopped alternating"
+               cat input.log; exit 1 ;;
+          esac
+
+          kill "$APP_PID" 2>/dev/null || true
+
       - name: Upload the screenshot
         if: always() && matrix.platform != 'macos'
         uses: actions/upload-artifact@v7
