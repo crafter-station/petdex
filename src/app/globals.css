@@ -619,13 +619,16 @@ input {
      matter how many rows exist below the ones we animate. */
   background-size: var(--sprite-sheet-width) auto;
   image-rendering: pixelated;
-  /* translateZ(0) forces a GPU-composited layer so background-image
-     decode + animation stay on the compositor thread instead of being
-     re-rasterized on each scroll-induced repaint. Combined with
-     contain:paint on the parent, the WebP stays decoded. */
-  transform: scale(var(--pet-scale)) translateZ(0);
-  transform-origin: top left;
-  will-change: background-position;
+  /* zoom, not transform: scale(). Scaling a pixelated layer by a
+     fractional factor makes the nearest-neighbour sampler reach past
+     the frame it is drawing, so a card at 0.7 showed a sliver of the
+     next column (a hat tip, a braid) beside the pet (#660). zoom
+     scales the box before the background is sampled, so every frame
+     stays inside its own 192x208 cell. translateZ(0) is gone with the
+     transform, so will-change keeps the layer promoted and the WebP
+     decoded across scrolls. */
+  zoom: var(--pet-scale);
+  will-change: transform, background-position;
   animation: pet-state var(--sprite-duration) steps(var(--sprite-frames))
     infinite;
 }
@@ -662,8 +665,8 @@ input {
   background-size: 1536px auto;
   background-position: 0 var(--sprite-y);
   image-rendering: pixelated;
-  transform: scale(var(--pet-scale, 1));
-  transform-origin: top left;
+  /* Same nearest-neighbour bleed as .pet-sprite, see #660. */
+  zoom: var(--pet-scale, 1);
 }
 
 /* Tap-me hint ring on the interactive PetFloater. A brand-tinted glow
