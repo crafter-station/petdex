@@ -46,6 +46,9 @@ const LEGACY_REDIRECT_HOSTS = new Set([
   "www.petdex.crafter.run",
 ]);
 
+// The /api entries are unreachable while the /api early return above
+// runs first, and they stay as a backstop in case that order changes.
+// Every route they name already answers 401 on its own.
 const isProtected = createRouteMatcher([
   "/submit",
   "/submit/(.*)",
@@ -96,12 +99,17 @@ const clerkBackedMiddleware = clerkMiddleware(async (auth, req, event) => {
   const guard = await guardPublicTraffic(req);
   if (guard) return guard;
 
-  if (isProtected(req)) {
-    await auth.protect();
-  }
-
+  // API routes authenticate themselves and answer 401. Running
+  // auth.protect() here instead sends them down Clerk's page path,
+  // which redirects a document request but calls notFound() for a
+  // fetch(), so /api/r2/presign answered 404 to an expired session
+  // and the submit form reported "presign 404" (#717).
   if (req.nextUrl.pathname.startsWith("/api")) {
     return NextResponse.next();
+  }
+
+  if (isProtected(req)) {
+    await auth.protect();
   }
 
   return handleI18nRoutingWithoutLocaleCookie(req);
