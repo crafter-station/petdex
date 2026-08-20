@@ -818,8 +818,15 @@ jobs:
       # than reaching a user. The assertion is deliberately the CHANGED
       # frame: a tap flips the pet between jumping and waving, and only
       # a click that actually reached the window can produce that.
+      # Not blocking yet: cuse cannot enumerate windows on a bare X11
+      # display (crafter-agents/cuse#65), so the Linux leg cannot aim a
+      # click even though xwininfo sees the window in the same job. The
+      # Windows leg is blocked on its own pets failing to decode on the
+      # runner. Both are tracked; flip continue-on-error off once the
+      # Linux side goes green, so the check starts gating.
       - name: Click the pet and prove it reacts
         if: matrix.platform != 'macos'
+        continue-on-error: true
         shell: bash
         working-directory: packages/petdex-desktop-native
         env:
