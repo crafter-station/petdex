@@ -949,10 +949,25 @@ jobs:
           esac
 
           if [ "${{ matrix.platform }}" = windows ]; then
+            "${bin}" capture menu-before.png --json
             "${bin}" click 112 210 --button=right --json
-            "${bin}" wait --element="Open Settings" --timeout=10000 --json
+            sleep 1
+            "${bin}" capture menu-open.png --json
+            opened=$(verdict menu-before.png menu-open.png)
+            echo "context menu open: $opened"
+            case "$opened" in
+              CHANGED*) ;;
+              *) echo "FAIL: the context menu did not appear"; exit 1 ;;
+            esac
             "${bin}" key Escape --json
-            "${bin}" wait --element="Open Settings" --gone --timeout=10000 --json
+            sleep 1
+            "${bin}" capture menu-closed.png --json
+            closed=$(verdict menu-open.png menu-closed.png)
+            echo "context menu close: $closed"
+            case "$closed" in
+              CHANGED*) ;;
+              *) echo "FAIL: the context menu did not close"; exit 1 ;;
+            esac
 
             "${bin}" capture drag-before.png --json
             "${bin}" drag 112 210 192 250 --json
@@ -980,6 +995,9 @@ jobs:
             packages/petdex-desktop-native/before.png
             packages/petdex-desktop-native/after1.png
             packages/petdex-desktop-native/after2.png
+            packages/petdex-desktop-native/menu-before.png
+            packages/petdex-desktop-native/menu-open.png
+            packages/petdex-desktop-native/menu-closed.png
             packages/petdex-desktop-native/drag-before.png
             packages/petdex-desktop-native/drag-after.png
             ${{ runner.temp }}/windows-screen.png
