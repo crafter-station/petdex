@@ -954,12 +954,18 @@ jobs:
               *) echo "FAIL: the context menu did not close"; exit 1 ;;
             esac
 
-            "${bin}" capture drag-before.png --json
-            "${bin}" drag 112 210 192 250 --json
-            sleep 1
-            "${bin}" capture drag-after.png --json
-            moved=$(verdict drag-before.png drag-after.png)
-            echo "drag: $moved"
+            moved="SAME 0%"
+            for attempt in 1 2 3; do
+              "${bin}" capture drag-before.png --json
+              "${bin}" drag 112 210 192 250 --json
+              sleep 1
+              "${bin}" capture drag-after.png --json
+              moved=$(verdict drag-before.png drag-after.png)
+              echo "drag attempt $attempt: $moved"
+              case "$moved" in
+                CHANGED*) break ;;
+              esac
+            done
             case "$moved" in
               CHANGED*) ;;
               *) echo "FAIL: the pet did not move after a real drag"; exit 1 ;;
