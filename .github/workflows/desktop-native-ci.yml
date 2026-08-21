@@ -39,10 +39,14 @@ on:
   push:
     paths:
       - "packages/petdex-desktop-native/**"
+      - "patches/native-sdk-*.patch"
+      - "scripts/patch-native-sdk.sh"
       - ".github/workflows/desktop-native-ci.yml"
   pull_request:
     paths:
       - "packages/petdex-desktop-native/**"
+      - "patches/native-sdk-*.patch"
+      - "scripts/patch-native-sdk.sh"
       - ".github/workflows/desktop-native-ci.yml"
   workflow_dispatch:
 
@@ -229,9 +233,9 @@ jobs:
         run: |
           $dir = "$env:USERPROFILE\.petdex\pets\ci-pet"
           New-Item -ItemType Directory -Force -Path $dir | Out-Null
-          $meta = Invoke-RestMethod -Uri "https://petdex.dev/api/install-pet/boba"
-          Invoke-WebRequest -Uri $meta.pet.spritesheetUrl -OutFile "$dir\spritesheet.webp"
-          '{"id":"ci-pet","displayName":"CI Pet","description":"ci","spritesheetPath":"spritesheet.webp"}' |
+          $meta = Invoke-RestMethod -Uri "https://petdex.dev/api/install-pet/gf-sd"
+          Invoke-WebRequest -Uri $meta.pet.spritesheetUrl -OutFile "$dir\spritesheet.png"
+          '{"id":"ci-pet","displayName":"CI Pet","description":"ci","spritesheetPath":"spritesheet.png"}' |
             Set-Content -Path "$dir\pet.json" -NoNewline
           Get-ChildItem $dir | Select-Object Name, Length | Format-Table -AutoSize
 
@@ -818,15 +822,12 @@ jobs:
       # than reaching a user. The assertion is deliberately the CHANGED
       # frame: a tap flips the pet between jumping and waving, and only
       # a click that actually reached the window can produce that.
-      # Not blocking yet: cuse cannot enumerate windows on a bare X11
-      # display (crafter-agents/cuse#65), so the Linux leg cannot aim a
-      # click even though xwininfo sees the window in the same job. The
-      # Windows leg is blocked on its own pets failing to decode on the
-      # runner. Both are tracked; flip continue-on-error off once the
-      # Linux side goes green, so the check starts gating.
+      # Not blocking on Linux yet: cuse cannot enumerate windows on a
+      # bare X11 display (crafter-agents/cuse#65), so that leg cannot aim
+      # a click even though xwininfo sees the window in the same job.
       - name: Click the pet and prove it reacts
         if: matrix.platform != 'macos'
-        continue-on-error: true
+        continue-on-error: ${{ matrix.platform == 'linux' }}
         shell: bash
         working-directory: packages/petdex-desktop-native
         env:
@@ -922,6 +923,8 @@ jobs:
 
           "${bin}" capture before.png --json
 
+          "${bin}" click --window="$title" --json
+
           # Two taps. One frame change could be an idle animation landing
           # elsewhere by chance; the pet alternates jumping and waving on
           # each pat, so a second tap has to move it again.
@@ -955,6 +958,39 @@ jobs:
             *) echo "FAIL: the pet reacted once and then stopped alternating"
                cat input.log; exit 1 ;;
           esac
+
+          if [ "${{ matrix.platform }}" = windows ]; then
+            export PETDEX_WINDOW_TITLE="$title"
+            window_geometry() {
+              "${bin}" windows --json | bun -e '
+                const result = JSON.parse(await Bun.stdin.text());
+                const target = result.data.find((window) => window.title.includes(process.env.PETDEX_WINDOW_TITLE));
+                if (!target) process.exit(1);
+                console.log(`${target.x} ${target.y} ${target.width} ${target.height}`);
+              '
+            }
+
+            read -r before_x before_y window_w window_h <<< "$(window_geometry)"
+            from_x=$((before_x + window_w / 2))
+            from_y=$((before_y + window_h / 2))
+            to_x=$((from_x + 80))
+            to_y=$((from_y + 40))
+            "${bin}" drag "$from_x" "$from_y" "$to_x" "$to_y" --json
+            read -r after_x after_y _ _ <<< "$(window_geometry)"
+            moved_x=$((after_x - before_x))
+            moved_y=$((after_y - before_y))
+            moved_x=${moved_x#-}
+            moved_y=${moved_y#-}
+            if [ "$moved_x" -lt 20 ] && [ "$moved_y" -lt 20 ]; then
+              echo "FAIL: the pet did not move after a real drag"
+              exit 1
+            fi
+
+            "${bin}" click --window="$title" --button=right --json
+            "${bin}" wait --element="Open Settings" --timeout=10000 --json
+            "${bin}" key Escape --json
+            "${bin}" wait --element="Open Settings" --gone --timeout=10000 --json
+          fi
 
           kill "$APP_PID" 2>/dev/null || true
 

@@ -1,0 +1,221 @@
+diff --git a/src/platform/windows/root.zig b/src/platform/windows/root.zig
+index 7debdf9..0843612 100644
+--- a/src/platform/windows/root.zig
++++ b/src/platform/windows/root.zig
+@@ -36,0 +37 @@ const WindowsEventKind = enum(c_int) {
++    context_menu_action = 20,
+@@ -104,0 +106,2 @@ const WindowsEvent = extern struct {
++    widget_id: u64,
++    menu_item_id: u32,
+@@ -133,0 +137 @@ extern fn native_sdk_windows_create_window(host: *WindowsHost, window_id: u64, w
++extern fn native_sdk_windows_move_window(host: *WindowsHost, window_id: u64, dx: f64, dy: f64, clamp: c_int, out_x: *f64, out_y: *f64, out_hit_x: *c_int, out_hit_y: *c_int, out_primary_down: *c_int, out_cursor_x: *f64, out_cursor_y: *f64) c_int;
+@@ -182,0 +187,9 @@ extern fn native_sdk_windows_audio_spectrum_supported(host: *WindowsHost) c_int;
++extern fn native_sdk_windows_show_context_menu(host: *WindowsHost, window_id: u64, label: [*]const u8, label_len: usize, x: f64, y: f64, token: u64, items: [*]const WindowsContextMenuItem, count: usize) c_int;
++
++const WindowsContextMenuItem = extern struct {
++    item_id: u32,
++    label: [*]const u8,
++    label_len: usize,
++    enabled: c_int,
++    separator: c_int,
++};
+@@ -283,0 +297 @@ pub const WindowsPlatform = struct {
++                .move_window_fn = moveWindow,
+@@ -296,0 +311 @@ pub const WindowsPlatform = struct {
++                .show_context_menu_fn = showContextMenu,
+@@ -371 +386,2 @@ pub const WindowsPlatform = struct {
+-            .gpu_surface_scroll_drivers, .context_menus, .view_surface_adoption => false,
++            .context_menus => self.web_engine == .system,
++            .gpu_surface_scroll_drivers, .view_surface_adoption => false,
+@@ -532,0 +549,6 @@ fn windowsCallback(context: ?*anyopaque, event: *const WindowsEvent) callconv(.c
++        .context_menu_action => state.emit(.{ .context_menu_action = .{
++            .window_id = event.window_id,
++            .view_label = event.view_label[0..event.view_label_len],
++            .token = event.widget_id,
++            .item_id = event.menu_item_id,
++        } }),
+@@ -746,0 +769,13 @@ fn focusWindow(context: ?*anyopaque, window_id: platform_mod.WindowId) anyerror!
++fn moveWindow(context: ?*anyopaque, window_id: platform_mod.WindowId, dx: f64, dy: f64, clamp: bool) anyerror!platform_mod.MoveWindowResult {
++    const self: *WindowsPlatform = @ptrCast(@alignCast(context.?));
++    var out_x: f64 = 0;
++    var out_y: f64 = 0;
++    var out_hit_x: c_int = 0;
++    var out_hit_y: c_int = 0;
++    var out_primary: c_int = 0;
++    var out_cursor_x: f64 = 0;
++    var out_cursor_y: f64 = 0;
++    if (native_sdk_windows_move_window(self.host, window_id, dx, dy, if (clamp) 1 else 0, &out_x, &out_y, &out_hit_x, &out_hit_y, &out_primary, &out_cursor_x, &out_cursor_y) == 0) return error.WindowNotFound;
++    return .{ .x = out_x, .y = out_y, .hit_x = out_hit_x != 0, .hit_y = out_hit_y != 0, .primary_down = out_primary != 0, .cursor_x = out_cursor_x, .cursor_y = out_cursor_y };
++}
++
+@@ -954,0 +990,17 @@ fn presentGpuSurfacePixels(context: ?*anyopaque, pixels: platform_mod.GpuSurface
++fn showContextMenu(context: ?*anyopaque, request: platform_mod.ContextMenuRequest) anyerror!void {
++    const self: *WindowsPlatform = @ptrCast(@alignCast(context.?));
++    if (self.web_engine != .system) return error.UnsupportedService;
++    var items: [platform_mod.max_context_menu_items]WindowsContextMenuItem = undefined;
++    const count = @min(request.items.len, items.len);
++    for (request.items[0..count], 0..) |item, index| {
++        items[index] = .{
++            .item_id = item.id,
++            .label = item.label.ptr,
++            .label_len = item.label.len,
++            .enabled = if (item.enabled) 1 else 0,
++            .separator = if (item.separator) 1 else 0,
++        };
++    }
++    if (native_sdk_windows_show_context_menu(self.host, request.window_id, request.view_label.ptr, request.view_label.len, request.point.x, request.point.y, request.token, items[0..count].ptr, count) == 0) return error.WindowNotFound;
++}
++
+diff --git a/src/platform/windows/webview2_host.cpp b/src/platform/windows/webview2_host.cpp
+index 4dd7ecd..97fb309 100644
+--- a/src/platform/windows/webview2_host.cpp
++++ b/src/platform/windows/webview2_host.cpp
+@@ -124,0 +125 @@ enum EventKind {
++    kContextMenuAction = 20,
+@@ -155,0 +157 @@ constexpr UINT kAudioSpectrumMessage = WM_APP + 46;
++constexpr UINT kShowContextMenuMessage = WM_APP + 47;
+@@ -255,0 +258,10 @@ struct WindowsEvent {
++    uint64_t widget_id;
++    uint32_t menu_item_id;
++};
++
++struct WindowsContextMenuItem {
++    uint32_t item_id;
++    const char *label;
++    size_t label_len;
++    int enabled;
++    int separator;
+@@ -563,0 +576,16 @@ struct AudioState {
++struct PendingContextMenu {
++    bool active = false;
++    uint64_t window_id = 0;
++    std::string view_label;
++    double x = 0;
++    double y = 0;
++    uint64_t token = 0;
++    struct Item {
++        uint32_t id = 0;
++        std::string label;
++        bool enabled = true;
++        bool separator = false;
++    };
++    std::vector<Item> items;
++};
++
+@@ -616,0 +645 @@ struct Host {
++    PendingContextMenu context_menu;
+@@ -2160,0 +2190,39 @@ static NativeView *gpuSurfaceViewForHwnd(Host *host, HWND hwnd) {
++static void showAppContextMenu(Host *host, HWND hwnd) {
++    if (!host || !host->context_menu.active) return;
++    PendingContextMenu request = std::move(host->context_menu);
++    host->context_menu = PendingContextMenu{};
++    HMENU menu = CreatePopupMenu();
++    if (!menu) return;
++    for (const PendingContextMenu::Item &item : request.items) {
++        if (item.separator) {
++            AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
++            continue;
++        }
++        UINT flags = MF_STRING;
++        if (!item.enabled) flags |= MF_GRAYED;
++        std::wstring label = widen(item.label);
++        AppendMenuW(menu, flags, item.id, label.c_str());
++    }
++    HWND target = hwnd;
++    if (!request.view_label.empty()) {
++        auto view = host->native_views.find(nativeViewKey(request.window_id, request.view_label));
++        if (view != host->native_views.end() && view->second.hwnd) target = view->second.hwnd;
++    }
++    const double scale = gpuSurfaceScale(target);
++    POINT point = { (LONG)lround(request.x * scale), (LONG)lround(request.y * scale) };
++    ClientToScreen(target, &point);
++    SetForegroundWindow(hwnd);
++    UINT command_id = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON, point.x, point.y, 0, hwnd, nullptr);
++    DestroyMenu(menu);
++    WindowsEvent event = {};
++    event.kind = kContextMenuAction;
++    event.window_id = request.window_id;
++    event.view_label = request.view_label.c_str();
++    event.view_label_len = request.view_label.size();
++    event.timestamp_ns = gpuTimestampNs();
++    event.widget_id = request.token;
++    event.menu_item_id = command_id;
++    if (host->callback) host->callback(host->callback_context, &event);
++    PostMessageW(hwnd, WM_NULL, 0, 0);
++}
++
+@@ -5033,0 +5102,3 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wparam, LPARA
++        case kShowContextMenuMessage:
++            if (host) showAppContextMenu(host, hwnd);
++            return 0;
+@@ -5942,0 +6014,44 @@ int native_sdk_windows_create_window(Host *host, uint64_t window_id, const char
++int native_sdk_windows_move_window(Host *host, uint64_t window_id, double dx, double dy, int clamp, double *out_x, double *out_y, int *out_hit_x, int *out_hit_y, int *out_primary_down, double *out_cursor_x, double *out_cursor_y) {
++    if (!host) return 0;
++    auto found = host->windows.find(window_id);
++    if (found == host->windows.end() || !found->second.hwnd) return 0;
++    HWND hwnd = found->second.hwnd;
++    RECT frame = {};
++    if (!GetWindowRect(hwnd, &frame)) return 0;
++    double scale = (double)dpiForWindow(hwnd) / 96.0;
++    if (scale <= 0) scale = 1;
++    LONG next_x = frame.left + (LONG)lround(dx * scale);
++    LONG next_y = frame.top + (LONG)lround(dy * scale);
++    int hit_x = 0;
++    int hit_y = 0;
++    if (clamp) {
++        HMONITOR monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
++        MONITORINFO info = {};
++        info.cbSize = sizeof(info);
++        if (monitor && GetMonitorInfoW(monitor, &info)) {
++            const LONG width = frame.right - frame.left;
++            const LONG height = frame.bottom - frame.top;
++            const LONG max_x = std::max(info.rcWork.left, info.rcWork.right - width);
++            const LONG max_y = std::max(info.rcWork.top, info.rcWork.bottom - height);
++            if (next_x < info.rcWork.left) { next_x = info.rcWork.left; hit_x = 1; }
++            if (next_x > max_x) { next_x = max_x; hit_x = 1; }
++            if (next_y < info.rcWork.top) { next_y = info.rcWork.top; hit_y = 1; }
++            if (next_y > max_y) { next_y = max_y; hit_y = 1; }
++        }
++    }
++    if ((dx != 0 || dy != 0) && !SetWindowPos(hwnd, nullptr, next_x, next_y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)) return 0;
++    if (!GetWindowRect(hwnd, &frame)) return 0;
++    scale = (double)dpiForWindow(hwnd) / 96.0;
++    if (scale <= 0) scale = 1;
++    POINT cursor = {};
++    GetCursorPos(&cursor);
++    if (out_x) *out_x = (double)frame.left / scale;
++    if (out_y) *out_y = (double)frame.top / scale;
++    if (out_hit_x) *out_hit_x = hit_x;
++    if (out_hit_y) *out_hit_y = hit_y;
++    if (out_primary_down) *out_primary_down = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0 ? 1 : 0;
++    if (out_cursor_x) *out_cursor_x = (double)cursor.x / scale;
++    if (out_cursor_y) *out_cursor_y = (double)cursor.y / scale;
++    return 1;
++}
++
+@@ -6272,0 +6388,25 @@ int native_sdk_windows_note_gpu_surface_input(Host *host, uint64_t window_id, co
++int native_sdk_windows_show_context_menu(Host *host, uint64_t window_id, const char *label, size_t label_len, double x, double y, uint64_t token, const WindowsContextMenuItem *items, size_t count) {
++    if (!host || !items || count == 0) return 0;
++    auto found = host->windows.find(window_id);
++    if (found == host->windows.end() || !found->second.hwnd) return 0;
++    PendingContextMenu pending;
++    pending.active = true;
++    pending.window_id = window_id;
++    pending.view_label = slice(label, label_len);
++    pending.x = x;
++    pending.y = y;
++    pending.token = token;
++    pending.items.reserve(count);
++    for (size_t index = 0; index < count; index++) {
++        PendingContextMenu::Item item;
++        item.id = items[index].item_id;
++        item.label = slice(items[index].label, items[index].label_len);
++        item.enabled = items[index].enabled != 0;
++        item.separator = items[index].separator != 0;
++        pending.items.push_back(std::move(item));
++    }
++    host->context_menu = std::move(pending);
++    PostMessageW(found->second.hwnd, kShowContextMenuMessage, 0, 0);
++    return 1;
++}
++
