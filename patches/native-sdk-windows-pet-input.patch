@@ -187,7 +187,7 @@ index 4dd7ecd..97fb309 100644
 +    if (out_y) *out_y = (double)frame.top / scale;
 +    if (out_hit_x) *out_hit_x = hit_x;
 +    if (out_hit_y) *out_hit_y = hit_y;
-+    if (out_primary_down) *out_primary_down = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0 ? 1 : 0;
++    if (out_primary_down) *out_primary_down = (GetAsyncKeyState(VK_LBUTTON) & 0x8001) != 0 ? 1 : 0;
 +    if (out_cursor_x) *out_cursor_x = (double)cursor.x / scale;
 +    if (out_cursor_y) *out_cursor_y = (double)cursor.y / scale;
 +    return 1;

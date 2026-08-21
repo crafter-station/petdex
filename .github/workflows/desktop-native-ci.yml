@@ -997,6 +997,9 @@ jobs:
             /tmp/linux-screen.png
             /tmp/linux-screen-cairo.png
             /tmp/linux-screen-deeplink.png
+            packages/petdex-desktop-native/before.png
+            packages/petdex-desktop-native/after1.png
+            packages/petdex-desktop-native/after2.png
             ${{ runner.temp }}/windows-screen.png
             ${{ runner.temp }}/windows-screen-deeplink.png
           if-no-files-found: warn
