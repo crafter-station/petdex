@@ -881,7 +881,7 @@ jobs:
             export GSK_RENDERER=cairo
           fi
           mkdir -p "$HOME/.petdex"
-          printf '{"active_pet":"ci-pet","scale":0.7,"pet_x":300,"pet_y":200,"agents_prompted":true}' \
+          printf '{"active_pet":"ci-pet","scale":0.7,"agents_prompted":true}' \
             > "$HOME/.petdex/desktop-native-settings.json"
           ./zig-out/bin/petdex-desktop-native > input.log 2>&1 &
           APP_PID=$!
@@ -911,7 +911,7 @@ jobs:
               target=(--window="$title")
               ;;
             windows)
-              target=(367 273)
+              target=(112 210)
               ;;
           esac
 
@@ -949,41 +949,21 @@ jobs:
           esac
 
           if [ "${{ matrix.platform }}" = windows ]; then
-            pet_position() {
-              bun -e '
-                const settings = await Bun.file(process.env.HOME + "/.petdex/desktop-native-settings.json").json();
-                console.log(`${settings.pet_x} ${settings.pet_y}`);
-              '
-            }
-
-            read -r before_x before_y <<< "$(pet_position)"
-            from_x=$((before_x + 67))
-            from_y=$((before_y + 73))
-            to_x=$((from_x + 80))
-            to_y=$((from_y + 40))
-            "${bin}" drag "$from_x" "$from_y" "$to_x" "$to_y" --json
-            for _ in $(seq 1 40); do
-              read -r after_x after_y <<< "$(pet_position)"
-              if [ "$after_x" != "$before_x" ] || [ "$after_y" != "$before_y" ]; then
-                break
-              fi
-              sleep 0.25
-            done
-            moved_x=$((after_x - before_x))
-            moved_y=$((after_y - before_y))
-            moved_x=${moved_x#-}
-            moved_y=${moved_y#-}
-            if [ "$moved_x" -lt 20 ] && [ "$moved_y" -lt 20 ]; then
-              echo "FAIL: the pet did not move after a real drag"
-              exit 1
-            fi
-
-            menu_x=$((after_x + 67))
-            menu_y=$((after_y + 73))
-            "${bin}" click "$menu_x" "$menu_y" --button=right --json
+            "${bin}" click 112 210 --button=right --json
             "${bin}" wait --element="Open Settings" --timeout=10000 --json
             "${bin}" key Escape --json
             "${bin}" wait --element="Open Settings" --gone --timeout=10000 --json
+
+            "${bin}" capture drag-before.png --json
+            "${bin}" drag 112 210 192 250 --json
+            sleep 1
+            "${bin}" capture drag-after.png --json
+            moved=$(verdict drag-before.png drag-after.png)
+            echo "drag: $moved"
+            case "$moved" in
+              CHANGED*) ;;
+              *) echo "FAIL: the pet did not move after a real drag"; exit 1 ;;
+            esac
           fi
 
           kill "$APP_PID" 2>/dev/null || true
@@ -1000,6 +980,8 @@ jobs:
             packages/petdex-desktop-native/before.png
             packages/petdex-desktop-native/after1.png
             packages/petdex-desktop-native/after2.png
+            packages/petdex-desktop-native/drag-before.png
+            packages/petdex-desktop-native/drag-after.png
             ${{ runner.temp }}/windows-screen.png
             ${{ runner.temp }}/windows-screen-deeplink.png
           if-no-files-found: warn
