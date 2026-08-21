@@ -898,43 +898,40 @@ jobs:
             echo "app never came up"; cat input.log; exit 1; }
           "${bin}" settle 8 500 --json || true
 
-          # The window title differs by platform: Win32 shows the app
-          # title from src/main.zig:59, while GTK reports the binary name.
-          # Match either rather than assuming one.
           case "${{ matrix.platform }}" in
-            linux) title=petdex-desktop-native ;;
-            windows) title=Petdex ;;
+            linux)
+              title=petdex-desktop-native
+              for _ in $(seq 1 30); do
+                "${bin}" windows --json | grep -q "$title" && break
+                sleep 1
+              done
+              "${bin}" windows --json > windows.json
+              cat windows.json
+              grep -q "$title" windows.json || {
+                echo "FAIL: the app is running but never opened a titled window"
+                cat input.log
+                exit 1
+              }
+              target=(--window="$title")
+              ;;
+            windows)
+              if "${bin}" focus "Petdex Settings" --json; then
+                "${bin}" key alt+F4 --json
+              fi
+              "${bin}" wait --element="Petdex pet" --timeout=10000 --json
+              target=(--element="Petdex pet")
+              ;;
           esac
 
-          # A window has to exist before a click can land on it. Without
-          # this the failure reads as "no window matching ...", which
-          # points at the click rather than at the app.
-          for _ in $(seq 1 30); do
-            "${bin}" windows --json | grep -q "$title" && break
-            sleep 1
-          done
-          "${bin}" windows --json > windows.json
-          cat windows.json
-          grep -q "$title" windows.json || {
-            echo "FAIL: the app is running but never opened a titled window"
-            cat input.log
-            exit 1
-          }
-
           "${bin}" capture before.png --json
-
-          "${bin}" click --window="$title" --json
 
           # Two taps. One frame change could be an idle animation landing
           # elsewhere by chance; the pet alternates jumping and waving on
           # each pat, so a second tap has to move it again.
-          # The window title is "Petdex" (src/main.zig:59). cuse errors
-          # with the list of visible windows if it cannot find it, which
-          # is the diagnostic we want when this fails.
-          "${bin}" click --window="$title" --json
+          "${bin}" click "${target[@]}" --json
           sleep 1
           "${bin}" capture after1.png --json
-          "${bin}" click --window="$title" --json
+          "${bin}" click "${target[@]}" --json
           sleep 1
           "${bin}" capture after2.png --json
 
@@ -960,23 +957,21 @@ jobs:
           esac
 
           if [ "${{ matrix.platform }}" = windows ]; then
-            export PETDEX_WINDOW_TITLE="$title"
-            window_geometry() {
-              "${bin}" windows --json | bun -e '
+            pet_geometry() {
+              "${bin}" element --element="Petdex pet" --json | bun -e '
                 const result = JSON.parse(await Bun.stdin.text());
-                const target = result.data.find((window) => window.title.includes(process.env.PETDEX_WINDOW_TITLE));
-                if (!target) process.exit(1);
-                console.log(`${target.x} ${target.y} ${target.width} ${target.height}`);
+                const pet = result.data;
+                console.log(`${pet.x} ${pet.y} ${pet.width} ${pet.height}`);
               '
             }
 
-            read -r before_x before_y window_w window_h <<< "$(window_geometry)"
+            read -r before_x before_y window_w window_h <<< "$(pet_geometry)"
             from_x=$((before_x + window_w / 2))
             from_y=$((before_y + window_h / 2))
             to_x=$((from_x + 80))
             to_y=$((from_y + 40))
             "${bin}" drag "$from_x" "$from_y" "$to_x" "$to_y" --json
-            read -r after_x after_y _ _ <<< "$(window_geometry)"
+            read -r after_x after_y _ _ <<< "$(pet_geometry)"
             moved_x=$((after_x - before_x))
             moved_y=$((after_y - before_y))
             moved_x=${moved_x#-}
@@ -986,7 +981,7 @@ jobs:
               exit 1
             fi
 
-            "${bin}" click --window="$title" --button=right --json
+            "${bin}" click --element="Petdex pet" --button=right --json
             "${bin}" wait --element="Open Settings" --timeout=10000 --json
             "${bin}" key Escape --json
             "${bin}" wait --element="Open Settings" --gone --timeout=10000 --json
