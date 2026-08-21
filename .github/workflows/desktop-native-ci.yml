@@ -921,10 +921,10 @@ jobs:
           # elsewhere by chance; the pet alternates jumping and waving on
           # each pat, so a second tap has to move it again.
           "${bin}" click "${target[@]}" --json
-          sleep 1
           "${bin}" capture after1.png --json
+          "${bin}" settle 8 250 --json || true
+          "${bin}" capture before2.png --json
           "${bin}" click "${target[@]}" --json
-          sleep 1
           "${bin}" capture after2.png --json
 
           # Read the verdict field rather than grepping the line: SAME and
@@ -933,7 +933,7 @@ jobs:
             'const r=JSON.parse(await Bun.stdin.text()); console.log(r.data.verdict, r.data.percent+"%")'; }
 
           first=$(verdict before.png after1.png)
-          second=$(verdict after1.png after2.png)
+          second=$(verdict before2.png after2.png)
           echo "first tap:  $first"
           echo "second tap: $second"
 
@@ -994,6 +994,7 @@ jobs:
             /tmp/linux-screen-deeplink.png
             packages/petdex-desktop-native/before.png
             packages/petdex-desktop-native/after1.png
+            packages/petdex-desktop-native/before2.png
             packages/petdex-desktop-native/after2.png
             packages/petdex-desktop-native/menu-before.png
             packages/petdex-desktop-native/menu-open.png
