@@ -2546,6 +2546,7 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
                 // Release: velocity from our own 100ms sample tail,
                 // the WebView renderer's computeVelocity semantics.
                 model.dragging = false;
+                model.primary_was_down = false;
                 // A tap, not a drag: the window never left the press
                 // point and the button came back up quickly. Until now
                 // a plain left-click did nothing at all — the pet gets
