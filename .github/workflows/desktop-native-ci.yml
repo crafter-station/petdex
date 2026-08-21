@@ -831,14 +831,13 @@ jobs:
         shell: bash
         working-directory: packages/petdex-desktop-native
         env:
-          CUSE_VERSION: v0.1.0
+          CUSE_REF: fa387098481758959561d89b57b6428a27497ce3
         run: |
           set -euo pipefail
 
           case "${{ matrix.platform }}" in
             linux)
-              asset=cuse-linux-x64
-              bin=./cuse
+              bin=./cuse-src/dist/cuse
               # cuse reads the screen through xwd, which is not on the
               # runner by default.
               sudo apt-get install -y x11-apps xvfb
@@ -856,9 +855,7 @@ jobs:
               xdpyinfo -display :99 >/dev/null 2>&1 || { echo "no display on :99"; exit 1; }
               ;;
             windows)
-              asset=cuse-windows-x64.exe
-              # Git Bash will not execute an extensionless binary here.
-              bin=./cuse.exe
+              bin=./cuse-src/dist/cuse.exe
               # git-bash's ~ is not $USERPROFILE on this runner, which is
               # the same trap the "Install a pet (Windows)" step documents:
               # the app reads its runtime out of USERPROFILE, so pointing
@@ -867,14 +864,10 @@ jobs:
               ;;
           esac
 
-          base="https://github.com/crafter-agents/cuse/releases/download/${CUSE_VERSION}"
-          curl -fsSLo "${bin}" "${base}/${asset}"
-          curl -fsSLo SHA256SUMS "${base}/SHA256SUMS"
-          # A downloaded binary that drives OS input deserves the check
-          # the release already publishes.
-          awk -v a="$asset" -v b="${bin#./}" '$2 == a { print $1 "  " b }' SHA256SUMS > cuse.sha256
-          sha256sum -c cuse.sha256
-          chmod +x "${bin}"
+          git clone https://github.com/crafter-agents/cuse.git cuse-src
+          git -C cuse-src checkout --detach "$CUSE_REF"
+          test "$(git -C cuse-src rev-parse HEAD)" = "$CUSE_REF"
+          (cd cuse-src && bun install --frozen-lockfile && bun run build)
           "${bin}" os --json
 
           # Earlier steps leave a token behind, so waiting on the file
@@ -887,7 +880,10 @@ jobs:
           if [ "${{ matrix.platform }}" = linux ]; then
             export GSK_RENDERER=cairo
           fi
-          PETDEX_PET=ci-pet ./zig-out/bin/petdex-desktop-native > input.log 2>&1 &
+          mkdir -p "$HOME/.petdex"
+          printf '{"active_pet":"ci-pet","scale":0.7,"pet_x":300,"pet_y":200,"agents_prompted":true}' \
+            > "$HOME/.petdex/settings.json"
+          ./zig-out/bin/petdex-desktop-native > input.log 2>&1 &
           APP_PID=$!
           for _ in $(seq 1 60); do
             test -s "$HOME/.petdex/runtime/update-token" && break
@@ -915,11 +911,7 @@ jobs:
               target=(--window="$title")
               ;;
             windows)
-              if "${bin}" focus "Petdex Settings" --json; then
-                "${bin}" key alt+F4 --json
-              fi
-              "${bin}" wait --element="Petdex pet" --timeout=10000 --json
-              target=(--element="Petdex pet")
+              target=(367 273)
               ;;
           esac
 
@@ -957,21 +949,26 @@ jobs:
           esac
 
           if [ "${{ matrix.platform }}" = windows ]; then
-            pet_geometry() {
-              "${bin}" element --element="Petdex pet" --json | bun -e '
-                const result = JSON.parse(await Bun.stdin.text());
-                const pet = result.data;
-                console.log(`${pet.x} ${pet.y} ${pet.width} ${pet.height}`);
+            pet_position() {
+              bun -e '
+                const settings = await Bun.file(process.env.HOME + "/.petdex/settings.json").json();
+                console.log(`${settings.pet_x} ${settings.pet_y}`);
               '
             }
 
-            read -r before_x before_y window_w window_h <<< "$(pet_geometry)"
-            from_x=$((before_x + window_w / 2))
-            from_y=$((before_y + window_h / 2))
+            read -r before_x before_y <<< "$(pet_position)"
+            from_x=$((before_x + 67))
+            from_y=$((before_y + 73))
             to_x=$((from_x + 80))
             to_y=$((from_y + 40))
             "${bin}" drag "$from_x" "$from_y" "$to_x" "$to_y" --json
-            read -r after_x after_y _ _ <<< "$(pet_geometry)"
+            for _ in $(seq 1 40); do
+              read -r after_x after_y <<< "$(pet_position)"
+              if [ "$after_x" != "$before_x" ] || [ "$after_y" != "$before_y" ]; then
+                break
+              fi
+              sleep 0.25
+            done
             moved_x=$((after_x - before_x))
             moved_y=$((after_y - before_y))
             moved_x=${moved_x#-}
@@ -981,7 +978,9 @@ jobs:
               exit 1
             fi
 
-            "${bin}" click --element="Petdex pet" --button=right --json
+            menu_x=$((after_x + 67))
+            menu_y=$((after_y + 73))
+            "${bin}" click "$menu_x" "$menu_y" --button=right --json
             "${bin}" wait --element="Open Settings" --timeout=10000 --json
             "${bin}" key Escape --json
             "${bin}" wait --element="Open Settings" --gone --timeout=10000 --json
