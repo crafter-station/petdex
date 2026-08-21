@@ -67,7 +67,7 @@ index 7debdf9..0843612 100644
 +}
 +
 diff --git a/src/platform/windows/webview2_host.cpp b/src/platform/windows/webview2_host.cpp
-index 4dd7ecd..b1a13ad 100644
+index 4dd7ecd..24fd947 100644
 --- a/src/platform/windows/webview2_host.cpp
 +++ b/src/platform/windows/webview2_host.cpp
 @@ -124,0 +125 @@ enum EventKind {
@@ -85,9 +85,12 @@ index 4dd7ecd..b1a13ad 100644
 +    size_t label_len;
 +    int enabled;
 +    int separator;
-@@ -430,0 +443 @@ struct NativeView {
+@@ -430,0 +443,4 @@ struct NativeView {
++    int gpu_primary_down = 0;
 +    int gpu_primary_latched = 0;
-@@ -563,0 +577,16 @@ struct AudioState {
++    double gpu_primary_x = 0;
++    double gpu_primary_y = 0;
+@@ -563,0 +580,16 @@ struct AudioState {
 +struct PendingContextMenu {
 +    bool active = false;
 +    uint64_t window_id = 0;
@@ -104,9 +107,9 @@ index 4dd7ecd..b1a13ad 100644
 +    std::vector<Item> items;
 +};
 +
-@@ -616,0 +646 @@ struct Host {
+@@ -616,0 +649 @@ struct Host {
 +    PendingContextMenu context_menu;
-@@ -2160,0 +2191,39 @@ static NativeView *gpuSurfaceViewForHwnd(Host *host, HWND hwnd) {
+@@ -2160,0 +2194,39 @@ static NativeView *gpuSurfaceViewForHwnd(Host *host, HWND hwnd) {
 +static void showAppContextMenu(Host *host, HWND hwnd) {
 +    if (!host || !host->context_menu.active) return;
 +    PendingContextMenu request = std::move(host->context_menu);
@@ -146,13 +149,22 @@ index 4dd7ecd..b1a13ad 100644
 +    PostMessageW(hwnd, WM_NULL, 0, 0);
 +}
 +
-@@ -2928,0 +2998 @@ static LRESULT CALLBACK gpuSurfaceProc(HWND hwnd, UINT message, WPARAM wparam, L
-+            if (message == WM_LBUTTONDOWN) view->gpu_primary_latched = 1;
-@@ -5033,0 +5104,3 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wparam, LPARA
+@@ -2928,0 +3001,6 @@ static LRESULT CALLBACK gpuSurfaceProc(HWND hwnd, UINT message, WPARAM wparam, L
++            if (message == WM_LBUTTONDOWN) {
++                view->gpu_primary_down = 1;
++                view->gpu_primary_latched = 2;
++                view->gpu_primary_x = x;
++                view->gpu_primary_y = y;
++            }
+@@ -2940,0 +3019 @@ static LRESULT CALLBACK gpuSurfaceProc(HWND hwnd, UINT message, WPARAM wparam, L
++            if (message == WM_LBUTTONUP) view->gpu_primary_down = 0;
+@@ -2957,0 +3037 @@ static LRESULT CALLBACK gpuSurfaceProc(HWND hwnd, UINT message, WPARAM wparam, L
++            view->gpu_primary_down = 0;
+@@ -5033,0 +5114,3 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wparam, LPARA
 +        case kShowContextMenuMessage:
 +            if (host) showAppContextMenu(host, hwnd);
 +            return 0;
-@@ -5942,0 +6016,52 @@ int native_sdk_windows_create_window(Host *host, uint64_t window_id, const char
+@@ -5942,0 +6026,57 @@ int native_sdk_windows_create_window(Host *host, uint64_t window_id, const char
 +int native_sdk_windows_move_window(Host *host, uint64_t window_id, double dx, double dy, int clamp, double *out_x, double *out_y, int *out_hit_x, int *out_hit_y, int *out_primary_down, double *out_cursor_x, double *out_cursor_y) {
 +    if (!host) return 0;
 +    auto found = host->windows.find(window_id);
@@ -194,10 +206,15 @@ index 4dd7ecd..b1a13ad 100644
 +    int primary_down = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0 ? 1 : 0;
 +    for (auto &entry : host->native_views) {
 +        NativeView &view = entry.second;
-+        if (view.window_id == window_id && view.kind == kViewGpuSurface && view.gpu_primary_latched) {
++        if (view.window_id != window_id || view.kind != kViewGpuSurface) continue;
++        if (view.gpu_primary_latched > 0) {
 +            primary_down = 1;
-+            view.gpu_primary_latched = 0;
-+        }
++            if (view.gpu_primary_latched == 2 && view.hwnd) {
++                POINT press = { (LONG)lround(view.gpu_primary_x * scale), (LONG)lround(view.gpu_primary_y * scale) };
++                if (ClientToScreen(view.hwnd, &press)) cursor = press;
++            }
++            view.gpu_primary_latched--;
++        } else if (view.gpu_primary_down) primary_down = 1;
 +    }
 +    if (out_primary_down) *out_primary_down = primary_down;
 +    if (out_cursor_x) *out_cursor_x = (double)cursor.x / scale;
@@ -205,7 +222,7 @@ index 4dd7ecd..b1a13ad 100644
 +    return 1;
 +}
 +
-@@ -6272,0 +6398,25 @@ int native_sdk_windows_note_gpu_surface_input(Host *host, uint64_t window_id, co
+@@ -6272,0 +6413,25 @@ int native_sdk_windows_note_gpu_surface_input(Host *host, uint64_t window_id, co
 +int native_sdk_windows_show_context_menu(Host *host, uint64_t window_id, const char *label, size_t label_len, double x, double y, uint64_t token, const WindowsContextMenuItem *items, size_t count) {
 +    if (!host || !items || count == 0) return 0;
 +    auto found = host->windows.find(window_id);
