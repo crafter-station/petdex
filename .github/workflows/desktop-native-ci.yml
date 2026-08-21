@@ -929,7 +929,7 @@ jobs:
 
           # Read the verdict field rather than grepping the line: SAME and
           # CHANGED both contain "CHANGE" as a substring in other wordings.
-          verdict() { "${bin}" diff "$1" "$2" --json | bun -e \
+          verdict() { "${bin}" diff "$1" "$2" --same-under=0.25 --json | bun -e \
             'const r=JSON.parse(await Bun.stdin.text()); console.log(r.data.verdict, r.data.percent+"%")'; }
 
           first=$(verdict before.png after1.png)
