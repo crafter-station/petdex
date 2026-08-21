@@ -882,7 +882,7 @@ jobs:
           fi
           mkdir -p "$HOME/.petdex"
           printf '{"active_pet":"ci-pet","scale":0.7,"pet_x":300,"pet_y":200,"agents_prompted":true}' \
-            > "$HOME/.petdex/settings.json"
+            > "$HOME/.petdex/desktop-native-settings.json"
           ./zig-out/bin/petdex-desktop-native > input.log 2>&1 &
           APP_PID=$!
           for _ in $(seq 1 60); do
@@ -951,7 +951,7 @@ jobs:
           if [ "${{ matrix.platform }}" = windows ]; then
             pet_position() {
               bun -e '
-                const settings = await Bun.file(process.env.HOME + "/.petdex/settings.json").json();
+                const settings = await Bun.file(process.env.HOME + "/.petdex/desktop-native-settings.json").json();
                 console.log(`${settings.pet_x} ${settings.pet_y}`);
               '
             }
