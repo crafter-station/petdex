@@ -5,46 +5,67 @@ import {
   HeadObjectCommand,
   PutObjectCommand,
 } from "@aws-sdk/client-s3";
-import JSZip from "jszip";
-import sharp from "sharp";
+import { and, eq, isNotNull, isNull } from "drizzle-orm";
 
+import { db, schema } from "@/lib/db/client";
 import type { PetStateId } from "@/lib/pet-states";
-import { petStates } from "@/lib/pet-states";
 import {
   PET_STICKER_CACHE_HEADER,
   PET_STICKER_STATES,
   type PetStickerFormat,
+  type PetStickerProfile,
+  type PetStickerTreatment,
   petStickerFilename,
   petStickerKey,
-  petStickerPackFilename,
-  petStickerPackKey,
+  petStickerTrayFilename,
+  petStickerTrayKey,
+  petStickerTrayUrl,
+  petStickerUrl,
 } from "@/lib/pet-sticker-artifacts";
-import { getAllApprovedPets } from "@/lib/pets";
 import { R2_BUCKET, r2 } from "@/lib/r2";
 import { keyFromR2PublicUrl } from "@/lib/r2-public-url";
-import { renderSticker, STICKER_SIZES } from "@/lib/sticker-renderer";
+import {
+  STICKER_ARTIFACT_VERSION,
+  STICKER_EXPORT_POLICY_VERSION,
+  STICKER_EXPORT_SCOPE,
+  STICKER_PUBLIC_FORMATS,
+  STICKER_PUBLIC_PROFILES,
+  STICKER_PUBLIC_TREATMENTS,
+  stickerFormatsForProfile,
+} from "@/lib/sticker-export-policy";
+import {
+  renderSticker,
+  renderWhatsAppTray,
+  STICKER_SIZES,
+} from "@/lib/sticker-renderer";
 import { isAllowedAssetUrl } from "@/lib/url-allowlist";
+import {
+  assertWhatsAppSticker,
+  assertWhatsAppTray,
+} from "@/lib/whatsapp-sticker";
 
 type Mode = "check" | "apply";
-type Artifact = "idle-webp" | "all-webp" | "pack";
+type Artifact = "idle-webp" | "all-webp" | "reactions";
 type ArtifactRef =
   | {
       kind: "sticker";
       key: string;
       state: PetStateId;
       format: PetStickerFormat;
+      profile: PetStickerProfile;
+      treatment: PetStickerTreatment;
     }
   | {
-      kind: "pack";
+      kind: "whatsapp-tray";
       key: string;
     };
 
 type StickerTask = {
   slug: string;
-  displayName: string;
-  description: string;
+  id: string;
   spritesheetPath: string;
   spritesheetKey: string;
+  sourceSha256: string;
   refs: ArtifactRef[];
 };
 
@@ -56,6 +77,7 @@ const mode = parseMode(process.argv[2]);
 const force = process.argv.includes("--force");
 const limit = parseLimit(process.argv);
 const artifacts = parseArtifacts(process.argv);
+const collectionSlug = parseStringArg(process.argv, "collection");
 const headConcurrency = parseConcurrency("PETDEX_STICKER_HEAD_CONCURRENCY", 24);
 const publishConcurrency = parseConcurrency(
   "PETDEX_STICKER_PUBLISH_CONCURRENCY",
@@ -63,17 +85,17 @@ const publishConcurrency = parseConcurrency(
 );
 const progressEvery = parseConcurrency("PETDEX_STICKER_PROGRESS_EVERY", 50);
 
-const allPets = await getAllApprovedPets();
+const allPets = await getPublishablePets(collectionSlug);
 const selectedPets =
   typeof limit === "number" ? allPets.slice(0, limit) : allPets;
 const tasks = selectedPets.map((pet) => {
-  const spritesheetKey = keyFromR2PublicUrl(pet.spritesheetPath);
+  const spritesheetKey = keyFromR2PublicUrl(pet.spritesheetUrl);
   return {
     slug: pet.slug,
-    displayName: pet.displayName,
-    description: pet.description,
-    spritesheetPath: pet.spritesheetPath,
+    id: pet.id,
+    spritesheetPath: pet.spritesheetUrl,
     spritesheetKey: spritesheetKey ?? "",
+    sourceSha256: pet.spriteSha256,
     refs: refsForArtifacts(pet.slug, artifacts),
   };
 });
@@ -84,14 +106,18 @@ const invalidTasks = tasks.filter(
   (task) => !isAllowedAssetUrl(task.spritesheetPath) || !task.spritesheetKey,
 );
 const requiredRefs = validTasks.flatMap((task) =>
-  task.refs.map((ref) => ({ slug: task.slug, key: ref.key })),
+  task.refs.map((ref) => ({
+    slug: task.slug,
+    key: ref.key,
+    sourceSha256: task.sourceSha256,
+  })),
 );
 const existingKeys = force
   ? new Set<string>()
   : new Set(
       (
         await mapLimit(requiredRefs, headConcurrency, async (ref) =>
-          (await r2ObjectExists(ref.key)) ? ref.key : null,
+          (await r2ObjectIsCurrent(ref.key, ref.sourceSha256)) ? ref.key : null,
         )
       ).filter((key): key is string => Boolean(key)),
     );
@@ -109,7 +135,8 @@ const pendingRefs = pendingTasks.reduce(
 );
 
 console.log(`pet sticker artifacts ${mode}`);
-console.log(`approved ${allPets.length}`);
+console.log(`eligible ${allPets.length}`);
+console.log(`collection ${collectionSlug ?? "all"}`);
 console.log(`selected ${selectedPets.length}`);
 console.log(`artifacts ${artifacts.join(",")}`);
 console.log(`valid pets ${validTasks.length}`);
@@ -184,13 +211,75 @@ if (mode === "apply") {
     console.log(`failed ${result.slug} ${result.reason}`);
   }
 
-  if (failed.length > 0) process.exit(1);
+  if (artifacts.includes("reactions")) {
+    const failedSlugs = new Set(failed.map((result) => result.slug));
+    const purged = await mapLimit(
+      validTasks.filter((task) => !failedSlugs.has(task.slug)),
+      publishConcurrency,
+      purgeReactionTask,
+    );
+    const purgeFailures = purged.filter(
+      (result): result is Extract<PublishResult, { ok: false }> => !result.ok,
+    );
+    for (const result of purgeFailures) failedSlugs.add(result.slug);
+    console.log(`purged publications ${purged.length - purgeFailures.length}`);
+    for (const result of purgeFailures.slice(0, 20)) {
+      console.log(`purge failed ${result.slug} ${result.reason}`);
+    }
+    const finalized = await mapLimit(
+      validTasks.filter((task) => !failedSlugs.has(task.slug)),
+      publishConcurrency,
+      finalizeReactionPublication,
+    );
+    const finalizeFailures = finalized.filter(
+      (result): result is Extract<PublishResult, { ok: false }> => !result.ok,
+    );
+    for (const result of finalizeFailures) failedSlugs.add(result.slug);
+    console.log(
+      `finalized publications ${finalized.length - finalizeFailures.length}`,
+    );
+    for (const result of finalizeFailures.slice(0, 20)) {
+      console.log(`finalize failed ${result.slug} ${result.reason}`);
+    }
+    if (
+      failed.length > 0 ||
+      purgeFailures.length > 0 ||
+      finalizeFailures.length > 0
+    ) {
+      process.exit(1);
+    }
+    await notifyStickerRevalidation(
+      validTasks
+        .filter((task) => !failedSlugs.has(task.slug))
+        .map((task) => task.slug),
+    );
+  } else {
+    if (failed.length > 0) process.exit(1);
+    await purgeCdnUrls(
+      pendingTasks.flatMap((task) =>
+        task.refs
+          .filter((ref) => ref.kind === "sticker")
+          .map((ref) =>
+            petStickerUrl(
+              task.slug,
+              ref.state,
+              ref.format,
+              ref.treatment,
+              ref.profile,
+            ),
+          ),
+      ),
+    );
+  }
 }
 
 async function publishTask(task: StickerTask): Promise<PublishResult> {
   try {
     const source = await getR2ObjectBuffer(task.spritesheetKey);
     const sourceSha256 = createHash("sha256").update(source).digest("hex");
+    if (sourceSha256 !== task.sourceSha256) {
+      throw new Error("source hash changed since approval");
+    }
     const hash = createHash("sha256");
     let bytes = 0;
     let artifacts = 0;
@@ -208,6 +297,7 @@ async function publishTask(task: StickerTask): Promise<PublishResult> {
           Metadata: {
             "petdex-slug": task.slug,
             "petdex-source-sha256": sourceSha256,
+            "petdex-artifact-version": STICKER_ARTIFACT_VERSION,
             "petdex-sha256": artifact.sha256,
           },
         }),
@@ -232,6 +322,124 @@ async function publishTask(task: StickerTask): Promise<PublishResult> {
   }
 }
 
+async function purgeReactionTask(task: StickerTask): Promise<PublishResult> {
+  try {
+    const urls = task.refs.map((ref) =>
+      ref.kind === "sticker"
+        ? petStickerUrl(
+            task.slug,
+            ref.state,
+            ref.format,
+            ref.treatment,
+            ref.profile,
+          )
+        : petStickerTrayUrl(task.slug),
+    );
+    await purgeCdnUrls(urls, true);
+    return {
+      ok: true,
+      slug: task.slug,
+      artifacts: urls.length,
+      bytes: 0,
+      sha256: "",
+    };
+  } catch (error) {
+    return { ok: false, slug: task.slug, reason: errorReason(error) };
+  }
+}
+
+async function finalizeReactionPublication(
+  task: StickerTask,
+): Promise<PublishResult> {
+  try {
+    const refs = refsForArtifacts(task.slug, ["reactions"]);
+    const objects = await mapLimit(refs, headConcurrency, async (ref) => {
+      const head = await r2.send(
+        new HeadObjectCommand({ Bucket: R2_BUCKET, Key: ref.key }),
+      );
+      if (head.Metadata?.["petdex-source-sha256"] !== task.sourceSha256) {
+        throw new Error(`stale object ${ref.key}`);
+      }
+      if (
+        head.Metadata?.["petdex-artifact-version"] !== STICKER_ARTIFACT_VERSION
+      ) {
+        throw new Error(`outdated object ${ref.key}`);
+      }
+      const sha256 = head.Metadata?.["petdex-sha256"];
+      if (!sha256) throw new Error(`missing artifact hash ${ref.key}`);
+      return {
+        key: ref.key,
+        bytes: head.ContentLength ?? 0,
+        sha256,
+      };
+    });
+    const manifestHash = createHash("sha256");
+    for (const object of objects.sort((a, b) => a.key.localeCompare(b.key))) {
+      manifestHash.update(object.key);
+      manifestHash.update("\0");
+      manifestHash.update(object.sha256);
+      manifestHash.update("\0");
+      manifestHash.update(String(object.bytes));
+      manifestHash.update("\0");
+    }
+    const manifestSha256 = manifestHash.digest("hex");
+    const totalBytes = objects.reduce(
+      (total, object) => total + object.bytes,
+      0,
+    );
+    const now = new Date();
+    await db
+      .insert(schema.petStickerPublications)
+      .values({
+        petId: task.id,
+        sourceSha256: task.sourceSha256,
+        artifactVersion: STICKER_ARTIFACT_VERSION,
+        states: [...PET_STICKER_STATES],
+        formats: [...STICKER_PUBLIC_FORMATS],
+        profiles: [...STICKER_PUBLIC_PROFILES],
+        treatments: [...STICKER_PUBLIC_TREATMENTS],
+        objectCount: objects.length,
+        totalBytes,
+        manifestSha256,
+        status: "complete",
+        cleanupStatus: "not_required",
+        cleanupError: null,
+        publishedAt: now,
+        revokedAt: null,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: schema.petStickerPublications.petId,
+        set: {
+          sourceSha256: task.sourceSha256,
+          artifactVersion: STICKER_ARTIFACT_VERSION,
+          states: [...PET_STICKER_STATES],
+          formats: [...STICKER_PUBLIC_FORMATS],
+          profiles: [...STICKER_PUBLIC_PROFILES],
+          treatments: [...STICKER_PUBLIC_TREATMENTS],
+          objectCount: objects.length,
+          totalBytes,
+          manifestSha256,
+          status: "complete",
+          cleanupStatus: "not_required",
+          cleanupError: null,
+          publishedAt: now,
+          revokedAt: null,
+          updatedAt: now,
+        },
+      });
+    return {
+      ok: true,
+      slug: task.slug,
+      artifacts: objects.length,
+      bytes: totalBytes,
+      sha256: manifestSha256,
+    };
+  } catch (error) {
+    return { ok: false, slug: task.slug, reason: errorReason(error) };
+  }
+}
+
 async function buildArtifact(
   task: StickerTask,
   ref: ArtifactRef,
@@ -242,119 +450,108 @@ async function buildArtifact(
   filename: string;
   sha256: string;
 }> {
-  if (ref.kind === "pack") {
-    const body = await buildPack(task, source);
+  if (ref.kind === "whatsapp-tray") {
+    const body = await renderWhatsAppTray(source);
+    await assertWhatsAppTray(body);
     return {
       body,
-      contentType: "application/zip",
-      filename: petStickerPackFilename(task.slug),
+      contentType: "image/png",
+      filename: petStickerTrayFilename(task.slug),
       sha256: createHash("sha256").update(body).digest("hex"),
     };
   }
 
-  const sticker = await renderStickerWithFallback(source, ref);
+  const sticker = await renderStickerArtifact(source, ref);
   return {
     body: sticker.buffer,
     contentType: sticker.contentType,
-    filename: petStickerFilename(task.slug, ref.state, ref.format),
+    filename: petStickerFilename(
+      task.slug,
+      ref.state,
+      ref.format,
+      ref.treatment,
+      ref.profile,
+    ),
     sha256: createHash("sha256").update(sticker.buffer).digest("hex"),
   };
 }
 
-async function renderStickerWithFallback(
+async function renderStickerArtifact(
   source: Buffer,
   ref: Extract<ArtifactRef, { kind: "sticker" }>,
 ) {
-  try {
-    return await renderSticker(source, {
-      state: ref.state,
-      format: ref.format,
-    });
-  } catch (error) {
-    if (ref.format !== "webp" || !isExtractAreaError(error)) throw error;
-    const buffer = await sharp(source)
-      .extract({ left: 0, top: 0, width: 192, height: 208 })
-      .resize(STICKER_SIZES.default, STICKER_SIZES.default, {
-        fit: "contain",
-        kernel: "nearest",
-        background: { r: 0, g: 0, b: 0, alpha: 0 },
-      })
-      .webp({ quality: 80, effort: 4 })
-      .toBuffer();
-    return {
-      buffer,
-      contentType: "image/webp" as const,
-      isAnimated: false,
-      frameCount: 1,
-    };
-  }
-}
-
-async function buildPack(task: StickerTask, source: Buffer): Promise<Buffer> {
-  const trayBuf = await buildTrayIcon(source);
-  const stickerBufs = await Promise.all(
-    petStates.map(async (state) => {
-      const out = await renderSticker(source, {
-        state: state.id,
-        size: STICKER_SIZES.whatsappPack,
-      });
-      return { id: state.id, buf: out.buffer };
-    }),
-  );
-  const publisherWebsite =
-    process.env.PETDEX_URL?.trim() || "https://petdex.dev";
-  const stateEmoji: Record<string, string[]> = {
-    idle: ["🙂"],
-    "running-right": ["🏃"],
-    "running-left": ["🏃"],
-    waving: ["👋"],
-    jumping: ["⬆️"],
-    failed: ["😅"],
-    waiting: ["⏳"],
-    running: ["🏃"],
-    review: ["🤔"],
-  };
-  const manifest = {
-    identifier: `petdex.${task.slug}`,
-    name: `${task.displayName} - Petdex`,
-    publisher: "Petdex",
-    tray_image_file: "tray.png",
-    publisher_email: "hello@crafter.run",
-    publisher_website: publisherWebsite,
-    privacy_policy_website: `${publisherWebsite}/legal/privacy`,
-    license_agreement_website: `${publisherWebsite}/legal/terms`,
-    image_data_version: "1",
-    avoid_cache: false,
-    animated_sticker_pack: true,
-    stickers: stickerBufs.map((sticker) => ({
-      image_file: `${sticker.id}.webp`,
-      emojis: stateEmoji[sticker.id] ?? ["🙂"],
-    })),
-  };
-  const zip = new JSZip();
-  zip.file("manifest.json", JSON.stringify(manifest, null, 2));
-  zip.file("contents.json", JSON.stringify(manifest, null, 2));
-  zip.file("tray.png", trayBuf);
-  for (const sticker of stickerBufs) {
-    zip.file(`${sticker.id}.webp`, sticker.buf);
-  }
-  return await zip.generateAsync({
-    type: "nodebuffer",
-    compression: "DEFLATE",
-    compressionOptions: { level: 6 },
+  const output = await renderSticker(source, {
+    state: ref.state,
+    format: ref.format,
+    treatment: ref.treatment,
+    size:
+      ref.profile === "whatsapp"
+        ? STICKER_SIZES.whatsapp
+        : STICKER_SIZES.default,
   });
+  if (ref.profile === "whatsapp") {
+    await assertWhatsAppSticker(output.buffer);
+  }
+  return output;
 }
 
-async function buildTrayIcon(sheet: Buffer): Promise<Buffer> {
-  return await sharp(sheet)
-    .extract({ left: 0, top: 0, width: 192, height: 208 })
-    .resize(96, 96, {
-      fit: "contain",
-      kernel: "nearest",
-      background: { r: 0, g: 0, b: 0, alpha: 0 },
-    })
-    .png({ compressionLevel: 9 })
-    .toBuffer();
+async function getPublishablePets(collectionSlug: string | null) {
+  const columns = {
+    id: schema.submittedPets.id,
+    slug: schema.submittedPets.slug,
+    spritesheetUrl: schema.submittedPets.spritesheetUrl,
+    spriteSha256: schema.submittedPets.spriteSha256,
+  };
+  const approvalWhere = and(
+    eq(schema.submittedPets.status, "approved"),
+    isNotNull(schema.submittedPets.spriteSha256),
+    eq(schema.petExportApprovals.scope, STICKER_EXPORT_SCOPE),
+    eq(schema.petExportApprovals.status, "allowed"),
+    eq(schema.petExportApprovals.policyVersion, STICKER_EXPORT_POLICY_VERSION),
+    eq(
+      schema.petExportApprovals.sourceSha256,
+      schema.submittedPets.spriteSha256,
+    ),
+  );
+
+  if (collectionSlug) {
+    const rows = await db
+      .select(columns)
+      .from(schema.submittedPets)
+      .innerJoin(
+        schema.petExportApprovals,
+        eq(schema.petExportApprovals.petId, schema.submittedPets.id),
+      )
+      .innerJoin(
+        schema.petCollectionItems,
+        eq(schema.petCollectionItems.petSlug, schema.submittedPets.slug),
+      )
+      .innerJoin(
+        schema.petCollections,
+        eq(schema.petCollections.id, schema.petCollectionItems.collectionId),
+      )
+      .where(
+        and(
+          approvalWhere,
+          eq(schema.petCollections.slug, collectionSlug),
+          isNull(schema.petCollections.ownerId),
+        ),
+      );
+    return rows.map((row) => ({
+      ...row,
+      spriteSha256: row.spriteSha256 ?? "",
+    }));
+  }
+
+  const rows = await db
+    .select(columns)
+    .from(schema.submittedPets)
+    .innerJoin(
+      schema.petExportApprovals,
+      eq(schema.petExportApprovals.petId, schema.submittedPets.id),
+    )
+    .where(approvalWhere);
+  return rows.map((row) => ({ ...row, spriteSha256: row.spriteSha256 ?? "" }));
 }
 
 async function getR2ObjectBuffer(key: string): Promise<Buffer> {
@@ -365,10 +562,18 @@ async function getR2ObjectBuffer(key: string): Promise<Buffer> {
   return Buffer.from(await response.Body.transformToByteArray());
 }
 
-async function r2ObjectExists(key: string): Promise<boolean> {
+async function r2ObjectIsCurrent(
+  key: string,
+  sourceSha256: string,
+): Promise<boolean> {
   try {
-    await r2.send(new HeadObjectCommand({ Bucket: R2_BUCKET, Key: key }));
-    return true;
+    const head = await r2.send(
+      new HeadObjectCommand({ Bucket: R2_BUCKET, Key: key }),
+    );
+    return (
+      head.Metadata?.["petdex-source-sha256"] === sourceSha256 &&
+      head.Metadata?.["petdex-artifact-version"] === STICKER_ARTIFACT_VERSION
+    );
   } catch (error) {
     if (isMissingObjectError(error)) return false;
     throw error;
@@ -378,18 +583,49 @@ async function r2ObjectExists(key: string): Promise<boolean> {
 function refsForArtifacts(slug: string, artifacts: Artifact[]): ArtifactRef[] {
   const refs = new Map<string, ArtifactRef>();
   if (artifacts.includes("idle-webp")) {
-    const key = petStickerKey(slug, "idle", "webp");
-    refs.set(key, { kind: "sticker", key, state: "idle", format: "webp" });
+    const key = petStickerKey(slug, "idle", "webp", "clean");
+    refs.set(key, {
+      kind: "sticker",
+      key,
+      state: "idle",
+      format: "webp",
+      profile: "web",
+      treatment: "clean",
+    });
   }
   if (artifacts.includes("all-webp")) {
     for (const state of PET_STICKER_STATES) {
-      const key = petStickerKey(slug, state, "webp");
-      refs.set(key, { kind: "sticker", key, state, format: "webp" });
+      const key = petStickerKey(slug, state, "webp", "clean");
+      refs.set(key, {
+        kind: "sticker",
+        key,
+        state,
+        format: "webp",
+        profile: "web",
+        treatment: "clean",
+      });
     }
   }
-  if (artifacts.includes("pack")) {
-    const key = petStickerPackKey(slug);
-    refs.set(key, { kind: "pack", key });
+  if (artifacts.includes("reactions")) {
+    for (const profile of STICKER_PUBLIC_PROFILES) {
+      for (const state of PET_STICKER_STATES) {
+        for (const format of stickerFormatsForProfile(profile)) {
+          for (const treatment of STICKER_PUBLIC_TREATMENTS) {
+            const key = petStickerKey(slug, state, format, treatment, profile);
+            refs.set(key, {
+              kind: "sticker",
+              key,
+              state,
+              format,
+              profile,
+              treatment,
+            });
+          }
+        }
+      }
+    }
+    const key = petStickerTrayKey(slug);
+    refs.set(key, { kind: "whatsapp-tray", key });
   }
   return [...refs.values()];
 }
@@ -440,7 +676,7 @@ function parseArtifacts(args: string[]): Artifact[] {
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean);
-  const valid = new Set<Artifact>(["idle-webp", "all-webp", "pack"]);
+  const valid = new Set<Artifact>(["idle-webp", "all-webp", "reactions"]);
   if (
     values.length > 0 &&
     values.every((value) => valid.has(value as Artifact))
@@ -454,6 +690,75 @@ function parseArtifacts(args: string[]): Artifact[] {
 function parseConcurrency(key: string, fallback: number): number {
   const value = Number.parseInt(process.env[key] ?? "", 10);
   return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function parseStringArg(args: string[], key: string): string | null {
+  const prefix = `--${key}=`;
+  const value = args
+    .find((arg) => arg.startsWith(prefix))
+    ?.slice(prefix.length);
+  return value?.trim().toLowerCase() || null;
+}
+
+async function purgeCdnUrls(urls: string[], required = false): Promise<void> {
+  if (urls.length === 0) return;
+  const zoneId = process.env.CLOUDFLARE_ZONE_ID;
+  const token = process.env.CLOUDFLARE_PURGE_TOKEN;
+  if (!zoneId || !token) {
+    if (required) throw new Error("cloudflare purge credentials are required");
+    console.log(`cloudflare purge skipped (no creds) for ${urls.length} urls`);
+    return;
+  }
+  let purged = 0;
+  for (let index = 0; index < urls.length; index += 30) {
+    const batch = urls.slice(index, index + 30);
+    const response = await fetch(
+      `https://api.cloudflare.com/client/v4/zones/${zoneId}/purge_cache`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ files: batch }),
+        signal: AbortSignal.timeout(10_000),
+      },
+    );
+    const body = (await response.json().catch(() => null)) as {
+      success?: unknown;
+    } | null;
+    if (!response.ok || body?.success !== true) {
+      throw new Error(`cloudflare purge failed ${response.status}`);
+    }
+    purged += batch.length;
+  }
+  console.log(`cloudflare purged ${purged}`);
+}
+
+async function notifyStickerRevalidation(slugs: string[]): Promise<void> {
+  if (slugs.length === 0) return;
+  const secret = process.env.PETDEX_REVALIDATE_SECRET;
+  if (!secret) throw new Error("PETDEX_REVALIDATE_SECRET is required");
+  const base = process.env.PETDEX_URL?.trim() || "https://petdex.dev";
+  for (let index = 0; index < slugs.length; index += 100) {
+    const batch = slugs.slice(index, index + 100);
+    const response = await fetch(`${base}/api/revalidate`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${secret}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        slugs: batch,
+        tags: batch.map((slug) => `sticker:${slug}`),
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) {
+      throw new Error(`petdex revalidation failed ${response.status}`);
+    }
+  }
+  console.log(`revalidated ${slugs.length} pets`);
 }
 
 function isMissingObjectError(error: unknown): boolean {
@@ -470,8 +775,4 @@ function isMissingObjectError(error: unknown): boolean {
 function errorReason(error: unknown): string {
   if (error instanceof Error) return error.message;
   return String(error);
-}
-
-function isExtractAreaError(error: unknown): boolean {
-  return error instanceof Error && error.message.includes("extract_area");
 }

@@ -69,7 +69,7 @@ echo "==> build ($ARCH)"
 # targets the host CPU otherwise, and a Mac newer than the user's would
 # emit instructions their machine cannot decode (#604 was exactly this
 # on Windows).
-(cd "$PKG" && "$NATIVE_CLI" build -Dtarget="$ZIG_TARGET" -Dcpu=baseline)
+(cd "$PKG" && "$NATIVE_CLI" build -Dtarget="$ZIG_TARGET" -Dcpu=baseline -Dtrace=off)
 
 echo "==> package + sign"
 # The bundle must be named Petdex.app: the name is baked into the

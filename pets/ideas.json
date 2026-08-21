@@ -349,5 +349,12 @@
     "description": "A sturdy wombat wearing a tiny worker helmet.",
     "tags": ["wombat", "worker", "cloud"],
     "status": "planned"
+  },
+  {
+    "id": "office-robot-f1",
+    "name": "Robot F1",
+    "description": "A robot assistant for Office 97 (a Clippy friend)",
+    "tags": ["robot", "office"],
+    "status": "planned"
   }
 ]

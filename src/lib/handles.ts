@@ -18,6 +18,16 @@ export function fallbackHandle(userId: string): string {
   return userId.slice(-FALLBACK_HANDLE_LENGTH).toLowerCase();
 }
 
+export function viewerIdForFallbackHandle(
+  handle: string,
+  viewerId: string | null,
+): string | null {
+  if (!viewerId) return null;
+  return fallbackHandle(viewerId) === handle.trim().toLowerCase()
+    ? viewerId
+    : null;
+}
+
 // Forward: userId -> handle. Used to build /u/<handle> URLs from a
 // pet's ownerId (e.g. credit chip, /my-pets header).
 export async function handleForUser(userId: string): Promise<string> {

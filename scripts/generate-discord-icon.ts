@@ -31,7 +31,10 @@ Style: 16-bit chibi pixel art, clean outlines, friendly mascot energy, modern fl
 No text, no letters, no watermarks, no UI chrome.`;
 
 async function main() {
-  const miniMaxBuffer = await generateMiniMaxReferenceImageFromEnv(PROMPT, "1:1");
+  const miniMaxBuffer = await generateMiniMaxReferenceImageFromEnv(
+    PROMPT,
+    "1:1",
+  );
   if (miniMaxBuffer) {
     console.log(
       `[icon] received ${miniMaxBuffer.length} bytes from MiniMax, normalizing to PNG...`,

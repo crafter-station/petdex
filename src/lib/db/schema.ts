@@ -60,6 +60,9 @@ export const submittedPets = pgTable(
     // 64-bit dHash of the first idle frame as a 16-char hex string. Used
     // for fast perceptual-similarity dedup at admin review time.
     dhash: text("dhash"),
+    spriteSha256: text("sprite_sha256"),
+    petJsonSha256: text("pet_json_sha256"),
+    zipSha256: text("zip_sha256"),
     // Gemini embedding + embedding_model live in raw pgvector columns.
     // Drizzle has no first-class pgvector type yet, so they are kept out
     // of this model and cast at query boundaries.
@@ -197,6 +200,79 @@ export const submissionReviews = pgTable(
     petCreatedAtIdx: index("submission_reviews_pet_created_at_idx").on(
       table.submittedPetId,
       table.createdAt.desc(),
+    ),
+  }),
+);
+
+export const petExportApprovals = pgTable(
+  "pet_export_approvals",
+  {
+    petId: text("pet_id")
+      .notNull()
+      .references(() => submittedPets.id, { onDelete: "cascade" }),
+    scope: text("scope").notNull().default("stickers"),
+    status: text("status").$type<"allowed" | "revoked">().notNull(),
+    sourceSha256: text("source_sha256").notNull(),
+    policyVersion: text("policy_version").notNull(),
+    reviewedBy: text("reviewed_by").notNull(),
+    reason: text("reason").notNull(),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.petId, table.scope] }),
+    scopeStatusIdx: index("pet_export_approvals_scope_status_idx").on(
+      table.scope,
+      table.status,
+    ),
+    sourceIdx: index("pet_export_approvals_source_idx").on(
+      table.petId,
+      table.sourceSha256,
+    ),
+  }),
+);
+
+export const petStickerPublications = pgTable(
+  "pet_sticker_publications",
+  {
+    petId: text("pet_id")
+      .primaryKey()
+      .references(() => submittedPets.id, { onDelete: "cascade" }),
+    sourceSha256: text("source_sha256").notNull(),
+    artifactVersion: text("artifact_version").notNull(),
+    states: jsonb("states").$type<string[]>().notNull(),
+    formats: jsonb("formats").$type<string[]>().notNull(),
+    profiles: jsonb("profiles").$type<string[]>().notNull(),
+    treatments: jsonb("treatments").$type<string[]>().notNull(),
+    objectCount: integer("object_count").notNull(),
+    totalBytes: integer("total_bytes").notNull(),
+    manifestSha256: text("manifest_sha256").notNull(),
+    status: text("status").$type<"complete" | "revoked">().notNull(),
+    cleanupStatus: text("cleanup_status")
+      .$type<"not_required" | "pending" | "complete" | "failed">()
+      .notNull()
+      .default("not_required"),
+    cleanupError: text("cleanup_error"),
+    publishedAt: timestamp("published_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    statusIdx: index("pet_sticker_publications_status_idx").on(table.status),
+    sourceIdx: index("pet_sticker_publications_source_idx").on(
+      table.petId,
+      table.sourceSha256,
     ),
   }),
 );

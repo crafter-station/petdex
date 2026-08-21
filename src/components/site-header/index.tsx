@@ -1,6 +1,7 @@
 import { getLocale, getTranslations } from "next-intl/server";
 
 import { withLocale } from "@/lib/locale-routing";
+import { isStickerExplorerEnabled } from "@/lib/sticker-export-policy";
 
 import { AuthBadge } from "@/components/auth/auth-badge";
 import { LocaleSwitcher } from "@/components/brand/locale-switcher";
@@ -21,18 +22,23 @@ export async function SiteHeader({ hideSubmitCta = false }: SiteHeaderProps) {
   const t = await getTranslations("header");
   const common = await getTranslations("common");
   const href = (pathname: string) => withLocale(pathname, currentLocale);
-  const nav = buildHeaderNav(href, {
-    collections: t("collections"),
-    creators: t("creators"),
-    requests: t("requests"),
-    download: t("download"),
-    docs: t("docs"),
-    create: t("create"),
-    builtWith: t("builtWith"),
-    community: t("community"),
-    github: common("github"),
-    githubRepoAria: t("githubRepoAria"),
-  });
+  const nav = buildHeaderNav(
+    href,
+    {
+      collections: t("collections"),
+      reactions: t("reactions"),
+      creators: t("creators"),
+      requests: t("requests"),
+      download: t("download"),
+      docs: t("docs"),
+      create: t("create"),
+      builtWith: t("builtWith"),
+      community: t("community"),
+      github: common("github"),
+      githubRepoAria: t("githubRepoAria"),
+    },
+    isStickerExplorerEnabled() || process.env.STICKER_EXPLORER_DEMO === "1",
+  );
 
   return (
     <header className="sticky top-0 z-40 w-full border-b border-foreground/[0.06] bg-background/88 backdrop-blur-md supports-[backdrop-filter]:bg-background/70">

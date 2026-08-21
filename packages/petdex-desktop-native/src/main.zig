@@ -20,8 +20,15 @@ const native_sdk = @import("native_sdk");
 const hook_server = @import("hook_server.zig");
 const hook_runner = @import("hook_runner.zig");
 const agent_hooks = @import("agent_hooks.zig");
+const dsh_integration = @import("dsh_integration.zig");
 const plat = @import("plat.zig");
 const installer = @import("installer.zig");
+const remote_agents = @import("remote_agents.zig");
+const remote_ssh = @import("remote_ssh.zig");
+const remote_writeback = @import("remote_writeback.zig");
+const remote_runtime = @import("remote_runtime.zig");
+const herdr_status = @import("herdr_status.zig");
+pub const updates = @import("updates.zig");
 
 pub const panic = std.debug.FullPanic(native_sdk.debug.capturePanic);
 
@@ -104,6 +111,8 @@ pub const Msg = union(enum) {
     quit_app,
     install_agent: u32,
     uninstall_agent: u32,
+    dsh_install_done: native_sdk.EffectExit,
+    dsh_remove_done: native_sdk.EffectExit,
     pet_filter: canvas.TextInputEvent,
     toggle_pets_expanded,
     manifest_done: native_sdk.EffectExit,
@@ -114,9 +123,21 @@ pub const Msg = union(enum) {
     native_drag_started: ?State,
     native_drag_ended,
     native_drag_watchdog: native_sdk.EffectTimer,
+    remote_line: native_sdk.EffectLine,
+    remote_done: native_sdk.EffectExit,
+    remote_backoff: native_sdk.EffectTimer,
+    update_boot_check: native_sdk.EffectTimer,
+    check_updates,
+    toggle_update_checks,
+    update_response: native_sdk.EffectResponse,
+    homebrew_done: native_sdk.EffectExit,
+    homebrew_timeout: native_sdk.EffectTimer,
+    download_update,
+    copy_brew_command,
+    brew_command_copied: native_sdk.EffectClipboardResult,
     noop,
 
-    pub const view_unbound = .{ "frame_tick", "poll_tick", "physics_tick", "frame_clock", "cycle_state", "native_drag_watchdog", "chime_done", "quit_app", "toggle_focus_mode", "shuffle_pet" };
+    pub const view_unbound = .{ "frame_tick", "poll_tick", "physics_tick", "frame_clock", "cycle_state", "native_drag_watchdog", "chime_done", "quit_app", "toggle_focus_mode", "shuffle_pet", "dsh_install_done", "dsh_remove_done", "remote_line", "remote_done", "remote_backoff", "update_boot_check", "update_response", "homebrew_done", "homebrew_timeout", "brew_command_copied" };
 };
 
 pub const Model = struct {
@@ -271,13 +292,30 @@ pub const Model = struct {
         .{ .kind = .kimi_code },
         .{ .kind = .codebuddy },
         .{ .kind = .omp },
+        .{ .kind = .hermes },
+        .{ .kind = .dsh },
     },
+    dsh_busy: bool = false,
+    dsh_error: bool = false,
+    herdr_status: herdr_status.Status = .absent,
+    update_checks_enabled: bool = true,
+    update_phase: updates.Phase = .idle,
+    update_manual: bool = false,
+    latest_version: [32]u8 = @splat(0),
+    latest_version_len: usize = 0,
+    last_update_check_ms: i64 = 0,
+    install_source: updates.InstallSource = .unknown,
+    update_cancel_pending: bool = false,
+    update_restart_after_cancel: bool = false,
+    brew_command_copied: bool = false,
     agents_prompted: bool = false,
     codex_trust_note: bool = false,
     pet_filter: [48]u8 = @splat(0),
     pet_filter_len: usize = 0,
     pets_expanded: bool = false,
     install: InstallState = .{},
+    remotes: [remote_runtime.max_remotes]remote_runtime.Slot = .{ .{}, .{}, .{}, .{}, .{}, .{}, .{}, .{} },
+    remote_count: usize = 0,
     dark: bool = true,
     high_contrast: bool = false,
     reduce_motion: bool = false,
@@ -730,6 +768,102 @@ pub const Effects = native_sdk.Effects(Msg);
 const frame_timer_key: u64 = 1;
 const native_drag_watchdog_key: u64 = 4;
 const native_drag_watchdog_ms: u32 = 5000;
+const update_fetch_key: u64 = 30;
+const homebrew_check_key: u64 = 31;
+const brew_clipboard_key: u64 = 32;
+const update_boot_timer_key: u64 = 33;
+const homebrew_timeout_timer_key: u64 = 34;
+const dsh_install_key: u64 = 35;
+const dsh_remove_key: u64 = 36;
+const update_boot_delay_ms: u32 = 5000;
+const update_background_interval_ms: i64 = 24 * 60 * 60 * 1000;
+const update_settings_interval_ms: i64 = 5 * 60 * 1000;
+const update_failure_retry_ms: u64 = 60 * 60 * 1000;
+const homebrew_timeout_ms: u64 = 8000;
+
+fn updateCachePhase(model: *Model) void {
+    if (model.latest_version_len == 0) {
+        model.update_phase = .idle;
+        return;
+    }
+    const latest = model.latest_version[0..model.latest_version_len];
+    model.update_phase = if (updates.isNewer(latest, updates.current_version)) .available else .current;
+}
+
+fn updateCheckStale(last_check_ms: i64, now_ms: i64, interval_ms: i64) bool {
+    return last_check_ms <= 0 or now_ms < last_check_ms or now_ms - last_check_ms >= interval_ms;
+}
+
+fn updateCheckDelay(last_check_ms: i64, now_ms: i64) u64 {
+    if (updateCheckStale(last_check_ms, now_ms, update_background_interval_ms)) return update_boot_delay_ms;
+    return @intCast(update_background_interval_ms - (now_ms - last_check_ms));
+}
+
+fn armNextUpdateCheck(model: *const Model, fx: *Effects) void {
+    if (!model.update_checks_enabled) return;
+    fx.startTimer(.{
+        .key = update_boot_timer_key,
+        .interval_ms = updateCheckDelay(model.last_update_check_ms, fx.wallMs()),
+        .mode = .one_shot,
+        .on_fire = Effects.timerMsg(.update_boot_check),
+    });
+}
+
+fn armUpdateRetry(model: *const Model, fx: *Effects) void {
+    if (!model.update_checks_enabled) return;
+    fx.startTimer(.{
+        .key = update_boot_timer_key,
+        .interval_ms = update_failure_retry_ms,
+        .mode = .one_shot,
+        .on_fire = Effects.timerMsg(.update_boot_check),
+    });
+}
+
+fn startUpdateCheck(model: *Model, manual: bool, fx: *Effects) void {
+    if (model.update_phase == .checking or model.update_cancel_pending) return;
+    model.update_manual = manual;
+    model.update_phase = .checking;
+    fx.fetch(.{
+        .key = update_fetch_key,
+        .url = updates.endpoint,
+        .timeout_ms = 8000,
+        .on_response = Effects.responseMsg(.update_response),
+    });
+}
+
+fn finishUpdateFailure(model: *Model) void {
+    if (model.update_manual) {
+        model.update_phase = .failed;
+    } else {
+        updateCachePhase(model);
+    }
+    model.update_manual = false;
+}
+
+fn startHomebrewCheck(model: *Model, fx: *Effects) void {
+    if (builtin.target.os.tag != .macos or model.install_source == .checking or model.install_source == .homebrew) return;
+    const brew = if (plat.fileExists("/opt/homebrew/bin/brew"))
+        "/opt/homebrew/bin/brew"
+    else if (plat.fileExists("/usr/local/bin/brew"))
+        "/usr/local/bin/brew"
+    else {
+        model.install_source = .direct;
+        return;
+    };
+    model.install_source = .checking;
+    fx.spawn(.{
+        .key = homebrew_check_key,
+        .argv = &.{ brew, "list", "--cask", "petdex" },
+        .output = .collect,
+        .on_exit = Effects.exitMsg(.homebrew_done),
+    });
+    fx.startTimer(.{
+        .key = homebrew_timeout_timer_key,
+        .interval_ms = homebrew_timeout_ms,
+        .mode = .one_shot,
+        .on_fire = Effects.timerMsg(.homebrew_timeout),
+    });
+}
 
 fn armFrameTimer(model: *const Model, fx: *Effects) void {
     const def = stateDef(model.state);
@@ -902,7 +1036,7 @@ fn saveSettings(model: *const Model) void {
     // drops the whole save): keep room for the configurable bubble
     // fields, rotation state, a long slug, and negative coordinates.
     // Grown with every key added; `font_path` alone can escape to 1024.
-    var buf: [1792]u8 = undefined;
+    var buf: [2304]u8 = undefined;
     const active = if (model.active_pet < catalog_mod.catalog_len) catalog[model.active_pet].slice() else "";
     // The position keys only exist once the window has been fitted and
     // read: a save fired on the very first frame would otherwise
@@ -916,7 +1050,8 @@ fn saveSettings(model: *const Model) void {
     var escaped_font_buf: [1024]u8 = undefined;
     const font_path = std.mem.trim(u8, model.font_path[0..model.font_path_len], " \t\r\n");
     const escaped_font = jsonEscapeString(font_path, &escaped_font_buf) orelse return;
-    const json = std.fmt.bufPrint(&buf, "{{\"active_pet\":\"{s}\",\"scale\":{d:.2},\"bubbles\":{},\"bubbles_per_conversation\":{},\"waiting_sound\":{},\"bubble_text\":{d:.1},\"bubble_lifetime\":{d:.0},\"bubble_columns\":{},\"bubble_answer_lines\":{},\"font_path\":\"{s}\",\"hide_dock\":{},\"rotate_pets\":{},\"rotation_day\":{d}{s},\"agents_prompted\":{}}}", .{ active, model.scale, model.bubbles_enabled, model.bubbles_per_conversation, model.waiting_sound, model.bubble_text_px, model.bubble_lifetime_secs, model.bubble_columns, model.bubble_answer_lines, escaped_font, model.hide_dock, model.rotate_pets, model.rotation_day, pos, model.agents_prompted }) catch return;
+    const latest = model.latest_version[0..model.latest_version_len];
+    const json = std.fmt.bufPrint(&buf, "{{\"active_pet\":\"{s}\",\"scale\":{d:.2},\"bubbles\":{},\"bubbles_per_conversation\":{},\"waiting_sound\":{},\"bubble_text\":{d:.1},\"bubble_lifetime\":{d:.0},\"bubble_columns\":{},\"bubble_answer_lines\":{},\"font_path\":\"{s}\",\"hide_dock\":{},\"rotate_pets\":{},\"rotation_day\":{d},\"update_checks\":{},\"last_update_check_ms\":{d},\"latest_desktop_version\":\"{s}\"{s},\"agents_prompted\":{}}}", .{ active, model.scale, model.bubbles_enabled, model.bubbles_per_conversation, model.waiting_sound, model.bubble_text_px, model.bubble_lifetime_secs, model.bubble_columns, model.bubble_answer_lines, escaped_font, model.hide_dock, model.rotate_pets, model.rotation_day, model.update_checks_enabled, model.last_update_check_ms, latest, pos, model.agents_prompted }) catch return;
     cWriteFile(path, json);
 }
 
@@ -1066,6 +1201,10 @@ var initial_hide_dock: bool = false;
 var initial_rotate_pets: bool = false;
 var initial_rotation_day: u32 = 0;
 var initial_agents_prompted: bool = false;
+var initial_update_checks: bool = true;
+var initial_last_update_check_ms: i64 = 0;
+var initial_latest_version: [32]u8 = @splat(0);
+var initial_latest_version_len: usize = 0;
 /// Persisted pet window origin; null on first run (or a settings file
 /// from before positions were saved), which keeps the platform's
 /// default placement. Off-screen values from an unplugged monitor are
@@ -1080,7 +1219,7 @@ var initial_pet_y: ?f64 = null;
 // assets/agents/, re-registered only when the agent changes.
 const avatar_image_id: u64 = 13;
 const tail_image_id: u64 = 14;
-// One slot for every agent logo, packed side by side and read back with
+// One slot for every agent logo plus fallback, packed side by side and read back with
 // `image_src` (the thumbnail atlas above does the same). Previously each
 // agent held its own registry id, which ran the app into the SDK's
 // 16-slot ceiling (canvas_limits.max_registered_canvas_images): ids
@@ -1110,7 +1249,7 @@ fn agentIconRect(index: usize) geometry.RectF {
 /// cannot go missing from a bundle or resolve against the wrong cwd.
 /// opencode ships light and dark glyphs; the rest read on both.
 const AgentArt = struct { light: []const u8, dark: []const u8 };
-const agent_art = [agent_hooks.agent_count]AgentArt{
+const agent_art = [agent_hooks.agent_count + 2]AgentArt{
     .{ .light = @embedFile("assets/agents/claude-code.png"), .dark = @embedFile("assets/agents/claude-code.png") },
     .{ .light = @embedFile("assets/agents/codex.png"), .dark = @embedFile("assets/agents/codex.png") },
     .{ .light = @embedFile("assets/agents/gemini.png"), .dark = @embedFile("assets/agents/gemini.png") },
@@ -1119,8 +1258,14 @@ const agent_art = [agent_hooks.agent_count]AgentArt{
     .{ .light = @embedFile("assets/agents/kimi-code.png"), .dark = @embedFile("assets/agents/kimi-code.png") },
     .{ .light = @embedFile("assets/agents/codebuddy.png"), .dark = @embedFile("assets/agents/codebuddy.png") },
     .{ .light = @embedFile("assets/agents/omp.png"), .dark = @embedFile("assets/agents/omp.png") },
+    .{ .light = @embedFile("assets/agents/hermes.png"), .dark = @embedFile("assets/agents/hermes.png") },
+    // DSH has no bundled brand asset in this clean-room slice.
+    .{ .light = @embedFile("assets/agents/fallback.png"), .dark = @embedFile("assets/agents/fallback.png") },
+    .{ .light = @embedFile("assets/agents/herdr.png"), .dark = @embedFile("assets/agents/herdr.png") },
+    .{ .light = @embedFile("assets/agents/fallback.png"), .dark = @embedFile("assets/agents/fallback.png") },
 };
-const agent_fallback_art: []const u8 = @embedFile("assets/agents/fallback.png");
+pub const herdr_icon_index = agent_hooks.agent_count;
+const agent_fallback_index = agent_hooks.agent_count + 1;
 
 /// Pack every settings agent logo into one registry slot, themed like the
 /// bubble avatar and rebuilt on appearance flips. Each logo decodes
@@ -1243,23 +1388,26 @@ var avatar_theme_dark: bool = false;
 /// is looked up by name rather than by enum. An unknown name is the
 /// normal case for an agent we do not ship a glyph for, not an error.
 fn agentArtBytes(agent: []const u8, dark: bool) []const u8 {
-    for (std.enums.values(agent_hooks.AgentKind)) |kind| {
-        if (std.mem.eql(u8, kind.hookAgentName(), agent)) {
-            const art = agent_art[@intFromEnum(kind)];
-            return if (dark) art.dark else art.light;
-        }
-    }
-    return agent_fallback_art;
+    const index = if (std.mem.eql(u8, agent, "herdr")) herdr_icon_index else if (agentKindForName(agent)) |kind| @intFromEnum(kind) else agent_fallback_index;
+    const art = agent_art[index];
+    return if (dark) art.dark else art.light;
 }
 
-/// Which cell of the packed logo strip belongs to this agent, or null
-/// for a name we ship no glyph for. The strip has exactly one cell per
-/// AgentKind and none for the fallback art, so an unknown agent has no
-/// tile to point at and the caller has to draw nothing.
-fn agentIconIndex(agent: []const u8) ?usize {
+/// Which cell of the packed logo strip belongs to this agent.
+fn agentIconIndex(agent: []const u8) usize {
+    if (std.mem.eql(u8, agent, "herdr")) return herdr_icon_index;
+    if (agentKindForName(agent)) |kind| return @intFromEnum(kind);
+    return agent_fallback_index;
+}
+
+fn agentKindForName(agent: []const u8) ?agent_hooks.AgentKind {
     for (std.enums.values(agent_hooks.AgentKind)) |kind| {
-        if (std.mem.eql(u8, kind.hookAgentName(), agent)) return @intFromEnum(kind);
+        if (std.mem.eql(u8, kind.hookAgentName(), agent)) return kind;
     }
+    if (std.mem.eql(u8, agent, "claude")) return .claude_code;
+    if (std.mem.eql(u8, agent, "open-code")) return .opencode;
+    if (std.mem.eql(u8, agent, "qodercli")) return .qoder;
+    if (std.mem.eql(u8, agent, "kimi")) return .kimi_code;
     return null;
 }
 
@@ -1332,7 +1480,7 @@ fn resolveInitialPet(io: std.Io, allocator: std.mem.Allocator, environ_map: *std
     if (catalog_mod.catalog_len == 0) return error.NoPetInstalled;
 
     var wanted: []const u8 = "";
-    var settings_buf: [512]u8 = undefined;
+    var settings_buf: [3072]u8 = undefined;
     var path_buf: [512]u8 = undefined;
     if (env_wanted_pet) |w| {
         wanted = w;
@@ -1396,6 +1544,18 @@ fn resolveInitialPet(io: std.Io, allocator: std.mem.Allocator, environ_map: *std
             }
             if (hook_server.jsonNumberPub(json, "rotation_day")) |v| {
                 if (v >= 0) initial_rotation_day = @intFromFloat(v);
+            }
+            if (std.mem.indexOf(u8, json, "\"update_checks\":false") != null) {
+                initial_update_checks = false;
+            }
+            if (hook_server.jsonNumberPub(json, "last_update_check_ms")) |v| {
+                if (v >= 0) initial_last_update_check_ms = @intFromFloat(v);
+            }
+            if (hook_server.jsonStringPub(json, "latest_desktop_version")) |version| {
+                if (version.len <= initial_latest_version.len and updates.isValidVersion(version)) {
+                    @memcpy(initial_latest_version[0..version.len], version);
+                    initial_latest_version_len = version.len;
+                }
             }
         }
     }
@@ -1536,6 +1696,83 @@ fn applyState(model: *Model, state: State, duration_ms: u32, fx: *Effects) void 
     armFrameTimer(model, fx);
 }
 
+/// Turn a remote runtime Action into an effect. Spawn argv comes from
+/// the remote_ssh builders; the driver decides WHAT, this decides HOW
+/// it reaches fx.
+fn runRemoteAction(model: *Model, slot_idx: usize, action: remote_runtime.Action, fx: *Effects) void {
+    switch (action) {
+        .none => {},
+        .backoff => |ms| {
+            fx.startTimer(.{
+                .key = remote_runtime.backoffKey(slot_idx),
+                .interval_ms = ms,
+                .mode = .one_shot,
+                .on_fire = Effects.timerMsg(.remote_backoff),
+            });
+        },
+        .spawn => |spec| {
+            const slot = &model.remotes[slot_idx];
+            const remote = remote_runtime.remoteFor(slot);
+            var argv_buf: [remote_ssh.max_argv][]const u8 = undefined;
+            var scratch: remote_ssh.Scratch = .{};
+            const argv: ?[]const []const u8 = switch (spec.op) {
+                .probe => remote_ssh.probeArgv(&argv_buf, &scratch, &remote),
+                .quiesce => remote_ssh.quiesceArgv(&argv_buf, &scratch, &remote),
+                .profile => remote_ssh.probeArgv(&argv_buf, &scratch, &remote),
+                .fetch => remote_ssh.readArgv(&argv_buf, &scratch, &remote, spec.path),
+                .push => remote_ssh.writeArgv(&argv_buf, &scratch, &remote, spec.path, spec.first_chunk, spec.last_chunk, spec.executable),
+                .token => remote_ssh.tokenArgv(&argv_buf, &scratch, &remote),
+                .watcher => remote_ssh.watcherArgv(&argv_buf, &scratch, &remote, spec.watch_codex, spec.watch_hermes),
+                .tunnel => if (env_home) |home|
+                    remote_ssh.tunnelArgv(&argv_buf, &scratch, &remote, home, plat.processId())
+                else
+                    null,
+                .none => null,
+            };
+            const final_argv = argv orelse {
+                std.debug.print("petdex: remote '{s}': could not build ssh argv\n", .{slot.nameSlice()});
+                if (env_home) |home| {
+                    const recovery = remote_runtime.onSpawnBuildFailure(slot, slot_idx, spec.op, home);
+                    runRemoteAction(model, slot_idx, recovery, fx);
+                }
+                return;
+            };
+            const is_tunnel = spec.op == .tunnel;
+            fx.spawn(.{
+                .key = remote_runtime.keyFor(slot_idx, spec.op),
+                .argv = final_argv,
+                .stdin = if (spec.stdin.len > 0) spec.stdin else null,
+                .output = if (is_tunnel) .lines else .collect,
+                .on_line = if (is_tunnel) Effects.lineMsg(.remote_line) else null,
+                .on_exit = Effects.exitMsg(.remote_done),
+            });
+        },
+    }
+}
+
+/// Boot entry: load remote-agents.json, fill slots, and kick each
+/// remote's probe. A missing or unparsable config is a no-op. Local
+/// pets never depend on remotes.
+fn startRemotes(model: *Model, fx: *Effects) void {
+    const home = env_home orelse return;
+    // A crash can strand private fetch snapshots; they are never inputs to a
+    // later run, so remove them before reading any remote configuration.
+    remote_writeback.cleanupStagingRoot(home);
+    if (remote_ssh.detect() == null) return;
+    if (!remote_ssh.installTunnelSupervisor(home)) {
+        std.debug.print("petdex: could not install the ssh tunnel supervisor; remotes disabled\n", .{});
+        return;
+    }
+    const cfg = remote_agents.load(boot_allocator, home) orelse {
+        std.debug.print("petdex: ~/.petdex/remote-agents.json is not valid JSON; remotes disabled\n", .{});
+        return;
+    };
+    model.remote_count = remote_runtime.fillFromConfig(&model.remotes, &cfg);
+    for (0..model.remote_count) |i| {
+        runRemoteAction(model, i, remote_runtime.startAction(&model.remotes[i]), fx);
+    }
+}
+
 pub fn boot(model: *Model, fx: *Effects) void {
     if (env_home) |home| {
         // Upgrade old CLI-written hooks before any agent starts another
@@ -1548,6 +1785,7 @@ pub fn boot(model: *Model, fx: *Effects) void {
         hook_server.start(boot_allocator, home) catch |err| {
             std.debug.print("petdex: hook server failed to start ({s})\n", .{@errorName(err)});
         };
+        startRemotes(model, fx);
     }
     fx.startTimer(.{
         .key = poll_timer_key,
@@ -1577,13 +1815,23 @@ pub fn boot(model: *Model, fx: *Effects) void {
     model.hide_dock = initial_hide_dock;
     model.rotate_pets = initial_rotate_pets;
     model.rotation_day = initial_rotation_day;
+    model.update_checks_enabled = initial_update_checks;
+    model.last_update_check_ms = initial_last_update_check_ms;
+    @memcpy(model.latest_version[0..initial_latest_version_len], initial_latest_version[0..initial_latest_version_len]);
+    model.latest_version_len = initial_latest_version_len;
+    updateCachePhase(model);
+    armNextUpdateCheck(model, fx);
     model.launch_at_login = plat.launchAtLoginEnabled();
     // Applied via the main queue, so the flip lands as soon as the
     // host's runloop spins up; a Regular-policy Dock icon may blink in
     // for the first frames of a hidden-dock boot, which beats holding
     // the setting hostage to an SDK boot hook that does not exist yet.
     plat.setDockIconHidden(model.hide_dock);
-    if (env_home) |home| model.agents = agent_hooks.scan(boot_allocator, home);
+    if (env_home) |home| {
+        model.agents = agent_hooks.scan(boot_allocator, home);
+        model.herdr_status = herdr_status.detect(boot_allocator, home);
+    }
+    loadAgentsAtlas(model.dark, fx);
 
     // First point where the platform codec is reachable: `init_fx` runs
     // on the loop thread right after the runtime binds services onto fx.
@@ -1772,6 +2020,20 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
         .uninstall_agent => |index| {
             if (index >= agent_hooks.agent_count) return;
             const home = env_home orelse return;
+            if (model.agents[index].kind == .dsh) {
+                if (model.dsh_busy or builtin.os.tag != .macos) return;
+                const official = dsh_integration.removeArgv();
+                const command = dsh_integration.macLoginShellArgv(official.slice());
+                model.dsh_busy = true;
+                model.dsh_error = false;
+                fx.spawn(.{
+                    .key = dsh_remove_key,
+                    .argv = command.slice(),
+                    .output = .collect,
+                    .on_exit = Effects.exitMsg(.dsh_remove_done),
+                });
+                return;
+            }
             _ = agent_hooks.uninstall(boot_allocator, home, model.agents[index].kind);
             if (model.agents[index].kind == .codex) model.codex_trust_note = false;
             model.agents = agent_hooks.scan(boot_allocator, home);
@@ -1780,6 +2042,26 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             if (index >= agent_hooks.agent_count) return;
             const kind = model.agents[index].kind;
             const home = env_home orelse return;
+            if (kind == .dsh) {
+                if (model.dsh_busy or builtin.os.tag != .macos) return;
+                var path_buf: [768]u8 = undefined;
+                const tarball = dsh_integration.materialize(boot_allocator, home, &path_buf) orelse {
+                    model.dsh_error = true;
+                    return;
+                };
+                dsh_integration.clearHandshake(home);
+                const official = dsh_integration.addArgv(tarball);
+                const command = dsh_integration.macLoginShellArgv(official.slice());
+                model.dsh_busy = true;
+                model.dsh_error = false;
+                fx.spawn(.{
+                    .key = dsh_install_key,
+                    .argv = command.slice(),
+                    .output = .collect,
+                    .on_exit = Effects.exitMsg(.dsh_install_done),
+                });
+                return;
+            }
             const ok = switch (kind) {
                 .claude_code => agent_hooks.installClaude(boot_allocator, home),
                 .codex => agent_hooks.installCodex(boot_allocator, home),
@@ -1789,12 +2071,40 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
                 .kimi_code => agent_hooks.installKimiCode(boot_allocator, home),
                 .codebuddy => agent_hooks.installCodeBuddy(boot_allocator, home),
                 .omp => agent_hooks.installOmp(boot_allocator, home),
+                .hermes => agent_hooks.installHermes(boot_allocator, home),
+                .dsh => unreachable,
             };
             if (ok and kind == .codex) model.codex_trust_note = true;
             model.agents = agent_hooks.scan(boot_allocator, home);
         },
-        .open_settings => {
+        .dsh_install_done => |exit| {
+            model.dsh_busy = false;
+            model.dsh_error = exit.reason != .exited or exit.code != 0;
+            if (model.dsh_error and exit.output.len > 0) {
+                std.debug.print("petdex: DSH plugin install failed: {s}\n", .{exit.output});
+            }
             if (env_home) |home| model.agents = agent_hooks.scan(boot_allocator, home);
+        },
+        .dsh_remove_done => |exit| {
+            model.dsh_busy = false;
+            model.dsh_error = exit.reason != .exited or exit.code != 0;
+            if (env_home) |home| {
+                if (!model.dsh_error) dsh_integration.clearHandshake(home);
+                model.agents = agent_hooks.scan(boot_allocator, home);
+            }
+            if (model.dsh_error and exit.output.len > 0) {
+                std.debug.print("petdex: DSH plugin removal failed: {s}\n", .{exit.output});
+            }
+        },
+        .open_settings => {
+            if (env_home) |home| {
+                model.agents = agent_hooks.scan(boot_allocator, home);
+                model.herdr_status = herdr_status.detect(boot_allocator, home);
+            }
+            startHomebrewCheck(model, fx);
+            if (model.update_checks_enabled and updateCheckStale(model.last_update_check_ms, fx.wallMs(), update_settings_interval_ms)) {
+                startUpdateCheck(model, false, fx);
+            }
             loadAgentsAtlas(model.dark, fx);
             if (model.settings_open) {
                 // Already open, likely buried behind other windows:
@@ -1806,6 +2116,95 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             model.settings_open = true;
         },
         .settings_closed => model.settings_open = false,
+        .update_boot_check => |timer| {
+            if (timer.outcome == .fired and model.update_checks_enabled) startUpdateCheck(model, false, fx);
+        },
+        .check_updates => startUpdateCheck(model, true, fx),
+        .toggle_update_checks => {
+            model.update_checks_enabled = !model.update_checks_enabled;
+            if (!model.update_checks_enabled) {
+                fx.cancelTimer(update_boot_timer_key);
+                if (model.update_phase == .checking and !model.update_manual) {
+                    model.update_cancel_pending = true;
+                    model.update_restart_after_cancel = false;
+                    fx.cancel(update_fetch_key);
+                    updateCachePhase(model);
+                }
+            } else if (model.update_cancel_pending) {
+                model.update_restart_after_cancel = true;
+            } else if (updateCheckStale(model.last_update_check_ms, fx.wallMs(), update_background_interval_ms)) {
+                startUpdateCheck(model, false, fx);
+            } else {
+                armNextUpdateCheck(model, fx);
+            }
+            saveSettings(model);
+        },
+        .update_response => |response| {
+            if (model.update_cancel_pending) {
+                const restart = model.update_restart_after_cancel and model.update_checks_enabled;
+                model.update_cancel_pending = false;
+                model.update_restart_after_cancel = false;
+                model.update_manual = false;
+                updateCachePhase(model);
+                if (restart) startUpdateCheck(model, false, fx);
+                saveSettings(model);
+                return;
+            }
+            if (response.outcome != .ok or response.status != 200 or response.truncated) {
+                finishUpdateFailure(model);
+                armUpdateRetry(model, fx);
+                saveSettings(model);
+                return;
+            }
+            var parsed = updates.parseLatest(boot_allocator, response.body) orelse {
+                finishUpdateFailure(model);
+                armUpdateRetry(model, fx);
+                saveSettings(model);
+                return;
+            };
+            defer parsed.deinit();
+            const version = parsed.value.version orelse {
+                finishUpdateFailure(model);
+                armUpdateRetry(model, fx);
+                saveSettings(model);
+                return;
+            };
+            if (version.len > model.latest_version.len) {
+                finishUpdateFailure(model);
+                armUpdateRetry(model, fx);
+                saveSettings(model);
+                return;
+            }
+            @memcpy(model.latest_version[0..version.len], version);
+            model.latest_version_len = version.len;
+            model.last_update_check_ms = fx.wallMs();
+            model.update_phase = if (updates.isNewer(version, updates.current_version)) .available else .current;
+            model.update_manual = false;
+            armNextUpdateCheck(model, fx);
+            saveSettings(model);
+        },
+        .homebrew_done => |exit| {
+            fx.cancelTimer(homebrew_timeout_timer_key);
+            if (model.install_source == .checking) {
+                model.install_source = if (exit.reason == .exited and exit.code == 0) .homebrew else .direct;
+            }
+        },
+        .homebrew_timeout => |timer| {
+            if (timer.outcome == .fired and model.install_source == .checking) {
+                model.install_source = .direct;
+                fx.cancel(homebrew_check_key);
+            }
+        },
+        .download_update => plat.openExternal(updates.downloadUrl()),
+        .copy_brew_command => {
+            model.brew_command_copied = false;
+            fx.writeClipboard(.{
+                .key = brew_clipboard_key,
+                .text = updates.brew_command,
+                .on_result = Effects.clipboardMsg(.brew_command_copied),
+            });
+        },
+        .brew_command_copied => |result| model.brew_command_copied = result.outcome == .ok,
         .close_pet => closePet(model, fx),
         .select_pet => |index| {
             if (index >= catalog_mod.catalog_len) return;
@@ -1864,6 +2263,38 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             if (model.waiting_sound) playWaitingChime(fx);
         },
         .chime_done => {},
+        .remote_line => |line| {
+            const decoded = remote_runtime.slotOpFromKey(line.key) orelse return;
+            if (decoded.slot >= model.remote_count) return;
+            const action = remote_runtime.onSpawnLine(&model.remotes[decoded.slot], decoded.op, line.line);
+            runRemoteAction(model, decoded.slot, action, fx);
+        },
+        .remote_done => |exit| {
+            const decoded = remote_runtime.slotOpFromKey(exit.key) orelse return;
+            if (decoded.slot >= model.remote_count) return;
+            const home = env_home orelse return;
+            const slot = &model.remotes[decoded.slot];
+            if (exit.reason == .cancelled) return;
+            if (decoded.op == .tunnel) {
+                // A tunnel can die while a short post-ready sync SSH process
+                // is in flight. Cancel every gated phase before scheduling
+                // reconnect so no stale completion can reopen the token.
+                inline for (.{ remote_runtime.Op.profile, remote_runtime.Op.fetch, remote_runtime.Op.push, remote_runtime.Op.token, remote_runtime.Op.watcher }) |op| {
+                    fx.cancel(remote_runtime.keyFor(decoded.slot, op));
+                }
+                fx.cancel(remote_runtime.backoffKey(decoded.slot));
+            }
+            const action = remote_runtime.onSpawnExitDetailed(slot, decoded.slot, decoded.op, exit.code, exit.output, exit.output_truncated, home);
+            runRemoteAction(model, decoded.slot, action, fx);
+        },
+        .remote_backoff => |timer| {
+            if (timer.outcome != .fired) return;
+            const slot_idx = remote_runtime.slotFromBackoffKey(timer.key) orelse return;
+            if (slot_idx >= model.remote_count) return;
+            const home = env_home orelse return;
+            const action = remote_runtime.onBackoff(&model.remotes[slot_idx], slot_idx, home);
+            runRemoteAction(model, slot_idx, action, fx);
+        },
         .set_bubble_text_size => |fraction| {
             model.bubble_text_px = bubble_text_min_px + fraction * (bubble_text_max_px - bubble_text_min_px);
             _ = fitWindow(model, fx);
@@ -2123,7 +2554,8 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
                 if (isTap(now - model.press_ms, read.x - model.press_x, read.y - model.press_y)) {
                     model.sample_len = 0;
                     if (newestBubble(model)) |bubble| {
-                        _ = plat.activateOriginApplication(bubble.origin_app, bubble.ttySlice(), bubble.cwdSlice());
+                        const focused = if (env_home) |home| plat.activateHerdrPane(home, bubble.herdrPaneSlice()) else false;
+                        if (!focused) _ = plat.activateOriginApplication(bubble.origin_app, bubble.ttySlice(), bubble.cwdSlice());
                     }
                     model.pat_flip = !model.pat_flip;
                     applyState(model, if (model.pat_flip) .jumping else .waving, pat_react_ms, fx);
@@ -2182,6 +2614,14 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             const now = fx.wallMs();
             var drained: [hook_server.max_bubbles]hook_server.Bubble = undefined;
             if (hook_server.mailbox.takeBubbles(&drained)) |raw_count| {
+                if (model.settings_open) {
+                    for (drained[0..raw_count]) |bubble| {
+                        if (std.mem.eql(u8, bubble.agent[0..bubble.agent_len], "dsh")) {
+                            if (env_home) |home| model.agents = agent_hooks.scan(boot_allocator, home);
+                            break;
+                        }
+                    }
+                }
                 if (!model.bubbles_enabled or model.focus_mode) {
                     clearBubble(model);
                 } else {
@@ -2361,9 +2801,33 @@ fn bubbleMaxCardWidth(model: *const Model) f32 {
 }
 
 fn bubbleMaxCardHeight(model: *const Model) f32 {
-    const rows = @as(f32, @floatFromInt(@as(u16, model.bubble_answer_lines) + 1));
-    const line_height = bubbleFontSize(model) * 1.35;
-    return @ceil(rows * line_height + (rows - 1) * bubble_line_gap + bubble_card_padding * 2);
+    const rows = @as(usize, model.bubble_answer_lines) + 1;
+    return @ceil(bubbleContentHeight(model, rows) + bubble_card_padding * 2);
+}
+
+fn bubbleContentHeight(model: *const Model, row_count: usize) f32 {
+    if (row_count == 0) return 0;
+    const rows = @as(f32, @floatFromInt(row_count));
+    return rows * bubbleFontSize(model) * 1.35 + @as(f32, @floatFromInt(row_count - 1)) * bubble_line_gap;
+}
+
+fn bubbleRowCount(model: *const Model, slot: usize) usize {
+    const bubble = &model.bubbles[slot];
+    const chars_per_line: usize = model.bubble_columns;
+    const answer_lines: usize = model.bubble_answer_lines;
+    const title = clipDisplay(bubble.title[0..bubble.title_len], chars_per_line, &bubble_title_scratch[slot], false);
+    const text = clipDisplay(bubble.text[0..bubble.text_len], chars_per_line * answer_lines, &bubble_text_scratch[slot], true);
+    var count: usize = if (title.len > 0) 1 else 0;
+    for (splitLines(text, chars_per_line, answer_lines)) |line| {
+        if (line.len > 0) count += 1;
+    }
+    return count;
+}
+
+fn bubbleCardHeight(model: *const Model, slot: usize) f32 {
+    const content = bubbleContentHeight(model, bubbleRowCount(model, slot));
+    const inner = @max(content, @max(bubble_avatar_width, bubble_busy_width));
+    return @ceil(inner + bubble_card_padding * 2);
 }
 
 /// Painted width of the widest line a card holds. The strings are the
@@ -2443,8 +2907,7 @@ fn bubbleRenderedCardWidth(model: *const Model, slot: usize) f32 {
 /// rounded rect. Outside a stack there is nothing to inherit from and
 /// intrinsic sizing is what the single bubble has always wanted.
 fn bubbleRenderedCardHeight(model: *const Model, slot: usize) f32 {
-    _ = slot;
-    return if (bubbleStackable(model)) bubbleMaxCardHeight(model) else 0;
+    return if (bubbleStackable(model)) bubbleCardHeight(model, slot) else 0;
 }
 
 /// The vertical axis the cards center on, in stack-container local
@@ -2564,15 +3027,28 @@ fn bubbleCardAlpha(model: *const Model, slot: usize) f32 {
 fn bubbleCardOffset(model: *const Model, slot: usize) f32 {
     if (!bubbleStackable(model)) return 0;
     const from_front: f32 = @floatFromInt(model.bubbles_len - 1 - slot);
-    const collapsed = bubble_peek_offset * @min(from_front, bubble_peek_max_depth);
-    const expanded = (bubbleMaxCardHeight(model) + bubble_stack_gap) * from_front;
-    const magnitude = collapsed + (expanded - collapsed) * bubbleExpansionEased(model);
-    if (model.bubble_flipped) return magnitude;
-    // Unflipped, the container reserves the whole fan but the front card
-    // belongs at its BOTTOM edge (nearest the pet), so every card starts
-    // from there and the others stack upward from it.
-    const slack = bubbleStackHeightAt(model, 1) - bubbleMaxCardHeight(model);
-    return slack - magnitude;
+    const peek = bubble_peek_offset * @min(from_front, bubble_peek_max_depth);
+    const front = model.bubbles_len - 1;
+    const collapsed = if (model.bubble_flipped)
+        peek
+    else
+        bubbleExpandedStackHeight(model) - bubbleCardHeight(model, front) - peek;
+    var expanded: f32 = 0;
+    if (model.bubble_flipped) {
+        var i = front;
+        while (i > slot) : (i -= 1) expanded += bubbleCardHeight(model, i) + bubble_stack_gap;
+    } else {
+        for (0..slot) |i| expanded += bubbleCardHeight(model, i) + bubble_stack_gap;
+    }
+    const t = bubbleExpansionEased(model);
+    return collapsed + (expanded - collapsed) * t;
+}
+
+fn bubbleExpandedStackHeight(model: *const Model) f32 {
+    if (model.bubbles_len == 0) return bubbleMaxCardHeight(model);
+    var height: f32 = 0;
+    for (0..model.bubbles_len) |slot| height += bubbleCardHeight(model, slot);
+    return height + bubble_stack_gap * @as(f32, @floatFromInt(model.bubbles_len - 1));
 }
 
 /// Height the window needs at a given expansion. Collapsed only has to
@@ -2580,11 +3056,12 @@ fn bubbleCardOffset(model: *const Model, slot: usize) f32 {
 /// column. The window is sized to the max of both (see syncBubbleWindow)
 /// so a resize never races the animation.
 fn bubbleStackHeightAt(model: *const Model, expansion: f32) f32 {
-    const card = bubbleMaxCardHeight(model);
-    if (!bubbleStackable(model)) return card;
+    if (!bubbleStackable(model)) return if (model.bubbles_len == 0) bubbleMaxCardHeight(model) else bubbleCardHeight(model, 0);
+    var tallest: f32 = 0;
+    for (0..model.bubbles_len) |slot| tallest = @max(tallest, bubbleCardHeight(model, slot));
     const behind: f32 = @floatFromInt(model.bubbles_len - 1);
-    const collapsed = card + bubble_peek_offset * @min(behind, bubble_peek_max_depth);
-    const expanded = card * @as(f32, @floatFromInt(model.bubbles_len)) + bubble_stack_gap * behind;
+    const collapsed = tallest + bubble_peek_offset * @min(behind, bubble_peek_max_depth);
+    const expanded = bubbleExpandedStackHeight(model);
     return collapsed + (expanded - collapsed) * expansion;
 }
 
@@ -2601,8 +3078,7 @@ fn bubbleStackHeightAt(model: *const Model, expansion: f32) f32 {
 /// the front card, which costs nothing: the window is click-through and
 /// fully transparent already.
 fn bubbleWindowHeight(model: *const Model) f32 {
-    const count: f32 = @floatFromInt(@max(model.bubbles_len, 1));
-    const cards = bubbleMaxCardHeight(model) * count + bubble_stack_gap * (count - 1);
+    const cards = if (model.bubbles_len == 0) bubbleMaxCardHeight(model) else bubbleExpandedStackHeight(model);
     return cards + @as(f32, @floatFromInt(tail_h)) + bubble_head_gap + bubble_canvas_margin * 2;
 }
 
@@ -2817,7 +3293,7 @@ fn bubbleCardsRect(model: *const Model) BubbleRect {
     var min_x = bubbleCardCenterDx(model, front);
     var max_x = min_x + bubbleRenderedCardWidth(model, front);
     var min_y = bubbleCardOffset(model, front);
-    var max_y = min_y + bubbleMaxCardHeight(model);
+    var max_y = min_y + bubbleCardHeight(model, front);
     // The peeks behind the front card stick out; they are visible and so
     // they are hoverable.
     if (bubbleStackable(model)) {
@@ -2827,7 +3303,7 @@ fn bubbleCardsRect(model: *const Model) BubbleRect {
             min_x = @min(min_x, x0);
             max_x = @max(max_x, x0 + bubbleRenderedCardWidth(model, slot));
             min_y = @min(min_y, y0);
-            max_y = @max(max_y, y0 + bubbleMaxCardHeight(model));
+            max_y = @max(max_y, y0 + bubbleCardHeight(model, slot));
         }
     }
     return .{
@@ -3322,9 +3798,7 @@ fn bubbleCard(ui: *AppUi, model: *const Model, slot: usize) AppUi.Node {
     // included), which is strictly better than a strip cell, so the card
     // Hunter looks at most never degrades. Older cards read their logo
     // out of the shared strip via image_src, the same addressing
-    // settings_view uses for its rows. An agent with no cell in the
-    // strip draws an empty box of the same width, so the column still
-    // lines up.
+    // settings_view uses for its rows.
     const agent_name = bubble.agent[0..bubble.agent_len];
     const avatar = if (newest) blk: {
         var img = ui.image(.{
@@ -3335,14 +3809,14 @@ fn bubbleCard(ui: *AppUi, model: *const Model, slot: usize) AppUi.Node {
         });
         img.widget.image_fit = .contain;
         break :blk img;
-    } else if (agents_icons_ready and agentIconIndex(agent_name) != null) blk: {
+    } else if (agents_icons_ready) blk: {
         var img = ui.image(.{
             .width = bubble_avatar_width,
             .height = bubble_avatar_width,
             .image = agent_icon_atlas_id,
             .semantics = .{ .label = "Agent avatar" },
         });
-        img.widget.image_src = agentIconRect(agentIconIndex(agent_name).?);
+        img.widget.image_src = agentIconRect(agentIconIndex(agent_name));
         img.widget.image_fit = .contain;
         break :blk img;
     } else ui.el(.stack, .{ .width = bubble_avatar_width, .height = bubble_avatar_width }, .{});
@@ -3383,7 +3857,7 @@ fn bubbleCard(ui: *AppUi, model: *const Model, slot: usize) AppUi.Node {
     const content = [_]AppUi.Node{
         ui.row(.{ .gap = bubble_content_gap, .cross = .center }, .{
             avatar,
-            ui.column(.{ .grow = 1, .gap = bubble_line_gap, .cross = .start }, @as([]const AppUi.Node, rows[0..row_count])),
+            ui.column(.{ .grow = 1, .height = bubbleContentHeight(model, row_count), .gap = bubble_line_gap, .main = .start, .cross = .start }, @as([]const AppUi.Node, rows[0..row_count])),
             spinner_slot,
         }),
     };
@@ -3418,7 +3892,7 @@ fn bubbleCard(ui: *AppUi, model: *const Model, slot: usize) AppUi.Node {
     if (bubbleStackable(model)) {
         const scale = bubbleCardScale(model, slot);
         const w = bubbleRenderedCardWidth(model, slot);
-        const h = bubbleMaxCardHeight(model);
+        const h = bubbleCardHeight(model, slot);
         const cx = w / 2;
         const cy = h / 2;
         card.widget.transform = canvas.Affine.translate(bubbleCardCenterDx(model, slot), bubbleCardOffset(model, slot))
@@ -3692,6 +4166,8 @@ pub fn main(init: std.process.Init) !void {
     agent_hooks.env_qoder_cn_config_dir = init.environ_map.get("QODERCN_CONFIG_DIR");
     agent_hooks.env_qoder_cli_home = init.environ_map.get("QODER_CLI_HOME");
     agent_hooks.env_qoder_cn_cli_home = init.environ_map.get("QODERCN_CLI_HOME");
+    agent_hooks.env_hermes_home = init.environ_map.get("HERMES_HOME");
+    dsh_integration.env_dsh_home = init.environ_map.get("DSH_HOME");
     // Hook hot path: `<binary> bubble <phase> [agent]` runs the
     // in-binary runner and exits before any UI machinery spins up.
     // initAllocator, not init: on Windows the command line arrives as
@@ -3705,7 +4181,7 @@ pub fn main(init: std.process.Init) !void {
             const phase = args_it.next() orelse return;
             const agent: ?[]const u8 = args_it.next();
             const origin_app = plat.OriginApplication.fromTermProgram(init.environ_map.get("TERM_PROGRAM"));
-            hook_runner.run(phase, agent, origin_app, init.environ_map.get("PWD"), env_home orelse return);
+            hook_runner.run(phase, agent, origin_app, init.environ_map.get("PWD"), init.environ_map.get("HERDR_PANE_ID"), env_home orelse return);
             return;
         }
     }
@@ -3762,6 +4238,10 @@ pub fn main(init: std.process.Init) !void {
         .fonts = app_fonts,
         .on_appearance = onAppearance,
     });
+    defer if (env_home) |home| remote_writeback.cleanupStagingRoot(home);
+    defer remote_runtime.deinitWritebacks();
+    // Effect workers can still own stdin slices from the writeback arenas.
+    // Tear the app down (and join those workers) before reclaiming the arenas.
     defer app_state.destroy();
     app_state.model = .{};
 
@@ -3788,7 +4268,7 @@ pub fn main(init: std.process.Init) !void {
 test "every agent gets its own cell in the icon strip" {
     // One slot holds them all, so a wrong offset silently draws the
     // neighbouring agent's logo rather than failing to register.
-    for (0..agent_hooks.agent_count) |i| {
+    for (0..agent_art.len) |i| {
         const rect = agentIconRect(i);
         try std.testing.expectEqual(@as(f32, @floatFromInt(i * agent_icon_px)), rect.x);
         try std.testing.expectEqual(@as(f32, 0), rect.y);
@@ -3796,14 +4276,14 @@ test "every agent gets its own cell in the icon strip" {
         try std.testing.expectEqual(@as(f32, agent_icon_px), rect.height);
     }
     // Cells abut with no overlap: agent N ends exactly where N+1 begins.
-    if (agent_hooks.agent_count >= 2) {
+    if (agent_art.len >= 2) {
         const first = agentIconRect(0);
         const second = agentIconRect(1);
         try std.testing.expectEqual(first.x + first.width, second.x);
     }
     // The packed strip stays inside the SDK's per-image bounds, which is
     // the ceiling this atlas exists to avoid running into again.
-    const atlas_w = agent_hooks.agent_count * agent_icon_px;
+    const atlas_w = agent_art.len * agent_icon_px;
     try std.testing.expect(atlas_w * agent_icon_px * 4 <= 1024 * 1024);
     try std.testing.expect(atlas_w <= 512 * 512);
 }
@@ -3834,7 +4314,41 @@ test "transparent surfaces clear independently from settings" {
 test "one image slot covers every agent" {
     // agent_art is what loadAgentsAtlas walks, so a new AgentKind without
     // artwork would pack short and leave the last agent blank.
-    try std.testing.expectEqual(agent_hooks.agent_count, agent_art.len);
+    try std.testing.expectEqual(agent_hooks.agent_count + 2, agent_art.len);
+}
+
+test "DSH bubbles keep the companion window click through" {
+    var model: Model = .{};
+    model.bubbles_len = 1;
+    model.bubbles[0].origin_app = .default_browser;
+    var scratch: PetdexApp.WindowsScratch = .{};
+    const windows = petdexWindows(&model, &scratch);
+    try std.testing.expect(windows.len > 0);
+    try std.testing.expect(windows[0].click_through);
+}
+
+test "Herdr agent aliases resolve to their Petdex artwork" {
+    try std.testing.expectEqual(agent_hooks.AgentKind.claude_code, agentKindForName("claude").?);
+    try std.testing.expectEqual(agent_hooks.AgentKind.opencode, agentKindForName("open-code").?);
+    try std.testing.expectEqual(agent_hooks.AgentKind.qoder, agentKindForName("qodercli").?);
+    try std.testing.expectEqual(agent_hooks.AgentKind.kimi_code, agentKindForName("kimi").?);
+    try std.testing.expectEqual(herdr_icon_index, agentIconIndex("herdr"));
+}
+
+test "bubble title and status stay in one compact text block" {
+    var model: Model = .{};
+    testPushBubble(&model, "herdr", "Thinking…", true, -1);
+    const title = "Execute sleep 30 in the terminal";
+    @memcpy(model.bubbles[0].title[0..title.len], title);
+    model.bubbles[0].title_len = title.len;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var ui = AppUi.init(arena.allocator());
+    const card = bubbleCard(&ui, &model, 0);
+    const text_column = card.nodes[0].nodes[1].widget;
+    try std.testing.expectEqual(bubbleContentHeight(&model, 2), text_column.layout.min_size.height);
+    try std.testing.expectEqual(text_column.layout.min_size.height, text_column.layout.max_size.height);
 }
 
 test "activating index 0 works before any sheet is loaded" {
@@ -3863,6 +4377,27 @@ test "empty-state copy fits the pet window" {
     while (it.next()) |line| {
         try std.testing.expect(line.len <= 14);
     }
+}
+
+test "update checks stay daily across a long-lived process" {
+    try std.testing.expectEqual(@as(u64, update_boot_delay_ms), updateCheckDelay(0, 1000));
+    try std.testing.expectEqual(@as(u64, update_boot_delay_ms), updateCheckDelay(2000, 1000));
+    try std.testing.expectEqual(@as(u64, 23 * 60 * 60 * 1000), updateCheckDelay(1000, 1000 + 60 * 60 * 1000));
+    try std.testing.expectEqual(@as(u64, update_boot_delay_ms), updateCheckDelay(1000, 1000 + update_background_interval_ms));
+}
+
+test "cached update versions restore the correct phase" {
+    var model: Model = .{};
+    updateCachePhase(&model);
+    try std.testing.expectEqual(updates.Phase.idle, model.update_phase);
+    @memcpy(model.latest_version[0.."0.9.0".len], "0.9.0");
+    model.latest_version_len = "0.9.0".len;
+    updateCachePhase(&model);
+    try std.testing.expectEqual(updates.Phase.available, model.update_phase);
+    @memcpy(model.latest_version[0.."0.8.0".len], "0.8.0");
+    model.latest_version_len = "0.8.0".len;
+    updateCachePhase(&model);
+    try std.testing.expectEqual(updates.Phase.current, model.update_phase);
 }
 
 test "bubble text default is its own value, not the range floor" {
@@ -3913,6 +4448,10 @@ test {
     _ = hook_server;
     _ = installer;
     _ = plat;
+    _ = remote_agents;
+    _ = remote_runtime;
+    _ = remote_ssh;
+    _ = remote_writeback;
     _ = settings_view;
 }
 
@@ -4198,7 +4737,7 @@ test "collapsed cards recede behind the front one" {
     try std.testing.expectEqual(@as(f32, 1), bubbleCardAlpha(&model, 1));
     // The container reserves the whole fan, and unflipped the front card
     // sits at its bottom edge, nearest the pet.
-    try std.testing.expectEqual(bubbleStackHeightAt(&model, 1) - bubbleMaxCardHeight(&model), bubbleCardOffset(&model, 1));
+    try std.testing.expectEqual(bubbleStackHeightAt(&model, 1) - bubbleCardHeight(&model, 1), bubbleCardOffset(&model, 1));
 
     // The one behind is smaller, dimmer and pushed up by the peek offset.
     try std.testing.expect(bubbleCardScale(&model, 0) < 1);
@@ -4223,8 +4762,8 @@ test "expanded restores the slice 1 column" {
         try std.testing.expectEqual(@as(f32, 1), bubbleCardScale(&model, i));
         try std.testing.expectEqual(@as(f32, 1), bubbleCardAlpha(&model, i));
     }
-    try std.testing.expectEqual(bubbleStackHeightAt(&model, 1) - bubbleMaxCardHeight(&model), bubbleCardOffset(&model, 1));
-    try std.testing.expectEqual(bubbleMaxCardHeight(&model) + bubble_stack_gap, bubbleCardOffset(&model, 1) - bubbleCardOffset(&model, 0));
+    try std.testing.expectEqual(bubbleStackHeightAt(&model, 1) - bubbleCardHeight(&model, 1), bubbleCardOffset(&model, 1));
+    try std.testing.expectEqual(bubbleCardHeight(&model, 0) + bubble_stack_gap, bubbleCardOffset(&model, 1) - bubbleCardOffset(&model, 0));
 }
 
 test "hover waits out the delay, and leaving collapses at once" {
@@ -4302,8 +4841,10 @@ test "hover hit tests the drawn cards, not the tall transparent window" {
 
     // Expanded, the live band reaches much higher up the window.
     model.bubble_expansion = 1;
-    const high = bottom - @as(f64, @floatCast(bubbleMaxCardHeight(&model))) - 10;
-    try std.testing.expect(bubbleHoverHit(&model, win_x, win_y, win_height, win_x + 20, high));
+    const expanded_rect = bubbleCardsRect(&model);
+    const high_x = win_x + @as(f64, @floatCast(expanded_rect.x + expanded_rect.w / 2));
+    const high_y = win_y + @as(f64, @floatCast(expanded_rect.y + 2));
+    try std.testing.expect(bubbleHoverHit(&model, win_x, win_y, win_height, high_x, high_y));
 }
 
 test "collapsed peeks are clamped to the front card and centered" {
@@ -4589,7 +5130,7 @@ test "the hover rect covers the whole visible card, not just its text" {
             const cx = bubble_canvas_margin + bubbleCardCenterDx(&model, slot);
             const cy = bubbleStackOriginY(&model) + bubbleCardOffset(&model, slot);
             const cw = bubbleRenderedCardWidth(&model, slot);
-            const chh = bubbleMaxCardHeight(&model);
+            const chh = bubbleCardHeight(&model, slot);
             try std.testing.expect(r.x <= cx);
             try std.testing.expect(r.y <= cy);
             try std.testing.expect(r.x + r.w >= cx + cw);
@@ -4615,7 +5156,7 @@ test "the hover rect covers the whole visible card, not just its text" {
         const fx0 = bubble_canvas_margin + bubbleCardCenterDx(&model, model.bubbles_len - 1);
         const fy0 = bubbleStackOriginY(&model) + bubbleCardOffset(&model, model.bubbles_len - 1);
         const fw = bubbleRenderedCardWidth(&model, model.bubbles_len - 1);
-        const fh = bubbleMaxCardHeight(&model);
+        const fh = bubbleCardHeight(&model, model.bubbles_len - 1);
         const wh: f64 = @floatCast(bubbleWindowHeight(&model));
         for ([_][2]f32{
             .{ fx0 + 1, fy0 + 1 },
@@ -4699,7 +5240,7 @@ test "the hover rect starts at the stack container, not at the canvas margin" {
         const front = model.bubbles_len - 1;
         const fy0 = origin_y + bubbleCardOffset(&model, front);
         const fx = bubble_canvas_margin + bubbleCardCenterDx(&model, front) + 4;
-        const bottom = fy0 + bubbleMaxCardHeight(&model);
+        const bottom = fy0 + bubbleCardHeight(&model, front);
         const wh: f64 = @floatCast(bubbleWindowHeight(&model));
         // One point inside the bottom edge: live.
         try std.testing.expect(bubbleHoverHit(&model, 0, 0, wh, fx, bottom - 1));
@@ -4709,11 +5250,11 @@ test "the hover rect starts at the stack container, not at the canvas margin" {
         // card unflipped and the deepest peek once flipped: the peeks are
         // drawn, so they are hoverable, and the rect is their union.
         var drawn_top = origin_y + bubbleCardOffset(&model, 0);
-        var drawn_bottom = drawn_top + bubbleMaxCardHeight(&model);
+        var drawn_bottom = drawn_top + bubbleCardHeight(&model, 0);
         for (0..model.bubbles_len) |slot| {
             const top = origin_y + bubbleCardOffset(&model, slot);
             drawn_top = @min(drawn_top, top);
-            drawn_bottom = @max(drawn_bottom, top + bubbleMaxCardHeight(&model));
+            drawn_bottom = @max(drawn_bottom, top + bubbleCardHeight(&model, slot));
         }
         // Well past the slop below everything drawn: dead, so the fix
         // widened the rect onto the cards rather than onto the window.
@@ -4855,11 +5396,11 @@ test "a stacked card keeps its own height, never the container's" {
     testPushBubble(&model, "alpha", "older", false, -1);
     testPushBubble(&model, "beta", "newer", true, -1);
 
-    const card_h = bubbleMaxCardHeight(&model);
     const container = bubbleStackHeightAt(&model, 1);
-    try std.testing.expect(container > card_h);
     for (0..model.bubbles_len) |i| {
+        const card_h = bubbleCardHeight(&model, i);
         try std.testing.expectEqual(card_h, bubbleRenderedCardHeight(&model, i));
+        try std.testing.expect(card_h < bubbleMaxCardHeight(&model));
         try std.testing.expect(bubbleRenderedCardHeight(&model, i) < container);
     }
 
@@ -4882,7 +5423,6 @@ test "a flipped stack stays inside its container at both ends" {
     model.bubble_flipped = true;
 
     const container = bubbleStackHeightAt(&model, 1);
-    const card_h = bubbleMaxCardHeight(&model);
 
     // Every card, at every point of the animation, must sit fully
     // inside the container: top edge at or below 0, bottom edge at or
@@ -4892,7 +5432,7 @@ test "a flipped stack stays inside its container at both ends" {
         for (0..model.bubbles_len) |i| {
             const top = bubbleCardOffset(&model, i);
             try std.testing.expect(top >= -0.01);
-            try std.testing.expect(top + card_h <= container + 0.01);
+            try std.testing.expect(top + bubbleCardHeight(&model, i) <= container + 0.01);
         }
         // Flipped, the FRONT card leads at the top, hard against the
         // head gap, and the rest hang below it.
@@ -4906,19 +5446,18 @@ test "a flipped stack stays inside its container at both ends" {
         for (0..model.bubbles_len) |i| {
             const top = bubbleCardOffset(&model, i);
             try std.testing.expect(top >= -0.01);
-            try std.testing.expect(top + card_h <= container + 0.01);
+            try std.testing.expect(top + bubbleCardHeight(&model, i) <= container + 0.01);
         }
-        try std.testing.expectEqual(container - card_h, bubbleCardOffset(&model, model.bubbles_len - 1));
+        const front = model.bubbles_len - 1;
+        try std.testing.expectEqual(container - bubbleCardHeight(&model, front), bubbleCardOffset(&model, front));
     }
 }
 
-test "an agent with no strip cell falls back to no tile" {
-    // Every shipped AgentKind has a cell, the fallback art does not: the
-    // strip is packed from agent_art alone.
-    try std.testing.expect(agentIconIndex("claude-code") != null);
-    try std.testing.expect(agentIconIndex("codex") != null);
-    try std.testing.expectEqual(@as(?usize, null), agentIconIndex("some-unknown-agent"));
-    try std.testing.expectEqual(@as(?usize, null), agentIconIndex(""));
+test "an agent with no dedicated art uses the fallback tile" {
+    try std.testing.expectEqual(@as(usize, @intFromEnum(agent_hooks.AgentKind.claude_code)), agentIconIndex("claude-code"));
+    try std.testing.expectEqual(@as(usize, @intFromEnum(agent_hooks.AgentKind.codex)), agentIconIndex("codex"));
+    try std.testing.expectEqual(agent_fallback_index, agentIconIndex("some-unknown-agent"));
+    try std.testing.expectEqual(agent_fallback_index, agentIconIndex(""));
 }
 
 test "clearing a bubble also cancels its lifetime" {
@@ -4985,7 +5524,7 @@ test "an empty stack still reserves one card of window height" {
     var model: Model = .{};
     const empty = bubbleWindowHeight(&model);
     testPushBubble(&model, "alpha", "reading", true, -1);
-    try std.testing.expectEqual(empty, bubbleWindowHeight(&model));
+    try std.testing.expect(bubbleWindowHeight(&model) < empty);
 }
 
 test "expiry drops only the bubbles past their deadline" {

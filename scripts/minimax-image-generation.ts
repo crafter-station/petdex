@@ -128,7 +128,10 @@ export function validateMiniMaxImageToImageRequest(
         400,
       );
     }
-    if (referenceUrl.protocol !== "https:" && referenceUrl.protocol !== "http:") {
+    if (
+      referenceUrl.protocol !== "https:" &&
+      referenceUrl.protocol !== "http:"
+    ) {
       throw new MiniMaxImageGenerationError(
         "subject_reference.image_file must be a public URL",
         400,
@@ -199,14 +202,17 @@ export async function generateMiniMaxImage(
   const region = options.region || resolveRegion(process.env.MINIMAX_REGION);
   validateMiniMaxImageToImageRequest(request);
 
-  const response = await (options.fetch || fetch)(MINIMAX_IMAGE_ENDPOINTS[region], {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
+  const response = await (options.fetch || fetch)(
+    MINIMAX_IMAGE_ENDPOINTS[region],
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(request),
     },
-    body: JSON.stringify(request),
-  });
+  );
 
   let payload: unknown;
   try {
@@ -265,7 +271,8 @@ export async function generateMiniMaxReferenceImageFromEnv(
     n: 1,
     prompt_optimizer: false,
   });
-  const encoded = response.data.image_base64?.[0] || response.data.image_urls?.[0];
+  const encoded =
+    response.data.image_base64?.[0] || response.data.image_urls?.[0];
   if (!encoded) {
     throw new MiniMaxImageGenerationError(
       "MiniMax returned no generated image data",

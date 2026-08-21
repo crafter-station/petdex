@@ -1,7 +1,7 @@
 {
   "$schema": "./built-with.schema.json",
   "version": 1,
-  "lastUpdated": "2026-07-29",
+  "lastUpdated": "2026-08-20",
   "categories": {
     "desktop-companion": {
       "label": "Desktop companions",
@@ -532,6 +532,24 @@
         "url": "https://github.com/omlovelife/PetOS-Agent#readme"
       },
       "screenshot": "/built-with/petos.webp"
+    },
+    {
+      "slug": "caw",
+      "name": "Caw",
+      "tagline": "Web terminal multiplexer for AI agents, with Petdex pets roaming the terminal and reacting to what each agent is doing.",
+      "category": "bundled",
+      "repo": "04mg/caw",
+      "homepage": "https://caw.rocks",
+      "stars": 93,
+      "language": "TypeScript",
+      "platforms": ["macOS", "Windows", "Linux", "Web"],
+      "addedAt": "2026-08-20",
+      "evidence": {
+        "type": "code",
+        "quote": "manifestURL     = \"https://petdex.dev/api/manifest\"",
+        "url": "https://github.com/04mg/caw/blob/develop/src/internal/pets/pets.go"
+      },
+      "screenshot": "/built-with/caw.png"
     }
   ]
 }

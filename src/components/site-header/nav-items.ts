@@ -4,6 +4,7 @@ const GITHUB_REPO_URL = "https://github.com/crafter-station/petdex";
 
 type HeaderNavLabels = {
   collections: string;
+  reactions: string;
   creators: string;
   requests: string;
   download: string;
@@ -18,9 +19,13 @@ type HeaderNavLabels = {
 export function buildHeaderNav(
   href: (pathname: string) => string,
   labels: HeaderNavLabels,
+  reactionsEnabled = false,
 ) {
   const primary: HeaderNavItem[] = [
     { href: href("/collections"), label: labels.collections },
+    ...(reactionsEnabled
+      ? [{ href: href("/stickers/claude"), label: labels.reactions }]
+      : []),
     { href: href("/leaderboard"), label: labels.creators },
     { href: href("/requests"), label: labels.requests },
     { href: href("/download"), label: labels.download },

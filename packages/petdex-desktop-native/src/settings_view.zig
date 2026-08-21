@@ -32,6 +32,7 @@ const catalog = &catalog_mod.catalog;
 const catalog_len = &catalog_mod.catalog_len;
 const max_catalog = catalog_mod.max_catalog;
 const agent_hooks = @import("agent_hooks.zig");
+const remote_runtime = @import("remote_runtime.zig");
 const settingsBackground = app.settingsBackground;
 
 /// Where the agent logos are, handed in so this file does not reach into
@@ -63,7 +64,17 @@ fn mutedParagraph(ui: *AppUi, content: []const u8) AppUi.Node {
     }, &.{.{ .text = content }});
 }
 
-fn agentStatusCaption(info: agent_hooks.AgentInfo, codex_note: bool) []const u8 {
+fn agentStatusCaption(info: agent_hooks.AgentInfo, codex_note: bool, dsh_busy: bool, dsh_error: bool) []const u8 {
+    if (info.kind == .dsh) {
+        if (dsh_busy) return "Running the DSH plugin command";
+        if (dsh_error) return "Plugin command failed - check npx and network";
+        return switch (info.status) {
+            .absent => "Not detected",
+            .none => "Plugin not installed",
+            .node => "Restart DSH Web, then start a task",
+            .current => "Connected",
+        };
+    }
     if (info.kind == .codex and codex_note) return "Installed - restart Codex and approve its hooks once";
     if (info.kind == .opencode) {
         return switch (info.status) {
@@ -145,7 +156,11 @@ fn agentsSection(ui: *AppUi, model: *const Model, icons: IconAtlas) AppUi.Node {
     var count: usize = 0;
     for (model.agents, 0..) |info, i| {
         if (info.status == .absent) continue;
-        const trailing = if (info.status == .current)
+        const trailing = if (info.kind == .dsh and model.dsh_busy)
+            ui.button(.{ .size = .sm, .variant = .secondary, .disabled = true }, "Working")
+        else if (info.kind == .dsh and info.status == .node)
+            ui.button(.{ .size = .sm, .variant = .secondary, .disabled = true }, "Restart DSH")
+        else if (info.status == .current)
             ui.button(.{
                 .size = .sm,
                 .variant = .secondary,
@@ -176,7 +191,7 @@ fn agentsSection(ui: *AppUi, model: *const Model, icons: IconAtlas) AppUi.Node {
                 logo,
                 ui.column(.{ .grow = 1, .main = .center }, .{
                     ui.text(.{}, info.kind.displayName()),
-                    mutedParagraph(ui, agentStatusCaption(info, model.codex_trust_note)),
+                    mutedParagraph(ui, agentStatusCaption(info, model.codex_trust_note, model.dsh_busy, model.dsh_error)),
                 }),
                 trailing,
             }),
@@ -189,6 +204,132 @@ fn agentsSection(ui: *AppUi, model: *const Model, icons: IconAtlas) AppUi.Node {
         });
     }
     return ui.column(.{ .gap = 12 }, @as([]const AppUi.Node, rows[0..count]));
+}
+
+fn herdrSection(ui: *AppUi, model: *const Model, icons: IconAtlas) AppUi.Node {
+    if (model.herdr_status == .absent) return ui.el(.stack, .{}, .{});
+    var logo = ui.image(.{
+        .width = 24,
+        .height = 24,
+        .image = if (icons.ready) icons.image else 0,
+        .semantics = .{ .label = "Herdr" },
+    });
+    logo.widget.image_src = icons.rect(app.herdr_icon_index);
+    logo.widget.image_fit = .contain;
+    return ui.el(.panel, .{
+        .padding = 12,
+        .gap = 12,
+        .cross = .center,
+        .style_tokens = .{ .background = .surface, .radius = .md },
+        .semantics = .{ .label = "Herdr" },
+    }, .{
+        ui.row(.{ .gap = 12, .cross = .center }, .{
+            logo,
+            ui.column(.{ .grow = 1, .main = .center }, .{
+                ui.text(.{}, "Herdr"),
+                mutedParagraph(ui, model.herdr_status.caption()),
+            }),
+        }),
+    });
+}
+
+/// SSH remotes running agents whose hooks ride the reverse tunnel.
+/// Read-only by design: remotes are declared in
+/// ~/.petdex/remote-agents.json and the section only reports what the
+/// runtime is doing with them. Hidden entirely when nothing is
+/// configured. A user without the feature gets no noise.
+fn remoteSection(ui: *AppUi, model: *const Model) AppUi.Node {
+    if (model.remote_count == 0) return ui.el(.stack, .{}, .{});
+    var rows: [remote_runtime.max_remotes]AppUi.Node = undefined;
+    var count: usize = 0;
+    for (model.remotes[0..model.remote_count]) |*slot| {
+        if (!slot.active) continue;
+        rows[count] = ui.el(.panel, .{
+            .padding = 12,
+            .gap = 12,
+            .cross = .center,
+            .style_tokens = .{ .background = .surface, .radius = .md },
+            .semantics = .{ .label = slot.nameSlice() },
+        }, .{
+            ui.row(.{ .gap = 12, .cross = .center }, .{
+                ui.column(.{ .grow = 1, .main = .center }, .{
+                    ui.text(.{}, slot.nameSlice()),
+                    mutedParagraph(ui, remote_runtime.statusCaption(slot)),
+                }),
+                ui.text(.{ .size = .sm, .style_tokens = .{ .foreground = .text_muted } }, slot.host[0..slot.host_len]),
+            }),
+        });
+        count += 1;
+    }
+    if (count == 0) return ui.el(.stack, .{}, .{});
+    const heading = ui.text(.{ .size = .lg }, "Remote Agents");
+    const hint = mutedParagraph(ui, "Declared in ~/.petdex/remote-agents.json; sync runs at launch");
+    const list = ui.column(.{ .gap = 12 }, @as([]const AppUi.Node, rows[0..count]));
+    return ui.column(.{ .gap = 12 }, .{ heading, hint, list });
+}
+
+var update_status_buf: [96]u8 = undefined;
+
+fn updatesSection(ui: *AppUi, model: *const Model) AppUi.Node {
+    const latest = model.latest_version[0..model.latest_version_len];
+    const version_status = switch (model.update_phase) {
+        .idle => std.fmt.bufPrint(&update_status_buf, "{s} · Not checked yet", .{app.updates.current_version}) catch app.updates.current_version,
+        .checking => std.fmt.bufPrint(&update_status_buf, "{s} · Checking…", .{app.updates.current_version}) catch app.updates.current_version,
+        .current => std.fmt.bufPrint(&update_status_buf, "{s} · Up to date", .{app.updates.current_version}) catch app.updates.current_version,
+        .available => std.fmt.bufPrint(&update_status_buf, "{s} installed · {s} available", .{ app.updates.current_version, latest }) catch app.updates.current_version,
+        .failed => std.fmt.bufPrint(&update_status_buf, "{s} · Check failed", .{app.updates.current_version}) catch app.updates.current_version,
+    };
+    const version_action = if (model.update_phase == .available)
+        if (model.install_source == .homebrew)
+            ui.button(.{ .variant = .primary, .on_press = .copy_brew_command }, if (model.brew_command_copied) "Copied" else "Copy brew upgrade command")
+        else
+            ui.button(.{ .variant = .primary, .on_press = .download_update }, "Download update")
+    else
+        ui.button(.{ .variant = .secondary, .on_press = .check_updates, .disabled = model.update_phase == .checking or model.update_cancel_pending }, "Check now");
+    const warning_title = if (builtin.os.tag == .macos and model.install_source == .homebrew)
+        "Homebrew manages updates"
+    else
+        "Updates stay manual";
+    const warning_copy = if (builtin.os.tag == .macos)
+        if (model.install_source == .homebrew)
+            "Petdex never runs Brew for you. Update with brew upgrade --cask petdex."
+        else
+            "Petdex never replaces itself. Homebrew users should install the petdex cask first."
+    else
+        "Petdex can download a release, but never replaces itself automatically.";
+    var warning = ui.el(.panel, .{ .padding = 12, .style_tokens = .{ .radius = .md } }, .{
+        ui.column(.{ .gap = 4 }, .{
+            ui.text(.{}, warning_title),
+            mutedParagraph(ui, warning_copy),
+        }),
+    });
+    warning.widget.style.background = if (model.dark) canvas.Color.rgb8(48, 38, 22) else canvas.Color.rgb8(255, 246, 214);
+    return ui.column(.{ .gap = 12 }, .{
+        ui.text(.{ .size = .lg }, "Updates"),
+        ui.el(.panel, .{ .style_tokens = .{ .background = .surface, .radius = .md } }, .{
+            ui.row(.{ .padding = 12, .cross = .center, .gap = 12 }, .{
+                ui.column(.{ .grow = 1 }, .{
+                    ui.text(.{}, "Current version"),
+                    mutedParagraph(ui, version_status),
+                }),
+                version_action,
+            }),
+        }),
+        ui.el(.panel, .{ .style_tokens = .{ .background = .surface, .radius = .md } }, .{
+            ui.row(.{ .padding = 12, .cross = .center, .gap = 12 }, .{
+                ui.column(.{ .grow = 1 }, .{
+                    ui.text(.{}, "Check automatically"),
+                    mutedParagraph(ui, "Quietly checks once per day"),
+                }),
+                ui.el(.switch_control, .{
+                    .selected = model.update_checks_enabled,
+                    .on_toggle = .toggle_update_checks,
+                    .semantics = .{ .label = "Check for updates automatically" },
+                }, .{}),
+            }),
+        }),
+        warning,
+    });
 }
 
 pub fn settingsView(ui: *AppUi, model: *const Model, icons: IconAtlas, thumbs: ThumbAtlas) AppUi.Node {
@@ -244,7 +385,7 @@ pub fn settingsView(ui: *AppUi, model: *const Model, icons: IconAtlas, thumbs: T
     // One scrollable page: the root scroll takes the window frame and
     // everything - full pet catalog included - flows inside it. No
     // more per-section band budgets.
-    var page = ui.scroll(.{ .grow = 1 }, .{ui.column(.{ .padding = 16, .gap = 12 }, .{
+    const page = ui.scroll(.{ .grow = 1 }, .{ui.column(.{ .padding = 16, .gap = 12 }, .{
         ui.text(.{ .size = .lg }, "Pets"),
         installBanner(ui, model),
         ui.el(.search_field, .{
@@ -269,6 +410,8 @@ pub fn settingsView(ui: *AppUi, model: *const Model, icons: IconAtlas, thumbs: T
         ui.el(.stack, .{ .height = 10 }, .{}),
         ui.text(.{ .size = .lg }, "Agents"),
         agentsSection(ui, model, icons),
+        herdrSection(ui, model, icons),
+        remoteSection(ui, model),
         ui.el(.stack, .{ .height = 10 }, .{}),
         ui.text(.{ .size = .lg }, "Appearance"),
         ui.el(.panel, .{ .style_tokens = .{ .background = .surface, .radius = .md } }, .{
@@ -451,12 +594,15 @@ pub fn settingsView(ui: *AppUi, model: *const Model, icons: IconAtlas, thumbs: T
                 ui.button(.{ .on_press = .open_pets_folder }, "Open folder"),
             }),
         }),
+        ui.el(.stack, .{ .height = 10 }, .{}),
+        updatesSection(ui, model),
         // Trailing spacer: the column's own bottom padding is not part
         // of the scroll extent, so the last card needs explicit air.
         ui.el(.stack, .{ .height = 8 }, .{}),
     })});
-    page.widget.style.background = settingsBackground(model);
-    return page;
+    var root = ui.el(.panel, .{ .grow = 1 }, .{page});
+    root.widget.style.background = settingsBackground(model);
+    return root;
 }
 
 test "settings descriptions use wrapped paragraphs" {
@@ -469,4 +615,12 @@ test "settings descriptions use wrapped paragraphs" {
     try std.testing.expectEqual(@as(usize, 1), node.widget.spans.len);
     try std.testing.expectEqualStrings(copy, node.widget.text);
     try std.testing.expect(!node.widget.text_no_wrap);
+}
+
+test "DSH command errors do not ask for a global pnpm install" {
+    const info = agent_hooks.AgentInfo{ .kind = .dsh, .status = .none };
+    try std.testing.expectEqualStrings(
+        "Plugin command failed - check npx and network",
+        agentStatusCaption(info, false, false, true),
+    );
 }

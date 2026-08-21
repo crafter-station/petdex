@@ -68,10 +68,43 @@ jobs:
           - platform: windows
             runner: windows-2022
             expected_to_fail: false
+    env:
+      HERDR_PLUGIN_SOURCE: ${{ (github.event.pull_request.head.repo.full_name || github.repository) }}/packages/petdex-desktop-native/integrations/herdr
+      HERDR_PLUGIN_REF: ${{ github.event.pull_request.head.sha || github.sha }}
 
     steps:
       - name: Checkout petdex
         uses: actions/checkout@v7
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Test DSH plugin and embedded archive
+        if: matrix.platform == 'macos'
+        working-directory: packages/petdex-desktop-native/integrations/dsh
+        run: bun test
+
+      - name: Install Herdr (Unix)
+        if: matrix.platform != 'windows'
+        shell: bash
+        run: |
+          curl -fsSL https://herdr.dev/install.sh -o "$RUNNER_TEMP/install-herdr.sh"
+          HERDR_INSTALL_DIR="$RUNNER_TEMP/herdr" sh "$RUNNER_TEMP/install-herdr.sh"
+          echo "$RUNNER_TEMP/herdr" >> "$GITHUB_PATH"
+
+      - name: Install Herdr (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $installer = "$env:RUNNER_TEMP\install-herdr.ps1"
+          Invoke-WebRequest -Uri "https://herdr.dev/install.ps1" -OutFile $installer
+          & $installer -InstallDir "$env:RUNNER_TEMP\herdr"
+          "$env:RUNNER_TEMP\herdr" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Install managed Herdr plugin
+        shell: bash
+        working-directory: packages/petdex-desktop-native/integrations/herdr
+        run: bun run managed-smoke.ts install
 
       - name: Install Linux GUI libraries
         # The SDK's Linux host links gtk4. Cross-compiling this from
@@ -156,6 +189,17 @@ jobs:
         run: |
           "$NATIVE_CLI" test .
 
+      - name: Test remote helper runtimes
+        if: matrix.platform != 'windows'
+        working-directory: packages/petdex-desktop-native
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tests/remote_watchers_test.py
+          sh -n src/assets/petdex-remote-hook.sh
+          sh tests/remote_hook_test.sh
+          sh tests/tunnel_supervisor_test.sh
+
       # Compiling proves nothing about whether the app draws: the hook
       # server regression that shipped in this branch compiled fine on
       # every platform. These steps run the binary, exercise the hook
@@ -191,6 +235,24 @@ jobs:
             Set-Content -Path "$dir\pet.json" -NoNewline
           Get-ChildItem $dir | Select-Object Name, Length | Format-Table -AutoSize
 
+      - name: Exercise managed Herdr plugin (macOS)
+        if: matrix.platform == 'macos'
+        shell: bash
+        working-directory: packages/petdex-desktop-native
+        run: |
+          set -euo pipefail
+          PETDEX_PET=ci-pet ./zig-out/bin/petdex-desktop-native > herdr-smoke.log 2>&1 &
+          APP_PID=$!
+          for _ in $(seq 1 60); do
+            test -s "$HOME/.petdex/runtime/update-token" && break
+            kill -0 "$APP_PID" || { cat herdr-smoke.log; exit 1; }
+            sleep 1
+          done
+          test -s "$HOME/.petdex/runtime/update-token"
+          bun run integrations/herdr/managed-smoke.ts action
+          kill "$APP_PID" || true
+          wait "$APP_PID" 2>/dev/null || true
+
       - name: Run and exercise the hook server (Linux)
         if: matrix.platform == 'linux'
         shell: bash
@@ -208,7 +270,14 @@ jobs:
           APP_PID=$!
           sleep 10
           kill -0 "$APP_PID" || { echo "app died"; cat run.log; exit 1; }
+          for _ in $(seq 1 60); do
+            test -s "$HOME/.petdex/runtime/update-token" && break
+            kill -0 "$APP_PID" || { echo "app died"; cat run.log; exit 1; }
+            sleep 1
+          done
+          test -s ~/.petdex/runtime/update-token || { cat run.log; exit 1; }
           TOKEN=$(cat ~/.petdex/runtime/update-token)
+          bun run integrations/herdr/managed-smoke.ts action
           curl -fsS -X POST -H "x-petdex-update-token: $TOKEN" \
             -H "Content-Type: application/json" -d '{"state":"running"}' \
             http://127.0.0.1:7777/state
@@ -226,6 +295,7 @@ jobs:
           echo "=== app log (full) ==="
           cat run.log
           kill "$APP_PID" || true
+          wait "$APP_PID" 2>/dev/null || true
           sleep 2
           echo "=== retry with the cairo renderer ==="
           GSK_RENDERER=cairo PETDEX_PET=ci-pet ./zig-out/bin/petdex-desktop-native > cairo.log 2>&1 &
@@ -450,11 +520,45 @@ jobs:
           $tokenPath = "$env:USERPROFILE\.petdex\runtime\update-token"
           if (Test-Path $tokenPath) {
             $token = Get-Content $tokenPath -Raw
+            "=== pre-Herdr health probe ==="
+            Invoke-RestMethod -Uri "http://127.0.0.1:7777/health" | ConvertTo-Json -Compress
+            "=== pre-Herdr stderr ==="
+            Get-Content run.err -ErrorAction SilentlyContinue
+            $herdrServer = Start-Process -FilePath (Get-Command herdr).Source `
+              -ArgumentList "server" -RedirectStandardOutput herdr.log `
+              -RedirectStandardError herdr.err -PassThru
+            $herdrReady = $false
+            for ($attempt = 0; $attempt -lt 80; $attempt++) {
+              if ((herdr status server) -match "status:\s+running") {
+                $herdrReady = $true
+                break
+              }
+              Start-Sleep -Milliseconds 100
+            }
+            if (-not $herdrReady) {
+              Get-Content herdr.log -ErrorAction SilentlyContinue
+              Get-Content herdr.err -ErrorAction SilentlyContinue
+              throw "Herdr server did not start"
+            }
+            bun run integrations/herdr/managed-smoke.ts action
+            $bridgeExit = $LASTEXITCODE
+            "=== Herdr plugin logs ==="
+            herdr plugin log list --plugin dev.petdex.bridge --limit 20
             "=== hook round trip ==="
             Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:7777/state" `
               -Headers @{ "x-petdex-update-token" = $token } `
               -ContentType "application/json" -Body '{"state":"running"}' | ConvertTo-Json -Compress
             Invoke-RestMethod -Uri "http://127.0.0.1:7777/state" | ConvertTo-Json -Compress
+            "=== runtime mirrors after requests ==="
+            Get-Content "$env:USERPROFILE\.petdex\runtime\state.json" -ErrorAction SilentlyContinue
+            Get-Content "$env:USERPROFILE\.petdex\runtime\bubble.json" -ErrorAction SilentlyContinue
+            "=== stderr after requests ==="
+            Get-Content run.err -ErrorAction SilentlyContinue
+            "=== process after requests ==="
+            if ($app.HasExited) { "EXITED, code $($app.ExitCode)" } else { "alive, pid $($app.Id)" }
+            herdr server stop
+            $herdrServer.WaitForExit(10000) | Out-Null
+            if ($bridgeExit -ne 0) { throw "managed Herdr action failed" }
           } else {
             "NO TOKEN at $tokenPath"
           }
@@ -579,6 +683,280 @@ jobs:
           $bmp.Save("$env:TEMP\windows-screen-deeplink.png")
 
           Stop-Process -Id $cold.Id -Force -ErrorAction SilentlyContinue
+
+      - name: Remote agent writeback over real SSH (Linux)
+        # The remote-agents feature's whole promise is that ssh argv built
+        # on the desktop drives a fetch-merge-writeback on a remote. Unit
+        # tests prove the argv and the merge; only a real sshd proves the
+        # round trip. An isolated container supplies the remote loopback:
+        # unlike an sshd on the runner itself, its 127.0.0.1:7777 is free for
+        # the reverse tunnel. That lets CI prove the security order too:
+        # tunnel health -> hook patch -> atomic token -> feed.
+        if: matrix.platform == 'linux'
+        shell: bash
+        working-directory: packages/petdex-desktop-native
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y xvfb
+          cleanup_remote_smoke() {
+            if [ -n "${APP_PID:-}" ]; then kill "$APP_PID" 2>/dev/null || true; fi
+            docker rm -f petdex-ssh >/dev/null 2>&1 || true
+          }
+          trap cleanup_remote_smoke EXIT
+
+          # Dedicated throwaway SSH host and key. Container loopback keeps
+          # the remote forward distinct from the app's runner-side :7777.
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          ssh-keygen -t ed25519 -N '' -f ~/.ssh/ci_petdex -q
+          docker run -d --name petdex-ssh -p 127.0.0.1:22222:22 ubuntu:24.04 sleep infinity
+          docker exec petdex-ssh bash -lc \
+            'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-server curl python3 procps && useradd -m -s /bin/bash petdex && mkdir -p /run/sshd /home/petdex/.ssh'
+          docker cp ~/.ssh/ci_petdex.pub petdex-ssh:/tmp/ci_petdex.pub
+          docker exec petdex-ssh bash -lc \
+            'cat /tmp/ci_petdex.pub > /home/petdex/.ssh/authorized_keys && chown -R petdex:petdex /home/petdex/.ssh && chmod 700 /home/petdex/.ssh && chmod 600 /home/petdex/.ssh/authorized_keys && ssh-keygen -A'
+          docker exec -d petdex-ssh /usr/sbin/sshd -D -e
+
+          REMOTE=(ssh -oBatchMode=yes -oStrictHostKeyChecking=accept-new \
+            -oConnectTimeout=8 -p 22222 -i "$HOME/.ssh/ci_petdex" -- petdex@localhost)
+          for _ in $(seq 1 20); do
+            "${REMOTE[@]}" true >/dev/null 2>&1 && break
+            sleep 1
+          done
+          "${REMOTE[@]}" true
+
+          # The config the app reads at boot. opencode + codex cover both
+          # writeback shapes; Hermes also exercises a custom remote home and
+          # the two-watcher readiness handshake.
+          mkdir -p ~/.petdex
+          cat > ~/.petdex/remote-agents.json <<JSON
+          {"remotes":[{"name":"loopback","host":"petdex@localhost","port":22222,
+            "identity_file":"$HOME/.ssh/ci_petdex",
+            "agents":{"opencode":{"enabled":true},"codex":{"enabled":true},
+              "hermes":{"enabled":true,"home":"~/.hermes-ci"}}}]}
+          JSON
+
+          # Any earlier instance booted without this config and would not
+          # re-run the sync.
+          pkill -f petdex-desktop-native || true
+          sleep 2
+          export DISPLAY=:99
+          xdpyinfo -display :99 >/dev/null 2>&1 || { Xvfb :99 -screen 0 1280x800x24 & sleep 3; }
+          PETDEX_PET=ci-pet ./zig-out/bin/petdex-desktop-native > remote.log 2>&1 &
+          APP_PID=$!
+
+          # Token publication is the terminal gate: seeing it remotely proves
+          # the tunnel health check and every preceding patch completed.
+          for _ in $(seq 1 45); do
+            "${REMOTE[@]}" 'test -s ~/.petdex/runtime/update-token' >/dev/null 2>&1 && break
+            sleep 2
+          done
+          kill -0 "$APP_PID" || { echo "app died during remote sync"; cat remote.log; exit 1; }
+          echo "=== app log ==="; cat remote.log
+
+          # The pushed opencode plugin is byte-identical to the asset: it
+          # POSTs directly and needs no remote-side helper.
+          "${REMOTE[@]}" 'grep -q "HOOK_SERVER_URL" ~/.config/opencode/plugins/petdex.js' || {
+            echo "FAIL: opencode plugin never landed"; exit 1; }
+          # Codex's merged hooks point at the shared hook path...
+          "${REMOTE[@]}" 'grep -q "petdex-hook" ~/.codex/hooks.json' || {
+            echo "FAIL: codex hooks.json never landed"; "${REMOTE[@]}" 'cat ~/.codex/hooks.json' || true; exit 1; }
+          "${REMOTE[@]}" 'grep -q "hooks = true" ~/.codex/config.toml' || {
+            echo "FAIL: codex config.toml feature flag missing"; exit 1; }
+          "${REMOTE[@]}" 'grep -q "petdex-hook" ~/.hermes-ci/config.yaml' || {
+            echo "FAIL: custom-home Hermes config never landed"; exit 1; }
+          "${REMOTE[@]}" 'grep -qx "$HOME/.hermes-ci" ~/.petdex/runtime/hermes-home' || {
+            echo "FAIL: custom Hermes home was not published to the hook runtime"; exit 1; }
+          # ...and that path carries the sh script, executable, with the
+          # desktop runner's contract markers.
+          "${REMOTE[@]}" 'test -x ~/.petdex/bin/petdex-hook' || {
+            echo "FAIL: remote hook script missing or not executable"; exit 1; }
+          "${REMOTE[@]}" 'grep -q "hooks-disabled" ~/.petdex/bin/petdex-hook' || {
+            echo "FAIL: hook script lacks the killswitch"; exit 1; }
+          "${REMOTE[@]}" 'test -s ~/.petdex/runtime/codex-watch.pid && test -s ~/.petdex/runtime/hermes-watch.pid && test -f ~/.petdex/runtime/tunnel-lease' || {
+            echo "FAIL: watcher readiness was reported without live PID/lease files"; exit 1; }
+
+          # Functional proof, not just file presence: invoke the pushed
+          # script the way remote Codex would and assert it reached the
+          # runner-side hook server through the established reverse tunnel.
+          "${REMOTE[@]}" 'curl -fsS --max-time 2 http://127.0.0.1:7777/health' | grep -q '"ok":true'
+          printf '%s\n' '{"tool_name":"Bash","session_id":"ci"}' | \
+            "${REMOTE[@]}" '~/.petdex/bin/petdex-hook bubble pre codex'
+          sleep 1
+          # The hook server deliberately alternates running-left and
+          # running-right sprite variants.  Both are successful running
+          # states, so do not require the legacy bare "running" spelling.
+          curl -fsS http://127.0.0.1:7777/state | grep -q '"state":"running' || {
+            echo "FAIL: the pushed hook script never reached the hook server"
+            curl -fsS http://127.0.0.1:7777/state || true; exit 1; }
+          kill "$APP_PID" || true
+          wait "$APP_PID" 2>/dev/null || true
+          # The tunnel owns the feed lease. Its exit revokes the token and
+          # both detached watchers must clean up without waiting for another
+          # Petdex launch.
+          for _ in $(seq 1 15); do
+            if "${REMOTE[@]}" 'test ! -e ~/.petdex/runtime/update-token && test ! -e ~/.petdex/runtime/codex-watch.pid && test ! -e ~/.petdex/runtime/hermes-watch.pid'; then
+              break
+            fi
+            sleep 1
+          done
+          "${REMOTE[@]}" 'test ! -e ~/.petdex/runtime/update-token && test ! -e ~/.petdex/runtime/codex-watch.pid && test ! -e ~/.petdex/runtime/hermes-watch.pid' || {
+            echo "FAIL: tunnel shutdown left a token or watcher alive"
+            "${REMOTE[@]}" 'ls -la ~/.petdex/runtime; for p in ~/.petdex/runtime/*-watch.pid; do test -e "$p" || continue; printf "%s: " "$p"; cat "$p"; done'
+            exit 1
+          }
+          APP_PID=
+
+      # The legs above prove the app launches, paints, and answers the
+      # hook server. None of them sends the pet a single click, which is
+      # the gap the header note calls "compile-and-launch verified only"
+      # and exactly where #703 hid: on Windows the pet renders correctly
+      # and ignores every mouse event, because the platform registers no
+      # move_window_fn and all pet input is routed through it.
+      #
+      # cuse drives real OS input (XTEST on X11, SendInput on Win32) and
+      # diffs the frames, so a pet that stops reacting fails here rather
+      # than reaching a user. The assertion is deliberately the CHANGED
+      # frame: a tap flips the pet between jumping and waving, and only
+      # a click that actually reached the window can produce that.
+      # Not blocking yet: cuse cannot enumerate windows on a bare X11
+      # display (crafter-agents/cuse#65), so the Linux leg cannot aim a
+      # click even though xwininfo sees the window in the same job. The
+      # Windows leg is blocked on its own pets failing to decode on the
+      # runner. Both are tracked; flip continue-on-error off once the
+      # Linux side goes green, so the check starts gating.
+      - name: Click the pet and prove it reacts
+        if: matrix.platform != 'macos'
+        continue-on-error: true
+        shell: bash
+        working-directory: packages/petdex-desktop-native
+        env:
+          CUSE_VERSION: v0.1.0
+        run: |
+          set -euo pipefail
+
+          case "${{ matrix.platform }}" in
+            linux)
+              asset=cuse-linux-x64
+              bin=./cuse
+              # cuse reads the screen through xwd, which is not on the
+              # runner by default.
+              sudo apt-get install -y x11-apps xvfb
+              export DISPLAY=:99
+              # :99 may still be up from the hook-server step. Starting a
+              # second server on a live display is a fatal error, so only
+              # start one when nothing answers.
+              if ! xdpyinfo -display :99 >/dev/null 2>&1; then
+                Xvfb :99 -screen 0 1280x800x24 &
+                for _ in $(seq 1 30); do
+                  xdpyinfo -display :99 >/dev/null 2>&1 && break
+                  sleep 1
+                done
+              fi
+              xdpyinfo -display :99 >/dev/null 2>&1 || { echo "no display on :99"; exit 1; }
+              ;;
+            windows)
+              asset=cuse-windows-x64.exe
+              # Git Bash will not execute an extensionless binary here.
+              bin=./cuse.exe
+              # git-bash's ~ is not $USERPROFILE on this runner, which is
+              # the same trap the "Install a pet (Windows)" step documents:
+              # the app reads its runtime out of USERPROFILE, so pointing
+              # HOME anywhere else looks like "the app never started".
+              export HOME="$USERPROFILE"
+              ;;
+          esac
+
+          base="https://github.com/crafter-agents/cuse/releases/download/${CUSE_VERSION}"
+          curl -fsSLo "${bin}" "${base}/${asset}"
+          curl -fsSLo SHA256SUMS "${base}/SHA256SUMS"
+          # A downloaded binary that drives OS input deserves the check
+          # the release already publishes.
+          awk -v a="$asset" -v b="${bin#./}" '$2 == a { print $1 "  " b }' SHA256SUMS > cuse.sha256
+          sha256sum -c cuse.sha256
+          chmod +x "${bin}"
+          "${bin}" os --json
+
+          # Earlier steps leave a token behind, so waiting on the file
+          # would return instantly and prove nothing. Clear it first and
+          # wait for THIS run to write a fresh one.
+          rm -f "$HOME/.petdex/runtime/update-token"
+          # Under Xvfb GTK's default GL renderer has no driver, which is
+          # why the hook-server step falls back to cairo. Without this the
+          # app runs and paints nothing.
+          if [ "${{ matrix.platform }}" = linux ]; then
+            export GSK_RENDERER=cairo
+          fi
+          PETDEX_PET=ci-pet ./zig-out/bin/petdex-desktop-native > input.log 2>&1 &
+          APP_PID=$!
+          for _ in $(seq 1 60); do
+            test -s "$HOME/.petdex/runtime/update-token" && break
+            kill -0 "$APP_PID" 2>/dev/null || { echo "app died"; cat input.log; exit 1; }
+            sleep 1
+          done
+          test -s "$HOME/.petdex/runtime/update-token" || {
+            echo "app never came up"; cat input.log; exit 1; }
+          "${bin}" settle 8 500 --json || true
+
+          # The window title differs by platform: Win32 shows the app
+          # title from src/main.zig:59, while GTK reports the binary name.
+          # Match either rather than assuming one.
+          case "${{ matrix.platform }}" in
+            linux) title=petdex-desktop-native ;;
+            windows) title=Petdex ;;
+          esac
+
+          # A window has to exist before a click can land on it. Without
+          # this the failure reads as "no window matching ...", which
+          # points at the click rather than at the app.
+          for _ in $(seq 1 30); do
+            "${bin}" windows --json | grep -q "$title" && break
+            sleep 1
+          done
+          "${bin}" windows --json > windows.json
+          cat windows.json
+          grep -q "$title" windows.json || {
+            echo "FAIL: the app is running but never opened a titled window"
+            cat input.log
+            exit 1
+          }
+
+          "${bin}" capture before.png --json
+
+          # Two taps. One frame change could be an idle animation landing
+          # elsewhere by chance; the pet alternates jumping and waving on
+          # each pat, so a second tap has to move it again.
+          # The window title is "Petdex" (src/main.zig:59). cuse errors
+          # with the list of visible windows if it cannot find it, which
+          # is the diagnostic we want when this fails.
+          "${bin}" click --window="$title" --json
+          sleep 1
+          "${bin}" capture after1.png --json
+          "${bin}" click --window="$title" --json
+          sleep 1
+          "${bin}" capture after2.png --json
+
+          # Read the verdict field rather than grepping the line: SAME and
+          # CHANGED both contain "CHANGE" as a substring in other wordings.
+          verdict() { "${bin}" diff "$1" "$2" --json | bun -e \
+            'const r=JSON.parse(await Bun.stdin.text()); console.log(r.data.verdict, r.data.percent+"%")'; }
+
+          first=$(verdict before.png after1.png)
+          second=$(verdict after1.png after2.png)
+          echo "first tap:  $first"
+          echo "second tap: $second"
+
+          case "$first" in
+            CHANGED*) ;;
+            *) echo "FAIL: the pet did not react to a click (see #703)"
+               cat input.log; exit 1 ;;
+          esac
+          case "$second" in
+            CHANGED*) ;;
+            *) echo "FAIL: the pet reacted once and then stopped alternating"
+               cat input.log; exit 1 ;;
+          esac
+
+          kill "$APP_PID" 2>/dev/null || true
 
       - name: Upload the screenshot
         if: always() && matrix.platform != 'macos'

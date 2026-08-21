@@ -165,10 +165,31 @@ pub fn makeDir(path: []const u8) void {
     std.Io.Dir.cwd().createDirPath(scope.io(), path) catch {};
 }
 
+/// Create a directory tree and constrain the leaf directory's POSIX mode.
+/// Windows keeps the inherited ACL, matching writeFileMode's behavior.
+pub fn makeDirMode(path: []const u8, mode: u16) bool {
+    var scope = Scope.init();
+    defer scope.deinit();
+    const io = scope.io();
+    std.Io.Dir.cwd().createDirPath(io, path) catch return false;
+    if (builtin.os.tag == .windows) return true;
+    var dir = std.Io.Dir.cwd().openDir(io, path, .{ .iterate = true }) catch return false;
+    defer dir.close(io);
+    dir.setPermissions(io, @enumFromInt(mode)) catch return false;
+    return true;
+}
+
 pub fn deleteFile(path: []const u8) void {
     var scope = Scope.init();
     defer scope.deinit();
     std.Io.Dir.cwd().deleteFile(scope.io(), path) catch {};
+}
+
+pub fn deleteTree(path: []const u8) bool {
+    var scope = Scope.init();
+    defer scope.deinit();
+    std.Io.Dir.cwd().deleteTree(scope.io(), path) catch return false;
+    return true;
 }
 
 pub fn fileExists(path: []const u8) bool {
@@ -340,6 +361,15 @@ test "Windows hook launcher forwards stdin and arguments" {
     );
 }
 
+test "DSH browser activation stays strict" {
+    try std.testing.expectEqual(OriginApplication.default_browser, OriginApplication.fromTermProgram("default_browser"));
+    try std.testing.expectEqualStrings("default_browser", OriginApplication.default_browser.wireName());
+    try std.testing.expect(BrowserActivation.already_active.succeeded());
+    try std.testing.expect(BrowserActivation.activated.succeeded());
+    try std.testing.expect(!BrowserActivation.not_running.succeeded());
+    try std.testing.expect(!BrowserActivation.activation_failed.succeeded());
+}
+
 /// Own pid, for the /whoami endpoint. std has no portable accessor in
 /// 0.16, so this is the one genuine per-platform branch in this file.
 ///
@@ -363,11 +393,16 @@ pub const OriginApplication = enum(u8) {
     none,
     terminal,
     vscode,
+    /// DSH Web owns the task UI in the user's default browser. Unlike the
+    /// terminal rows this is intentionally not a bundle identifier: the
+    /// active HTTP handler is resolved at click time on macOS.
+    default_browser,
 
     pub fn fromTermProgram(value: ?[]const u8) OriginApplication {
         const name = value orelse return .none;
         if (std.mem.eql(u8, name, "Apple_Terminal")) return .terminal;
         if (std.mem.eql(u8, name, "vscode")) return .vscode;
+        if (std.mem.eql(u8, name, "default_browser")) return .default_browser;
         return .none;
     }
 
@@ -376,6 +411,7 @@ pub const OriginApplication = enum(u8) {
             .none => "",
             .terminal => "Apple_Terminal",
             .vscode => "vscode",
+            .default_browser => "default_browser",
         };
     }
 
@@ -384,7 +420,21 @@ pub const OriginApplication = enum(u8) {
             .none => null,
             .terminal => "com.apple.Terminal",
             .vscode => "com.microsoft.VSCode",
+            .default_browser => null,
         };
+    }
+};
+
+pub const BrowserActivation = enum {
+    unsupported,
+    no_handler,
+    not_running,
+    already_active,
+    activated,
+    activation_failed,
+
+    pub fn succeeded(self: BrowserActivation) bool {
+        return self == .already_active or self == .activated;
     }
 };
 
@@ -443,6 +493,23 @@ pub fn safeSourceCwd(value: ?[]const u8) ?[]const u8 {
     return cwd;
 }
 
+pub fn safeHerdrPaneId(value: ?[]const u8) ?[]const u8 {
+    const pane = value orelse return null;
+    if (pane.len == 0 or pane.len > 64) return null;
+    for (pane) |ch| {
+        if (!std.ascii.isAlphanumeric(ch) and ch != ':' and ch != '_' and ch != '-') return null;
+    }
+    return pane;
+}
+
+test "Herdr pane ids accept only bounded CLI-safe identifiers" {
+    try std.testing.expectEqualStrings("w1:p5", safeHerdrPaneId("w1:p5").?);
+    try std.testing.expect(safeHerdrPaneId("w1:p5;open") == null);
+    try std.testing.expect(safeHerdrPaneId("") == null);
+    var too_long: [65]u8 = @splat('a');
+    try std.testing.expect(safeHerdrPaneId(&too_long) == null);
+}
+
 fn spawnAndWait(argv: []const []const u8) bool {
     var scope = Scope.init();
     defer scope.deinit();
@@ -454,9 +521,54 @@ fn spawnAndWait(argv: []const []const u8) bool {
     };
 }
 
+fn runHerdrPluginList(allocator: std.mem.Allocator, binary: []const u8) ?[]u8 {
+    var scope = Scope.init();
+    defer scope.deinit();
+    const result = std.process.run(allocator, scope.io(), .{
+        .argv = &.{ binary, "plugin", "list", "--plugin", "dev.petdex.bridge", "--json" },
+        .stdout_limit = .limited(1024 * 1024),
+        .stderr_limit = .limited(64 * 1024),
+    }) catch return null;
+    allocator.free(result.stderr);
+    if (result.term != .exited or result.term.exited != 0) {
+        allocator.free(result.stdout);
+        return null;
+    }
+    return result.stdout;
+}
+
+pub fn herdrPluginListAlloc(allocator: std.mem.Allocator, home: []const u8) ?[]u8 {
+    if (runHerdrPluginList(allocator, "herdr")) |source| return source;
+    var local_buf: [768]u8 = undefined;
+    const local = std.fmt.bufPrint(&local_buf, "{s}/.local/bin/herdr", .{home}) catch return null;
+    if (runHerdrPluginList(allocator, local)) |source| return source;
+    if (runHerdrPluginList(allocator, "/opt/homebrew/bin/herdr")) |source| return source;
+    return runHerdrPluginList(allocator, "/usr/local/bin/herdr");
+}
+
+pub fn herdrAvailable(home: []const u8) bool {
+    if (spawnAndWait(&.{ "herdr", "--version" })) return true;
+    var local_buf: [768]u8 = undefined;
+    const local = std.fmt.bufPrint(&local_buf, "{s}/.local/bin/herdr", .{home}) catch return false;
+    if (spawnAndWait(&.{ local, "--version" })) return true;
+    if (spawnAndWait(&.{ "/opt/homebrew/bin/herdr", "--version" })) return true;
+    return spawnAndWait(&.{ "/usr/local/bin/herdr", "--version" });
+}
+
+pub fn activateHerdrPane(home: []const u8, pane_raw: []const u8) bool {
+    const pane = safeHerdrPaneId(pane_raw) orelse return false;
+    if (spawnAndWait(&.{ "herdr", "agent", "focus", pane })) return true;
+    var local_buf: [768]u8 = undefined;
+    const local = std.fmt.bufPrint(&local_buf, "{s}/.local/bin/herdr", .{home}) catch return false;
+    if (spawnAndWait(&.{ local, "agent", "focus", pane })) return true;
+    if (spawnAndWait(&.{ "/opt/homebrew/bin/herdr", "agent", "focus", pane })) return true;
+    return spawnAndWait(&.{ "/usr/local/bin/herdr", "agent", "focus", pane });
+}
+
 pub fn activateOriginApplication(origin: OriginApplication, source_tty: []const u8, source_cwd: []const u8) bool {
     if (builtin.os.tag != .macos) return false;
     _ = source_cwd;
+    if (origin == .default_browser) return activateRunningDefaultBrowser().succeeded();
     if (origin == .terminal) {
         if (safeSourceTty(source_tty)) |tty| {
             if (spawnAndWait(&.{ "/usr/bin/osascript", "-e", terminal_focus_script, tty })) return true;
@@ -585,4 +697,59 @@ pub fn openExternal(target: []const u8) void {
         .stderr = .ignore,
     }) catch return;
     _ = child.wait(io) catch {};
+}
+
+/// Resolve the current default HTTP handler through NSWorkspace, then activate
+/// only an already-running instance. No URL is opened or passed to the target,
+/// so this cannot navigate the browser or create a new tab. A closed browser
+/// remains closed and reports `not_running` to the caller.
+pub fn activateRunningDefaultBrowser() BrowserActivation {
+    if (builtin.os.tag != .macos) return .unsupported;
+
+    _ = AppleApp.dlopen("/System/Library/Frameworks/AppKit.framework/AppKit", 2);
+    const MsgSendObj = *const fn (?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque;
+    const MsgSendObj1 = *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque;
+    const MsgSendObjIndex = *const fn (?*anyopaque, ?*anyopaque, usize) callconv(.c) ?*anyopaque;
+    const MsgSendUsize = *const fn (?*anyopaque, ?*anyopaque) callconv(.c) usize;
+    const MsgSendBool = *const fn (?*anyopaque, ?*anyopaque) callconv(.c) bool;
+    const MsgSendBoolOptions = *const fn (?*anyopaque, ?*anyopaque, usize) callconv(.c) bool;
+
+    const ns_string = AppleApp.objc_getClass("NSString") orelse return .no_handler;
+    const string_sel = AppleApp.sel_registerName("stringWithUTF8String:") orelse return .no_handler;
+    const url_text = @as(MsgSendObj1, @ptrCast(&AppleApp.objc_msgSend))(ns_string, string_sel, @ptrCast(@constCast("http://localhost".ptr))) orelse return .no_handler;
+
+    const ns_url = AppleApp.objc_getClass("NSURL") orelse return .no_handler;
+    const url_sel = AppleApp.sel_registerName("URLWithString:") orelse return .no_handler;
+    const http_url = @as(MsgSendObj1, @ptrCast(&AppleApp.objc_msgSend))(ns_url, url_sel, url_text) orelse return .no_handler;
+
+    const ns_workspace = AppleApp.objc_getClass("NSWorkspace") orelse return .no_handler;
+    const shared_sel = AppleApp.sel_registerName("sharedWorkspace") orelse return .no_handler;
+    const workspace = @as(MsgSendObj, @ptrCast(&AppleApp.objc_msgSend))(ns_workspace, shared_sel) orelse return .no_handler;
+    const handler_sel = AppleApp.sel_registerName("URLForApplicationToOpenURL:") orelse return .no_handler;
+    const handler_url = @as(MsgSendObj1, @ptrCast(&AppleApp.objc_msgSend))(workspace, handler_sel, http_url) orelse return .no_handler;
+
+    const ns_bundle = AppleApp.objc_getClass("NSBundle") orelse return .no_handler;
+    const bundle_sel = AppleApp.sel_registerName("bundleWithURL:") orelse return .no_handler;
+    const bundle = @as(MsgSendObj1, @ptrCast(&AppleApp.objc_msgSend))(ns_bundle, bundle_sel, handler_url) orelse return .no_handler;
+    const bundle_id_sel = AppleApp.sel_registerName("bundleIdentifier") orelse return .no_handler;
+    const bundle_id = @as(MsgSendObj, @ptrCast(&AppleApp.objc_msgSend))(bundle, bundle_id_sel) orelse return .no_handler;
+
+    const ns_running_application = AppleApp.objc_getClass("NSRunningApplication") orelse return .not_running;
+    const running_sel = AppleApp.sel_registerName("runningApplicationsWithBundleIdentifier:") orelse return .no_handler;
+    const running = @as(MsgSendObj1, @ptrCast(&AppleApp.objc_msgSend))(ns_running_application, running_sel, bundle_id) orelse return .not_running;
+    const count_sel = AppleApp.sel_registerName("count") orelse return .not_running;
+    const count = @as(MsgSendUsize, @ptrCast(&AppleApp.objc_msgSend))(running, count_sel);
+    if (count == 0) return .not_running;
+
+    const item_sel = AppleApp.sel_registerName("objectAtIndex:") orelse return .activation_failed;
+    const terminated_sel = AppleApp.sel_registerName("isTerminated") orelse return .activation_failed;
+    const active_sel = AppleApp.sel_registerName("isActive") orelse return .activation_failed;
+    const activate_sel = AppleApp.sel_registerName("activateWithOptions:") orelse return .activation_failed;
+    for (0..count) |index| {
+        const app = @as(MsgSendObjIndex, @ptrCast(&AppleApp.objc_msgSend))(running, item_sel, index) orelse continue;
+        if (@as(MsgSendBool, @ptrCast(&AppleApp.objc_msgSend))(app, terminated_sel)) continue;
+        if (@as(MsgSendBool, @ptrCast(&AppleApp.objc_msgSend))(app, active_sel)) return .already_active;
+        if (@as(MsgSendBoolOptions, @ptrCast(&AppleApp.objc_msgSend))(app, activate_sel, 0)) return .activated;
+    }
+    return .activation_failed;
 }
