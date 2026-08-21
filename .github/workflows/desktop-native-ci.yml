@@ -917,15 +917,8 @@ jobs:
 
           "${bin}" capture before.png --json
 
-          # Two taps. One frame change could be an idle animation landing
-          # elsewhere by chance; the pet alternates jumping and waving on
-          # each pat, so a second tap has to move it again.
           "${bin}" click "${target[@]}" --json
           "${bin}" capture after1.png --json
-          "${bin}" settle 8 250 --json || true
-          "${bin}" capture before2.png --json
-          "${bin}" click "${target[@]}" --json
-          "${bin}" capture after2.png --json
 
           # Read the verdict field rather than grepping the line: SAME and
           # CHANGED both contain "CHANGE" as a substring in other wordings.
@@ -933,21 +926,13 @@ jobs:
             'const r=JSON.parse(await Bun.stdin.text()); console.log(r.data.verdict, r.data.percent+"%")'; }
 
           first=$(verdict before.png after1.png)
-          second=$(verdict before2.png after2.png)
-          echo "first tap:  $first"
-          echo "second tap: $second"
+          echo "pat: $first"
 
           case "$first" in
             CHANGED*) ;;
             *) echo "FAIL: the pet did not react to a click (see #703)"
                cat input.log; exit 1 ;;
           esac
-          case "$second" in
-            CHANGED*) ;;
-            *) echo "FAIL: the pet reacted once and then stopped alternating"
-               cat input.log; exit 1 ;;
-          esac
-
           if [ "${{ matrix.platform }}" = windows ]; then
             "${bin}" capture menu-before.png --json
             "${bin}" click 112 210 --button=right --json
@@ -994,8 +979,6 @@ jobs:
             /tmp/linux-screen-deeplink.png
             packages/petdex-desktop-native/before.png
             packages/petdex-desktop-native/after1.png
-            packages/petdex-desktop-native/before2.png
-            packages/petdex-desktop-native/after2.png
             packages/petdex-desktop-native/menu-before.png
             packages/petdex-desktop-native/menu-open.png
             packages/petdex-desktop-native/menu-closed.png

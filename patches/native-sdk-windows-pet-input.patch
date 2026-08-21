@@ -156,15 +156,18 @@ index 4dd7ecd..24fd947 100644
 +                view->gpu_primary_x = x;
 +                view->gpu_primary_y = y;
 +            }
-@@ -2940,0 +3019 @@ static LRESULT CALLBACK gpuSurfaceProc(HWND hwnd, UINT message, WPARAM wparam, L
-+            if (message == WM_LBUTTONUP) view->gpu_primary_down = 0;
-@@ -2957,0 +3037 @@ static LRESULT CALLBACK gpuSurfaceProc(HWND hwnd, UINT message, WPARAM wparam, L
+@@ -2940,0 +3019,4 @@ static LRESULT CALLBACK gpuSurfaceProc(HWND hwnd, UINT message, WPARAM wparam, L
++            if (message == WM_LBUTTONUP) {
++                view->gpu_primary_down = 0;
++                if (view->gpu_primary_latched < 1) view->gpu_primary_latched = 1;
++            }
+@@ -2957,0 +3040 @@ static LRESULT CALLBACK gpuSurfaceProc(HWND hwnd, UINT message, WPARAM wparam, L
 +            view->gpu_primary_down = 0;
-@@ -5033,0 +5114,3 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wparam, LPARA
+@@ -5033,0 +5117,3 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wparam, LPARA
 +        case kShowContextMenuMessage:
 +            if (host) showAppContextMenu(host, hwnd);
 +            return 0;
-@@ -5942,0 +6026,57 @@ int native_sdk_windows_create_window(Host *host, uint64_t window_id, const char
+@@ -5942,0 +6029,59 @@ int native_sdk_windows_create_window(Host *host, uint64_t window_id, const char
 +int native_sdk_windows_move_window(Host *host, uint64_t window_id, double dx, double dy, int clamp, double *out_x, double *out_y, int *out_hit_x, int *out_hit_y, int *out_primary_down, double *out_cursor_x, double *out_cursor_y) {
 +    if (!host) return 0;
 +    auto found = host->windows.find(window_id);
@@ -209,9 +212,11 @@ index 4dd7ecd..24fd947 100644
 +        if (view.window_id != window_id || view.kind != kViewGpuSurface) continue;
 +        if (view.gpu_primary_latched > 0) {
 +            primary_down = 1;
-+            if (view.gpu_primary_latched == 2 && view.hwnd) {
-+                POINT press = { (LONG)lround(view.gpu_primary_x * scale), (LONG)lround(view.gpu_primary_y * scale) };
-+                if (ClientToScreen(view.hwnd, &press)) cursor = press;
++            if (view.hwnd) {
++                const double x = view.gpu_primary_latched == 2 ? view.gpu_primary_x : view.gpu_pointer_x;
++                const double y = view.gpu_primary_latched == 2 ? view.gpu_primary_y : view.gpu_pointer_y;
++                POINT sampled = { (LONG)lround(x * scale), (LONG)lround(y * scale) };
++                if (ClientToScreen(view.hwnd, &sampled)) cursor = sampled;
 +            }
 +            view.gpu_primary_latched--;
 +        } else if (view.gpu_primary_down) primary_down = 1;
@@ -222,7 +227,7 @@ index 4dd7ecd..24fd947 100644
 +    return 1;
 +}
 +
-@@ -6272,0 +6413,25 @@ int native_sdk_windows_note_gpu_surface_input(Host *host, uint64_t window_id, co
+@@ -6272,0 +6418,25 @@ int native_sdk_windows_note_gpu_surface_input(Host *host, uint64_t window_id, co
 +int native_sdk_windows_show_context_menu(Host *host, uint64_t window_id, const char *label, size_t label_len, double x, double y, uint64_t token, const WindowsContextMenuItem *items, size_t count) {
 +    if (!host || !items || count == 0) return 0;
 +    auto found = host->windows.find(window_id);

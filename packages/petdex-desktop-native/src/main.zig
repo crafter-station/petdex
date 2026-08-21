@@ -2543,6 +2543,20 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
                     syncBubbleWindow(model, fx);
                     return;
                 }
+                var release_x = read.x;
+                var release_y = read.y;
+                const release_dx = (read.cursor_x - model.grab_dx) - read.x;
+                const release_dy = (read.cursor_y - model.grab_dy) - read.y;
+                if (release_dx != 0 or release_dy != 0) {
+                    if (fx.moveWindow("main", release_dx, release_dy, false)) |moved| {
+                        release_x = moved.x;
+                        release_y = moved.y;
+                        model.pet_x = moved.x;
+                        model.pet_y = moved.y;
+                        pushSample(model, moved.x, moved.y, now);
+                        syncBubbleWindow(model, fx);
+                    }
+                }
                 // Release: velocity from our own 100ms sample tail,
                 // the WebView renderer's computeVelocity semantics.
                 model.dragging = false;
@@ -2552,7 +2566,7 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
                 // a plain left-click did nothing at all — the pet gets
                 // patted and reacts, alternating so it doesn't feel
                 // canned (#557's "pet" interaction).
-                if (isTap(now - model.press_ms, read.x - model.press_x, read.y - model.press_y)) {
+                if (isTap(now - model.press_ms, release_x - model.press_x, release_y - model.press_y)) {
                     model.sample_len = 0;
                     if (newestBubble(model)) |bubble| {
                         const focused = if (env_home) |home| plat.activateHerdrPane(home, bubble.herdrPaneSlice()) else false;
