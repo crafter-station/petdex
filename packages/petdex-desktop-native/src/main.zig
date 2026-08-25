@@ -1992,7 +1992,13 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             applyState(model, model.state.next(), 0, fx);
         },
         .toggle_pets_expanded => model.pets_expanded = !model.pets_expanded,
-        .toggle_flock_window => model.flock.open = !model.flock.open,
+        .toggle_flock_window => {
+            model.flock.open = !model.flock.open;
+            // Badges read from the shared agent strip. It loads at boot,
+            // but a theme flip since then would leave it in the wrong
+            // palette; this reloads only when that happened.
+            if (model.flock.open) loadAgentsAtlas(model.dark, fx);
+        },
         .dismiss_install_error => model.install.error_len = 0,
         .install_first_pet => {
             // A fresh install has no pets, so the pet window renders an
@@ -4046,8 +4052,11 @@ fn bubbleView(ui: *AppUi, model: *const Model) AppUi.Node {
 
 const flock_window_label = "flock";
 const flock_canvas_label = "flock-canvas";
-/// Room under the grid for one row of agent labels.
-const flock_label_h: f32 = 18;
+/// Room under each body for its agent badge, plus the gap above it.
+const flock_badge_px: f32 = 18;
+/// Badge, the gap above it, and breathing room below: at exactly badge +
+/// gap the badge lands flush on the window edge and reads as clipped.
+const flock_label_h: f32 = flock_badge_px + 8;
 const flock_max_columns: usize = 4;
 /// Bodies render smaller than the solo pet: the point of the window is
 /// the whole set at a glance, not one mascot at full size.
@@ -4109,10 +4118,39 @@ fn flockMember(ui: *AppUi, model: *const Model, index: usize, spec: flock_mod.La
     });
     body.widget.image_fit = .stretch;
     body.widget.image_sampling = .nearest;
-    return ui.column(.{ .cross = .center }, .{
+    return ui.column(.{ .cross = .center, .gap = 2 }, .{
         body,
-        ui.text(.{ .size = .sm, .text_alignment = .center }, member.labelSlice()),
+        flockBadge(ui, member),
     });
+}
+
+/// Which agent this body belongs to. The logo reads faster than the name
+/// at this size and survives a narrow cell, and the strip it comes from
+/// is already compiled into the binary for the bubbles. The name stays as
+/// the accessibility label, so screen readers and the automation snapshot
+/// still get it.
+fn flockBadge(ui: *AppUi, member: *const flock_mod.Member) AppUi.Node {
+    const name = member.labelSlice();
+    const identity = if (agents_icons_ready and name.len != 0) blk: {
+        var badge = ui.image(.{
+            .width = flock_badge_px,
+            .height = flock_badge_px,
+            .image = agent_icon_atlas_id,
+            .semantics = .{ .label = name },
+        });
+        badge.widget.image_src = agentIconRect(agentIconIndex(name));
+        badge.widget.image_fit = .contain;
+        break :blk badge;
+    } else ui.text(.{ .size = .sm, .text_alignment = .center }, name);
+
+    // An agent that needs the human is the one thing worth spotting from
+    // across the room, and the resting poses of waiting and idle are too
+    // close to carry that on their own. Same amber marker the bubble
+    // already uses for the same meaning.
+    if (member.state != .waiting) return identity;
+    var marker = ui.text(.{ .size = .sm }, "!");
+    marker.widget.style.foreground = canvas.Color.rgb8(250, 170, 48);
+    return ui.row(.{ .cross = .center, .gap = 3 }, .{ identity, marker });
 }
 
 const settings_window_label = "settings";
@@ -4468,6 +4506,29 @@ test "transparent surfaces clear independently from settings" {
     model.dark = false;
     try std.testing.expectEqual(@as(f32, 0), petdexTokens(&model).colors.background.a);
     try std.testing.expectEqual(settings_alpha, settingsBackground(&model).a);
+}
+
+test "a flock body reserves more than its badge is tall" {
+    // At exactly badge + gap the badge landed flush on the window edge
+    // and read as clipped, which only the screenshot showed: the
+    // snapshot bounds looked correct.
+    try std.testing.expect(flock_label_h > flock_badge_px + 2);
+}
+
+test "flock states that must look different get different image slots" {
+    // Bodies render stills from separate slots, so two agents in
+    // different states cannot collapse onto the same artwork.
+    try std.testing.expect(flockImageId(.waiting) != flockImageId(.running));
+    try std.testing.expect(flockImageId(.waiting) != flockImageId(.idle));
+    try std.testing.expect(flockImageId(.running) != flockImageId(.idle));
+    // And they must not collide with the slots the rest of the app owns.
+    for ([_]u64{ flockImageId(.waiting), flockImageId(.running), flockImageId(.idle) }) |id| {
+        try std.testing.expect(id != sheet_image_id);
+        try std.testing.expect(id != agent_icon_atlas_id);
+        try std.testing.expect(id != avatar_image_id);
+        try std.testing.expect(id != tail_image_id);
+        try std.testing.expect(id > cols);
+    }
 }
 
 test "one image slot covers every agent" {
