@@ -68,12 +68,20 @@ fn copyInto(dest: []u8, dest_len: *usize, source: []const u8) void {
 pub fn stateForBubble(bubble: *const hook_server.Bubble) sprite.State {
     const reported = bubble.agentStateSlice();
     if (reported.len != 0) {
+        // Herdr's vocabulary: four statuses, all it can see.
         if (std.mem.eql(u8, reported, "blocked")) return .waiting;
-        if (std.mem.eql(u8, reported, "waiting")) return .waiting;
         if (std.mem.eql(u8, reported, "working")) return .running;
+        if (std.mem.eql(u8, reported, "done")) return .idle;
+        // What the direct hooks add on top, and the reason a body can say
+        // more than "busy": a failed tool call, a read-only pass, the end
+        // of a turn. None of these cross Herdr's plugin API.
+        if (std.mem.eql(u8, reported, "failed")) return .failed;
+        if (std.mem.eql(u8, reported, "review")) return .review;
+        if (std.mem.eql(u8, reported, "waving")) return .waving;
+        if (std.mem.eql(u8, reported, "jumping")) return .jumping;
+        if (std.mem.eql(u8, reported, "waiting")) return .waiting;
         if (std.mem.eql(u8, reported, "running")) return .running;
         if (std.mem.eql(u8, reported, "idle")) return .idle;
-        if (std.mem.eql(u8, reported, "done")) return .idle;
         // An unknown name is not a reason to lie about the agent: fall
         // through to the boolean rather than inventing a state.
     }
@@ -388,4 +396,63 @@ test "Herdr done means idle, not verified completion" {
     var model: Model = .{};
     reconcile(&model, &[_]hook_server.Bubble{testBubbleWithState("s1", "claude", true, "done")});
     try std.testing.expectEqual(sprite.State.idle, model.members[0].state);
+}
+
+test "a failed tool call shows as failure, not as idle" {
+    // The whole competitive claim: Herdr's plugin API carries four
+    // statuses and none of them is "that tool call errored". The direct
+    // hooks compute it, so a body can show it.
+    var model: Model = .{};
+    reconcile(&model, &[_]hook_server.Bubble{testBubbleWithState("s1", "claude", true, "failed")});
+    try std.testing.expectEqual(sprite.State.failed, model.members[0].state);
+}
+
+test "a read-only pass reads apart from an edit" {
+    var model: Model = .{};
+    reconcile(&model, &[_]hook_server.Bubble{
+        testBubbleWithState("s1", "claude", true, "review"),
+        testBubbleWithState("s2", "codex", true, "working"),
+    });
+    try std.testing.expectEqual(sprite.State.review, model.members[0].state);
+    try std.testing.expectEqual(sprite.State.running, model.members[1].state);
+}
+
+test "the states Herdr cannot express all survive the trip" {
+    // Each of these comes from a direct hook and has no equivalent in
+    // Herdr's working/blocked/idle/done.
+    const cases = [_]struct { reported: []const u8, want: sprite.State }{
+        .{ .reported = "failed", .want = .failed },
+        .{ .reported = "review", .want = .review },
+        .{ .reported = "waving", .want = .waving },
+        .{ .reported = "jumping", .want = .jumping },
+    };
+    for (cases) |case| {
+        var model: Model = .{};
+        reconcile(&model, &[_]hook_server.Bubble{testBubbleWithState("s1", "claude", true, case.reported)});
+        try std.testing.expectEqual(case.want, model.members[0].state);
+    }
+}
+
+test "a body without a pane offers no jump" {
+    // Direct hooks outside Herdr carry no pane. Such a body must stay
+    // inert rather than presenting a click that would reach nothing.
+    var model: Model = .{};
+    reconcile(&model, &[_]hook_server.Bubble{
+        testBubble("s1", "claude", "", true),
+        testBubble("s2", "codex", "w1:p9", true),
+    });
+    try std.testing.expectEqual(@as(usize, 0), model.members[0].herdrPaneSlice().len);
+    try std.testing.expectEqualStrings("w1:p9", model.members[1].herdrPaneSlice());
+}
+
+test "each body keeps its own pane, so a click cannot reach the wrong session" {
+    var model: Model = .{};
+    reconcile(&model, &[_]hook_server.Bubble{
+        testBubble("s1", "claude", "w1:pA", true),
+        testBubble("s2", "codex", "w1:pB", true),
+        testBubble("s3", "gemini", "w1:pC", true),
+    });
+    try std.testing.expectEqualStrings("w1:pA", model.members[0].herdrPaneSlice());
+    try std.testing.expectEqualStrings("w1:pB", model.members[1].herdrPaneSlice());
+    try std.testing.expectEqualStrings("w1:pC", model.members[2].herdrPaneSlice());
 }

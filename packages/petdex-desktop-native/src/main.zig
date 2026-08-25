@@ -117,6 +117,7 @@ pub const Msg = union(enum) {
     pet_filter: canvas.TextInputEvent,
     toggle_pets_expanded,
     toggle_flock_window,
+    focus_flock_member: u32,
     manifest_done: native_sdk.EffectExit,
     pet_json_done: native_sdk.EffectExit,
     spritesheet_done: native_sdk.EffectExit,
@@ -1603,11 +1604,15 @@ fn registerStateFrames(state: State, fx: *Effects) void {
 const flock_waiting_image_id: u64 = 10;
 const flock_running_image_id: u64 = 11;
 const flock_idle_image_id: u64 = 12;
+const flock_failed_image_id: u64 = 15;
+const flock_review_image_id: u64 = 16;
 
 pub fn flockImageId(state: State) u64 {
     return switch (state) {
         .waiting => flock_waiting_image_id,
         .running, .@"running-right", .@"running-left" => flock_running_image_id,
+        .failed => flock_failed_image_id,
+        .review => flock_review_image_id,
         else => flock_idle_image_id,
     };
 }
@@ -1620,10 +1625,15 @@ fn registerFlockFrames(fx: *Effects) void {
     const fh = sheet.height / sheet.rows;
     var scratch = boot_allocator.alloc(u8, fw * fh * 4) catch return;
     defer boot_allocator.free(scratch);
+    // Five stills fill the registry to its 16-slot cap alongside the pet
+    // window's eight frames, the agent strip, the avatar and the tail.
+    // Nothing else may claim a slot without freeing one here.
     const entries = [_]struct { state: State, id: u64 }{
         .{ .state = .waiting, .id = flock_waiting_image_id },
         .{ .state = .running, .id = flock_running_image_id },
         .{ .state = .idle, .id = flock_idle_image_id },
+        .{ .state = .failed, .id = flock_failed_image_id },
+        .{ .state = .review, .id = flock_review_image_id },
     };
     for (entries) |entry| {
         const def = stateDef(entry.state);
@@ -1992,6 +2002,16 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             applyState(model, model.state.next(), 0, fx);
         },
         .toggle_pets_expanded => model.pets_expanded = !model.pets_expanded,
+        .focus_flock_member => |index| {
+            // The pane id rode all the way from Herdr on the bubble this
+            // body was built from, so reaching the session is the same
+            // verb the pet window already uses for the front bubble.
+            if (index >= model.flock.len) return;
+            const member = &model.flock.members[index];
+            const pane = member.herdrPaneSlice();
+            if (pane.len == 0) return;
+            if (env_home) |home| _ = plat.activateHerdrPane(home, pane);
+        },
         .toggle_flock_window => {
             model.flock.open = !model.flock.open;
             // Badges read from the shared agent strip. It loads at boot,
@@ -4104,8 +4124,19 @@ fn flockSemanticLabel(state: State) []const u8 {
     return switch (state) {
         .waiting => "Agent blocked",
         .running, .@"running-right", .@"running-left" => "Agent working",
+        .failed => "Agent failed",
+        .review => "Agent reading",
+        .waving, .jumping => "Agent finished",
         else => "Agent idle",
     };
+}
+
+/// Which bodies earn the amber marker: the ones where a human either has
+/// to act or would want to look. A failed tool call qualifies for the
+/// same reason a blocked prompt does, and neither is legible from the
+/// pose alone at this size.
+fn flockNeedsAttention(state: State) bool {
+    return state == .waiting or state == .failed;
 }
 
 fn flockMember(ui: *AppUi, model: *const Model, index: usize, spec: flock_mod.LayoutSpec) AppUi.Node {
@@ -4118,7 +4149,16 @@ fn flockMember(ui: *AppUi, model: *const Model, index: usize, spec: flock_mod.La
     });
     body.widget.image_fit = .stretch;
     body.widget.image_sampling = .nearest;
-    return ui.column(.{ .cross = .center, .gap = 2 }, .{
+    // Whole cell, not just the sprite: a 115px target beats a 18px one,
+    // and the badge is part of the same body. A member with no pane (a
+    // direct hook outside Herdr) stays inert rather than offering a jump
+    // that would do nothing.
+    const pressable = member.herdrPaneSlice().len != 0;
+    return ui.column(.{
+        .cross = .center,
+        .gap = 2,
+        .on_press = if (pressable) .{ .focus_flock_member = @intCast(index) } else null,
+    }, .{
         body,
         flockBadge(ui, member),
     });
@@ -4147,7 +4187,7 @@ fn flockBadge(ui: *AppUi, member: *const flock_mod.Member) AppUi.Node {
     // across the room, and the resting poses of waiting and idle are too
     // close to carry that on their own. Same amber marker the bubble
     // already uses for the same meaning.
-    if (member.state != .waiting) return identity;
+    if (!flockNeedsAttention(member.state)) return identity;
     var marker = ui.text(.{ .size = .sm }, "!");
     marker.widget.style.foreground = canvas.Color.rgb8(250, 170, 48);
     return ui.row(.{ .cross = .center, .gap = 3 }, .{ identity, marker });
@@ -4515,19 +4555,44 @@ test "a flock body reserves more than its badge is tall" {
     try std.testing.expect(flock_label_h > flock_badge_px + 2);
 }
 
+test "every flock state names itself, none falls through to idle" {
+    // failed and review were mapped to their own artwork but not to their
+    // own label, so both announced themselves as idle: the states the
+    // direct hooks exist to surface were the ones going unnamed.
+    try std.testing.expectEqualStrings("Agent failed", flockSemanticLabel(.failed));
+    try std.testing.expectEqualStrings("Agent reading", flockSemanticLabel(.review));
+    try std.testing.expectEqualStrings("Agent blocked", flockSemanticLabel(.waiting));
+    try std.testing.expectEqualStrings("Agent working", flockSemanticLabel(.running));
+    try std.testing.expectEqualStrings("Agent idle", flockSemanticLabel(.idle));
+}
+
+test "a body earns the marker when a human has to act" {
+    try std.testing.expect(flockNeedsAttention(.waiting));
+    try std.testing.expect(flockNeedsAttention(.failed));
+    try std.testing.expect(!flockNeedsAttention(.running));
+    try std.testing.expect(!flockNeedsAttention(.idle));
+    try std.testing.expect(!flockNeedsAttention(.review));
+}
+
 test "flock states that must look different get different image slots" {
     // Bodies render stills from separate slots, so two agents in
     // different states cannot collapse onto the same artwork.
-    try std.testing.expect(flockImageId(.waiting) != flockImageId(.running));
-    try std.testing.expect(flockImageId(.waiting) != flockImageId(.idle));
-    try std.testing.expect(flockImageId(.running) != flockImageId(.idle));
+    const flock_states = [_]State{ .waiting, .running, .idle, .failed, .review };
+    for (flock_states, 0..) |a, i| {
+        for (flock_states[i + 1 ..]) |b| {
+            try std.testing.expect(flockImageId(a) != flockImageId(b));
+        }
+    }
     // And they must not collide with the slots the rest of the app owns.
-    for ([_]u64{ flockImageId(.waiting), flockImageId(.running), flockImageId(.idle) }) |id| {
+    for (flock_states) |state| {
+        const id = flockImageId(state);
         try std.testing.expect(id != sheet_image_id);
         try std.testing.expect(id != agent_icon_atlas_id);
         try std.testing.expect(id != avatar_image_id);
         try std.testing.expect(id != tail_image_id);
         try std.testing.expect(id > cols);
+        // The registry caps at 16 slots and these are the last free ones.
+        try std.testing.expect(id <= 16);
     }
 }
 
