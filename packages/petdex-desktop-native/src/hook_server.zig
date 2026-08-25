@@ -303,7 +303,6 @@ const Server = struct {
     // Token-bucket limiter, sidecar budget: 30/s shared by state+bubble.
     bucket: f64 = 30,
     bucket_stamp_ms: i64 = 0,
-    running_toggle: bool = false,
     pid: i32,
 
     fn rateLimitOk(self: *Server) bool {
@@ -319,13 +318,6 @@ const Server = struct {
         return true;
     }
 
-    fn nextRunningState(self: *Server) []const u8 {
-        self.request_lock.lock();
-        defer self.request_lock.unlock();
-        const state = if (self.running_toggle) "running-left" else "running-right";
-        self.running_toggle = !self.running_toggle;
-        return state;
-    }
 };
 
 /// Spawn the listener thread. Never blocks the caller; failures to
@@ -526,18 +518,11 @@ fn route(server: *Server, conn: *Conn, method: []const u8, path: []const u8, hea
             .value => |value| duration = value,
         }
 
-        // Sidecar's sprite variation: bare "running" alternates
-        // left/right per session so consecutive tool calls vary.
-        var applied: []const u8 = state_raw;
-        if (std.mem.eql(u8, state_raw, "running")) {
-            applied = server.nextRunningState();
-        }
-
         var event = StateEvent{ .duration_ms = duration };
-        event.state_len = applied.len;
-        @memcpy(event.state[0..applied.len], applied);
+        event.state_len = state_raw.len;
+        @memcpy(event.state[0..state_raw.len], state_raw);
         const enqueue_result = mailbox.enqueueWithCounter(event);
-        mirrorQueuedState(server, applied, enqueue_result) catch {};
+        mirrorQueuedState(server, state_raw, enqueue_result) catch {};
 
         const dur_out: i64 = if (duration == 0) -1 else @intCast(duration);
         const out = if (dur_out < 0)
@@ -984,16 +969,15 @@ test "unqueued state never reaches the runtime mirror" {
     try std.testing.expectEqual(@as(u64, 0), server.last_state_mirror);
 }
 
-test "running state alternates without sharing mutable state with callers" {
+test "running state is preserved for hook /state posts" {
     var server = Server{
         .allocator = std.testing.allocator,
         .runtime_dir = "",
         .token = undefined,
         .pid = 0,
     };
-    try std.testing.expectEqualStrings("running-right", server.nextRunningState());
-    try std.testing.expectEqualStrings("running-left", server.nextRunningState());
-    try std.testing.expectEqualStrings("running-right", server.nextRunningState());
+    try mirrorQueuedState(&server, "running", .{ .queued = true, .counter = 1 });
+    try std.testing.expectEqual(@as(u64, 1), server.last_state_mirror);
 }
 
 fn jsonNumber(body: []const u8, key: []const u8) ?f64 {
