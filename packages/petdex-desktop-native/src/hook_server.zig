@@ -63,6 +63,12 @@ pub const Bubble = struct {
     herdr_pane: [64]u8 = @splat(0),
     herdr_pane_len: usize = 0,
     busy: bool = false,
+    /// Per-agent attention, when the sender knows it. `busy` alone cannot
+    /// tell a blocked agent from an idle one, and that distinction is the
+    /// whole point of showing a body per agent. Empty means the sender did
+    /// not say, and readers fall back to `busy`.
+    agent_state: [16]u8 = @splat(0),
+    agent_state_len: usize = 0,
     counter: u64 = 0,
 
     pub fn sessionSlice(self: *const Bubble) []const u8 {
@@ -76,6 +82,9 @@ pub const Bubble = struct {
     }
     pub fn herdrPaneSlice(self: *const Bubble) []const u8 {
         return self.herdr_pane[0..self.herdr_pane_len];
+    }
+    pub fn agentStateSlice(self: *const Bubble) []const u8 {
+        return self.agent_state[0..self.agent_state_len];
     }
 };
 
@@ -230,6 +239,25 @@ pub const Mailbox = struct {
         slot.counter = self.bubble_counter;
         self.bubbles_dirty = true;
         return slot.counter;
+    }
+
+    /// Record per-agent attention for a session that already has a slot.
+    /// Separate from setBubbleWithMetadata so the nine-parameter contract
+    /// every existing caller uses stays exactly as it is: a sender that
+    /// knows the state calls this right after, and one that does not
+    /// leaves the field empty for readers to fall back on `busy`.
+    pub fn setBubbleAgentState(self: *Mailbox, session: []const u8, state: []const u8) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        for (self.bubbles[0..self.bubbles_len]) |*b| {
+            if (!std.mem.eql(u8, b.sessionSlice(), session)) continue;
+            const n = @min(state.len, b.agent_state.len);
+            @memcpy(b.agent_state[0..n], state[0..n]);
+            @memset(b.agent_state[n..], 0);
+            b.agent_state_len = n;
+            self.bubbles_dirty = true;
+            return;
+        }
     }
 
     /// Drain the whole set into `out`, returning how many slots landed.
@@ -574,6 +602,11 @@ fn route(server: *Server, conn: *Conn, method: []const u8, path: []const u8, hea
             ) catch {};
         }
         const counter = mailbox.setBubbleWithMetadata(session, capped, agent[0..@min(agent.len, 24)], title[0..@min(title.len, 96)], origin_app, source_tty, source_cwd, herdr_pane, busy);
+        // Optional: a sender that can tell blocked from working says so
+        // here. Older senders omit it and keep the busy-only behaviour.
+        if (jsonString(body, "agent_state")) |state| {
+            mailbox.setBubbleAgentState(session, state[0..@min(state.len, 16)]);
+        }
         mirrorBubble(server, capped, counter, title[0..@min(title.len, 96)], agent[0..@min(agent.len, 24)], busy) catch {};
         const out = std.fmt.bufPrint(&scratch, "{{\"ok\":true,\"counter\":{d}}}", .{counter}) catch return;
         return respond(conn, 200, out);

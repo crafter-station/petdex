@@ -62,6 +62,7 @@ describe("Herdr Petdex bridge", () => {
     expect(update).toEqual({
       bubble: {
         agent_source: "claude",
+        agent_state: "blocked",
         busy: false,
         herdr_pane_id: "w1:p5",
         session_id: "session-1",
@@ -220,5 +221,25 @@ describe("Herdr Petdex bridge", () => {
     } finally {
       await rm(stateRoot, { recursive: true, force: true });
     }
+  });
+
+  test("reports this pane's own status, not the aggregate", () => {
+    // Petdex renders one body per session. Sending only the aggregate
+    // would move every body when any single agent changed, which is the
+    // exact behaviour the flock window exists to replace.
+    const working = updateFromEvent(
+      {
+        data: {
+          agent: "claude",
+          agent_status: "working",
+          pane_id: "w1:p5",
+        },
+      },
+      { ...agent, agent_status: "working" },
+      "waiting",
+      { includeAgents: ["claude"] },
+    );
+    expect(working?.bubble.agent_state).toBe("working");
+    expect(working?.state).toBe("waiting");
   });
 });

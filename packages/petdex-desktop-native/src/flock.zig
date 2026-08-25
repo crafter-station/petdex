@@ -57,10 +57,26 @@ fn copyInto(dest: []u8, dest_len: *usize, source: []const u8) void {
     dest_len.* = n;
 }
 
-/// A bubble's `busy` flag is the only per-agent signal the mailbox carries
-/// today, so V1 renders `running` against `idle`. V2 replaces this with a
-/// real per-agent state once the bridge stops collapsing them.
+/// This agent's body state. The mailbox carries a per-agent attention
+/// string when the sender knows one, so a blocked agent reads apart from
+/// a working one instead of both collapsing into "busy". Senders that do
+/// not report it fall back to the boolean, which is what every existing
+/// hook produces.
+///
+/// The names accepted here are the vocabulary the senders already speak:
+/// Herdr's four statuses and the richer set the direct hooks produce.
 pub fn stateForBubble(bubble: *const hook_server.Bubble) sprite.State {
+    const reported = bubble.agentStateSlice();
+    if (reported.len != 0) {
+        if (std.mem.eql(u8, reported, "blocked")) return .waiting;
+        if (std.mem.eql(u8, reported, "waiting")) return .waiting;
+        if (std.mem.eql(u8, reported, "working")) return .running;
+        if (std.mem.eql(u8, reported, "running")) return .running;
+        if (std.mem.eql(u8, reported, "idle")) return .idle;
+        if (std.mem.eql(u8, reported, "done")) return .idle;
+        // An unknown name is not a reason to lie about the agent: fall
+        // through to the boolean rather than inventing a state.
+    }
     return if (bubble.busy) .running else .idle;
 }
 
@@ -182,6 +198,12 @@ pub fn windowSize(count: usize, spec: LayoutSpec) struct { w: f32, h: f32 } {
         .w = @as(f32, @floatFromInt(shown_cols)) * spec.cell_w + @as(f32, @floatFromInt(shown_cols -| 1)) * spec.gap,
         .h = rows_f * (spec.cell_h + spec.label_h) + @as(f32, @floatFromInt(rows -| 1)) * spec.gap,
     };
+}
+
+fn testBubbleWithState(session: []const u8, agent: []const u8, busy: bool, state: []const u8) hook_server.Bubble {
+    var bubble = testBubble(session, agent, "", busy);
+    copyInto(&bubble.agent_state, &bubble.agent_state_len, state);
+    return bubble;
 }
 
 fn testBubble(session: []const u8, agent: []const u8, pane: []const u8, busy: bool) hook_server.Bubble {
@@ -311,4 +333,59 @@ test "columns never exceed the bodies on screen" {
     try std.testing.expectEqual(@as(usize, 1), columnsFor(0, 4));
     try std.testing.expectEqual(@as(usize, 2), rowsFor(6, 4));
     try std.testing.expectEqual(@as(usize, 1), rowsFor(0, 4));
+}
+
+test "a blocked agent reads apart from a working one" {
+    var model: Model = .{};
+    reconcile(&model, &[_]hook_server.Bubble{
+        testBubbleWithState("s1", "claude", true, "blocked"),
+        testBubbleWithState("s2", "codex", true, "working"),
+    });
+    try std.testing.expectEqual(sprite.State.waiting, model.members[0].state);
+    try std.testing.expectEqual(sprite.State.running, model.members[1].state);
+}
+
+test "one agent changing state leaves the others alone" {
+    // The aggregate the pet window shows would move every body at once.
+    // Here only the session that reported a change moves.
+    var model: Model = .{};
+    const before = [_]hook_server.Bubble{
+        testBubbleWithState("s1", "claude", true, "working"),
+        testBubbleWithState("s2", "codex", true, "working"),
+    };
+    reconcile(&model, &before);
+    try std.testing.expectEqual(sprite.State.running, model.members[1].state);
+
+    reconcile(&model, &[_]hook_server.Bubble{
+        testBubbleWithState("s1", "claude", true, "blocked"),
+        testBubbleWithState("s2", "codex", true, "working"),
+    });
+    try std.testing.expectEqual(sprite.State.waiting, model.members[0].state);
+    try std.testing.expectEqual(sprite.State.running, model.members[1].state);
+}
+
+test "a sender that reports no state keeps the busy behaviour" {
+    var model: Model = .{};
+    reconcile(&model, &[_]hook_server.Bubble{
+        testBubble("s1", "claude", "", true),
+        testBubble("s2", "codex", "", false),
+    });
+    try std.testing.expectEqual(sprite.State.running, model.members[0].state);
+    try std.testing.expectEqual(sprite.State.idle, model.members[1].state);
+}
+
+test "an unknown state name falls back instead of inventing one" {
+    var model: Model = .{};
+    reconcile(&model, &[_]hook_server.Bubble{
+        testBubbleWithState("s1", "claude", true, "quantum"),
+        testBubbleWithState("s2", "codex", false, "quantum"),
+    });
+    try std.testing.expectEqual(sprite.State.running, model.members[0].state);
+    try std.testing.expectEqual(sprite.State.idle, model.members[1].state);
+}
+
+test "Herdr done means idle, not verified completion" {
+    var model: Model = .{};
+    reconcile(&model, &[_]hook_server.Bubble{testBubbleWithState("s1", "claude", true, "done")});
+    try std.testing.expectEqual(sprite.State.idle, model.members[0].state);
 }

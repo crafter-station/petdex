@@ -1594,6 +1594,53 @@ fn registerStateFrames(state: State, fx: *Effects) void {
     }
 }
 
+/// Slots for the flock's per-state stills. The pet window animates one
+/// state at a time through slots 1..8; a flock shows several states at
+/// once, so each body needs a frame of its own state resident. One still
+/// per state is enough to tell them apart at a glance, and it fits the
+/// registry's remaining budget where eight animated frames per body would
+/// not.
+const flock_waiting_image_id: u64 = 10;
+const flock_running_image_id: u64 = 11;
+const flock_idle_image_id: u64 = 12;
+
+pub fn flockImageId(state: State) u64 {
+    return switch (state) {
+        .waiting => flock_waiting_image_id,
+        .running, .@"running-right", .@"running-left" => flock_running_image_id,
+        else => flock_idle_image_id,
+    };
+}
+
+/// Register one representative still per flock state. Called when the
+/// sheet loads, so the bodies have artwork before the window opens.
+fn registerFlockFrames(fx: *Effects) void {
+    if (sheet.pixels.len == 0) return;
+    const fw = sheet.width / cols;
+    const fh = sheet.height / sheet.rows;
+    var scratch = boot_allocator.alloc(u8, fw * fh * 4) catch return;
+    defer boot_allocator.free(scratch);
+    const entries = [_]struct { state: State, id: u64 }{
+        .{ .state = .waiting, .id = flock_waiting_image_id },
+        .{ .state = .running, .id = flock_running_image_id },
+        .{ .state = .idle, .id = flock_idle_image_id },
+    };
+    for (entries) |entry| {
+        const def = stateDef(entry.state);
+        // The first frame is each state's resting pose.
+        const src_x = def.frames[0].col * fw;
+        const src_y = def.row * fh;
+        for (0..fh) |y| {
+            const src_off = ((src_y + y) * sheet.width + src_x) * 4;
+            @memcpy(scratch[y * fw * 4 ..][0 .. fw * 4], sheet.pixels[src_off..][0 .. fw * 4]);
+        }
+        fx.registerImage(entry.id, fw, fh, scratch) catch |err| {
+            std.debug.print("petdex: flock frame register failed ({s})\n", .{@errorName(err)});
+            return;
+        };
+    }
+}
+
 const poll_timer_key: u64 = 2;
 const poll_interval_ms: u32 = 100;
 const min_dwell_ms: u32 = 250;
@@ -1875,6 +1922,10 @@ pub fn boot(model: *Model, fx: *Effects) void {
     // draw.
     pet_display_name = catalog[active].slice();
     registerStateFrames(model.state, fx);
+    // The flock draws several states at once, so its stills are resident
+    // from the moment the sheet is: a body must not wait for its own
+    // state to become the pet window's.
+    registerFlockFrames(fx);
     model.sheet_loaded = true;
     const n = @min(pet_display_name.len, model.pet_name.len);
     @memcpy(model.pet_name[0..n], pet_display_name[0..n]);
@@ -2237,6 +2288,7 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             // the next day.
             model.rotation_day = dayFromWallMs(fx.wallMs());
             registerStateFrames(model.state, fx);
+            registerFlockFrames(fx);
             armFrameTimer(model, fx);
             saveSettings(model);
         },
@@ -4039,13 +4091,21 @@ fn flockView(ui: *AppUi, model: *const Model) AppUi.Node {
     return ui.column(.{ .grow = 1, .main = .center, .cross = .center, .gap = spec.gap, .window_drag = true }, rows[0..row_count]);
 }
 
+fn flockSemanticLabel(state: State) []const u8 {
+    return switch (state) {
+        .waiting => "Agent blocked",
+        .running, .@"running-right", .@"running-left" => "Agent working",
+        else => "Agent idle",
+    };
+}
+
 fn flockMember(ui: *AppUi, model: *const Model, index: usize, spec: flock_mod.LayoutSpec) AppUi.Node {
     const member = &model.flock.members[index];
     var body = ui.image(.{
         .width = spec.cell_w,
         .height = spec.cell_h,
-        .image = @intCast(model.frame_index + 1),
-        .semantics = .{ .label = "Petdex agent" },
+        .image = @intCast(flockImageId(member.state)),
+        .semantics = .{ .label = flockSemanticLabel(member.state) },
     });
     body.widget.image_fit = .stretch;
     body.widget.image_sampling = .nearest;
