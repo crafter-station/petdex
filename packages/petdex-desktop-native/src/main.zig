@@ -28,6 +28,7 @@ const remote_ssh = @import("remote_ssh.zig");
 const remote_writeback = @import("remote_writeback.zig");
 const remote_runtime = @import("remote_runtime.zig");
 const herdr_status = @import("herdr_status.zig");
+const flock_mod = @import("flock.zig");
 pub const updates = @import("updates.zig");
 
 pub const panic = std.debug.FullPanic(native_sdk.debug.capturePanic);
@@ -115,6 +116,7 @@ pub const Msg = union(enum) {
     dsh_remove_done: native_sdk.EffectExit,
     pet_filter: canvas.TextInputEvent,
     toggle_pets_expanded,
+    toggle_flock_window,
     manifest_done: native_sdk.EffectExit,
     pet_json_done: native_sdk.EffectExit,
     spritesheet_done: native_sdk.EffectExit,
@@ -313,6 +315,10 @@ pub const Model = struct {
     pet_filter: [48]u8 = @splat(0),
     pet_filter_len: usize = 0,
     pets_expanded: bool = false,
+    /// One body per live agent. Derived from the same bubbles the
+    /// mailbox already keys by session, so the set exists whether or
+    /// not the window is open.
+    flock: flock_mod.Model = .{},
     install: InstallState = .{},
     remotes: [remote_runtime.max_remotes]remote_runtime.Slot = .{ .{}, .{}, .{}, .{}, .{}, .{}, .{}, .{} },
     remote_count: usize = 0,
@@ -1935,6 +1941,7 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             applyState(model, model.state.next(), 0, fx);
         },
         .toggle_pets_expanded => model.pets_expanded = !model.pets_expanded,
+        .toggle_flock_window => model.flock.open = !model.flock.open,
         .dismiss_install_error => model.install.error_len = 0,
         .install_first_pet => {
             // A fresh install has no pets, so the pet window renders an
@@ -2645,6 +2652,10 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
                     @memcpy(model.bubbles[0..count], drained[0..count]);
                     for (count..hook_server.max_bubbles) |i| model.bubbles[i] = .{};
                     model.bubbles_len = count;
+                    // The flock reads the same live set, one body per
+                    // session, instead of the single aggregate state the
+                    // pet window shows.
+                    flock_mod.reconcile(&model.flock, model.bubbles[0..count]);
                     syncBubbleDeadlines(model, previous[0..previous_len], previous_deadlines[0..previous_len], now);
                     if (newestBubble(model)) |newest| {
                         loadAgentAvatar(newest.agent[0..newest.agent_len], model.dark, fx);
@@ -2714,6 +2725,7 @@ pub fn onCommand(name: []const u8) ?Msg {
     if (std.mem.eql(u8, name, "petdex.quit")) return .quit_app;
     if (std.mem.eql(u8, name, "petdex.focus")) return .toggle_focus_mode;
     if (std.mem.eql(u8, name, "petdex.shuffle")) return .shuffle_pet;
+    if (std.mem.eql(u8, name, "petdex.flock")) return .toggle_flock_window;
     return null;
 }
 
@@ -3978,6 +3990,71 @@ fn bubbleView(ui: *AppUi, model: *const Model) AppUi.Node {
 
 // --------------------------------------------------------- settings window
 
+// ------------------------------------------------------------- flock
+
+const flock_window_label = "flock";
+const flock_canvas_label = "flock-canvas";
+/// Room under the grid for one row of agent labels.
+const flock_label_h: f32 = 18;
+const flock_max_columns: usize = 4;
+/// Bodies render smaller than the solo pet: the point of the window is
+/// the whole set at a glance, not one mascot at full size.
+const flock_pet_scale: f32 = 0.6;
+
+fn flockLayout(model: *const Model) flock_mod.LayoutSpec {
+    _ = model;
+    return .{
+        .cell_w = frame_w * flock_pet_scale,
+        .cell_h = frame_h * flock_pet_scale,
+        .gap = 8,
+        .columns = flock_max_columns,
+        .label_h = flock_label_h,
+    };
+}
+
+/// One body per live agent, laid out in a grid. V1 draws every member
+/// with the active pet's current frame: the bodies are separate, the
+/// artwork is not yet. V3 gives each session its own pet.
+fn flockView(ui: *AppUi, model: *const Model) AppUi.Node {
+    if (model.flock.len == 0 or !model.sheet_loaded) {
+        return ui.column(.{ .grow = 1, .main = .center, .cross = .center, .window_drag = true }, .{
+            ui.text(.{ .size = .sm, .text_alignment = .center }, "No agents running"),
+        });
+    }
+    const spec = flockLayout(model);
+    const columns = flock_mod.columnsFor(model.flock.len, flock_max_columns);
+    var rows: [flock_mod.max_members]AppUi.Node = undefined;
+    var row_count: usize = 0;
+    var index: usize = 0;
+    while (index < model.flock.len) {
+        var cells: [flock_max_columns]AppUi.Node = undefined;
+        var cell_count: usize = 0;
+        while (cell_count < columns and index < model.flock.len) : (index += 1) {
+            cells[cell_count] = flockMember(ui, model, index, spec);
+            cell_count += 1;
+        }
+        rows[row_count] = ui.row(.{ .gap = spec.gap, .cross = .end }, cells[0..cell_count]);
+        row_count += 1;
+    }
+    return ui.column(.{ .grow = 1, .main = .center, .cross = .center, .gap = spec.gap, .window_drag = true }, rows[0..row_count]);
+}
+
+fn flockMember(ui: *AppUi, model: *const Model, index: usize, spec: flock_mod.LayoutSpec) AppUi.Node {
+    const member = &model.flock.members[index];
+    var body = ui.image(.{
+        .width = spec.cell_w,
+        .height = spec.cell_h,
+        .image = @intCast(model.frame_index + 1),
+        .semantics = .{ .label = "Petdex agent" },
+    });
+    body.widget.image_fit = .stretch;
+    body.widget.image_sampling = .nearest;
+    return ui.column(.{ .cross = .center }, .{
+        body,
+        ui.text(.{ .size = .sm, .text_alignment = .center }, member.labelSlice()),
+    });
+}
+
 const settings_window_label = "settings";
 const settings_canvas_label = "settings-canvas";
 
@@ -4025,6 +4102,22 @@ fn petdexWindows(model: *const Model, scratch: *PetdexApp.WindowsScratch) []cons
         }
         count += 1;
     }
+    if (model.flock.open) {
+        const size = flock_mod.windowSize(model.flock.len, flockLayout(model));
+        scratch.windows[count] = .{
+            .label = flock_window_label,
+            .canvas_label = flock_canvas_label,
+            .title = "Petdex Flock",
+            .width = size.w,
+            .height = size.h,
+            .resizable = false,
+            .titlebar = .chromeless,
+            .floating = true,
+            .transparent = true,
+            .on_close = .toggle_flock_window,
+        };
+        count += 1;
+    }
     if (model.settings_open) {
         scratch.windows[count] = .{
             .label = settings_window_label,
@@ -4042,6 +4135,7 @@ fn petdexWindows(model: *const Model, scratch: *PetdexApp.WindowsScratch) []cons
 
 fn petdexWindowView(ui: *PetdexApp.Ui, model: *const Model, window_label: []const u8) PetdexApp.Ui.Node {
     if (std.mem.eql(u8, window_label, "bubble")) return bubbleView(ui, model);
+    if (std.mem.eql(u8, window_label, flock_window_label)) return flockView(ui, model);
     std.debug.assert(std.mem.eql(u8, window_label, settings_window_label));
     return settings_view.settingsView(ui, model, .{
         .ready = agents_icons_ready,
@@ -4099,9 +4193,14 @@ fn petdexStatusItem(model: *const Model, scratch: *PetdexApp.StatusItemScratch) 
         .command = "petdex.focus",
     };
     scratch.items[2] = .{ .id = 3, .label = "Shuffle Pet", .command = "petdex.shuffle" };
-    scratch.items[3] = .{ .id = 4, .separator = true };
-    scratch.items[4] = .{ .id = 5, .label = "Quit Petdex", .command = "petdex.quit" };
-    return .{ .items = scratch.items[0..5] };
+    scratch.items[3] = .{
+        .id = 4,
+        .label = if (model.flock.open) "Hide Flock" else "Show Flock",
+        .command = "petdex.flock",
+    };
+    scratch.items[4] = .{ .id = 5, .separator = true };
+    scratch.items[5] = .{ .id = 6, .label = "Quit Petdex", .command = "petdex.quit" };
+    return .{ .items = scratch.items[0..6] };
 }
 
 /// The menu-bar button icon: the brand mark's silhouette with the face
