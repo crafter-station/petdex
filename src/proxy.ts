@@ -7,6 +7,7 @@ import {
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import createMiddleware from "next-intl/middleware";
 
+import { checkBurst } from "@/lib/burst-guard";
 import { shouldBypassClerkMiddleware } from "@/lib/public-clerk-bypass";
 import {
   publicTrafficGuardKey,
@@ -14,12 +15,9 @@ import {
   shouldBlockKnownAbusiveClient,
 } from "@/lib/public-traffic-guard";
 import {
-  packAssetRatelimit,
   publicCatalogRatelimit,
   publicMetadataRatelimit,
   publicStateRatelimit,
-  publicTrafficBurstRatelimit,
-  stickerAssetRatelimit,
 } from "@/lib/ratelimit";
 import {
   buildRouteCostSample,
@@ -156,23 +154,21 @@ async function guardPublicTraffic(
   });
   if (!rule) return null;
 
+  // The burst check runs in process, so a spike costs no Redis commands. Only
+  // the sustained per-rule limit below reaches Upstash.
+  const key = publicTrafficGuardKey(req.headers);
+  const burst = checkBurst(key);
+  if (!burst.success) return rateLimitedResponse(burst.reset);
+
   // Every limiter fails open (see createRatelimit in @/lib/ratelimit), so a
   // limiter outage degrades to "allow" here instead of throwing into the
   // middleware and turning each matched route into a 500.
-  const key = publicTrafficGuardKey(req.headers);
-  const burst = await publicTrafficBurstRatelimit.limit(key);
-  if (!burst.success) return rateLimitedResponse(burst.reset);
-
   const limit =
-    rule === "sticker"
-      ? await stickerAssetRatelimit.limit(key)
-      : rule === "pack"
-        ? await packAssetRatelimit.limit(key)
-        : rule === "metadata"
-          ? await publicMetadataRatelimit.limit(key)
-          : rule === "state"
-            ? await publicStateRatelimit.limit(key)
-            : await publicCatalogRatelimit.limit(key);
+    rule === "metadata"
+      ? await publicMetadataRatelimit.limit(key)
+      : rule === "state"
+        ? await publicStateRatelimit.limit(key)
+        : await publicCatalogRatelimit.limit(key);
   if (limit.success) return null;
 
   return rateLimitedResponse(limit.reset);

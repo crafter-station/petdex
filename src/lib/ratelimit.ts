@@ -106,27 +106,6 @@ export const trackZipRatelimit = createRatelimit({
   prefix: "petdex:track-zip",
 });
 
-// WhatsApp Sticker Pack generation. Each request fans out to 1 spritesheet
-// fetch + 9 animated WebP encodes + 1 ZIP — the heaviest unauthenticated
-// path in the app. Tighter ceiling so a loop can't burn CPU + R2 egress.
-export const wastickersRatelimit = createRatelimit({
-  redis,
-  limiter: Ratelimit.slidingWindow(8, "1 h"),
-  prefix: "petdex:wastickers",
-});
-
-export const stickerAssetRatelimit = createRatelimit({
-  redis,
-  limiter: Ratelimit.slidingWindow(60, "1 h"),
-  prefix: "petdex:sticker-asset",
-});
-
-export const packAssetRatelimit = createRatelimit({
-  redis,
-  limiter: Ratelimit.slidingWindow(8, "1 h"),
-  prefix: "petdex:pack-asset",
-});
-
 export const publicCatalogRatelimit = createRatelimit({
   redis,
   limiter: Ratelimit.slidingWindow(60, "1 h"),
@@ -145,11 +124,8 @@ export const publicMetadataRatelimit = createRatelimit({
   prefix: "petdex:public-metadata",
 });
 
-export const publicTrafficBurstRatelimit = createRatelimit({
-  redis,
-  limiter: Ratelimit.slidingWindow(120, "1 m"),
-  prefix: "petdex:public-burst",
-});
+// The burst ceiling now lives in @/lib/burst-guard, in process, so a spike
+// costs no Redis commands. Only the sustained limits below reach Upstash.
 
 // Public metrics reads — `/api/pets/[slug]/metrics`. Browser pages hit
 // this on every visit, and the CDN caches the response for 60s so the

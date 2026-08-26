@@ -7,6 +7,17 @@ import {
 } from "@/lib/public-traffic-guard";
 
 describe("public traffic guard", () => {
+  it("leaves the sticker routes unguarded because they only redirect or 410", () => {
+    for (const pathname of [
+      "/api/pets/nukey/thumb",
+      "/api/pets/nukey/sticker",
+      "/api/pets/nukey/wastickers",
+    ]) {
+      expect(publicTrafficGuardRule({ method: "GET", pathname })).toBeNull();
+      expect(publicTrafficGuardRule({ method: "HEAD", pathname })).toBeNull();
+    }
+  });
+
   it("leaves /api/manifest unguarded because it is a cached static redirect", () => {
     expect(
       publicTrafficGuardRule({ method: "GET", pathname: "/api/manifest" }),
@@ -23,24 +34,6 @@ describe("public traffic guard", () => {
   });
 
   it("targets public asset exports and catalog enumeration routes", () => {
-    expect(
-      publicTrafficGuardRule({
-        method: "GET",
-        pathname: "/api/pets/nukey/thumb",
-      }),
-    ).toBe("sticker");
-    expect(
-      publicTrafficGuardRule({
-        method: "GET",
-        pathname: "/api/pets/nukey/sticker",
-      }),
-    ).toBe("sticker");
-    expect(
-      publicTrafficGuardRule({
-        method: "HEAD",
-        pathname: "/api/pets/nukey/wastickers",
-      }),
-    ).toBe("pack");
     expect(
       publicTrafficGuardRule({ method: "GET", pathname: "/api/pets/random" }),
     ).toBe("catalog");
