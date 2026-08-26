@@ -113,6 +113,48 @@
       "when": 1778604000000,
       "tag": "0015_drop_ad_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1778918401000,
+      "tag": "0015_edit_pet_columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1778918402000,
+      "tag": "0016_route_cost_buckets",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1778918403000,
+      "tag": "0017_route_cost_sources",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1778918404000,
+      "tag": "0018_sprite_version_number",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1778918405000,
+      "tag": "0018_sticker_exports",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1778918406000,
+      "tag": "0020_pending_asset_gc_claims",
+      "breakpoints": true
     }
   ]
 }
