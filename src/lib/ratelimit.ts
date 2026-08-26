@@ -7,19 +7,55 @@ const redis = Redis.fromEnv();
 
 type RatelimitConfig = ConstructorParameters<typeof Ratelimit>[0];
 
+const ALLOW_WHEN_LIMITER_IS_DOWN = {
+  success: true,
+  limit: Number.POSITIVE_INFINITY,
+  remaining: Number.POSITIVE_INFINITY,
+  reset: 0,
+  pending: Promise.resolve(),
+};
+
+// A rate limiter protects the site, so it must never be what takes the site
+// down. Upstash answers a temporarily-blocked database with HTTP 200 and an
+// `{"error": ...}` body; the SDK reads that as a success and calls .map() on
+// what it assumed was a pipeline result array, throwing `TypeError: r.map is
+// not a function` out of .limit(). Uncaught, that turned every rate-limited
+// route into a 500, including routes whose handlers never touch Redis.
+//
+// Wrapping the factory rather than each of the 27 call sites means a limiter
+// added later inherits the same fail-open behaviour without anyone
+// remembering to ask for it.
+function failOpen(limiter: Ratelimit): Ratelimit {
+  const inner = limiter.limit.bind(limiter);
+  const wrapped: Ratelimit["limit"] = async (identifier, req) => {
+    try {
+      return await inner(identifier, req);
+    } catch {
+      return ALLOW_WHEN_LIMITER_IS_DOWN;
+    }
+  };
+  return new Proxy(limiter, {
+    get(target, prop, receiver) {
+      if (prop === "limit") return wrapped;
+      return Reflect.get(target, prop, receiver);
+    },
+  });
+}
+
+// Exported for tests: exercises the wrapper without a live Upstash client.
+export function failOpenForTest(limiter: {
+  limit: (identifier: string) => Promise<{ success: boolean; reset?: number }>;
+}): Ratelimit {
+  return failOpen(limiter as unknown as Ratelimit);
+}
+
 function createRatelimit(config: RatelimitConfig): Ratelimit {
   if (IS_MOCK) {
     return {
-      limit: async () => ({
-        success: true,
-        limit: Number.POSITIVE_INFINITY,
-        remaining: Number.POSITIVE_INFINITY,
-        reset: 0,
-        pending: Promise.resolve(),
-      }),
+      limit: async () => ALLOW_WHEN_LIMITER_IS_DOWN,
     } as unknown as Ratelimit;
   }
-  return new Ratelimit(config);
+  return failOpen(new Ratelimit(config));
 }
 
 export const submitRatelimit = createRatelimit({

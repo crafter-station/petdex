@@ -7,6 +7,21 @@ import {
 } from "@/lib/public-traffic-guard";
 
 describe("public traffic guard", () => {
+  it("leaves /api/manifest unguarded because it is a cached static redirect", () => {
+    expect(
+      publicTrafficGuardRule({ method: "GET", pathname: "/api/manifest" }),
+    ).toBeNull();
+    expect(
+      publicTrafficGuardRule({ method: "HEAD", pathname: "/api/manifest" }),
+    ).toBeNull();
+  });
+
+  it("still guards the manifest routes that do read the database", () => {
+    expect(
+      publicTrafficGuardRule({ method: "GET", pathname: "/api/pets/search" }),
+    ).toBe("catalog");
+  });
+
   it("targets public asset exports and catalog enumeration routes", () => {
     expect(
       publicTrafficGuardRule({
@@ -26,9 +41,6 @@ describe("public traffic guard", () => {
         pathname: "/api/pets/nukey/wastickers",
       }),
     ).toBe("pack");
-    expect(
-      publicTrafficGuardRule({ method: "GET", pathname: "/api/manifest" }),
-    ).toBe("catalog");
     expect(
       publicTrafficGuardRule({ method: "GET", pathname: "/api/pets/random" }),
     ).toBe("catalog");

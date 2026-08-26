@@ -156,6 +156,9 @@ async function guardPublicTraffic(
   });
   if (!rule) return null;
 
+  // Every limiter fails open (see createRatelimit in @/lib/ratelimit), so a
+  // limiter outage degrades to "allow" here instead of throwing into the
+  // middleware and turning each matched route into a 500.
   const key = publicTrafficGuardKey(req.headers);
   const burst = await publicTrafficBurstRatelimit.limit(key);
   if (!burst.success) return rateLimitedResponse(burst.reset);

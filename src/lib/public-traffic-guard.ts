@@ -22,7 +22,11 @@ export function publicTrafficGuardRule(input: {
     return "sticker";
   }
   if (/^\/api\/pets\/[^/]+\/wastickers\/?$/.test(pathname)) return "pack";
-  if (pathname === "/api/manifest") return "catalog";
+  // /api/manifest is a static 307 to the R2 object with a 300s CDN cache and
+  // no database read, so rate limiting it spends a Redis round trip to guard
+  // a redirect. It is also the single most requested path, which made it the
+  // largest contributor to the command volume that got the Upstash database
+  // blocked. Leave it out of the guard.
   if (pathname === "/api/pets/random") return "catalog";
   if (pathname === "/api/pets/search") return "catalog";
   if (pathname === "/api/me/header-state") return "state";
