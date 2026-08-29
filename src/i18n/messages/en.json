@@ -280,7 +280,7 @@
     "form": {
       "drop": {
         "title": "Upload a pet package",
-        "instructions": "Drop a folder or a ZIP with <petJson>pet.json</petJson> and <spritesheet>spritesheet.webp</spritesheet> (or .png). Recommended {width}×{height}, 8×9 frame grid.",
+        "instructions": "Drop a folder or a ZIP with <petJson>pet.json</petJson> and <spritesheet>spritesheet.webp</spritesheet> (or .png). Supported grids: {classicWidth}×{classicHeight} (8×9) or {v2Width}×{v2Height} (v2 8×11).",
         "short": "Drop a folder or a ZIP with pet.json + spritesheet.",
         "ariaLabel": "Pet package drop zone",
         "pickFolder": "Pick folder",
@@ -372,8 +372,9 @@
         "invalidJson": "pet.json is not valid JSON.",
         "invalidSpriteVersion": "pet.json has unsupported spriteVersionNumber: {value}. Use 1, 2, or omit it.",
         "unreadableSpritesheet": "Spritesheet image is unreadable.",
-        "tooSmall": "Spritesheet seems too small ({width}×{height}). Use an 8×9 frame grid (recommended {recommendedWidth}×{recommendedHeight}).",
+        "tooSmall": "Spritesheet seems too small ({width}×{height}). Use {classicWidth}×{classicHeight} (8×9) or {v2Width}×{v2Height} (v2 8×11).",
         "badGrid": "Spritesheet grid is {width}×{height}, which doesn't match the 8×9 (1536×1872) or v2 8×11 (1536×2288) frame grid, so frames would render misaligned.",
+        "spriteVersionMismatch": "Spritesheet dimensions use v{detected}, but pet.json declares v{declared}. Update spriteVersionNumber before submitting.",
         "spritesheetMissingPetInfo": "No pet.json found next to this spritesheet, so a placeholder name/description was generated. Fill in the pet name and description below before submitting."
       }
     }

@@ -178,6 +178,20 @@ describe("validateSubmission", () => {
     ).toBeNull();
   });
 
+  it("rejects dimensions whose atlas version disagrees with metadata", () => {
+    const r = validateSubmission({
+      ...BASE_INPUT,
+      spriteVersionNumber: 1,
+      spritesheetWidth: 1536,
+      spritesheetHeight: 2288,
+    });
+    expect(r?.ok).toBe(false);
+    if (r && r.ok === false) {
+      expect(r.error).toBe("invalid_sprite_version");
+      expect(r.field).toBe("spriteVersionNumber");
+    }
+  });
+
   it("rejects an unsupported spriteVersionNumber from pet.json", () => {
     const r = validateSubmission({
       ...BASE_INPUT,

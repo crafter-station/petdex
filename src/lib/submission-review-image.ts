@@ -1,15 +1,19 @@
 import sharp from "sharp";
 
 import { petStates } from "@/lib/pet-states";
+import {
+  canonicalSpriteDimensions,
+  detectSpriteAtlas,
+  SPRITE_COLUMNS,
+  SPRITE_FRAME_HEIGHT,
+  SPRITE_FRAME_WIDTH,
+} from "@/lib/sprite-atlas";
 
-const SPRITESHEET_COLUMNS = 8;
-const SPRITESHEET_ROWS = 9;
-const POLICY_CELL_W = 192;
-const POLICY_CELL_H = 208;
-const EXPECTED_SPRITESHEET_W = SPRITESHEET_COLUMNS * POLICY_CELL_W;
-const EXPECTED_SPRITESHEET_H = SPRITESHEET_ROWS * POLICY_CELL_H;
 const POLICY_BACKGROUND = { r: 120, g: 120, b: 120 };
-const MAX_POLICY_SOURCE_DIMENSION = 4096;
+// Preserve the largest integer-cell atlas accepted by sprite-atlas.ts. The
+// v2 contract allows a 2x 8x11 sheet (3072x4576), whose height is above the
+// old 4096px guard and must still reach the visual review stage.
+const MAX_POLICY_SOURCE_DIMENSION = 4576;
 const MAX_POLICY_SOURCE_PIXELS = 16_777_216;
 const MAX_POLICY_OUTPUT_CHARS = 2 * 1024 * 1024;
 
@@ -46,22 +50,31 @@ export async function preparePolicyReviewImage(
       };
     }
 
-    if (
-      metadata.width !== EXPECTED_SPRITESHEET_W ||
-      metadata.height !== EXPECTED_SPRITESHEET_H
-    ) {
+    const layout = detectSpriteAtlas(metadata.width, metadata.height);
+    if (!layout) {
       return {
         ok: false,
-        reason: `Spritesheet must be ${EXPECTED_SPRITESHEET_W}x${EXPECTED_SPRITESHEET_H} for policy OCR review.`,
+        reason:
+          "Spritesheet must preserve the 8x9 (1536x1872) or v2 8x11 (1536x2288) atlas ratio for policy OCR review.",
       };
     }
 
-    const source = await sharp(spriteBuffer).ensureAlpha().raw().toBuffer();
-    const contactSheet = renderPolicyContactSheet(source);
+    const canonical = canonicalSpriteDimensions(layout.version);
+    const source = await sharp(spriteBuffer)
+      .ensureAlpha()
+      .resize({
+        width: canonical.width,
+        height: canonical.height,
+        fit: "fill",
+        kernel: sharp.kernel.nearest,
+      })
+      .raw()
+      .toBuffer();
+    const contactSheet = renderPolicyContactSheet(source, layout.rows);
     const sheet = await sharp(contactSheet, {
       raw: {
-        width: EXPECTED_SPRITESHEET_W,
-        height: EXPECTED_SPRITESHEET_H,
+        width: canonical.width,
+        height: canonical.height,
         channels: 4,
       },
     })
@@ -83,10 +96,9 @@ export async function preparePolicyReviewImage(
   }
 }
 
-function renderPolicyContactSheet(source: Buffer): Buffer {
-  const output = Buffer.alloc(
-    EXPECTED_SPRITESHEET_W * EXPECTED_SPRITESHEET_H * 4,
-  );
+function renderPolicyContactSheet(source: Buffer, rows: 9 | 11): Buffer {
+  const { width, height } = canonicalSpriteDimensions(rows === 11 ? 2 : 1);
+  const output = Buffer.alloc(width * height * 4);
   for (let index = 0; index < output.length; index += 4) {
     output[index] = POLICY_BACKGROUND.r;
     output[index + 1] = POLICY_BACKGROUND.g;
@@ -95,10 +107,27 @@ function renderPolicyContactSheet(source: Buffer): Buffer {
   }
 
   for (const state of petStates) {
-    const top = state.row * POLICY_CELL_H;
+    const top = state.row * SPRITE_FRAME_HEIGHT;
     for (let column = 0; column < state.frames; column++) {
-      const left = column * POLICY_CELL_W;
-      copyCellOverBackground(source, output, left, top);
+      const left = column * SPRITE_FRAME_WIDTH;
+      copyCellOverBackground(source, output, width, left, top);
+    }
+  }
+
+  // v2 adds two rows of look-direction frames. They are not animation
+  // states in the classic viewer, but policy review still needs to inspect
+  // every visible cell instead of silently dropping those rows.
+  if (rows === 11) {
+    for (let row = 9; row < 11; row++) {
+      for (let column = 0; column < SPRITE_COLUMNS; column++) {
+        copyCellOverBackground(
+          source,
+          output,
+          width,
+          column * SPRITE_FRAME_WIDTH,
+          row * SPRITE_FRAME_HEIGHT,
+        );
+      }
     }
   }
 
@@ -108,12 +137,13 @@ function renderPolicyContactSheet(source: Buffer): Buffer {
 function copyCellOverBackground(
   source: Buffer,
   output: Buffer,
+  width: number,
   left: number,
   top: number,
 ): void {
-  for (let y = 0; y < POLICY_CELL_H; y++) {
-    for (let x = 0; x < POLICY_CELL_W; x++) {
-      const offset = ((top + y) * EXPECTED_SPRITESHEET_W + left + x) * 4;
+  for (let y = 0; y < SPRITE_FRAME_HEIGHT; y++) {
+    for (let x = 0; x < SPRITE_FRAME_WIDTH; x++) {
+      const offset = ((top + y) * width + left + x) * 4;
       const alpha = source[offset + 3];
       if (alpha === 0) continue;
       if (alpha === 255) {

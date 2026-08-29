@@ -306,7 +306,7 @@
     "form": {
       "drop": {
         "title": "上传宠物包",
-        "instructions": "拖入包含 <petJson>pet.json</petJson> 和 <spritesheet>精灵图集文件 spritesheet.webp</spritesheet>（或 .png）的文件夹或 ZIP。推荐 {width}×{height}，8×9 帧网格。",
+        "instructions": "拖入包含 <petJson>pet.json</petJson> 和 <spritesheet>精灵图集文件 spritesheet.webp</spritesheet>（或 .png）的文件夹或 ZIP。支持 {classicWidth}×{classicHeight}（8×9）或 {v2Width}×{v2Height}（v2 8×11）帧网格。",
         "short": "拖入包含 pet.json 和精灵图集 Spritesheet 的文件夹或 ZIP。",
         "ariaLabel": "宠物包拖放区域",
         "pickFolder": "选择文件夹",
@@ -399,8 +399,9 @@
         "invalidJson": "pet.json 不是有效的 JSON。",
         "invalidSpriteVersion": "pet.json 中的 spriteVersionNumber 不受支持：{value}。请使用 1、2，或省略该字段。",
         "unreadableSpritesheet": "无法读取精灵图集 Spritesheet 图片。",
-        "tooSmall": "精灵图集 Spritesheet 看起来太小（{width}×{height}）。请使用 8×9 帧网格（推荐 {recommendedWidth}×{recommendedHeight}）。",
+        "tooSmall": "精灵图集 Spritesheet 看起来太小（{width}×{height}）。请使用 {classicWidth}×{classicHeight}（8×9）或 {v2Width}×{v2Height}（v2 8×11）。",
         "badGrid": "精灵图集 Spritesheet 网格为 {width}×{height}，不符合 8×9（1536×1872）或 v2 8×11（1536×2288）帧网格，帧会错位显示。",
+        "spriteVersionMismatch": "精灵图集尺寸使用 v{detected}，但 pet.json 声明为 v{declared}。请先更新 spriteVersionNumber 再提交。",
         "spritesheetMissingPetInfo": "此精灵图集旁未找到 pet.json，已生成占位名称/描述。请在下方填写宠物名称和描述后再提交。"
       }
     }
