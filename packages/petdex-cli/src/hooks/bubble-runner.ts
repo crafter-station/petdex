@@ -43,8 +43,11 @@ const HOOK_SERVER_BASE = "http://127.0.0.1:7777";
 const HOOK_SERVER_BUBBLE_URL = `${HOOK_SERVER_BASE}/bubble`;
 const HOOK_SERVER_STATE_URL = `${HOOK_SERVER_BASE}/state`;
 const STDIN_CAP = 64 * 1024;
+const STDIN_READ_TIMEOUT_MS = 500;
+const STDIN_DRAIN_GRACE_MS = 300;
 const SESSIONS_DIR = join(RUNTIME_DIR, "sessions");
 const TITLE_MAX = 60;
+type UnrefTimer = ReturnType<typeof setTimeout> & { unref?: () => void };
 
 /**
  * Session titles: UserPromptSubmit carries the user's prompt, so we
@@ -179,6 +182,48 @@ function safeSessionId(raw: unknown): string | null {
 
 type HookStdin = Readable & { isTTY?: boolean };
 
+/** Return the UTF-16 end offset of the first complete JSON value. */
+function completeJsonPayloadEnd(text: string): number | null {
+  let start = 0;
+  while (start < text.length && /\s/.test(text[start] ?? "")) start += 1;
+  const root = text[start];
+  if (root !== "{" && root !== "[") return null;
+
+  const stack: string[] = [root === "{" ? "}" : "]"];
+  let quoted = false;
+  let escaped = false;
+  for (let i = start + 1; i < text.length; i += 1) {
+    const char = text[i];
+    if (quoted) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') quoted = false;
+      continue;
+    }
+    if (char === '"') {
+      quoted = true;
+      continue;
+    }
+    if (char === "{" || char === "[") {
+      stack.push(char === "{" ? "}" : "]");
+      continue;
+    }
+    if (char !== "}" && char !== "]") continue;
+    if (stack.pop() !== char) return null;
+    if (stack.length !== 0) continue;
+
+    // Validate only the first complete value. A hook host may append a
+    // newline or other drain-only bytes after the payload.
+    try {
+      JSON.parse(text.slice(start, i + 1));
+      return i + 1;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 function requiredUtf8ContinuationBytes(byte: number): number | null {
   if (byte <= 0x7f) return 0;
   if (byte >= 0xc2 && byte <= 0xdf) return 1;
@@ -206,6 +251,10 @@ function completeUtf8PrefixLength(prefix: Buffer): number {
     return leadIndex;
   }
   return prefix.length;
+}
+
+function decodeCompleteUtf8Prefix(prefix: Buffer): string {
+  return prefix.toString("utf8", 0, completeUtf8PrefixLength(prefix));
 }
 
 /**
@@ -293,40 +342,79 @@ export function bubbleBody(
 export async function readStdin(
   input: HookStdin = process.stdin,
 ): Promise<string> {
-  // Hooks pipe a single JSON payload. Preserve at most STDIN_CAP bytes for
-  // parsing, but keep draining until EOF or an input error. Returning early
-  // closes the read end of the pipe and can make a host that is still writing
-  // report EPIPE. The generated agent hook timeout bounds the process itself.
+  // Hooks pipe one JSON payload, but some hosts keep stdin open after writing
+  // it. Preserve at most STDIN_CAP bytes for parsing, deliver a complete JSON
+  // value without waiting for EOF, then drain briefly so a large writer does
+  // not see an avoidable EPIPE. An incomplete or silent host is bounded too.
   if (input.isTTY) return Promise.resolve("");
   return await new Promise((resolve) => {
     const prefix: Buffer[] = [];
     let prefixBytes = 0;
     let settled = false;
+    let readTimer: ReturnType<typeof setTimeout> | undefined;
+    let drainTimer: UnrefTimer | undefined;
+
+    const retainedText = () => {
+      const retained = Buffer.concat(prefix, prefixBytes);
+      const text = decodeCompleteUtf8Prefix(retained);
+      const end = completeJsonPayloadEnd(text);
+      // A host may append logging or framing bytes after its JSON payload.
+      // Return only the value that made us settle so parseStdin never sees
+      // unrelated tail data.
+      return end === null ? text : text.slice(0, end);
+    };
+
+    const cleanup = () => {
+      if (readTimer !== undefined) clearTimeout(readTimer);
+      if (drainTimer !== undefined) clearTimeout(drainTimer);
+      input.off("data", onData);
+      input.off("end", finish);
+      input.off("error", finish);
+      input.pause();
+    };
 
     const finish = () => {
       if (settled) return;
       settled = true;
-      input.off("data", onData);
-      input.off("end", finish);
-      input.off("error", finish);
-      const retained = Buffer.concat(prefix, prefixBytes);
-      resolve(retained.toString("utf8", 0, completeUtf8PrefixLength(retained)));
+      cleanup();
+      resolve(retainedText());
+    };
+
+    const settleComplete = () => {
+      if (settled) return;
+      settled = true;
+      if (readTimer !== undefined) clearTimeout(readTimer);
+      resolve(retainedText());
+      // Keep the data listener attached for a short bounded drain. This is
+      // enough for normal oversized hook writes while guaranteeing the child
+      // can exit when the host never closes stdin.
+      drainTimer = setTimeout(cleanup, STDIN_DRAIN_GRACE_MS) as UnrefTimer;
+      drainTimer.unref?.();
     };
 
     const onData = (chunk: Buffer | string) => {
-      if (settled) return;
       const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-      const remaining = STDIN_CAP - prefixBytes;
-      if (remaining <= 0) return;
-      const retained = Buffer.from(bytes.subarray(0, remaining));
-      prefix.push(retained);
-      prefixBytes += retained.length;
+      if (!settled) {
+        const remaining = STDIN_CAP - prefixBytes;
+        if (remaining > 0) {
+          const retained = Buffer.from(bytes.subarray(0, remaining));
+          prefix.push(retained);
+          prefixBytes += retained.length;
+          const text = decodeCompleteUtf8Prefix(
+            Buffer.concat(prefix, prefixBytes),
+          );
+          if (completeJsonPayloadEnd(text) !== null) {
+            settleComplete();
+          }
+        }
+      }
     };
 
     input.on("data", onData);
     input.on("end", finish);
     input.on("error", finish);
     input.resume();
+    readTimer = setTimeout(finish, STDIN_READ_TIMEOUT_MS);
   });
 }
 
@@ -505,7 +593,7 @@ export async function runBubble(args: string[]): Promise<void> {
     transcriptPath,
     lastAssistantMessage,
   } = parseStdin(stdin);
-  const agentSource = stdinSource ?? argSource;
+  const agentSource = resolveAgentSource(stdinSource, argSource);
   if (
     sessionId &&
     prompt &&
@@ -565,4 +653,13 @@ export async function runBubble(args: string[]): Promise<void> {
     );
   }
   await Promise.all(tasks);
+}
+
+/// The command argument identifies the agent that invoked this runner. Stdin
+/// metadata is only a compatibility fallback for callers without that arg.
+export function resolveAgentSource(
+  stdinSource: string | null,
+  argSource: string | null,
+): string | null {
+  return argSource && argSource.length > 0 ? argSource : stdinSource;
 }

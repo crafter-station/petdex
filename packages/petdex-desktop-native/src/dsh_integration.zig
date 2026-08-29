@@ -302,17 +302,55 @@ test "DSH_HOME redirects profile detection" {
 }
 
 test "filesystem detection distinguishes restart from real event connection" {
-    const home = ".zig-cache/petdex-dsh-detect";
-    defer _ = plat.deleteTree(home);
-    plat.makeDir(home ++ "/.dsh/profiles/web");
-    plat.makeDir(home ++ "/.petdex/runtime");
+    // The production app populates this override from the process
+    // environment. Tests must use their isolated fixture home instead of a
+    // developer's real DSH_HOME, otherwise an installed host profile can
+    // make this assertion report connected or not_installed nondeterministically.
+    const saved_dsh_home = env_dsh_home;
+    env_dsh_home = null;
+    defer env_dsh_home = saved_dsh_home;
+
+    var test_dir = std.testing.tmpDir(.{});
+    defer test_dir.cleanup();
+    var home_buf: [128]u8 = undefined;
+    const home = std.fmt.bufPrint(
+        &home_buf,
+        ".zig-cache/tmp/{s}",
+        .{test_dir.sub_path[0..]},
+    ) catch unreachable;
+    var manifest_path_buf: [512]u8 = undefined;
+    const manifest_path = std.fmt.bufPrint(
+        &manifest_path_buf,
+        "{s}/.dsh/profiles/web/package.json",
+        .{home},
+    ) catch unreachable;
+    var handshake_path_buf: [512]u8 = undefined;
+    const handshake_path = std.fmt.bufPrint(
+        &handshake_path_buf,
+        "{s}/.petdex/runtime/dsh-handshake.json",
+        .{home},
+    ) catch unreachable;
+    var manifest_dir_buf: [512]u8 = undefined;
+    const manifest_dir = std.fmt.bufPrint(
+        &manifest_dir_buf,
+        "{s}/.dsh/profiles/web",
+        .{home},
+    ) catch unreachable;
+    var handshake_dir_buf: [512]u8 = undefined;
+    const handshake_dir = std.fmt.bufPrint(
+        &handshake_dir_buf,
+        "{s}/.petdex/runtime",
+        .{home},
+    ) catch unreachable;
+    plat.makeDir(manifest_dir);
+    plat.makeDir(handshake_dir);
     const manifest =
         \\{"dependencies":{"@petdex/dsh-plugin":"file:/stable/plugin.tgz"},"dsh":{"profile":{"bundles":["@petdex/dsh-plugin"]}}}
     ;
-    try std.testing.expect(plat.writeFile(home ++ "/.dsh/profiles/web/package.json", manifest));
+    try std.testing.expect(plat.writeFile(manifest_path, manifest));
     try std.testing.expectEqual(Status.restart_required, detect(std.testing.allocator, home));
     try std.testing.expect(plat.writeFile(
-        home ++ "/.petdex/runtime/dsh-handshake.json",
+        handshake_path,
         "{\"integrationVersion\":\"0.1.0\"}",
     ));
     try std.testing.expectEqual(Status.connected, detect(std.testing.allocator, home));

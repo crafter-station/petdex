@@ -52,7 +52,7 @@ pub fn run(phase: []const u8, arg_agent: ?[]const u8, origin_app: plat.OriginApp
     const token = std.mem.trim(u8, token_raw, " \t\r\n");
     if (token.len == 0) return;
 
-    const agent = jsonString(payload, "agent_source") orelse (arg_agent orelse "");
+    const agent = resolveAgent(payload, arg_agent);
     const source_app = origin_app.wireName();
     var tty_buf: [64]u8 = undefined;
     const source_tty = if (origin_app == .terminal) (plat.controllingTty(&tty_buf) orelse "") else "";
@@ -128,6 +128,16 @@ pub fn run(phase: []const u8, arg_agent: ?[]const u8, origin_app: plat.OriginApp
         }
     }
     waitForPosts(posts[0..post_count]);
+}
+
+/// The hook command identifies the agent that actually invoked this runner.
+/// Prefer that explicit argument over payload metadata, which may be nested,
+/// copied from another integration, or supplied by an agent subprocess.
+fn resolveAgent(payload: []const u8, arg_agent: ?[]const u8) []const u8 {
+    if (arg_agent) |agent| {
+        if (agent.len > 0) return agent;
+    }
+    return jsonString(payload, "agent_source") orelse "";
 }
 
 fn isPromptPhase(phase: []const u8) bool {
@@ -792,6 +802,19 @@ test "stateBody adds duration only for the failure phase" {
         "{\"state\":\"waving\",\"agent_source\":\"codex\"}",
         stateBody(&buf, "waving", 0, "codex").?,
     );
+}
+
+test "explicit hook agent wins over payload metadata" {
+    try t.expectEqualStrings(
+        "codex",
+        resolveAgent("{\"agent_source\":\"claude-code\"}", "codex"),
+    );
+    try t.expectEqualStrings(
+        "claude-code",
+        resolveAgent("{\"agent_source\":\"claude-code\"}", null),
+    );
+    try t.expectEqualStrings("", resolveAgent("{}", null));
+    try t.expectEqualStrings("codex", resolveAgent("{}", "codex"));
 }
 
 test "bubbleBody carries session_id, and omits it when there is none" {

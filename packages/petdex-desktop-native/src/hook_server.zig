@@ -32,7 +32,39 @@ pub const max_pending = 50;
 const max_active_connections: u32 = 64;
 const max_request_bytes: usize = 8192;
 const connection_timeout_ms: i64 = 5_000;
+const response_drain_grace_ms: i64 = 300;
 
+/// Windows' std.Io stream reader intentionally waits for the AFD receive
+/// operation to complete, but it has no stream-level timeout API. Poll the
+/// socket with the native AFD control path first, then use the existing
+/// reader only after the kernel reports readable or closed state. This keeps
+/// the receive buffer and the platform-independent parser unchanged while
+/// making the connection deadline real on Windows too.
+const AfdPollHandle = extern struct {
+    handle: std.os.windows.HANDLE,
+    events: std.os.windows.ULONG,
+    status: std.os.windows.NTSTATUS,
+};
+
+const AfdPollInfo = extern struct {
+    timeout: std.os.windows.LARGE_INTEGER,
+    handle_count: std.os.windows.ULONG,
+    exclusive: std.os.windows.ULONG,
+    handles: [1]AfdPollHandle,
+};
+
+const afd_event_receive: std.os.windows.ULONG = 1 << 0;
+const afd_event_disconnect: std.os.windows.ULONG = 1 << 3;
+const afd_event_abort: std.os.windows.ULONG = 1 << 4;
+const afd_event_close: std.os.windows.ULONG = 1 << 5;
+const afd_readable_events = afd_event_receive |
+    afd_event_disconnect |
+    afd_event_abort |
+    afd_event_close;
+
+// AFD.POLL is issued directly on each accepted socket handle below. The AFD
+// endpoint is created by Winsock; opening a separate \Device\Afd child and
+// sending the ioctl to that control handle is rejected by Windows.
 pub const StateEvent = struct {
     state: [16]u8 = @splat(0),
     state_len: usize = 0,
@@ -348,12 +380,6 @@ pub fn start(allocator: std.mem.Allocator, home: []const u8) !void {
 }
 
 fn run(server: *Server) void {
-    writeRuntimeFile(server, "update-token", &server.token, 0o600) catch |err| {
-        std.debug.print("petdex: token write failed ({s})\n", .{@errorName(err)});
-        return;
-    };
-    mirrorState(server, "idle", 0) catch {};
-
     // This thread owns its Io for its whole life: the listener blocks
     // in accept() forever and must never touch the main thread's.
     var scope = plat.Scope.init();
@@ -363,7 +389,10 @@ fn run(server: *Server) void {
     const addr: std.Io.net.IpAddress = .{ .ip4 = .loopback(7777) };
     var listener = addr.listen(io, .{
         .kernel_backlog = 16,
-        .reuse_address = true,
+        // This endpoint is a single-owner service. Zig maps true to
+        // SO_REUSEPORT on POSIX, which would let a second desktop bind the
+        // same port and replace the first instance's token file.
+        .reuse_address = false,
         .mode = .stream,
         .protocol = .tcp,
     }) catch {
@@ -371,6 +400,16 @@ fn run(server: *Server) void {
         return;
     };
     defer listener.deinit(io);
+
+    // Bind before replacing the token file. A second desktop instance may
+    // fail to bind; it must not invalidate the token of the listener that is
+    // already serving hooks.
+    writeRuntimeFile(server, "update-token", &server.token, 0o600) catch |err| {
+        std.debug.print("petdex: token write failed ({s})\n", .{@errorName(err)});
+        return;
+    };
+    mirrorState(server, "idle", 0) catch {};
+
     // Installation is not connection. Each Petdex process requires a fresh
     // event from the plugin before Settings may show DSH as connected.
     deleteRuntimeFile(server, "dsh-handshake.json");
@@ -405,10 +444,14 @@ fn handleConnectionThread(server: *Server, stream: std.Io.net.Stream) void {
     handleConnection(server, &conn);
     stream.shutdown(io, .send) catch {};
     if (builtin.os.tag == .windows) {
-        var drain: [1]u8 = undefined;
+        var drain: [1024]u8 = undefined;
+        const timeout = (std.Io.Timeout{ .duration = .{
+            .raw = std.Io.Duration.fromMilliseconds(response_drain_grace_ms),
+            .clock = .awake,
+        } }).toDeadline(io);
         while (true) {
-            const message = stream.socket.receive(io, &drain) catch break;
-            if (message.data.len == 0) break;
+            const received = receiveWithTimeout(&conn, &drain, timeout) catch break;
+            if (received == 0) break;
         }
     }
     stream.close(io);
@@ -472,6 +515,7 @@ fn handleConnection(server: *Server, conn: *Conn) void {
 
 fn receiveWithTimeout(conn: *Conn, buffer: []u8, timeout: std.Io.Timeout) !usize {
     if (builtin.os.tag == .windows) {
+        try waitForWindowsReadable(conn, timeout);
         var reader = conn.stream.reader(conn.io, &.{});
         var data = [_][]u8{buffer};
         return reader.interface.readVec(&data) catch |err| switch (err) {
@@ -480,6 +524,65 @@ fn receiveWithTimeout(conn: *Conn, buffer: []u8, timeout: std.Io.Timeout) !usize
         };
     }
     return (try conn.stream.socket.receiveTimeout(conn.io, buffer, timeout)).data.len;
+}
+
+fn waitForWindowsReadable(conn: *Conn, timeout: std.Io.Timeout) !void {
+    if (comptime builtin.os.tag != .windows) return;
+
+    var poll = AfdPollInfo{
+        .timeout = windowsRelativeTimeout(timeout, conn.io),
+        .handle_count = 1,
+        .exclusive = 0,
+        .handles = .{.{
+            .handle = conn.stream.socket.handle,
+            .events = afd_readable_events,
+            .status = .SUCCESS,
+        }},
+    };
+    const bytes = std.mem.asBytes(&poll);
+    const result = (try conn.io.operate(.{
+        .device_io_control = .{
+            .file = .{
+                // AFD.POLL is an endpoint ioctl. Windows requires the
+                // endpoint socket handle as the NtDeviceIoControlFile
+                // target; a separately opened \Device\Afd control handle
+                // returns STATUS_INVALID_DEVICE_REQUEST.
+                .handle = conn.stream.socket.handle,
+                // AFD.POLL completes through the APC path when the request is
+                // pending. The synchronous flag would hit Zig's unreachable
+                // branch on STATUS_PENDING instead of honoring the deadline.
+                .flags = .{ .nonblocking = true },
+            },
+            .code = std.os.windows.IOCTL.AFD.POLL,
+            .in = bytes,
+            .out = bytes,
+        },
+    })).device_io_control;
+
+    switch (result.u.Status) {
+        .SUCCESS => {},
+        .TIMEOUT => return error.Timeout,
+        .CANCELLED => return error.Canceled,
+        else => |status| return std.os.windows.unexpectedStatus(status),
+    }
+    if (poll.handles[0].status != .SUCCESS) {
+        return std.os.windows.unexpectedStatus(poll.handles[0].status);
+    }
+    if (poll.handles[0].events & afd_readable_events == 0) {
+        return error.Unexpected;
+    }
+}
+
+fn windowsRelativeTimeout(timeout: std.Io.Timeout, io: std.Io) std.os.windows.LARGE_INTEGER {
+    const duration = timeout.toDurationFromNow(io) orelse return std.math.minInt(std.os.windows.LARGE_INTEGER);
+    return windowsRelativeTimeoutFromNanoseconds(duration.raw.toNanoseconds());
+}
+
+fn windowsRelativeTimeoutFromNanoseconds(nanoseconds: i96) std.os.windows.LARGE_INTEGER {
+    if (nanoseconds <= 0) return 0;
+    const ticks: i128 = @divTrunc(@as(i128, nanoseconds) + 99, 100);
+    const bounded = @min(ticks, @as(i128, std.math.maxInt(std.os.windows.LARGE_INTEGER)));
+    return -@as(std.os.windows.LARGE_INTEGER, @intCast(bounded));
 }
 
 fn route(server: *Server, conn: *Conn, method: []const u8, path: []const u8, head: []const u8, body: []const u8) void {
@@ -929,6 +1032,33 @@ test "json string scanner rejects malformed mirror input" {
     try std.testing.expect(jsonString("{\"text\":\"unterminated}", "text") == null);
     try std.testing.expect(jsonString("{\"text\":\"bad\\x\"}", "text") == null);
     try std.testing.expect(jsonString("{\"text\":\"bad\nline\"}", "text") == null);
+}
+
+test "Windows AFD readable mask includes normal data and terminal events" {
+    try std.testing.expectEqual(
+        @as(std.os.windows.ULONG, (1 << 0) | (1 << 3) | (1 << 4) | (1 << 5)),
+        afd_readable_events,
+    );
+}
+
+test "Windows AFD relative timeout rounds up to 100ns units" {
+    try std.testing.expectEqual(@as(std.os.windows.LARGE_INTEGER, 0), windowsRelativeTimeoutFromNanoseconds(-1));
+    try std.testing.expectEqual(@as(std.os.windows.LARGE_INTEGER, 0), windowsRelativeTimeoutFromNanoseconds(0));
+    try std.testing.expectEqual(@as(std.os.windows.LARGE_INTEGER, -1), windowsRelativeTimeoutFromNanoseconds(1));
+    try std.testing.expectEqual(@as(std.os.windows.LARGE_INTEGER, -1), windowsRelativeTimeoutFromNanoseconds(100));
+    try std.testing.expectEqual(@as(std.os.windows.LARGE_INTEGER, -2), windowsRelativeTimeoutFromNanoseconds(101));
+    try std.testing.expectEqual(@as(std.os.windows.LARGE_INTEGER, -10_000), windowsRelativeTimeoutFromNanoseconds(1_000_000));
+}
+
+test "Windows AFD poll structures keep the native ABI layout" {
+    if (@sizeOf(usize) == 8) {
+        try std.testing.expectEqual(@as(usize, 16), @offsetOf(AfdPollInfo, "handles"));
+        try std.testing.expectEqual(@as(usize, 32), @sizeOf(AfdPollInfo));
+        try std.testing.expectEqual(@as(usize, 0), @offsetOf(AfdPollHandle, "handle"));
+        try std.testing.expectEqual(@as(usize, 8), @offsetOf(AfdPollHandle, "events"));
+        try std.testing.expectEqual(@as(usize, 12), @offsetOf(AfdPollHandle, "status"));
+        try std.testing.expectEqual(@as(usize, 16), @sizeOf(AfdPollHandle));
+    }
 }
 
 test "json number scanner validates complete JSON numbers" {

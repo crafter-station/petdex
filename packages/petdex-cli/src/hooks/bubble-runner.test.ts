@@ -23,6 +23,7 @@ import {
   pruneSessions,
   readStdin,
   rememberSessionTitle,
+  resolveAgentSource,
   sessionTitle,
   stateBody,
   stateForEvent,
@@ -37,6 +38,16 @@ function delay(ms: number): Promise<void> {
 function waitForClose(child: ReturnType<typeof spawn>): Promise<number | null> {
   if (child.exitCode !== null) return Promise.resolve(child.exitCode);
   return new Promise((resolve) => child.once("close", resolve));
+}
+
+async function waitForCloseWithin(
+  child: ReturnType<typeof spawn>,
+  timeoutMs: number,
+): Promise<number | null | "timeout"> {
+  return await Promise.race([
+    waitForClose(child),
+    delay(timeoutMs).then(() => "timeout" as const),
+  ]);
 }
 
 function waitForReady(child: ReturnType<typeof spawn>): Promise<void> {
@@ -112,6 +123,13 @@ describe("readStdin", () => {
     await expect(reading).resolves.toBe('{"tool_name":"Read"}');
   });
 
+  test("returns only the first JSON value when the host appends tail bytes", async () => {
+    const input = new PassThrough();
+    const reading = readStdin(input);
+    input.end('{"tool_name":"Read"}\nagent-log');
+    await expect(reading).resolves.toBe('{"tool_name":"Read"}');
+  });
+
   test("keeps reading until a delayed hook payload reaches EOF", async () => {
     const input = new PassThrough();
     let settled = false;
@@ -128,6 +146,32 @@ describe("readStdin", () => {
     await expect(reading).resolves.toBe(
       '{"tool_name":"Read","tool_input":"continued"}',
     );
+  });
+
+  test("does not parse through a split UTF-8 code point", async () => {
+    const input = new PassThrough();
+    const payload = JSON.stringify({
+      tool_name: "Read",
+      tool_input: { text: "中文🙂" },
+    });
+    const bytes = Buffer.from(payload);
+    const emoji = Buffer.from("🙂");
+    const emojiStart = bytes.indexOf(emoji);
+    expect(emojiStart).toBeGreaterThan(0);
+
+    let settled = false;
+    const reading = readStdin(input).then((value) => {
+      settled = true;
+      return value;
+    });
+
+    input.write(bytes.subarray(0, emojiStart + 1));
+    await delay(20);
+    expect(settled).toBeFalse();
+
+    input.end(bytes.subarray(emojiStart + 1));
+    await expect(reading).resolves.toBe(payload);
+    expect(settled).toBeTrue();
   });
 
   test("keeps the first 64KB while continuing to drain oversized input", async () => {
@@ -217,6 +261,63 @@ describe("readStdin", () => {
       rmSync(fakeHome, { recursive: true, force: true });
     }
   });
+
+  test("returns after a complete JSON payload even when stdin stays open", async () => {
+    const fakeHome = mkdtempSync(join(tmpdir(), "petdex-hook-stdin-"));
+    const child = spawn(
+      process.execPath,
+      [
+        "-e",
+        'import("./src/hooks/bubble-runner.ts").then(async ({ runBubble }) => { const task = runBubble(["post", "codex"]); process.stdout.write("ready\\n"); await task; })',
+      ],
+      {
+        cwd: CLI_PACKAGE_DIR,
+        stdio: ["pipe", "pipe", "pipe"],
+        env: {
+          ...process.env,
+          HOME: fakeHome,
+          USERPROFILE: fakeHome,
+        },
+      },
+    );
+
+    try {
+      await waitForReady(child);
+      child.stdin?.write('{"tool_name":"Read"}');
+      expect(await waitForCloseWithin(child, 900)).toBe(0);
+    } finally {
+      if (child.exitCode === null && !child.killed) child.kill();
+      rmSync(fakeHome, { recursive: true, force: true });
+    }
+  });
+
+  test("returns after a bounded wait when stdin never produces EOF", async () => {
+    const fakeHome = mkdtempSync(join(tmpdir(), "petdex-hook-stdin-"));
+    const child = spawn(
+      process.execPath,
+      [
+        "-e",
+        'import("./src/hooks/bubble-runner.ts").then(async ({ runBubble }) => { const task = runBubble(["post", "codex"]); process.stdout.write("ready\\n"); await task; })',
+      ],
+      {
+        cwd: CLI_PACKAGE_DIR,
+        stdio: ["pipe", "pipe", "pipe"],
+        env: {
+          ...process.env,
+          HOME: fakeHome,
+          USERPROFILE: fakeHome,
+        },
+      },
+    );
+
+    try {
+      await waitForReady(child);
+      expect(await waitForCloseWithin(child, 900)).toBe(0);
+    } finally {
+      if (child.exitCode === null && !child.killed) child.kill();
+      rmSync(fakeHome, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("eventFromArgs - session-level", () => {
@@ -247,6 +348,18 @@ describe("eventFromArgs - session-level", () => {
 
   test("missing phase returns null", () => {
     expect(eventFromArgs([], "")).toBeNull();
+  });
+});
+
+describe("resolveAgentSource", () => {
+  test("prefers the explicit command agent over stdin metadata", () => {
+    expect(resolveAgentSource("claude-code", "codex")).toBe("codex");
+  });
+
+  test("falls back to stdin metadata when the command has no agent", () => {
+    expect(resolveAgentSource("claude-code", null)).toBe("claude-code");
+    expect(resolveAgentSource("claude-code", "")).toBe("claude-code");
+    expect(resolveAgentSource(null, null)).toBeNull();
   });
 });
 

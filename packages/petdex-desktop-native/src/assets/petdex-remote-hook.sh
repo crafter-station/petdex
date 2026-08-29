@@ -12,17 +12,84 @@
 
 runtime="$HOME/.petdex/runtime"
 
-# Keep a bounded useful prefix while draining the complete hook pipe. Tool
-# results can be many megabytes; retaining all of them delays the agent and
-# used to reparse the same payload once per extracted field.
+# Keep a bounded useful prefix and stop after the first complete JSON value.
+# Hosts are allowed to leave the write end of stdin open, so waiting for EOF
+# here would leave every remote hook process stuck. Python is a declared
+# dependency for remote Codex/Hermes reconciliation; on a minimal host without
+# it, use an optional one-block timeout and fail closed rather than waiting
+# forever.
 if command -v python3 >/dev/null 2>&1; then
-    payload=$(python3 -c 'import sys
-data = sys.stdin.buffer.read(65536)
-while sys.stdin.buffer.read(65536):
-    pass
-sys.stdout.buffer.write(data)' 2>/dev/null)
+    payload=$(python3 -c '
+import json
+import os
+import select
+import sys
+import time
+
+CAP = 65536
+READ_TIMEOUT = 0.5
+DRAIN_TIMEOUT = 0.3
+
+fd = sys.stdin.fileno()
+retained = bytearray()
+output = None
+drain_deadline = None
+deadline = time.monotonic() + READ_TIMEOUT
+decoder = json.JSONDecoder()
+
+
+def first_json_bytes():
+    # Ignore malformed bytes only for the probe; the normal parser below still
+    # rejects malformed payloads. This lets a valid JSON value followed by a
+    # partial UTF-8 tail settle without waiting for the tail to complete.
+    text = bytes(retained).decode("utf-8", "ignore")
+    start = len(text) - len(text.lstrip())
+    if start >= len(text) or text[start] not in "[{":
+        return None
+    try:
+        _, end = decoder.raw_decode(text, start)
+    except ValueError:
+        return None
+    return text[:end].encode("utf-8")
+
+
+while True:
+    until = drain_deadline if drain_deadline is not None else deadline
+    remaining = until - time.monotonic()
+    if remaining <= 0:
+        break
+    try:
+        readable, _, _ = select.select([fd], [], [], remaining)
+    except (OSError, ValueError):
+        break
+    if not readable:
+        break
+    try:
+        chunk = os.read(fd, 8192)
+    except OSError:
+        break
+    if not chunk:
+        break
+    if output is None:
+        remaining_capacity = CAP - len(retained)
+        if remaining_capacity > 0:
+            retained.extend(chunk[:remaining_capacity])
+        candidate = first_json_bytes()
+        if candidate is not None:
+            output = candidate
+            drain_deadline = time.monotonic() + DRAIN_TIMEOUT
+        elif len(retained) >= CAP:
+            output = bytes(retained)
+            drain_deadline = time.monotonic() + DRAIN_TIMEOUT
+
+if output is None:
+    output = bytes(retained)
+sys.stdout.buffer.write(output)
+' 2>/dev/null)
+elif command -v timeout >/dev/null 2>&1; then
+    payload=$(timeout 1s sh -c 'dd bs=65536 count=1 2>/dev/null' 2>/dev/null || true)
 else
-    payload=$({ dd bs=65536 count=1 2>/dev/null; cat >/dev/null 2>&1; })
+    payload=
 fi
 
 # Check the gate before doing any parsing. Draining remains unconditional so
@@ -366,8 +433,10 @@ normalize_key() {
     elif command -v python3 >/dev/null 2>&1; then
         printf '%s' "$value" | python3 -c 'import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())'
     else
-        set -- $(printf '%s' "$value" | cksum)
-        printf 'cksum-%s-%s' "$1" "$2"
+        cksum_result=$(printf '%s' "$value" | cksum)
+        cksum_sum=$(printf '%s\n' "$cksum_result" | awk '{print $1}')
+        cksum_length=$(printf '%s\n' "$cksum_result" | awk '{print $2}')
+        printf 'cksum-%s-%s' "$cksum_sum" "$cksum_length"
     fi
 }
 conversation_key=$(normalize_key "$conversation_key")
@@ -401,7 +470,7 @@ notification_kind=$(id_field notification_type)
 case "$phase" in
     pre|post)
         tool=$(id_field tool_name)
-        lower_tool=$(printf '%s' "$tool" | tr 'A-Z' 'a-z')
+        lower_tool=$(printf '%s' "$tool" | tr '[:upper:]' '[:lower:]')
         session_status=running
         message_kind=tool
         if [ "$lower_tool" = "clarify" ]; then

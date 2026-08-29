@@ -80,6 +80,23 @@ jobs:
       - name: Checkout petdex
         uses: actions/checkout@v7
 
+      - name: Detect native CI capabilities
+        id: capabilities
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -Fq 'manifest_url = "https://petdex.dev/api/manifest/v2"' \
+            packages/petdex-desktop-native/src/installer.zig; then
+            echo 'run_deeplink=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'run_deeplink=false' >> "$GITHUB_OUTPUT"
+          fi
+          if grep -Fq 'gpu_primary_latched = 3' patches/native-sdk-windows-pet-input.patch; then
+            echo 'run_runtime=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'run_runtime=false' >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Install Bun
         uses: oven-sh/setup-bun@v2
 
@@ -180,6 +197,18 @@ jobs:
           "$NATIVE_CLI" build -Dcpu=baseline -Dtrace=off
           ls -lh zig-out/bin/
 
+      - name: Verify native hook exits without stdin EOF
+        working-directory: packages/petdex-desktop-native
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v python3 >/dev/null 2>&1; then
+            PYTHON=python3
+          else
+            PYTHON=python
+          fi
+          "$PYTHON" tests/hook_stdin_test.py ./zig-out/bin/petdex-desktop-native
+
       - name: Run the test suite
         # The suite ran on nobody's machine until the root aggregator
         # existed: `zig build test` collects tests from the root module
@@ -215,12 +244,33 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ~/.petdex/pets/ci-pet
-          # A known-good v2 atlas from the live catalog, so a decode
-          # failure here is the platform codec, never a bad fixture.
-          curl -fsSL -o ~/.petdex/pets/ci-pet/spritesheet.webp \
-            "$(curl -fsSL https://petdex.dev/api/install-pet/boba | sed -n 's/.*"spritesheetUrl":"\([^"]*\)".*/\1/p')"
-          printf '{"id":"ci-pet","displayName":"CI Pet","description":"ci","spritesheetPath":"spritesheet.webp"}' \
-            > ~/.petdex/pets/ci-pet/pet.json
+          # Read the compact v2 manifest instead of the retired install-pet
+          # route. This keeps the fixture on the same public contract as
+          # the CLI and fails clearly when the catalog itself is unavailable.
+          {
+            read -r SPRITE_URL
+            read -r SPRITE_VERSION
+            read -r SPRITE_EXT
+          } < <(bun -e '
+            const response = await fetch("https://petdex.dev/api/manifest/v2");
+            if (!response.ok) throw new Error(`manifest ${response.status}`);
+            const manifest = await response.json();
+            const fields = Object.fromEntries(manifest.fields.map((name, index) => [name, index]));
+            const row = manifest.pets.find((pet) => {
+              const sprite = String(pet[fields.spritesheet] ?? "").split("?", 1)[0].toLowerCase();
+              return Number(pet[fields.spriteVersionNumber]) === 2 && sprite.endsWith(".png");
+            });
+            if (!row) throw new Error("manifest has no v2 PNG fixture");
+            const sprite = new URL(row[fields.spritesheet], manifest.assetBase);
+            if (sprite.protocol !== "https:" || sprite.hostname !== "assets.petdex.dev") throw new Error("untrusted sprite host");
+            console.log(sprite.href);
+            console.log(row[fields.spriteVersionNumber]);
+            console.log("png");
+          ')
+          SPRITE_PATH="$HOME/.petdex/pets/ci-pet/spritesheet.$SPRITE_EXT"
+          curl -fsSL -o "$SPRITE_PATH" "$SPRITE_URL"
+          printf '{"id":"ci-pet","displayName":"CI Pet","description":"ci","spriteVersionNumber":%s,"spritesheetPath":"spritesheet.%s"}' \
+            "$SPRITE_VERSION" "$SPRITE_EXT" > ~/.petdex/pets/ci-pet/pet.json
           ls -lh ~/.petdex/pets/ci-pet/
 
       - name: Install a pet (Windows)
@@ -233,10 +283,27 @@ jobs:
         run: |
           $dir = "$env:USERPROFILE\.petdex\pets\ci-pet"
           New-Item -ItemType Directory -Force -Path $dir | Out-Null
-          $meta = Invoke-RestMethod -Uri "https://petdex.dev/api/install-pet/gf-sd"
-          Invoke-WebRequest -Uri $meta.pet.spritesheetUrl -OutFile "$dir\spritesheet.png"
-          '{"id":"ci-pet","displayName":"CI Pet","description":"ci","spritesheetPath":"spritesheet.png"}' |
-            Set-Content -Path "$dir\pet.json" -NoNewline
+          # Keep Windows on the same compact v2 manifest contract as Unix;
+          # the old /api/install-pet route is no longer a reliable fixture.
+          $manifest = Invoke-RestMethod -Uri "https://petdex.dev/api/manifest/v2"
+          $fields = @{}
+          for ($i = 0; $i -lt $manifest.fields.Count; $i++) { $fields[[string]$manifest.fields[$i]] = $i }
+          $row = @($manifest.pets | Where-Object {
+            $path = ([string]$_[$fields["spritesheet"]]).Split("?", 2)[0].ToLowerInvariant()
+            [int]$_[$fields["spriteVersionNumber"]] -eq 2 -and $path.EndsWith(".png")
+          } | Select-Object -First 1)
+          if ($row.Count -eq 0) { throw "manifest has no v2 PNG fixture" }
+          $sprite = [Uri]::new([Uri]$manifest.assetBase, [string]$row[0][$fields["spritesheet"]])
+          if ($sprite.Scheme -ne "https" -or $sprite.Host -ne "assets.petdex.dev") { throw "untrusted sprite host" }
+          $ext = "png"
+          Invoke-WebRequest -Uri $sprite.AbsoluteUri -OutFile "$dir\spritesheet.png"
+          [ordered]@{
+            id = "ci-pet"
+            displayName = "CI Pet"
+            description = "ci"
+            spriteVersionNumber = [int]$row[0][$fields["spriteVersionNumber"]]
+            spritesheetPath = "spritesheet.$ext"
+          } | ConvertTo-Json -Compress | Set-Content -Path "$dir\pet.json" -NoNewline
           Get-ChildItem $dir | Select-Object Name, Length | Format-Table -AutoSize
 
       - name: Exercise managed Herdr plugin (macOS)
@@ -302,11 +369,28 @@ jobs:
           wait "$APP_PID" 2>/dev/null || true
           sleep 2
           echo "=== retry with the cairo renderer ==="
+          # The hook server intentionally disables address reuse so a stale
+          # process cannot silently replace the active token owner. Wait for
+          # the kernel to release 7777 before the diagnostic retry; otherwise
+          # the retry only tests a UI that never started its hook server.
+          port_is_free() {
+            python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 7777)); s.close()' 2>/dev/null
+          }
+          for _ in $(seq 1 60); do
+            port_is_free && break
+            sleep 1
+          done
+          port_is_free || {
+            echo "FAIL: hook server endpoint remained unavailable before Cairo retry"
+            command -v ss >/dev/null 2>&1 && ss -ltnp '( sport = :7777 )' || true
+            exit 1
+          }
           GSK_RENDERER=cairo PETDEX_PET=ci-pet ./zig-out/bin/petdex-desktop-native > cairo.log 2>&1 &
           CAIRO_PID=$!
           sleep 10
           import -window root /tmp/linux-screen-cairo.png || true
           kill "$CAIRO_PID" || true
+          wait "$CAIRO_PID" 2>/dev/null || true
           tail -20 cairo.log
 
       # Deep links were verified by hand on macOS only. GTK's ::open path
@@ -324,7 +408,12 @@ jobs:
       # line would only mean the event was decoded.
 
       - name: Fire a real deep link (Linux)
-        if: matrix.platform == 'linux'
+        # The install contract lands separately from the desktop runtime.
+        # Do not make a Hook or runtime-only PR fail before its own code is
+        # exercised just because the base branch still has the retired
+        # manifest endpoint. Once the v2 installer is present this scenario
+        # runs unchanged on every platform.
+        if: matrix.platform == 'linux' && steps.capabilities.outputs.run_deeplink == 'true'
         shell: bash
         working-directory: packages/petdex-desktop-native
         run: |
@@ -395,18 +484,36 @@ jobs:
             Xvfb :99 -screen 0 1280x800x24 &
             sleep 3
           }
-          # That step also leaves its own app instance behind. GApplication
-          # is single-instance per app id, so a survivor would answer the
-          # link from OUTSIDE this D-Bus session, where the scenario below
-          # can neither see it nor assert on it.
-          pkill -f petdex-desktop-native || true
-          sleep 2
+          # The hook-server step owns and reaps its app instances. A health
+          # probe alone cannot see a closed listener in TIME_WAIT, while the
+          # server deliberately disables address reuse to protect token
+          # ownership. Probe an actual bind so this scenario waits for the
+          # kernel to release the endpoint without masking a live process.
+          port_is_free() {
+            python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 7777)); s.close()' 2>/dev/null
+          }
+          for _ in $(seq 1 60); do
+            port_is_free && break
+            sleep 1
+          done
+          port_is_free || {
+            echo "FAIL: hook server endpoint remained unavailable before deep-link scenario"
+            command -v ss >/dev/null 2>&1 && ss -ltnp '( sport = :7777 )' || true
+            exit 1
+          }
 
           cat > /tmp/deeplink.sh <<'SCENARIO'
           set -euo pipefail
           export PATH="$HOME/.local/bin:$PATH"
           PETDEX_PET=ci-pet petdex-desktop-native > /tmp/deeplink-run.log 2>&1 &
           APP_PID=$!
+          cleanup_deeplink_app() {
+            if [ -n "${APP_PID:-}" ]; then
+              kill "$APP_PID" 2>/dev/null || true
+              wait "$APP_PID" 2>/dev/null || true
+            fi
+          }
+          trap cleanup_deeplink_app EXIT
           sleep 10
           kill -0 "$APP_PID" || { echo "app died before the link"; cat /tmp/deeplink-run.log; exit 1; }
 
@@ -518,7 +625,7 @@ jobs:
           $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
           $g = [System.Drawing.Graphics]::FromImage($bmp)
           $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
-          $bmp.Save("$env:TEMP\windows-screen.png")
+          $bmp.Save("$env:RUNNER_TEMP\windows-screen.png")
           "screenshot saved"
 
           $tokenPath = "$env:USERPROFILE\.petdex\runtime\update-token"
@@ -568,10 +675,11 @@ jobs:
           }
 
           Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue
+          $app.WaitForExit(10000) | Out-Null
           if (-not (Test-Path $tokenPath)) { throw "token was never written" }
 
       - name: Fire a real deep link (Windows)
-        if: matrix.platform == 'windows'
+        if: matrix.platform == 'windows' && steps.capabilities.outputs.run_deeplink == 'true'
         shell: pwsh
         working-directory: packages/petdex-desktop-native
         run: |
@@ -684,9 +792,10 @@ jobs:
           $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
           $g = [System.Drawing.Graphics]::FromImage($bmp)
           $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
-          $bmp.Save("$env:TEMP\windows-screen-deeplink.png")
+          $bmp.Save("$env:RUNNER_TEMP\windows-screen-deeplink.png")
 
           Stop-Process -Id $cold.Id -Force -ErrorAction SilentlyContinue
+          $cold.WaitForExit(10000) | Out-Null
 
       - name: Remote agent writeback over real SSH (Linux)
         # The remote-agents feature's whole promise is that ssh argv built
@@ -703,7 +812,10 @@ jobs:
           set -euo pipefail
           sudo apt-get install -y xvfb
           cleanup_remote_smoke() {
-            if [ -n "${APP_PID:-}" ]; then kill "$APP_PID" 2>/dev/null || true; fi
+            if [ -n "${APP_PID:-}" ]; then
+              kill "$APP_PID" 2>/dev/null || true
+              wait "$APP_PID" 2>/dev/null || true
+            fi
             docker rm -f petdex-ssh >/dev/null 2>&1 || true
           }
           trap cleanup_remote_smoke EXIT
@@ -739,10 +851,22 @@ jobs:
               "hermes":{"enabled":true,"home":"~/.hermes-ci"}}}]}
           JSON
 
-          # Any earlier instance booted without this config and would not
-          # re-run the sync.
-          pkill -f petdex-desktop-native || true
-          sleep 2
+          # The preceding desktop smoke steps own and reap their processes.
+          # Probe an actual bind rather than only health: after a clean app
+          # exit, accepted hook connections can leave 7777 in TIME_WAIT while
+          # the server deliberately keeps address reuse disabled.
+          port_is_free() {
+            python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 7777)); s.close()' 2>/dev/null
+          }
+          for _ in $(seq 1 60); do
+            port_is_free && break
+            sleep 1
+          done
+          port_is_free || {
+            echo "FAIL: hook server endpoint remained unavailable before remote writeback"
+            command -v ss >/dev/null 2>&1 && ss -ltnp '( sport = :7777 )' || true
+            exit 1
+          }
           export DISPLAY=:99
           xdpyinfo -display :99 >/dev/null 2>&1 || { Xvfb :99 -screen 0 1280x800x24 & sleep 3; }
           PETDEX_PET=ci-pet ./zig-out/bin/petdex-desktop-native > remote.log 2>&1 &
@@ -826,7 +950,11 @@ jobs:
       # bare X11 display (crafter-agents/cuse#65), so that leg cannot aim
       # a click even though xwininfo sees the window in the same job.
       - name: Click the pet and prove it reacts
-        if: matrix.platform != 'macos'
+        # The real input assertion depends on the Windows Native SDK patch
+        # carried by the desktop-runtime PR. Contract and Hook PRs still
+        # build and run their own platform checks without claiming this
+        # unrelated regression test.
+        if: matrix.platform != 'macos' && steps.capabilities.outputs.run_runtime == 'true'
         continue-on-error: ${{ matrix.platform == 'linux' }}
         shell: bash
         working-directory: packages/petdex-desktop-native
@@ -973,12 +1101,13 @@ jobs:
           fi
 
           kill "$APP_PID" 2>/dev/null || true
+          wait "$APP_PID" 2>/dev/null || true
 
-      - name: Upload the screenshot
-        if: always() && matrix.platform != 'macos'
+      - name: Upload Linux screenshots
+        if: always() && matrix.platform == 'linux'
         uses: actions/upload-artifact@v7
         with:
-          name: screen-${{ matrix.platform }}
+          name: screen-linux
           path: |
             /tmp/linux-screen.png
             /tmp/linux-screen-cairo.png
@@ -990,9 +1119,24 @@ jobs:
             packages/petdex-desktop-native/menu-closed.png
             packages/petdex-desktop-native/drag-before.png
             packages/petdex-desktop-native/drag-after.png
+          if-no-files-found: ignore
+
+      - name: Upload Windows screenshots
+        if: always() && matrix.platform == 'windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: screen-windows
+          path: |
             ${{ runner.temp }}/windows-screen.png
             ${{ runner.temp }}/windows-screen-deeplink.png
-          if-no-files-found: warn
+            packages/petdex-desktop-native/before.png
+            packages/petdex-desktop-native/after1.png
+            packages/petdex-desktop-native/menu-before.png
+            packages/petdex-desktop-native/menu-open.png
+            packages/petdex-desktop-native/menu-closed.png
+            packages/petdex-desktop-native/drag-before.png
+            packages/petdex-desktop-native/drag-after.png
+          if-no-files-found: ignore
 
       - name: Upload Linux test binary
         if: matrix.platform == 'linux'

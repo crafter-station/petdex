@@ -6,6 +6,12 @@ fixture=$(mktemp -d)
 trap 'rm -rf "$fixture"' 0 1 2 15
 mkdir -p "$fixture/home/.petdex/runtime" "$fixture/bin"
 printf 'test-token\n' > "$fixture/home/.petdex/runtime/update-token"
+python3_path=$(command -v python3 || true)
+if [ -n "$python3_path" ]; then
+    test_path="$(dirname "$python3_path"):/usr/bin:/bin"
+else
+    test_path="/usr/bin:/bin"
+fi
 
 cat > "$fixture/bin/curl" <<'MOCK'
 #!/bin/sh
@@ -20,13 +26,70 @@ exit 0
 MOCK
 chmod +x "$fixture/bin/curl"
 
+wait_for_marker() {
+    marker=$1
+    attempts=0
+    while [ "$attempts" -lt 30 ]; do
+        [ -f "$marker" ] && return 0
+        attempts=$((attempts + 1))
+        sleep 0.1
+    done
+    return 1
+}
+
 payload='{"session_id":"raw-turn","session_key":"gateway/session key","petdex_session_title":"Canonical title","last_assistant_message":"Remote answer"}'
-printf '%s' "$payload" | HOME="$fixture/home" PATH="$fixture/bin:/usr/bin:/bin" \
+printf '%s' "$payload" | HOME="$fixture/home" PATH="$fixture/bin:$test_path" \
     PETDEX_CAPTURE="$fixture/capture" sh "$root/src/assets/petdex-remote-hook.sh" bubble assistant hermes
 
 grep -Eq '"session_id":"[0-9a-f]{64}"' "$fixture/capture"
 grep -q '"source_session_id":"raw-turn"' "$fixture/capture"
 grep -q '"session_kind":"primary"' "$fixture/capture"
+
+# A host may keep the stdin write end open after the JSON is complete. The
+# remote hook must return within its bounded drain window instead of waiting
+# for EOF indefinitely.
+bounded_fifo="$fixture/bounded-input"
+bounded_done="$fixture/bounded-done"
+mkfifo "$bounded_fifo"
+(
+    HOME="$fixture/home" PATH="$fixture/bin:$test_path" \
+        PETDEX_CAPTURE="$fixture/capture" sh "$root/src/assets/petdex-remote-hook.sh" bubble assistant hermes
+    : > "$bounded_done"
+) < "$bounded_fifo" &
+bounded_pid=$!
+exec 3>"$bounded_fifo"
+printf '%s' "$payload" >&3
+if ! wait_for_marker "$bounded_done"; then
+    echo "remote hook waited for EOF after a complete payload" >&2
+    kill "$bounded_pid" 2>/dev/null || true
+    exec 3>&-
+    wait "$bounded_pid" 2>/dev/null || true
+    exit 1
+fi
+exec 3>&-
+wait "$bounded_pid"
+
+# Silent stdin is bounded too; a disconnected or miswired host must not leave
+# a remote shell process behind forever.
+silent_fifo="$fixture/silent-input"
+silent_done="$fixture/silent-done"
+mkfifo "$silent_fifo"
+(
+    HOME="$fixture/home" PATH="$fixture/bin:$test_path" \
+        PETDEX_CAPTURE="$fixture/capture" sh "$root/src/assets/petdex-remote-hook.sh" bubble assistant hermes
+    : > "$silent_done"
+) < "$silent_fifo" &
+silent_pid=$!
+exec 4>"$silent_fifo"
+if ! wait_for_marker "$silent_done"; then
+    echo "remote hook waited for silent stdin" >&2
+    kill "$silent_pid" 2>/dev/null || true
+    exec 4>&-
+    wait "$silent_pid" 2>/dev/null || true
+    exit 1
+fi
+exec 4>&-
+wait "$silent_pid"
 
 # The transport-published Hermes home must drive hook-side canonical lookup
 # even when the hook process itself does not inherit HERMES_HOME.
@@ -47,7 +110,7 @@ with sqlite3.connect(sys.argv[1]) as database:
     )
 PY
 payload='{"session_id":"custom-raw","last_assistant_message":"Custom answer"}'
-printf '%s' "$payload" | HOME="$fixture/home" PATH="$fixture/bin:/usr/bin:/bin" \
+printf '%s' "$payload" | HOME="$fixture/home" PATH="$fixture/bin:$test_path" \
     PETDEX_CAPTURE="$fixture/capture" sh "$root/src/assets/petdex-remote-hook.sh" bubble assistant hermes
 tail -n 1 "$fixture/capture" | grep -q '"session_id":"custom-key"'
 tail -n 1 "$fixture/capture" | grep -q '"title":"Custom server title"'
@@ -55,7 +118,7 @@ tail -n 1 "$fixture/capture" | grep -q '"title":"Custom server title"'
 # Remote metadata is untrusted text even though the transport is authenticated.
 # Controls, quotes, and backslashes must not escape the compact JSON body or
 # create a second synthetic field when the shell interpolates it.
-python3 - <<'PY' | HOME="$fixture/home" PATH="$fixture/bin:/usr/bin:/bin" \
+python3 - <<'PY' | HOME="$fixture/home" PATH="$fixture/bin:$test_path" \
     PETDEX_CAPTURE="$fixture/capture" sh "$root/src/assets/petdex-remote-hook.sh" bubble assistant hermes
 import json
 import sys
@@ -84,7 +147,7 @@ PY
 # Hermes sessions.
 before=$(wc -l < "$fixture/capture")
 payload='{"session_id":"child","petdex_conversation_key":"parent","petdex_session_kind":"subagent","last_assistant_message":"noise"}'
-printf '%s' "$payload" | HOME="$fixture/home" PATH="$fixture/bin:/usr/bin:/bin" \
+printf '%s' "$payload" | HOME="$fixture/home" PATH="$fixture/bin:$test_path" \
     PETDEX_CAPTURE="$fixture/capture" sh "$root/src/assets/petdex-remote-hook.sh" bubble assistant hermes
 after=$(wc -l < "$fixture/capture")
 test "$before" -eq "$after"
@@ -125,7 +188,7 @@ rollout.write_text(
 PY
 before=$(wc -l < "$fixture/capture")
 payload='{"session_id":"00000000-0000-0000-0000-000000000002","last_assistant_message":"child done"}'
-printf '%s' "$payload" | HOME="$fixture/home" PATH="$fixture/bin:/usr/bin:/bin" \
+printf '%s' "$payload" | HOME="$fixture/home" PATH="$fixture/bin:$test_path" \
     PETDEX_CAPTURE="$fixture/capture" sh "$root/src/assets/petdex-remote-hook.sh" bubble stop codex
 after=$(wc -l < "$fixture/capture")
 test "$before" -eq "$after"
