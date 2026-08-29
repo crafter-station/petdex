@@ -25,7 +25,10 @@ const plat = @import("plat.zig");
 /// from the CLI list, one of the two starts refusing legitimate pets.
 const trusted_asset_host = "assets.petdex.dev";
 
-pub const manifest_url = "https://petdex.dev/api/manifest";
+/// The compact manifest is the production catalog contract. Keep the
+/// legacy URL as a bounded fallback for older deployments and mirrors.
+pub const manifest_url = "https://petdex.dev/api/manifest/v2";
+pub const legacy_manifest_url = "https://petdex.dev/api/manifest";
 
 /// Sent on asset requests exactly like the CLI's PETDEX_REFERER: the
 /// asset host answers on it, and dropping it here would make the app's
@@ -71,6 +74,9 @@ pub const install_roots = [_][]const u8{ ".petdex/pets", ".codex/pets" };
 pub const Urls = struct {
     pet_json: []const u8,
     spritesheet: []const u8,
+    /// Empty for the legacy object manifest. Compact v2 rows store asset
+    /// keys relative to this trusted base instead of repeating full URLs.
+    asset_base: []const u8 = "",
 
     /// `spritesheet.png` only when the URL says png, else webp — the
     /// CLI's rule. The extension has to match the bytes, since the
@@ -78,6 +84,30 @@ pub const Urls = struct {
     /// content, not suffix.
     pub fn spritesheetExt(self: Urls) []const u8 {
         return if (std.mem.endsWith(u8, self.spritesheet, ".png")) "png" else "webp";
+    }
+
+    fn resolve(self: Urls, raw: []const u8, buf: []u8) ?[]const u8 {
+        if (std.mem.startsWith(u8, raw, "https://")) {
+            return if (isTrustedAssetUrl(raw)) raw else null;
+        }
+        // Never reinterpret another absolute URL (including http:// and
+        // protocol-relative //host paths) as a relative asset key under the
+        // trusted base. The manifest is untrusted input at this boundary.
+        if (std.mem.startsWith(u8, raw, "//") or std.mem.indexOf(u8, raw, "://") != null) return null;
+        if (self.asset_base.len == 0 or !isTrustedAssetUrl(self.asset_base)) return null;
+        if (raw.len == 0 or raw[0] == '/' or std.mem.indexOf(u8, raw, "..") != null) return null;
+        var base_len = self.asset_base.len;
+        while (base_len > 0 and self.asset_base[base_len - 1] == '/') : (base_len -= 1) {}
+        const base = self.asset_base[0..base_len];
+        return std.fmt.bufPrint(buf, "{s}/{s}", .{ base, raw }) catch null;
+    }
+
+    pub fn resolvePetJson(self: Urls, buf: []u8) ?[]const u8 {
+        return self.resolve(self.pet_json, buf);
+    }
+
+    pub fn resolveSpritesheet(self: Urls, buf: []u8) ?[]const u8 {
+        return self.resolve(self.spritesheet, buf);
     }
 };
 
@@ -89,6 +119,24 @@ pub const Urls = struct {
 /// `homelander-2` both exist, and a prefix match would install the
 /// wrong pet — then reads only forward to that object's closing brace.
 pub fn findPetUrls(manifest: []const u8, slug: []const u8) ?Urls {
+    if (isCompactManifest(manifest)) return findCompactPetUrls(manifest, slug);
+    return findLegacyPetUrls(manifest, slug);
+}
+
+fn isCompactManifest(manifest: []const u8) bool {
+    // Do not classify a legacy object manifest because a pet's display name
+    // happens to contain the words `assetBase` and `fields`. The compact
+    // contract has an explicit version marker and a fixed field declaration;
+    // both are checked before any tuple positions are interpreted.
+    const head = manifest[0..@min(manifest.len, 4096)];
+    const compact_fields =
+        "\"fields\":[\"slug\",\"displayName\",\"kind\",\"submittedBy\",\"spritesheet\",\"petJson\",\"zip\",\"spriteVersionNumber\"]";
+    return std.mem.indexOf(u8, head, "\"v\":2") != null and
+        std.mem.indexOf(u8, head, "\"assetBase\"") != null and
+        std.mem.indexOf(u8, head, compact_fields) != null;
+}
+
+fn findLegacyPetUrls(manifest: []const u8, slug: []const u8) ?Urls {
     var needle_buf: [96]u8 = undefined;
     const needle = std.fmt.bufPrint(&needle_buf, "\"slug\":\"{s}\"", .{slug}) catch return null;
     const at = std.mem.indexOf(u8, manifest, needle) orelse return null;
@@ -101,6 +149,118 @@ pub fn findPetUrls(manifest: []const u8, slug: []const u8) ?Urls {
         .pet_json = jsonStringField(obj, "petJsonUrl") orelse return null,
         .spritesheet = jsonStringField(obj, "spritesheetUrl") orelse return null,
     };
+}
+
+fn findCompactPetUrls(manifest: []const u8, slug: []const u8) ?Urls {
+    var needle_buf: [96]u8 = undefined;
+    const needle = std.fmt.bufPrint(&needle_buf, "[\"{s}\",", .{slug}) catch return null;
+    const at = std.mem.indexOf(u8, manifest, needle) orelse return null;
+    const row = manifest[at..@min(manifest.len, at + 2048)];
+    return .{
+        .pet_json = jsonArrayStringAt(row, 5) orelse return null,
+        .spritesheet = jsonArrayStringAt(row, 4) orelse return null,
+        .asset_base = jsonStringField(manifest, "assetBase") orelse return null,
+    };
+}
+
+/// Return one string element from a compact manifest row. This small JSON
+/// scanner understands escaped quotes and skips non-string values so nullable
+/// credits or zip fields cannot shift the asset columns.
+fn jsonArrayStringAt(array: []const u8, wanted: usize) ?[]const u8 {
+    var pos: usize = 0;
+    while (pos < array.len and std.ascii.isWhitespace(array[pos])) : (pos += 1) {}
+    if (pos >= array.len or array[pos] != '[') return null;
+    pos += 1;
+    var index: usize = 0;
+    while (index <= wanted) {
+        while (pos < array.len and std.ascii.isWhitespace(array[pos])) : (pos += 1) {}
+        if (pos >= array.len) return null;
+        if (array[pos] == '"') {
+            const start = pos + 1;
+            const end = skipJsonString(array, pos) orelse return null;
+            if (index == wanted) return array[start .. end - 1];
+            pos = end;
+        } else {
+            if (index == wanted) return null;
+            pos = skipJsonValue(array, pos) orelse return null;
+        }
+        while (pos < array.len and std.ascii.isWhitespace(array[pos])) : (pos += 1) {}
+        if (pos >= array.len or array[pos] != ',') return null;
+        pos += 1;
+        index += 1;
+    }
+    return null;
+}
+
+fn skipJsonString(source: []const u8, start: usize) ?usize {
+    if (start >= source.len or source[start] != '"') return null;
+    var pos = start + 1;
+    while (pos < source.len) : (pos += 1) {
+        switch (source[pos]) {
+            '"' => return pos + 1,
+            '\\' => {
+                if (pos + 1 >= source.len) return null;
+                pos += 1;
+            },
+            0...0x1f => return null,
+            else => {},
+        }
+    }
+    return null;
+}
+
+/// Skip one JSON value without allocating. Compact manifest columns that are
+/// not needed for installation may be null, numeric, boolean, or nested data;
+/// only the requested asset columns are required to be strings.
+fn skipJsonValue(source: []const u8, start: usize) ?usize {
+    if (start >= source.len) return null;
+    switch (source[start]) {
+        '"' => return skipJsonString(source, start),
+        'n' => return if (std.mem.startsWith(u8, source[start..], "null")) start + 4 else null,
+        't' => return if (std.mem.startsWith(u8, source[start..], "true")) start + 4 else null,
+        'f' => return if (std.mem.startsWith(u8, source[start..], "false")) start + 5 else null,
+        '[', '{' => {
+            var depth: usize = 0;
+            var pos = start;
+            var in_string = false;
+            var escaped = false;
+            while (pos < source.len) : (pos += 1) {
+                const byte = source[pos];
+                if (in_string) {
+                    if (escaped) {
+                        escaped = false;
+                    } else if (byte == '\\') {
+                        escaped = true;
+                    } else if (byte == '"') {
+                        in_string = false;
+                    }
+                    continue;
+                }
+                switch (byte) {
+                    '"' => in_string = true,
+                    '[', '{' => depth += 1,
+                    ']', '}' => {
+                        if (depth == 0) return null;
+                        depth -= 1;
+                        if (depth == 0) return pos + 1;
+                    },
+                    else => {},
+                }
+            }
+            return null;
+        },
+        '-', '0'...'9' => {
+            var pos = start;
+            while (pos < source.len) : (pos += 1) {
+                switch (source[pos]) {
+                    ' ', '\t', '\r', '\n', ',', ']' => return pos,
+                    else => {},
+                }
+            }
+            return pos;
+        },
+        else => return null,
+    }
 }
 
 /// `"key":"value"` inside one already-narrowed object. The manifest
@@ -167,9 +327,9 @@ pub const missing_downloader_note = "petdex: cannot download pets, neither curl 
 /// comes from a remote manifest and the slug from any website, so a
 /// shell here would be a command injection with extra steps.
 ///
-/// `-L` is mandatory, not defensive: /api/manifest answers 307 to
-/// assets.petdex.dev, so without it curl writes an empty file and the
-/// install fails with a valid-looking 0-byte pet. `--fail` turns an
+/// `-L` is mandatory, not defensive: both public manifest routes answer
+/// 307 to assets.petdex.dev, so without it curl writes an empty file and
+/// the install fails with a valid-looking 0-byte pet. `--fail` turns an
 /// HTTP error into a nonzero exit instead of writing the error page
 /// into pet.json.
 pub const max_argv = 12;
@@ -251,6 +411,64 @@ test "manifest lookup picks the exact slug, not a prefix" {
     try std.testing.expectEqualStrings("png", second.spritesheetExt());
 
     try std.testing.expect(findPetUrls(manifest, "nonexistent") == null);
+}
+
+test "legacy manifest asset URLs stay host-bound during resolution" {
+    const manifest =
+        \\{"generatedAt":"x","total":1,"pets":[{"slug":"evil","displayName":"Evil","kind":"character","submittedBy":null,"spritesheetUrl":"https://evil.example/sprite.webp","petJsonUrl":"https://assets.petdex.dev/pets/evil/pet.json","zipUrl":null}]}
+    ;
+    const urls = findPetUrls(manifest, "evil").?;
+    var buf: [512]u8 = undefined;
+    try std.testing.expect(urls.resolveSpritesheet(buf[0..]) == null);
+    try std.testing.expectEqualStrings(
+        "https://assets.petdex.dev/pets/evil/pet.json",
+        urls.resolvePetJson(buf[0..]).?,
+    );
+}
+
+test "relative resolution rejects absolute non-https keys" {
+    const urls = Urls{
+        .pet_json = "http://evil.example/pet.json",
+        .spritesheet = "//evil.example/sprite.webp",
+        .asset_base = "https://assets.petdex.dev",
+    };
+    var buf: [512]u8 = undefined;
+    try std.testing.expect(urls.resolvePetJson(buf[0..]) == null);
+    try std.testing.expect(urls.resolveSpritesheet(buf[0..]) == null);
+}
+
+test "compact manifest resolves relative asset keys" {
+    const manifest =
+        \\{"v":2,"generatedAt":"x","total":1,"assetBase":"https://assets.petdex.dev","fields":["slug","displayName","kind","submittedBy","spritesheet","petJson","zip","spriteVersionNumber"],"pets":[["homelander","H, comma","character",null,"pets/homelander/sprite.webp","pets/homelander/pet.json",null,2]]}
+    ;
+    const urls = findPetUrls(manifest, "homelander").?;
+    var sheet_buf: [512]u8 = undefined;
+    var json_buf: [512]u8 = undefined;
+    const sheet = urls.resolveSpritesheet(sheet_buf[0..]).?;
+    const json = urls.resolvePetJson(json_buf[0..]).?;
+    try std.testing.expectEqualStrings("https://assets.petdex.dev/pets/homelander/sprite.webp", sheet);
+    try std.testing.expectEqualStrings("https://assets.petdex.dev/pets/homelander/pet.json", json);
+    try std.testing.expectEqualStrings("webp", urls.spritesheetExt());
+    try std.testing.expect(findPetUrls(manifest, "missing") == null);
+}
+
+test "legacy marker words do not switch the parser to compact mode" {
+    const manifest =
+        \\{"generatedAt":"x","total":1,"pets":[{"slug":"legacy","displayName":"assetBase fields v:2","kind":"character","submittedBy":null,"spritesheetUrl":"https://assets.petdex.dev/pets/legacy/sprite.webp","petJsonUrl":"https://assets.petdex.dev/pets/legacy/pet.json","zipUrl":null}]}
+    ;
+    const urls = findPetUrls(manifest, "legacy").?;
+    try std.testing.expectEqualStrings("", urls.asset_base);
+    try std.testing.expectEqualStrings(
+        "https://assets.petdex.dev/pets/legacy/sprite.webp",
+        urls.spritesheet,
+    );
+}
+
+test "compact parser requires the declared v2 field contract" {
+    const manifest =
+        \\{"assetBase":"https://assets.petdex.dev","fields":["slug","displayName"],"pets":[["demo","Demo"]]}
+    ;
+    try std.testing.expect(findPetUrls(manifest, "demo") == null);
 }
 
 test "download argv passes the url as its own argument" {

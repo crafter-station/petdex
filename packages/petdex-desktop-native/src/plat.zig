@@ -137,6 +137,11 @@ fn writeFileIo(io: std.Io, path: []const u8, bytes: []const u8, mode: ?u16) bool
 
     var atomic_file = std.Io.Dir.cwd().createFileAtomic(io, target_path, .{
         .permissions = permissionsFromMode(mode),
+        // Callers pass user-scoped paths whose parent may not exist yet
+        // (notably the Codex mirror on a first install). Keep the atomic
+        // replacement semantics, but do not turn a missing parent into a
+        // silently ignored write failure.
+        .make_path = true,
         .replace = true,
     }) catch return false;
     defer atomic_file.deinit(io);
@@ -911,4 +916,17 @@ pub fn activateRunningDefaultBrowser() BrowserActivation {
         if (@as(MsgSendBoolOptions, @ptrCast(&AppleApp.objc_msgSend))(app, activate_sel, 0)) return .activated;
     }
     return .activation_failed;
+}
+
+test "writeFile creates missing parent directories atomically" {
+    const root = ".zig-cache/petdex-plat-write-file";
+    _ = deleteTree(root);
+    defer _ = deleteTree(root);
+
+    const path = root ++ "/nested/pet.json";
+    try std.testing.expect(writeFile(path, "petdex"));
+
+    var buf: [32]u8 = undefined;
+    const got = readFile(path, &buf) orelse return error.ReadFailed;
+    try std.testing.expectEqualStrings("petdex", got);
 }
