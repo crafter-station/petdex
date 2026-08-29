@@ -941,11 +941,12 @@ jobs:
       # and ignores every mouse event, because the platform registers no
       # move_window_fn and all pet input is routed through it.
       #
-      # cuse drives real OS input (XTEST on X11, SendInput on Win32) and
-      # diffs the frames, so a pet that stops reacting fails here rather
-      # than reaching a user. The assertion is deliberately the CHANGED
-      # frame: a tap flips the pet between jumping and waving, and only
-      # a click that actually reached the window can produce that.
+      # cuse drives real OS input (XTEST on X11, SendInput on Win32). The
+      # click assertion uses a frame change because a tap flips the pet
+      # between jumping and waving. Dragging is asserted separately from
+      # the window's reported geometry: animation can change pixels even
+      # when the window never moved, so a screenshot diff is not evidence
+      # of a successful drag.
       # Not blocking on Linux yet: cuse cannot enumerate windows on a
       # bare X11 display (crafter-agents/cuse#65), so that leg cannot aim
       # a click even though xwininfo sees the window in the same job.
@@ -959,7 +960,7 @@ jobs:
         shell: bash
         working-directory: packages/petdex-desktop-native
         env:
-          CUSE_REF: fa387098481758959561d89b57b6428a27497ce3
+          CUSE_REF: 0ade4f9795f0ee8a49f0c2c0401c3ef0bdace0a4
         run: |
           set -euo pipefail
 
@@ -1039,7 +1040,57 @@ jobs:
               target=(--window="$title")
               ;;
             windows)
-              target=(112 210)
+              geometry() {
+                # Petdex is a transparent, chromeless window. Windows UI
+                # Automation (which backs cuse windows) does not expose that
+                # surface reliably, so query the process-owned Win32 window
+                # directly. GetWindowRect reports the same physical screen
+                # coordinates that SendInput and the GDI screenshot use.
+                powershell.exe -NoProfile -NonInteractive -Command '
+                  $source = "using System;using System.Runtime.InteropServices;public static class PetdexGeometry { [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left; public int Top; public int Right; public int Bottom; } [DllImport(`"user32.dll`", SetLastError = true)] public static extern bool GetWindowRect(IntPtr hWnd, out Rect rect); [DllImport(`"user32.dll`")] public static extern uint GetDpiForWindow(IntPtr hWnd); }"
+                  Add-Type $source
+                  $process = Get-Process -Name "petdex-desktop-native" -ErrorAction SilentlyContinue |
+                    Where-Object { -not $_.HasExited -and $_.MainWindowHandle -ne [IntPtr]::Zero } |
+                    Select-Object -First 1
+                  if ($null -eq $process) {
+                    Write-Error "FAIL: could not find the Petdex process window"
+                    exit 1
+                  }
+                  $process.Refresh()
+                  $rect = New-Object PetdexGeometry+Rect
+                  if (-not [PetdexGeometry]::GetWindowRect($process.MainWindowHandle, [ref]$rect)) {
+                    Write-Error "FAIL: GetWindowRect failed for the Petdex window"
+                    exit 1
+                  }
+                  [PSCustomObject]@{
+                    x = $rect.Left
+                    y = $rect.Top
+                    width = $rect.Right - $rect.Left
+                    height = $rect.Bottom - $rect.Top
+                    dpi = [PetdexGeometry]::GetDpiForWindow($process.MainWindowHandle)
+                  } | ConvertTo-Json -Compress
+                '
+              }
+              fit_geometry=$(geometry)
+              echo "fitted geometry: $fit_geometry"
+              FIT="$fit_geometry" bun -e '
+                const geometry = JSON.parse(process.env.FIT);
+                const dpi = Number(geometry.dpi) || 96;
+                const expectedWidth = Math.round(192 * 0.7 * dpi / 96);
+                const expectedHeight = Math.round(208 * 0.7 * dpi / 96);
+                const widthOk = Math.abs(geometry.width - expectedWidth) <= 3;
+                // The Win32 menu may contribute a caption-height strip to
+                // the outer rectangle; it must not hide a stale max canvas.
+                const heightOk = geometry.height >= expectedHeight - 3 && geometry.height <= expectedHeight + 48;
+                if (!widthOk || !heightOk) {
+                  console.error(`FAIL: Windows fit geometry is ${geometry.width}x${geometry.height}, expected content near ${expectedWidth}x${expectedHeight} at ${dpi} DPI`);
+                  process.exit(1);
+                }
+              '
+              target=($(FIT="$fit_geometry" bun -e '
+                const geometry = JSON.parse(process.env.FIT);
+                console.log(Math.round(geometry.x + geometry.width / 2), Math.round(geometry.y + geometry.height * 0.75));
+              '))
               ;;
           esac
 
@@ -1063,7 +1114,7 @@ jobs:
           esac
           if [ "${{ matrix.platform }}" = windows ]; then
             "${bin}" capture menu-before.png --json
-            "${bin}" click 112 210 --button=right --json
+            "${bin}" click "${target[@]}" --button=right --json
             sleep 1
             "${bin}" capture menu-open.png --json
             opened=$(verdict menu-before.png menu-open.png)
@@ -1082,20 +1133,38 @@ jobs:
               *) echo "FAIL: the context menu did not close"; exit 1 ;;
             esac
 
-            moved="SAME 0%"
+            moved=""
             for attempt in 1 2 3; do
               "${bin}" capture drag-before.png --json
-              "${bin}" drag 112 210 192 250 --json
+              before_geometry=$(geometry)
+              echo "drag attempt $attempt before: $before_geometry"
+              drag=($(BEFORE="$before_geometry" bun -e '
+                const geometry = JSON.parse(process.env.BEFORE);
+                const fromX = Math.round(geometry.x + geometry.width / 2);
+                const fromY = Math.round(geometry.y + geometry.height * 0.75);
+                console.log(fromX, fromY, fromX + 80, fromY + 40);
+              '))
+              "${bin}" drag "${drag[@]}" --json
               sleep 1
               "${bin}" capture drag-after.png --json
-              moved=$(verdict drag-before.png drag-after.png)
+              after_geometry=$(geometry)
+              echo "drag attempt $attempt after: $after_geometry"
+              moved=$(BEFORE="$before_geometry" AFTER="$after_geometry" bun -e '
+                const before = JSON.parse(process.env.BEFORE);
+                const after = JSON.parse(process.env.AFTER);
+                const dx = after.x - before.x;
+                const dy = after.y - before.y;
+                const moved = Math.max(Math.abs(dx), Math.abs(dy)) >= 20;
+                console.log(`${moved ? "MOVED" : "STATIONARY"} dx=${dx} dy=${dy}`);
+                if (!moved) process.exit(1);
+              ' 2>/dev/null || true)
               echo "drag attempt $attempt: $moved"
               case "$moved" in
-                CHANGED*) break ;;
+                MOVED*) break ;;
               esac
             done
             case "$moved" in
-              CHANGED*) ;;
+              MOVED*) ;;
               *) echo "FAIL: the pet did not move after a real drag"; exit 1 ;;
             esac
           fi

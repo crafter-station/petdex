@@ -39,9 +39,12 @@ const canvas_label = "pet-canvas";
 const frame_w: f32 = 192;
 const frame_h: f32 = 208;
 const max_scale: f32 = 1.2;
-const win_w: f32 = frame_w * max_scale;
-const win_h: f32 = frame_h * max_scale;
 const pet_edge_pad: f32 = 8;
+const win_w: f32 = frame_w * max_scale;
+// Linux keeps the startup canvas fixed instead of resizing it to the sprite.
+// Reserve the bottom edge pad in that canvas so the largest supported sprite
+// still starts at y=0 rather than clipping its top rows.
+const win_h: f32 = frame_h * max_scale + (if (builtin.target.os.tag == .linux) pet_edge_pad else 0);
 const cols: u64 = 8;
 const sheet_image_id: u64 = 1;
 /// What a first run offers to download. Small, friendly, and already in
@@ -185,6 +188,15 @@ pub const Model = struct {
     /// the top of the screen for the expanded height to fit. Flipped,
     /// the front card is the TOP one and the stack grows downward.
     bubble_flipped: bool = false,
+    /// A constrained placement probe can prove that the above candidate is
+    /// outside the current display's visible frame. Keep that result until
+    /// the pet moves to another display/position or the bubble is resized;
+    /// otherwise every frame would try the rejected side again and cause
+    /// visible jitter at a monitor edge.
+    bubble_above_blocked: bool = false,
+    bubble_above_blocked_x: f64 = 0,
+    bubble_above_blocked_y: f64 = 0,
+    bubble_above_blocked_h: f32 = 0,
     // Drag + momentum, the old desktop's "Codex parity" physics: the
     // frame clock samples the window origin and the primary button
     // through fx.moveWindow(0,0); a down->up edge computes the release
@@ -409,13 +421,10 @@ pub const InstallState = struct {
     phase: InstallPhase = .idle,
     queue: [max_install_queue][64]u8 = @splat(@splat(0)),
     queue_len: [max_install_queue]usize = @splat(0),
+    activate: [max_install_queue]bool = @splat(false),
     queued: usize = 0,
     /// Index into `queue` of the pet being downloaded right now.
     current: usize = 0,
-    /// Set when the deep link was `petdex://<slug>` rather than
-    /// `petdex://install?…`: that form means "use this pet", so the
-    /// install activates it on completion.
-    activate_when_done: bool = false,
     /// Chosen once per install so pet.json and the spritesheet land
     /// under matching names (`spritesheet.png` vs `.webp`).
     ext_png: bool = false,
@@ -438,18 +447,47 @@ pub const InstallState = struct {
         return self.phase != .idle;
     }
 
+    pub fn currentActivates(self: *const InstallState) bool {
+        if (self.current >= self.queued) return false;
+        return self.activate[self.current];
+    }
+
     /// Copy a slug off a borrowed URL slice. Rejected slugs never enter
     /// the queue, so nothing downstream has to re-validate a path.
-    pub fn enqueue(self: *InstallState, slug: []const u8) bool {
-        if (self.queued >= max_install_queue) return false;
+    ///
+    /// A repeated request is merged rather than dropped. This matters
+    /// when a bare `petdex://slug` arrives while the same slug is already
+    /// downloading: the second request upgrades the existing work to an
+    /// activating request without starting a duplicate download.
+    pub fn enqueueRequest(self: *InstallState, slug: []const u8, activate: bool) bool {
         if (!installer.slugOk(slug)) return false;
         for (0..self.queued) |i| {
-            if (std.mem.eql(u8, self.queue[i][0..self.queue_len[i]], slug)) return false;
+            if (std.mem.eql(u8, self.queue[i][0..self.queue_len[i]], slug)) {
+                self.activate[i] = self.activate[i] or activate;
+                return true;
+            }
         }
+        if (self.queued >= max_install_queue) return false;
         @memcpy(self.queue[self.queued][0..slug.len], slug);
         self.queue_len[self.queued] = slug.len;
+        self.activate[self.queued] = activate;
         self.queued += 1;
         return true;
+    }
+
+    pub fn enqueue(self: *InstallState, slug: []const u8) bool {
+        return self.enqueueRequest(slug, false);
+    }
+
+    pub fn removeAt(self: *InstallState, index: usize) void {
+        if (index >= self.queued) return;
+        var i = index;
+        while (i + 1 < self.queued) : (i += 1) {
+            self.queue[i] = self.queue[i + 1];
+            self.queue_len[i] = self.queue_len[i + 1];
+            self.activate[i] = self.activate[i + 1];
+        }
+        self.queued -= 1;
     }
 
     pub fn setError(self: *InstallState, comptime fmt: []const u8, args: anytype) void {
@@ -673,6 +711,48 @@ const url_scheme_prefix = "petdex://";
 var pending_install: InstallState = .{};
 var pending_ready: bool = false;
 
+fn stagePendingInstall(slug: []const u8, activate: bool) bool {
+    if (!pending_install.enqueueRequest(slug, activate)) return false;
+    pending_ready = true;
+    return true;
+}
+
+/// Merge staged requests into the active queue without starting a second
+/// run. This is called from the app's update loop, so it is safe to append
+/// while a manifest or asset effect is in flight; `advanceInstallQueue`
+/// will visit the appended entries after the current one. If the active
+/// fixed-size queue is full, the unmerged tail stays staged for the next
+/// poll instead of being discarded.
+fn mergePendingInstall(model: *Model) ?u32 {
+    if (!pending_ready) return null;
+    var immediate_selection: ?u32 = null;
+    var i: usize = 0;
+    while (i < pending_install.queued) {
+        const slug = pending_install.queue[i][0..pending_install.queue_len[i]];
+        // A bare deep link means "use this pet". If the pet finished
+        // downloading between the URL callback and this merge, select the
+        // catalog entry instead of downloading it a second time. Explicit
+        // `petdex://install` requests keep their existing install semantics.
+        if (pending_install.activate[i]) {
+            if (catalogIndexOf(slug)) |index| {
+                immediate_selection = @intCast(index);
+                pending_install.removeAt(i);
+                continue;
+            }
+        }
+        if (!model.install.enqueueRequest(slug, pending_install.activate[i])) {
+            i += 1;
+            continue;
+        }
+        pending_install.removeAt(i);
+    }
+    if (pending_install.queued == 0) {
+        pending_install = .{};
+        pending_ready = false;
+    }
+    return immediate_selection;
+}
+
 /// `petdex://<slug>` selects a pet, installing it first when it is not
 /// on disk; `petdex://install?slug=a&slug=b` installs without
 /// selecting (petdex-desktop-link.ts builds both forms).
@@ -681,6 +761,8 @@ var pending_ready: bool = false;
 /// callback, so the common case keeps its immediate swap and never
 /// touches the network.
 fn onUrlsOpened(urls: []const []const u8) ?Msg {
+    var staged = false;
+    var immediate_selection: ?u32 = null;
     for (urls) |url| {
         if (!std.mem.startsWith(u8, url, url_scheme_prefix)) continue;
         const rest = url[url_scheme_prefix.len..];
@@ -688,29 +770,30 @@ fn onUrlsOpened(urls: []const []const u8) ?Msg {
 
         if (std.mem.eql(u8, host, "install")) {
             const query = std.mem.indexOfScalar(u8, rest, '?') orelse continue;
-            pending_install = .{};
             var it = std.mem.splitScalar(u8, rest[query + 1 ..], '&');
             while (it.next()) |pair| {
                 if (!std.mem.startsWith(u8, pair, "slug=")) continue;
                 var value = pair["slug=".len..];
                 if (std.mem.indexOfScalar(u8, value, '#')) |cut| value = value[0..cut];
-                _ = pending_install.enqueue(value);
+                staged = stagePendingInstall(value, false) or staged;
             }
-            if (pending_install.queued == 0) continue;
-            pending_install.activate_when_done = false;
-            pending_ready = true;
-            return .noop;
+            continue;
         }
 
         // NSURL hands back the absoluteString, and a bare host round
         // trips as `petdex://slug/`.
-        if (catalogIndexOf(host)) |index| return .{ .select_pet = @intCast(index) };
-        pending_install = .{};
-        if (!pending_install.enqueue(host)) continue;
-        pending_install.activate_when_done = true;
-        pending_ready = true;
-        return .noop;
+        if (catalogIndexOf(host)) |index| {
+            // Process every URL in the callback. If a batch contains
+            // both an already-installed pet and a new one, the immediate
+            // selection is returned while the new install remains staged.
+            immediate_selection = @intCast(index);
+            continue;
+        }
+        staged = stagePendingInstall(host, true) or staged;
     }
+
+    if (immediate_selection) |index| return .{ .select_pet = index };
+    if (staged) return .noop;
     return null;
 }
 
@@ -718,14 +801,15 @@ fn onUrlsOpened(urls: []const []const u8) ?Msg {
 /// `update`, the first place with an `fx` to spawn on.
 fn drainPendingInstall(model: *Model, fx: *Effects) void {
     if (!pending_ready) return;
-    pending_ready = false;
-    if (model.install.busy()) return;
-    const activate = pending_install.activate_when_done;
-    model.install.queued = 0;
-    for (0..pending_install.queued) |i| {
-        _ = model.install.enqueue(pending_install.queue[i][0..pending_install.queue_len[i]]);
+    const immediate_selection = mergePendingInstall(model);
+    if (immediate_selection) |index| {
+        update(model, .{ .select_pet = index }, fx);
     }
-    model.install.activate_when_done = activate;
+    // The staged entries are now part of the active queue. Do not reset or
+    // restart it while an effect is still running; the next poll will retry
+    // only any tail that did not fit.
+    if (model.install.busy()) return;
+    if (model.install.queued == 0) return;
     startInstallQueue(model, fx);
     // A deep-link install arrives from the browser with no Petdex window
     // in front of the user, so the progress banner would render into a
@@ -1945,8 +2029,7 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             // takes the identical path.
             if (model.install.busy()) return;
             model.install.error_len = 0;
-            _ = model.install.enqueue(default_pet_slug);
-            model.install.activate_when_done = true;
+            _ = model.install.enqueueRequest(default_pet_slug, true);
             startInstallQueue(model, fx);
         },
         .manifest_done => |exit| {
@@ -1989,7 +2072,7 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             // thumbnail pass picks it up the next time settings is open.
             const index = catalogAppend(slug, model.active_pet);
             thumbs_built = @min(thumbs_built, catalog_mod.catalog_len);
-            if (model.install.activate_when_done) {
+            if (model.install.currentActivates()) {
                 if (index) |i| {
                     // Deliberately routed through the same Msg the
                     // settings list uses, so activation after an install
@@ -2601,7 +2684,7 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             else
                 read.x;
             const pet_y = if (builtin.target.os.tag == .linux)
-                read.y + @as(f64, win_h - pet_edge_pad) - pet_h
+                read.y + @as(f64, linuxPetTopLocal(model.scale))
             else
                 read.y;
             const inside = read.cursor_x >= pet_x and read.cursor_x <= pet_x + pet_w and
@@ -2673,6 +2756,12 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
                 }
             }
             _ = expireBubbles(model, now);
+            // A newly drained bubble is declared as a popup in the same
+            // update pass. Compute Linux's side after expiry and before
+            // that declaration so the first rendered frame uses the same
+            // orientation as the compositor anchor, rather than showing a
+            // flipped tail for one frame until the next frame-clock tick.
+            if (builtin.target.os.tag == .linux and bubbleActive(model)) syncBubbleWindow(model, fx);
             if (model.waiting_sound and shouldEscalate(model.state, model.waiting_since_ms, model.waiting_escalated, now)) {
                 model.waiting_escalated = true;
                 playWaitingChime(fx);
@@ -3406,6 +3495,7 @@ fn clearBubble(model: *Model) void {
     model.bubbles = @splat(.{});
     model.bubbles_len = 0;
     model.bubble_expires_at_ms = @splat(-1);
+    model.bubble_above_blocked = false;
     hook_server.mailbox.clearBubbles();
 }
 
@@ -3560,6 +3650,16 @@ const BubbleMovePlan = struct {
     dy: f64,
 };
 
+const bubble_probe_position_epsilon: f64 = 4;
+
+fn bubbleAboveProbeStale(model: *const Model, bubble_h: f32) bool {
+    if (!model.bubble_above_blocked) return false;
+    if (@abs(model.pet_x - model.bubble_above_blocked_x) > bubble_probe_position_epsilon) return true;
+    if (@abs(model.pet_y - model.bubble_above_blocked_y) > bubble_probe_position_epsilon) return true;
+    if (@abs(bubble_h - model.bubble_above_blocked_h) > 0.5) return true;
+    return false;
+}
+
 /// Calculate a global-coordinate move without applying a display clamp.
 /// The caller applies the destination display's visible-frame constraint
 /// only after this move has crossed any monitor boundary.
@@ -3578,15 +3678,100 @@ fn bubbleClampCorrection(actual_x: f64, actual_y: f64, settled_x: f64, settled_y
     return bubbleMovePlan(actual_x, actual_y, settled_x, settled_y);
 }
 
+/// Apply the destination display's visible-frame clamp and reconcile hosts
+/// that report the clamped origin without moving the actual window. The
+/// probe is also used when the bubble is already at its target: taskbar,
+/// display-layout, and display-scale changes can invalidate a previously
+/// valid origin without changing the requested coordinates.
+fn settleBubbleWindow(model: *Model, fx: *Effects, bubble_h: f32, want_x: f64) bool {
+    var settled = fx.moveWindow("bubble", 0, 0, true) orelse return false;
+    var actual = fx.moveWindow("bubble", 0, 0, false) orelse return false;
+    // A negative global y is valid on a monitor above the primary screen,
+    // so the initial direction deliberately stays above. If the above
+    // candidate is clipped by the destination display, flip below and make
+    // a second bounded pass.
+    if (!model.bubble_flipped and settled.hit_y) {
+        model.bubble_flipped = true;
+        model.bubble_above_blocked = true;
+        model.bubble_above_blocked_x = model.pet_x;
+        model.bubble_above_blocked_y = model.pet_y;
+        model.bubble_above_blocked_h = bubble_h;
+        const flipped_y = bubbleWantY(model, bubble_h);
+        if (bubbleMovePlan(actual.x, actual.y, want_x, flipped_y)) |flip_plan| {
+            _ = fx.moveWindow("bubble", flip_plan.dx, flip_plan.dy, false) orelse return false;
+        }
+        // Re-probe even when the flipped target is already at the current
+        // origin; the display may still clamp the candidate after the side
+        // changes, and the readback must describe that final placement.
+        settled = fx.moveWindow("bubble", 0, 0, true) orelse return false;
+        actual = fx.moveWindow("bubble", 0, 0, false) orelse return false;
+    }
+    if (!model.bubble_flipped and !settled.hit_y) model.bubble_above_blocked = false;
+    if (bubbleClampCorrection(actual.x, actual.y, settled.x, settled.y)) |correction| {
+        const corrected = fx.moveWindow("bubble", correction.dx, correction.dy, false) orelse return false;
+        recordPetCenterLocal(model, corrected.x);
+    } else {
+        recordPetCenterLocal(model, actual.x);
+    }
+    return true;
+}
+
+/// The Linux pet is drawn inside the fixed startup canvas rather than
+/// resizing the toplevel to the sprite. Keep the canvas-local pet origin in
+/// one helper so bubble anchoring and pointer hit testing use the same
+/// geometry at every scale.
+fn linuxPetTopLocal(scale: f32) f32 {
+    return win_h - pet_edge_pad - frame_h * scale;
+}
+
+/// GtkPopover's GTK_POS_TOP placement puts the popup above the pointing
+/// rectangle. The descriptor therefore supplies the rectangle edge, not the
+/// popup top: above the pet the rectangle is the pet top minus the clearance;
+/// below it is the pet bottom plus clearance plus the popup height. The
+/// previous code supplied the pet edge for both cases, which made GTK choose
+/// the wrong side and cover the sprite on the X11/GTK path.
+fn linuxBubbleAnchorY(scale: f32, flipped: bool, bubble_h: f32) f32 {
+    const pet_top = linuxPetTopLocal(scale);
+    const pet_bottom = win_h - pet_edge_pad;
+    const clearance: f32 = @floatCast(bubble_pet_clearance);
+    return if (flipped)
+        pet_bottom + clearance + bubble_h
+    else
+        // A scale at the edge of the fixed canvas can leave less than the
+        // clearance above the sprite. Keep the GTK pointing rectangle inside
+        // the parent surface; the side selector flips below when the global
+        // display has no room above, while a monitor above the primary screen
+        // may still legitimately use the zero-edge anchor.
+        @max(@as(f32, 0), pet_top - clearance);
+}
+
+/// Return the pet's actual global top edge for side selection. On Linux the
+/// model position is the fixed canvas origin, not the sprite origin.
+fn bubblePetTopY(model: *const Model) f64 {
+    if (builtin.target.os.tag == .linux)
+        return model.pet_y + @as(f64, @floatCast(linuxPetTopLocal(model.scale)));
+    return model.pet_y;
+}
+
 /// Keep the bubble window glued above the pet and sized to its content:
 /// read both origins and close the gap. Self-correcting, so drags,
 /// throws, scale changes, and text-size changes all need no
 /// special-casing.
 fn syncBubbleWindow(model: *Model, fx: *Effects) void {
+    if (!bubbleActive(model)) {
+        model.bubble_above_blocked = false;
+        return;
+    }
+    const bubble_h = bubbleWindowHeight(model);
     // Linux uses a parent-local compositor popup. Its descriptor drives
     // size and anchoring, so application-side global moves are both
-    // unnecessary and invalid on Wayland.
-    if (builtin.target.os.tag == .linux or !bubbleActive(model)) return;
+    // unnecessary and invalid on Wayland. The side decision still belongs
+    // here so petdexWindows can publish the correct local anchor on the
+    // next reconciliation pass.
+    if (builtin.target.os.tag == .linux) {
+        model.bubble_flipped = bubbleShouldFlip(model, bubblePetTopY(model), @floatCast(bubble_h));
+        return;
+    }
     // The flip is decided HERE, in the function that consumes it, rather
     // than by each caller beforehand. bubbleWantY below reads the flag,
     // so a caller that moved the pet and forgot to refresh it first would
@@ -3594,9 +3779,12 @@ fn syncBubbleWindow(model: *Model, fx: *Effects) void {
     // what the throw branch did: it drives its own moveWindow and returns
     // before the cursor poll, so it never reached the frame clock's
     // update and flew the whole arc with a stale flag.
-    model.bubble_flipped = bubbleShouldFlip(model, model.pet_y, @floatCast(bubbleWindowHeight(model)));
     const bubble_w = bubbleWindowWidth(model);
-    const bubble_h = bubbleWindowHeight(model);
+    if (bubbleAboveProbeStale(model, bubble_h)) model.bubble_above_blocked = false;
+    model.bubble_flipped = if (model.bubble_above_blocked)
+        true
+    else
+        bubbleShouldFlip(model, bubblePetTopY(model), @floatCast(bubble_h));
     // Resize before moving: the move centers on the new width, so doing
     // it the other way round centers on the old one and leaves the
     // bubble offset by half the delta.
@@ -3614,24 +3802,11 @@ fn syncBubbleWindow(model: *Model, fx: *Effects) void {
         // window. It cannot be used for the first leg of a cross-display
         // move: the bubble would remain trapped on the old display.
         _ = fx.moveWindow("bubble", plan.dx, plan.dy, false) orelse return;
-        // The global move has reached the target display. A zero-distance
-        // constrained move now lets that display apply its visible-frame
-        // correction, including negative coordinates and taskbar insets.
-        const settled = fx.moveWindow("bubble", 0, 0, true) orelse return;
-        // The pre-fix macOS host returned the clamped origin here but did
-        // not call setFrameOrigin when dx/dy were zero. Read the actual
-        // origin back and reconcile that legacy behavior explicitly; this
-        // also makes the app robust while an SDK fix is rolling out.
-        const actual = fx.moveWindow("bubble", 0, 0, false) orelse return;
-        if (bubbleClampCorrection(actual.x, actual.y, settled.x, settled.y)) |correction| {
-            const corrected = fx.moveWindow("bubble", correction.dx, correction.dy, false) orelse return;
-            recordPetCenterLocal(model, corrected.x);
-        } else {
-            recordPetCenterLocal(model, actual.x);
-        }
-        return;
     }
-    recordPetCenterLocal(model, cur.x);
+    // Always run the constrained probe, including a zero-distance target:
+    // taskbar/display-layout changes can invalidate an otherwise unchanged
+    // origin and must be reconciled before recording the local anchor.
+    if (!settleBubbleWindow(model, fx, bubble_h, want_x)) return;
 }
 
 /// Project the pet's center into the stack container's coordinates.
@@ -3668,6 +3843,11 @@ fn bubbleWantY(model: *const Model, bubble_h: f32) f64 {
 /// that threshold plus a margin to come back up.
 fn bubbleShouldFlip(model: *const Model, space_above: f64, needed: f64) bool {
     const required = needed + bubble_pet_clearance;
+    // Screen coordinates are global across the desktop. A monitor above
+    // the primary screen legitimately reports negative y, which is not
+    // evidence that there is no room above the pet. The destination
+    // monitor's constrained move supplies that fact through hit_y.
+    if (space_above < 0) return false;
     if (model.bubble_flipped) return space_above < required + bubble_flip_hysteresis;
     return space_above < required;
 }
@@ -4002,7 +4182,12 @@ fn petdexWindows(model: *const Model, scratch: *PetdexApp.WindowsScratch) []cons
         const bubble_w = bubbleWindowWidth(model);
         const bubble_h = bubbleWindowHeight(model);
         if (comptime builtin.target.os.tag == .linux) {
-            const pet_h = frame_h * model.scale;
+            // A popup is created before the next frame-clock sync can
+            // update `model.bubble_flipped`. Decide the initial side from
+            // the current geometry here as well; otherwise a pet near the
+            // top creates a GTK popover with a negative anchor, which the
+            // compositor maps off-screen and leaves at its 1px minimum.
+            const linux_flipped = bubbleShouldFlip(model, bubblePetTopY(model), @floatCast(bubble_h));
             scratch.windows[count] = .{
                 .label = "bubble",
                 .canvas_label = "bubble-canvas",
@@ -4010,7 +4195,10 @@ fn petdexWindows(model: *const Model, scratch: *PetdexApp.WindowsScratch) []cons
                 .width = bubble_w,
                 .height = bubble_h,
                 .x = win_w / 2,
-                .y = win_h - pet_edge_pad - pet_h,
+                // GTK_POS_TOP places the popup above its pointing
+                // rectangle. Supply a side-aware rectangle edge so the
+                // compositor never places the bubble over the sprite.
+                .y = linuxBubbleAnchorY(model.scale, linux_flipped, bubble_h),
                 .resizable = false,
                 .titlebar = .chromeless,
                 .floating = true,
@@ -4381,6 +4569,100 @@ test "activating index 0 works before any sheet is loaded" {
     const would_skip_now = 0 == fresh.active_pet and fresh.sheet_loaded;
     try std.testing.expect(would_skip_before);
     try std.testing.expect(!would_skip_now);
+}
+
+test "deep-link install requests merge into a busy queue" {
+    // URL callbacks can arrive while a manifest or asset download is in
+    // flight. New requests must join the active run without resetting its
+    // current item or dropping the activation bit for any queued pet.
+    pending_install = .{};
+    pending_ready = false;
+    defer {
+        pending_install = .{};
+        pending_ready = false;
+    }
+
+    _ = onUrlsOpened(&.{"petdex://install?slug=queue-a"});
+    _ = onUrlsOpened(&.{"petdex://queue-b"});
+    try std.testing.expect(pending_ready);
+    try std.testing.expectEqual(@as(usize, 2), pending_install.queued);
+    try std.testing.expect(!pending_install.activate[0]);
+    try std.testing.expect(pending_install.activate[1]);
+
+    var model: Model = .{};
+    try std.testing.expect(model.install.enqueueRequest("active", false));
+    model.install.phase = .manifest;
+    try std.testing.expect(mergePendingInstall(&model) == null);
+    try std.testing.expect(!pending_ready);
+    try std.testing.expectEqual(@as(usize, 3), model.install.queued);
+    try std.testing.expectEqualStrings("active", model.install.queue[0][0..model.install.queue_len[0]]);
+    try std.testing.expectEqualStrings("queue-a", model.install.queue[1][0..model.install.queue_len[1]]);
+    try std.testing.expectEqualStrings("queue-b", model.install.queue[2][0..model.install.queue_len[2]]);
+    try std.testing.expect(!model.install.activate[0]);
+    try std.testing.expect(!model.install.activate[1]);
+    try std.testing.expect(model.install.activate[2]);
+
+    // A full active queue may only consume the prefix that fits. The
+    // remaining staged tail keeps the ready signal until the next poll.
+    pending_install = .{};
+    pending_ready = false;
+    _ = onUrlsOpened(&.{"petdex://install?slug=queue-c&slug=queue-d"});
+    var full_model: Model = .{};
+    for (0..max_install_queue - 1) |i| {
+        var slug_buf: [16]u8 = undefined;
+        const slug = std.fmt.bufPrint(&slug_buf, "active-{d}", .{i}) catch unreachable;
+        try std.testing.expect(full_model.install.enqueue(slug));
+    }
+    full_model.install.phase = .spritesheet;
+    try std.testing.expect(mergePendingInstall(&full_model) == null);
+    try std.testing.expectEqual(@as(usize, 1), pending_install.queued);
+    try std.testing.expect(pending_ready);
+    try std.testing.expectEqualStrings("queue-d", pending_install.queue[0][0..pending_install.queue_len[0]]);
+    try std.testing.expectEqual(@as(usize, max_install_queue), full_model.install.queued);
+
+    full_model.install.removeAt(0);
+    try std.testing.expect(mergePendingInstall(&full_model) == null);
+    try std.testing.expect(!pending_ready);
+    try std.testing.expectEqual(@as(usize, max_install_queue), full_model.install.queued);
+    try std.testing.expectEqualStrings("queue-d", full_model.install.queue[max_install_queue - 1][0..full_model.install.queue_len[max_install_queue - 1]]);
+}
+
+test "deep-link install requests merge duplicates and process URL batches" {
+    pending_install = .{};
+    pending_ready = false;
+    defer {
+        pending_install = .{};
+        pending_ready = false;
+    }
+
+    const urls = [_][]const u8{
+        "petdex://install?slug=queue-a&slug=queue-c",
+        "petdex://queue-a",
+    };
+    _ = onUrlsOpened(&urls);
+
+    // The duplicate `queue-a` is one install, upgraded to activation by
+    // the bare link. The second slug in the same callback is retained.
+    try std.testing.expectEqual(@as(usize, 2), pending_install.queued);
+    try std.testing.expectEqualStrings("queue-a", pending_install.queue[0][0..pending_install.queue_len[0]]);
+    try std.testing.expect(pending_install.activate[0]);
+    try std.testing.expectEqualStrings("queue-c", pending_install.queue[1][0..pending_install.queue_len[1]]);
+    try std.testing.expect(!pending_install.activate[1]);
+}
+
+test "install queue keeps activation per pet" {
+    var queue: InstallState = .{};
+    try std.testing.expect(queue.enqueueRequest("queue-a", false));
+    try std.testing.expect(queue.enqueueRequest("queue-b", true));
+    try std.testing.expect(queue.enqueueRequest("queue-c", false));
+    try std.testing.expect(queue.enqueueRequest("queue-a", true));
+    try std.testing.expectEqual(@as(usize, 3), queue.queued);
+    try std.testing.expect(queue.currentActivates());
+    queue.current = 1;
+    try std.testing.expect(queue.currentActivates());
+    queue.current = 2;
+    try std.testing.expect(!queue.currentActivates());
+    try std.testing.expect(queue.activate[0]);
 }
 
 test "empty-state copy fits the pet window" {
@@ -4925,6 +5207,31 @@ test "flipping sends the stack below the pet, clear of the sprite" {
     try std.testing.expect(bubbleWantY(&high, bubble_h) + @as(f64, @floatCast(bubble_h)) <= high.pet_y - bubble_pet_clearance + 0.01);
 }
 
+test "linux popup anchors clear the fixed canvas pet on both sides" {
+    const scale: f32 = 1;
+    const bubble_h: f32 = 115;
+    const pet_top = linuxPetTopLocal(scale);
+    const pet_bottom = win_h - pet_edge_pad;
+
+    const above = linuxBubbleAnchorY(scale, false, bubble_h);
+    try std.testing.expectApproxEqAbs(pet_top - @as(f32, @floatCast(bubble_pet_clearance)), above, 0.001);
+    try std.testing.expect(above <= pet_top - @as(f32, @floatCast(bubble_pet_clearance)) + 0.001);
+
+    const below = linuxBubbleAnchorY(scale, true, bubble_h);
+    try std.testing.expectApproxEqAbs(pet_bottom + @as(f32, @floatCast(bubble_pet_clearance)) + bubble_h, below, 0.001);
+    try std.testing.expect(below - bubble_h >= pet_bottom + @as(f32, @floatCast(bubble_pet_clearance)) - 0.001);
+
+    // The fixed Linux canvas keeps its bottom edge stable when the sprite is
+    // scaled; the above-side anchor follows the sprite's top edge.
+    const larger_above = linuxBubbleAnchorY(max_scale, false, bubble_h);
+    try std.testing.expect(larger_above < above);
+    try std.testing.expectEqual(below, linuxBubbleAnchorY(max_scale, true, bubble_h));
+    if (builtin.target.os.tag == .linux) {
+        try std.testing.expect(linuxPetTopLocal(max_scale) >= 0);
+        try std.testing.expect(linuxBubbleAnchorY(max_scale, false, bubble_h) >= 0);
+    }
+}
+
 test "the flip has hysteresis so a pet on the threshold does not flap" {
     var model: Model = .{};
     testPushBubble(&model, "alpha", "older", false, -1);
@@ -4943,6 +5250,38 @@ test "the flip has hysteresis so a pet on the threshold does not flap" {
     model.bubble_flipped = true;
     try std.testing.expect(bubbleShouldFlip(&model, needed + bubble_pet_clearance + bubble_flip_hysteresis - 1, needed));
     try std.testing.expect(!bubbleShouldFlip(&model, needed + bubble_pet_clearance + bubble_flip_hysteresis + 1, needed));
+}
+
+test "a pet above the primary screen keeps the first bubble candidate above" {
+    var model: Model = .{};
+    model.pet_y = -640;
+    model.bubble_flipped = false;
+    const needed: f64 = @floatCast(bubbleWindowHeight(&model));
+
+    // The host reports negative top-left y coordinates for monitors above
+    // the primary screen. The first candidate must therefore be above; the
+    // later clamp probe will flip it below only when that monitor has no
+    // room for the expanded bubble.
+    try std.testing.expect(!bubbleShouldFlip(&model, model.pet_y, needed));
+    model.bubble_flipped = true;
+    try std.testing.expect(!bubbleShouldFlip(&model, model.pet_y, needed));
+}
+
+test "a blocked above probe stays sticky until position or size changes" {
+    var model: Model = .{};
+    model.bubble_above_blocked = true;
+    model.bubble_above_blocked_x = 100;
+    model.bubble_above_blocked_y = -640;
+    model.bubble_above_blocked_h = 300;
+    model.pet_x = 100;
+    model.pet_y = -640;
+    try std.testing.expect(!bubbleAboveProbeStale(&model, 300));
+    model.pet_x += bubble_probe_position_epsilon + 1;
+    try std.testing.expect(bubbleAboveProbeStale(&model, 300));
+    model.pet_x = 100;
+    model.pet_y = -640;
+    try std.testing.expect(!bubbleAboveProbeStale(&model, 300));
+    try std.testing.expect(bubbleAboveProbeStale(&model, 301));
 }
 
 test "a flipped stack grows downward and is hit tested from the top" {
@@ -5066,15 +5405,26 @@ test "bubble movement crosses displays before applying target bounds" {
     const src = @embedFile("main.zig");
     const sync_start = std.mem.indexOf(u8, src, "fn syncBubbleWindow").?;
     const sync = src[sync_start..];
+    const settle_start = std.mem.indexOf(u8, src, "fn settleBubbleWindow").?;
+    const settle = src[settle_start..sync_start];
     const unbounded = std.mem.indexOf(u8, sync, "fx.moveWindow(\"bubble\", plan.dx, plan.dy, false)");
-    const bounded = std.mem.indexOf(u8, sync, "fx.moveWindow(\"bubble\", 0, 0, true)");
-    const readback = std.mem.indexOf(u8, sync, "const actual = fx.moveWindow(\"bubble\", 0, 0, false)");
-    const correction = std.mem.indexOf(u8, sync, "fx.moveWindow(\"bubble\", correction.dx, correction.dy, false)");
+    const sync_settle = std.mem.indexOf(u8, sync, "settleBubbleWindow(model, fx, bubble_h, want_x)");
+    // Search for comments rather than line-oriented snippets. Git for
+    // Windows may check this source out with CRLF, while macOS/Linux use
+    // LF; the ordering assertions must be independent of that EOL policy.
+    const no_move_boundary = std.mem.indexOf(u8, sync, "// Always run the constrained probe");
+    const flip_reprobe = std.mem.indexOf(u8, settle, "// Re-probe even when the flipped target");
+    const bounded = std.mem.indexOf(u8, settle, "fx.moveWindow(\"bubble\", 0, 0, true)");
+    const readback = std.mem.indexOf(u8, settle, "var actual = fx.moveWindow(\"bubble\", 0, 0, false)");
+    const correction = std.mem.indexOf(u8, settle, "fx.moveWindow(\"bubble\", correction.dx, correction.dy, false)");
     try std.testing.expect(unbounded != null);
+    try std.testing.expect(sync_settle != null);
+    try std.testing.expect(no_move_boundary != null);
+    try std.testing.expect(sync_settle.? > no_move_boundary.?);
+    try std.testing.expect(flip_reprobe != null);
     try std.testing.expect(bounded != null);
     try std.testing.expect(readback != null);
     try std.testing.expect(correction != null);
-    try std.testing.expect(unbounded.? < bounded.?);
     try std.testing.expect(bounded.? < readback.?);
     try std.testing.expect(readback.? < correction.?);
 }

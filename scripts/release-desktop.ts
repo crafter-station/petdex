@@ -343,6 +343,7 @@ function preflightTree(): void {
       "packages/petdex-desktop-native/src",
       "packages/petdex-desktop-native/app.zon",
       "patches/native-sdk-macos-headerpad.patch",
+      "patches/native-sdk-windows-pet-input.patch",
       "packages/petdex-desktop-native/assets",
       "scripts/patch-native-sdk.sh",
       "scripts/release-desktop.ts",

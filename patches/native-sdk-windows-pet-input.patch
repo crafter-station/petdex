@@ -1,15 +1,37 @@
 diff --git a/src/platform/windows/root.zig b/src/platform/windows/root.zig
-index 7debdf9..0843612 100644
+index 7debdf9..346cc4c 100644
 --- a/src/platform/windows/root.zig
 +++ b/src/platform/windows/root.zig
-@@ -36,0 +37 @@ const WindowsEventKind = enum(c_int) {
+@@ -34,6 +34,7 @@ const WindowsEventKind = enum(c_int) {
+     appearance = 17,
+     audio = 18,
+     urls_opened = 19,
 +    context_menu_action = 20,
-@@ -104,0 +106,2 @@ const WindowsEvent = extern struct {
+ };
+ 
+ const WindowsEvent = extern struct {
+@@ -102,6 +103,8 @@ const WindowsEvent = extern struct {
+     /// NUL-separated, reusing the drop-path wire shape.
+     open_urls: [*]const u8,
+     open_urls_len: usize,
 +    widget_id: u64,
 +    menu_item_id: u32,
-@@ -133,0 +137 @@ extern fn native_sdk_windows_create_window(host: *WindowsHost, window_id: u64, w
+ };
+ 
+ const WindowsCallback = *const fn (context: ?*anyopaque, event: *const WindowsEvent) callconv(.c) void;
+@@ -131,6 +134,8 @@ extern fn native_sdk_windows_set_security_policy(host: *WindowsHost, allowed_ori
+ extern fn native_sdk_windows_set_menus(host: *WindowsHost, menu_titles: [*]const [*]const u8, menu_title_lens: [*]const usize, menu_count: usize, item_menu_indices: [*]const u32, item_labels: [*]const [*]const u8, item_label_lens: [*]const usize, item_commands: [*]const [*]const u8, item_command_lens: [*]const usize, item_keys: [*]const [*]const u8, item_key_lens: [*]const usize, item_modifiers: [*]const u32, item_separators: [*]const c_int, item_enabled: [*]const c_int, item_checked: [*]const c_int, item_count: usize) void;
+ extern fn native_sdk_windows_set_shortcuts(host: *WindowsHost, ids: [*]const [*]const u8, id_lens: [*]const usize, keys: [*]const [*]const u8, key_lens: [*]const usize, modifiers: [*]const u32, count: usize) void;
+ extern fn native_sdk_windows_create_window(host: *WindowsHost, window_id: u64, window_title: [*]const u8, window_title_len: usize, window_label: [*]const u8, window_label_len: usize, x: f64, y: f64, width: f64, height: f64, restore_frame: c_int, resizable: c_int, titlebar_style: c_int, window_flags: c_int, min_width: f64, min_height: f64) c_int;
 +extern fn native_sdk_windows_move_window(host: *WindowsHost, window_id: u64, dx: f64, dy: f64, clamp: c_int, out_x: *f64, out_y: *f64, out_hit_x: *c_int, out_hit_y: *c_int, out_primary_down: *c_int, out_cursor_x: *f64, out_cursor_y: *f64) c_int;
-@@ -182,0 +187,9 @@ extern fn native_sdk_windows_audio_spectrum_supported(host: *WindowsHost) c_int;
++extern fn native_sdk_windows_resize_window(host: *WindowsHost, window_id: u64, width: f64, height: f64, anchor_bottom_center: c_int) c_int;
+ extern fn native_sdk_windows_start_window_drag(host: *WindowsHost, window_id: u64) c_int;
+ extern fn native_sdk_windows_set_window_drag_regions(host: *WindowsHost, window_id: u64, label: [*]const u8, label_len: usize, rects: [*]const f64, exclusions: [*]const c_int, count: usize) c_int;
+ extern fn native_sdk_windows_window_chrome(host: *WindowsHost, window_id: u64, top: *f64, left: *f64, bottom: *f64, right: *f64, buttons_x: *f64, buttons_y: *f64, buttons_width: *f64, buttons_height: *f64) c_int;
+@@ -180,6 +185,15 @@ extern fn native_sdk_windows_audio_stop(host: *WindowsHost) c_int;
+ extern fn native_sdk_windows_audio_seek(host: *WindowsHost, position_ms: u64) c_int;
+ extern fn native_sdk_windows_audio_set_volume(host: *WindowsHost, volume: f64) c_int;
+ extern fn native_sdk_windows_audio_spectrum_supported(host: *WindowsHost) c_int;
 +extern fn native_sdk_windows_show_context_menu(host: *WindowsHost, window_id: u64, label: [*]const u8, label_len: usize, x: f64, y: f64, token: u64, items: [*]const WindowsContextMenuItem, count: usize) c_int;
 +
 +const WindowsContextMenuItem = extern struct {
@@ -19,22 +41,53 @@ index 7debdf9..0843612 100644
 +    enabled: c_int,
 +    separator: c_int,
 +};
-@@ -283,0 +297 @@ pub const WindowsPlatform = struct {
+ 
+ const WindowsOpenDialogOpts = extern struct {
+     title: [*]const u8,
+@@ -281,6 +295,8 @@ pub const WindowsPlatform = struct {
+                 .create_window_fn = createWindow,
+                 .focus_window_fn = focusWindow,
+                 .close_window_fn = closeWindow,
 +                .move_window_fn = moveWindow,
-@@ -296,0 +311 @@ pub const WindowsPlatform = struct {
++                .resize_window_fn = resizeWindow,
+                 .minimize_window_fn = minimizeWindow,
+                 .start_window_drag_fn = startWindowDrag,
+                 .set_window_drag_regions_fn = setWindowDragRegions,
+@@ -294,6 +310,7 @@ pub const WindowsPlatform = struct {
+                 .request_gpu_surface_frame_fn = requestGpuSurfaceFrame,
+                 .note_gpu_surface_input_fn = noteGpuSurfaceInput,
+                 .present_gpu_surface_pixels_fn = presentGpuSurfacePixels,
 +                .show_context_menu_fn = showContextMenu,
-@@ -371 +386,2 @@ pub const WindowsPlatform = struct {
+                 .create_webview_fn = createWebView,
+                 .set_webview_frame_fn = setWebViewFrame,
+                 .navigate_webview_fn = navigateWebView,
+@@ -368,7 +385,8 @@ pub const WindowsPlatform = struct {
+             // view-surface adoption are macOS-only today; Win32 keeps
+             // the engine's wheel physics (TrackPopupMenu is the natural
+             // future context-menu seam — the tray already uses it).
 -            .gpu_surface_scroll_drivers, .context_menus, .view_surface_adoption => false,
 +            .context_menus => self.web_engine == .system,
 +            .gpu_surface_scroll_drivers, .view_surface_adoption => false,
-@@ -532,0 +549,6 @@ fn windowsCallback(context: ?*anyopaque, event: *const WindowsEvent) callconv(.c
+         };
+     }
+ 
+@@ -530,6 +548,12 @@ fn windowsCallback(context: ?*anyopaque, event: *const WindowsEvent) callconv(.c
+             .buffering = event.audio_buffering != 0,
+             .bands = event.audio_bands,
+         } }),
 +        .context_menu_action => state.emit(.{ .context_menu_action = .{
 +            .window_id = event.window_id,
 +            .view_label = event.view_label[0..event.view_label_len],
 +            .token = event.widget_id,
 +            .item_id = event.menu_item_id,
 +        } }),
-@@ -746,0 +769,13 @@ fn focusWindow(context: ?*anyopaque, window_id: platform_mod.WindowId) anyerror!
+     }
+ }
+ 
+@@ -744,6 +768,24 @@ fn focusWindow(context: ?*anyopaque, window_id: platform_mod.WindowId) anyerror!
+     if (native_sdk_windows_focus_window(self.host, window_id) == 0) return error.FocusFailed;
+ }
+ 
 +fn moveWindow(context: ?*anyopaque, window_id: platform_mod.WindowId, dx: f64, dy: f64, clamp: bool) anyerror!platform_mod.MoveWindowResult {
 +    const self: *WindowsPlatform = @ptrCast(@alignCast(context.?));
 +    var out_x: f64 = 0;
@@ -48,7 +101,18 @@ index 7debdf9..0843612 100644
 +    return .{ .x = out_x, .y = out_y, .hit_x = out_hit_x != 0, .hit_y = out_hit_y != 0, .primary_down = out_primary != 0, .cursor_x = out_cursor_x, .cursor_y = out_cursor_y };
 +}
 +
-@@ -954,0 +990,17 @@ fn presentGpuSurfacePixels(context: ?*anyopaque, pixels: platform_mod.GpuSurface
++fn resizeWindow(context: ?*anyopaque, window_id: platform_mod.WindowId, width: f64, height: f64, anchor: platform_mod.WindowResizeAnchor) anyerror!void {
++    const self: *WindowsPlatform = @ptrCast(@alignCast(context.?));
++    if (native_sdk_windows_resize_window(self.host, window_id, width, height, if (anchor == .bottom_center) 1 else 0) == 0) return error.WindowNotFound;
++}
++
+ fn closeWindow(context: ?*anyopaque, window_id: platform_mod.WindowId) anyerror!void {
+     const self: *WindowsPlatform = @ptrCast(@alignCast(context.?));
+     if (native_sdk_windows_close_window(self.host, window_id) == 0) return error.CloseFailed;
+@@ -952,6 +994,23 @@ fn presentGpuSurfacePixels(context: ?*anyopaque, pixels: platform_mod.GpuSurface
+     ) == 0) return error.ViewNotFound;
+ }
+ 
 +fn showContextMenu(context: ?*anyopaque, request: platform_mod.ContextMenuRequest) anyerror!void {
 +    const self: *WindowsPlatform = @ptrCast(@alignCast(context.?));
 +    if (self.web_engine != .system) return error.UnsupportedService;
@@ -66,15 +130,33 @@ index 7debdf9..0843612 100644
 +    if (native_sdk_windows_show_context_menu(self.host, request.window_id, request.view_label.ptr, request.view_label.len, request.point.x, request.point.y, request.token, items[0..count].ptr, count) == 0) return error.WindowNotFound;
 +}
 +
+ fn createWebView(context: ?*anyopaque, options: platform_mod.WebViewOptions) anyerror!void {
+     const self: *WindowsPlatform = @ptrCast(@alignCast(context.?));
+     const frame = options.frame;
 diff --git a/src/platform/windows/webview2_host.cpp b/src/platform/windows/webview2_host.cpp
-index 4dd7ecd..24fd947 100644
+index 4dd7ecd..e50afae 100644
 --- a/src/platform/windows/webview2_host.cpp
 +++ b/src/platform/windows/webview2_host.cpp
-@@ -124,0 +125 @@ enum EventKind {
+@@ -122,6 +122,7 @@ enum EventKind {
+     kAppearance = 17,
+     kAudio = 18,
+     kUrlsOpened = 19,
 +    kContextMenuAction = 20,
-@@ -155,0 +157 @@ constexpr UINT kAudioSpectrumMessage = WM_APP + 46;
+ };
+ 
+ constexpr uint32_t kShortcutModifierPrimary = 1u << 0;
+@@ -153,6 +154,7 @@ constexpr UINT kAudioSessionMessage = WM_APP + 45;
+  * loop starves it far below the contract cadence, while posted messages
+  * keep their place in the queue. */
+ constexpr UINT kAudioSpectrumMessage = WM_APP + 46;
 +constexpr UINT kShowContextMenuMessage = WM_APP + 47;
-@@ -255,0 +258,10 @@ struct WindowsEvent {
+ constexpr const char *kAssetVirtualOrigin = "https://native-sdk-app.localhost";
+ 
+ /* COPYDATASTRUCT::dwData tag on the single-instance forward. dwData is
+@@ -253,6 +255,16 @@ struct WindowsEvent {
+      * NUL, so the separator stays unambiguous). */
+     const char *open_urls;
+     size_t open_urls_len;
 +    uint64_t widget_id;
 +    uint32_t menu_item_id;
 +};
@@ -85,12 +167,24 @@ index 4dd7ecd..24fd947 100644
 +    size_t label_len;
 +    int enabled;
 +    int separator;
-@@ -430,0 +443,4 @@ struct NativeView {
+ };
+ 
+ struct WindowsOpenDialogOpts {
+@@ -428,6 +440,10 @@ struct NativeView {
+     int gpu_nonblank = 0;
+     uint32_t gpu_sample_color = 0;
+     int gpu_pointer_down = 0;
 +    int gpu_primary_down = 0;
 +    int gpu_primary_latched = 0;
 +    double gpu_primary_x = 0;
 +    double gpu_primary_y = 0;
-@@ -563,0 +580,16 @@ struct AudioState {
+     double gpu_pointer_x = 0;
+     double gpu_pointer_y = 0;
+     WCHAR gpu_pending_high_surrogate = 0;
+@@ -561,6 +577,22 @@ struct AudioState {
+     std::shared_ptr<AudioDownloadCancel> download_cancel;
+ };
+ 
 +struct PendingContextMenu {
 +    bool active = false;
 +    uint64_t window_id = 0;
@@ -107,9 +201,21 @@ index 4dd7ecd..24fd947 100644
 +    std::vector<Item> items;
 +};
 +
-@@ -616,0 +649 @@ struct Host {
+ struct Host {
+     HINSTANCE instance = GetModuleHandleW(nullptr);
+     std::string app_name;
+@@ -614,6 +646,7 @@ struct Host {
+     std::string pending_forwarded_urls;
+     AudioState audio;
+     AudioSpectrumState spectrum;
 +    PendingContextMenu context_menu;
-@@ -2160,0 +2194,39 @@ static NativeView *gpuSurfaceViewForHwnd(Host *host, HWND hwnd) {
+     std::shared_ptr<HostLifetime> lifetime = std::make_shared<HostLifetime>();
+ };
+ 
+@@ -2158,6 +2191,45 @@ static NativeView *gpuSurfaceViewForHwnd(Host *host, HWND hwnd) {
+     return nullptr;
+ }
+ 
 +static void showAppContextMenu(Host *host, HWND hwnd) {
 +    if (!host || !host->context_menu.active) return;
 +    PendingContextMenu request = std::move(host->context_menu);
@@ -149,25 +255,120 @@ index 4dd7ecd..24fd947 100644
 +    PostMessageW(hwnd, WM_NULL, 0, 0);
 +}
 +
-@@ -2928,0 +3001,6 @@ static LRESULT CALLBACK gpuSurfaceProc(HWND hwnd, UINT message, WPARAM wparam, L
+ /* ------------------------------------------------------------------------
+  * Hidden-titlebar window chrome (the Win32 custom-frame pattern).
+  *
+@@ -2926,6 +2998,17 @@ static LRESULT CALLBACK gpuSurfaceProc(HWND hwnd, UINT message, WPARAM wparam, L
+             const double x = (double)(short)LOWORD(lparam) / scale;
+             const double y = (double)(short)HIWORD(lparam) / scale;
+             view->gpu_pointer_down = 1;
 +            if (message == WM_LBUTTONDOWN) {
 +                view->gpu_primary_down = 1;
-+                view->gpu_primary_latched = 2;
++                /* Keep three app polls alive: the first exposes the real
++                 * press point for hit testing, the second carries the
++                 * global endpoint while still pressed, and the third
++                 * reports release. Fast synthetic drags can deliver the
++                 * whole gesture before the runtime's first poll. */
++                view->gpu_primary_latched = 3;
 +                view->gpu_primary_x = x;
 +                view->gpu_primary_y = y;
 +            }
-@@ -2940,0 +3019,4 @@ static LRESULT CALLBACK gpuSurfaceProc(HWND hwnd, UINT message, WPARAM wparam, L
+             view->gpu_pointer_x = x;
+             view->gpu_pointer_y = y;
+             const int button = message == WM_LBUTTONDOWN ? 0 : message == WM_RBUTTONDOWN ? 1 : 2;
+@@ -2933,6 +3016,10 @@ static LRESULT CALLBACK gpuSurfaceProc(HWND hwnd, UINT message, WPARAM wparam, L
+             return 0;
+         }
+         case WM_LBUTTONUP:
 +            if (message == WM_LBUTTONUP) {
 +                view->gpu_primary_down = 0;
 +                if (view->gpu_primary_latched < 1) view->gpu_primary_latched = 1;
 +            }
-@@ -2957,0 +3040 @@ static LRESULT CALLBACK gpuSurfaceProc(HWND hwnd, UINT message, WPARAM wparam, L
-+            view->gpu_primary_down = 0;
-@@ -5033,0 +5117,3 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wparam, LPARA
+         case WM_RBUTTONUP:
+         case WM_MBUTTONUP: {
+             const double x = (double)(short)LOWORD(lparam) / scale;
+@@ -2954,9 +3041,12 @@ static LRESULT CALLBACK gpuSurfaceProc(HWND hwnd, UINT message, WPARAM wparam, L
+             emitGpuSurfaceInput(host, *view, kind, x, y, 0, 0, 0, "", "", gpuModifierFlags());
+             return 0;
+         }
++        case WM_CANCELMODE:
+         case WM_CAPTURECHANGED:
+             if (view->gpu_pointer_down) {
+                 view->gpu_pointer_down = 0;
++                view->gpu_primary_down = 0;
++                view->gpu_primary_latched = 0;
+                 emitGpuSurfaceInput(host, *view, kGpuInputPointerCancel, view->gpu_pointer_x, view->gpu_pointer_y, 0, 0, 0, "", "", gpuModifierFlags());
+             }
+             break;
+@@ -5028,6 +5118,9 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wparam, LPARA
+         case kAudioSessionMessage:
+             if (host) audioHandleSessionMessage(host, wparam, lparam);
+             return 0;
 +        case kShowContextMenuMessage:
 +            if (host) showAppContextMenu(host, hwnd);
 +            return 0;
-@@ -5942,0 +6029,59 @@ int native_sdk_windows_create_window(Host *host, uint64_t window_id, const char
+         case kAudioSpectrumMessage:
+             if (host) audioHandleSpectrumMessage(host, wparam);
+             return 0;
+@@ -5940,6 +6033,131 @@ int native_sdk_windows_create_window(Host *host, uint64_t window_id, const char
+     return 1;
+ }
+ 
++int native_sdk_windows_resize_window(Host *host, uint64_t window_id, double width, double height, int anchor_bottom_center) {
++    if (!host || width <= 0 || height <= 0) return 0;
++    auto found = host->windows.find(window_id);
++    if (found == host->windows.end() || !found->second.hwnd) return 0;
++    Window &window = found->second;
++    HWND hwnd = window.hwnd;
++
++    /* Window sizes cross the platform seam as logical content points. Keep
++     * the same style/DPI conversion as createNativeWindow so a resize lands
++     * on the requested client size for popup, standard, and hidden-titlebar
++     * windows alike. */
++    DWORD style = WS_OVERLAPPEDWINDOW;
++    if (!window.resizable) style &= ~(WS_THICKFRAME | WS_MAXIMIZEBOX);
++    if (windowIsChromeless(window)) {
++        style = WS_POPUP | WS_SYSMENU | WS_MINIMIZEBOX;
++        if (window.resizable) style |= WS_THICKFRAME | WS_MAXIMIZEBOX;
++    }
++    const bool has_menu = !host->menus.empty();
++    const UINT dpi = dpiForWindow(hwnd);
++    const double scale = dpi > 0 ? (double)dpi / 96.0 : 1.0;
++    const double content_width = width * scale;
++    const double content_height = height * scale;
++    LONG outer_width = 0;
++    LONG outer_height = 0;
++    if (windowUsesHiddenTitlebar(window)) {
++        const SIZE outer = hiddenOuterSizeForContent(style, 0, has_menu, content_width, content_height, dpi);
++        outer_width = outer.cx;
++        outer_height = outer.cy;
++    } else {
++        RECT desired = { 0, 0, physicalContentExtent(content_width), physicalContentExtent(content_height) };
++        adjustWindowRectForDpi(&desired, style, has_menu ? TRUE : FALSE, 0, dpi);
++        outer_width = desired.right - desired.left;
++        outer_height = desired.bottom - desired.top;
++    }
++    if (outer_width <= 0 || outer_height <= 0) return 0;
++
++    RECT current = {};
++    if (!GetWindowRect(hwnd, &current)) return 0;
++    const LONG current_width = current.right - current.left;
++    const LONG current_height = current.bottom - current.top;
++    LONG next_x = current.left;
++    LONG next_y = current.top;
++    if (anchor_bottom_center != 0) {
++        /* Keep the ground line and horizontal center fixed while the sprite
++         * scale changes. Physical coordinates are used here because the
++         * current window may already straddle a mixed-DPI monitor boundary. */
++        next_x = current.left + (current_width - outer_width) / 2;
++        next_y = current.top + current_height - outer_height;
++    }
++    if (!SetWindowPos(hwnd, nullptr, next_x, next_y, outer_width, outer_height, SWP_NOZORDER | SWP_NOACTIVATE)) return 0;
++    window.width = width;
++    window.height = height;
++    return 1;
++}
++
 +int native_sdk_windows_move_window(Host *host, uint64_t window_id, double dx, double dy, int clamp, double *out_x, double *out_y, int *out_hit_x, int *out_hit_y, int *out_primary_down, double *out_cursor_x, double *out_cursor_y) {
 +    if (!host) return 0;
 +    auto found = host->windows.find(window_id);
@@ -211,11 +412,22 @@ index 4dd7ecd..24fd947 100644
 +        NativeView &view = entry.second;
 +        if (view.window_id != window_id || view.kind != kViewGpuSurface) continue;
 +        if (view.gpu_primary_latched > 0) {
-+            primary_down = 1;
-+            if (view.hwnd) {
-+                const double x = view.gpu_primary_latched == 2 ? view.gpu_primary_x : view.gpu_pointer_x;
-+                const double y = view.gpu_primary_latched == 2 ? view.gpu_primary_y : view.gpu_pointer_y;
-+                POINT sampled = { (LONG)lround(x * scale), (LONG)lround(y * scale) };
++            /* 3 = press point/down, 2 = global endpoint/down,
++             * 1 = global endpoint/release only after WM_LBUTTONUP.
++             * If the button is still held, the final latched pulse stays
++             * down and subsequent polls use the live state. */
++            primary_down = (view.gpu_primary_latched > 1 || view.gpu_primary_down) ? 1 : 0;
++            if (view.gpu_primary_latched == 3 && view.hwnd) {
++                /* Preserve the press point for the first app poll. A fast
++                 * synthetic drag can move the cursor to its endpoint before
++                 * the runtime sees the down edge; using the live cursor on
++                 * that first pulse would miss the pet hit test. The second
++                 * pulse uses the GetCursorPos result above while still
++                 * reporting down; the third reports the same endpoint with
++                 * release. The child may not receive WM_MOUSEMOVE while a
++                 * transparent, borderless window is being dragged, but
++                 * Win32 still owns the authoritative global endpoint. */
++                POINT sampled = { (LONG)lround(view.gpu_primary_x * scale), (LONG)lround(view.gpu_primary_y * scale) };
 +                if (ClientToScreen(view.hwnd, &sampled)) cursor = sampled;
 +            }
 +            view.gpu_primary_latched--;
@@ -227,7 +439,13 @@ index 4dd7ecd..24fd947 100644
 +    return 1;
 +}
 +
-@@ -6272,0 +6418,25 @@ int native_sdk_windows_note_gpu_surface_input(Host *host, uint64_t window_id, co
+ void native_sdk_windows_start_timer(Host *host, uint64_t timer_id, uint64_t interval_ns, int repeats) {
+     if (!host) return;
+     native_sdk_windows_cancel_timer(host, timer_id);
+@@ -6270,6 +6488,31 @@ int native_sdk_windows_note_gpu_surface_input(Host *host, uint64_t window_id, co
+     return 1;
+ }
+ 
 +int native_sdk_windows_show_context_menu(Host *host, uint64_t window_id, const char *label, size_t label_len, double x, double y, uint64_t token, const WindowsContextMenuItem *items, size_t count) {
 +    if (!host || !items || count == 0) return 0;
 +    auto found = host->windows.find(window_id);
@@ -253,3 +471,6 @@ index 4dd7ecd..24fd947 100644
 +    return 1;
 +}
 +
+ int native_sdk_windows_present_gpu_surface_pixels(Host *host, uint64_t window_id, const char *label, size_t label_len, size_t width, size_t height, double scale, int has_dirty_rect, double dirty_x, double dirty_y, double dirty_width, double dirty_height, const uint8_t *rgba8, size_t rgba8_len) {
+     (void)scale;
+     (void)has_dirty_rect;
