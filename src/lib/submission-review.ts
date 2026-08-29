@@ -18,6 +18,8 @@ import {
   scanPetManifestsSecurity,
   scanPetSecurity,
 } from "@/lib/pet-security";
+import { readResponseBodyBounded } from "@/lib/response-body";
+import { detectSpriteAtlas } from "@/lib/sprite-atlas";
 import { decideAutomatedReview } from "@/lib/submission-review-decision";
 import { preparePolicyReviewImage } from "@/lib/submission-review-image";
 import {
@@ -447,6 +449,16 @@ async function analyzeAssets(row: SubmittedPet): Promise<AssetAnalysis> {
         metadata.height < MIN_SPRITE_DIM
       ) {
         reasons.push("spritesheet dimensions are below the minimum size.");
+      }
+      const atlas = detectSpriteAtlas(metadata.width, metadata.height);
+      if (!atlas) {
+        reasons.push(
+          "spritesheet dimensions do not match a supported 8x9 or v2 8x11 atlas.",
+        );
+      } else if (atlas.version !== row.spriteVersionNumber) {
+        reasons.push(
+          `spritesheet uses v${atlas.version} dimensions but pet metadata declares v${row.spriteVersionNumber}.`,
+        );
       }
       dhash = await dhashFromSpriteBuffer(sprite.buffer);
       if (!dhash)
@@ -972,12 +984,24 @@ async function fetchAllowedBuffer(
         reason: `${label} exceeds the maximum allowed size.`,
       };
     }
-    const buffer = Buffer.from(await res.arrayBuffer());
-    if (buffer.byteLength > maxBytes) {
-      return {
-        ok: false,
-        reason: `${label} exceeds the maximum allowed size.`,
-      };
+    let buffer: Buffer;
+    try {
+      buffer = await readResponseBodyBounded(
+        res,
+        maxBytes,
+        REVIEW_FETCH_TIMEOUT_MS,
+      );
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message === "response body exceeds limit"
+      ) {
+        return {
+          ok: false,
+          reason: `${label} exceeds the maximum allowed size.`,
+        };
+      }
+      throw error;
     }
     return { ok: true, buffer };
   } catch {

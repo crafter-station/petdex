@@ -2,6 +2,7 @@ import {
   BLOCKED_KEYWORD_REASON,
   findBlockedKeyword,
 } from "@/lib/keyword-blocklist";
+import { detectSpriteAtlas } from "@/lib/sprite-atlas";
 import { normalizeSpriteVersionNumber } from "@/lib/sprite-version";
 import { isAllowedAssetUrl } from "@/lib/url-allowlist";
 import { containsUrl, URL_BLOCKED_REASON } from "@/lib/url-blocklist";
@@ -59,37 +60,32 @@ export function validateSubmission(
       };
     }
   }
+  const width = body.spritesheetWidth;
+  const height = body.spritesheetHeight;
   if (
-    !body.spritesheetWidth ||
-    !body.spritesheetHeight ||
-    body.spritesheetWidth < MIN_SPRITE_DIM ||
-    body.spritesheetHeight < MIN_SPRITE_DIM
+    typeof width !== "number" ||
+    typeof height !== "number" ||
+    !Number.isSafeInteger(width) ||
+    !Number.isSafeInteger(height) ||
+    width < MIN_SPRITE_DIM ||
+    height < MIN_SPRITE_DIM
   ) {
     return {
       ok: false,
       status: 400,
       error: "invalid_spritesheet",
-      message: `Spritesheet seems too small. Got ${body.spritesheetWidth}x${body.spritesheetHeight}, expected at least ${MIN_SPRITE_DIM}x${MIN_SPRITE_DIM} (ideal 1536x1872).`,
-      got: { width: body.spritesheetWidth, height: body.spritesheetHeight },
+      message: `Spritesheet dimensions are invalid. Got ${String(width)}x${String(height)}, expected integer dimensions at least ${MIN_SPRITE_DIM}x${MIN_SPRITE_DIM}.`,
+      got: { width, height },
     };
   }
-  // The viewer walks 192x208 cells on an 8-column grid, so only two
-  // atlas shapes render correctly: the classic 8x9 (1536x1872) and the
-  // hatch-pet v2 8x11 (1536x2288, rows 9-10 hold the 16 look
-  // directions). Clean scales of either are fine (768x936, 3072x4576).
-  // Anything else gets squashed with every frame crop landing
-  // mid-sprite, which is how an early v2 sheet shipped visibly broken.
-  const isClassicGrid =
-    body.spritesheetWidth * 1872 === body.spritesheetHeight * 1536;
-  const isV2Grid =
-    body.spritesheetWidth * 2288 === body.spritesheetHeight * 1536;
-  if (!isClassicGrid && !isV2Grid) {
+  const atlas = detectSpriteAtlas(width, height);
+  if (!atlas) {
     return {
       ok: false,
       status: 400,
       error: "invalid_spritesheet",
-      message: `Spritesheet must be an 8x9 grid (1536x1872) or a v2 8x11 grid (1536x2288). Got ${body.spritesheetWidth}x${body.spritesheetHeight}, which the pet viewer would squash and misalign.`,
-      got: { width: body.spritesheetWidth, height: body.spritesheetHeight },
+      message: `Spritesheet must preserve the 8x9 (1536x1872) or v2 8x11 (1536x2288) atlas ratio. Got ${width}x${height}, which the pet viewer would squash and misalign.`,
+      got: { width, height },
     };
   }
   const spriteVersion = normalizeSpriteVersionNumber(body.spriteVersionNumber);
@@ -101,6 +97,16 @@ export function validateSubmission(
       field: "spriteVersionNumber",
       message: "spriteVersionNumber must be omitted, 1, or 2.",
       got: spriteVersion.value,
+    };
+  }
+  if (atlas.version !== spriteVersion.version) {
+    return {
+      ok: false,
+      status: 400,
+      error: "invalid_sprite_version",
+      field: "spriteVersionNumber",
+      message: `spriteVersionNumber ${spriteVersion.version} does not match the ${atlas.rows}-row atlas dimensions.`,
+      got: spriteVersion.version,
     };
   }
   // Reject any URL outside the allowlist. Without this, a malicious

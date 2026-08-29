@@ -1,5 +1,10 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, setDefaultTimeout } from "bun:test";
 import { randomBytes } from "node:crypto";
+
+// Sharp's native pipeline can take several seconds to initialize on a cold
+// CI worker. Keep a bounded file-level budget for this image-heavy suite
+// without weakening the production request timeouts.
+setDefaultTimeout(30_000);
 
 import sharp from "sharp";
 
@@ -595,7 +600,105 @@ describe("submission policy contact sheet", () => {
 
     await expect(preparePolicyReviewImage(sprite)).resolves.toEqual({
       ok: false,
-      reason: "Spritesheet must be 1536x1872 for policy OCR review.",
+      reason:
+        "Spritesheet must preserve the 8x9 (1536x1872) or v2 8x11 (1536x2288) atlas ratio for policy OCR review.",
+    });
+  });
+
+  it("normalizes a scaled classic atlas before policy review", async () => {
+    const sprite = await sharp({
+      create: {
+        width: 768,
+        height: 936,
+        channels: 4,
+        background: { r: 0, g: 0, b: 0, alpha: 0 },
+      },
+    })
+      .composite([
+        {
+          input: await sharp({
+            create: {
+              width: 96,
+              height: 104,
+              channels: 4,
+              background: { r: 25, g: 210, b: 80, alpha: 1 },
+            },
+          })
+            .png()
+            .toBuffer(),
+          left: 7 * 96,
+          top: 0,
+        },
+      ])
+      .png()
+      .toBuffer();
+
+    const dataUrl = await policyReviewImageDataUrl(sprite);
+    const image = Buffer.from(dataUrl?.split(",")[1] ?? "", "base64");
+    const metadata = await sharp(image).metadata();
+    expect(metadata.width).toBe(1536);
+    expect(metadata.height).toBe(1872);
+  });
+
+  it("reviews all rows of a v2 8x11 atlas", async () => {
+    const width = 8 * 192;
+    const height = 11 * 208;
+    const sprite = await sharp({
+      create: {
+        width,
+        height,
+        channels: 4,
+        background: { r: 0, g: 0, b: 0, alpha: 0 },
+      },
+    })
+      .composite([
+        {
+          input: await sharp({
+            create: {
+              width: 192,
+              height: 208,
+              channels: 4,
+              background: { r: 240, g: 210, b: 10, alpha: 1 },
+            },
+          })
+            .png()
+            .toBuffer(),
+          left: 7 * 192,
+          top: 10 * 208,
+        },
+      ])
+      .png()
+      .toBuffer();
+
+    const dataUrl = await policyReviewImageDataUrl(sprite);
+    const image = Buffer.from(dataUrl?.split(",")[1] ?? "", "base64");
+    const metadata = await sharp(image).metadata();
+    expect(metadata.width).toBe(width);
+    expect(metadata.height).toBe(height);
+    const { data } = await sharp(image)
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    const offset = (10 * 208 * width + 7 * 192 + 96) * 4;
+    expect(Array.from(data.slice(offset, offset + 4))).toEqual([
+      240, 210, 10, 255,
+    ]);
+  });
+
+  it("accepts a 2x v2 atlas within the supported review dimensions", async () => {
+    const sprite = await sharp({
+      create: {
+        width: 3072,
+        height: 4576,
+        channels: 4,
+        background: { r: 0, g: 0, b: 0, alpha: 0 },
+      },
+    })
+      .png()
+      .toBuffer();
+
+    await expect(preparePolicyReviewImage(sprite)).resolves.toMatchObject({
+      ok: true,
     });
   });
 
