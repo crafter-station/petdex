@@ -20,6 +20,7 @@
     "thumbs:snapshot:apply": "bun --env-file=.env.local --env-file=.env.production.local --conditions react-server scripts/publish-pet-thumbnails.ts apply",
     "previews:snapshot:check": "bun --env-file=.env.local --env-file=.env.production.local --conditions react-server scripts/publish-pet-previews.ts check",
     "previews:snapshot:apply": "bun --env-file=.env.local --env-file=.env.production.local --conditions react-server scripts/publish-pet-previews.ts apply",
+    "audit:pet-atlases": "bun scripts/audit-pet-atlases.ts --all",
     "stickers:snapshot:check": "bun --env-file=.env.local --env-file=.env.production.local --conditions react-server scripts/publish-pet-sticker-artifacts.ts check",
     "stickers:snapshot:apply": "bun --env-file=.env.local --env-file=.env.production.local --conditions react-server scripts/publish-pet-sticker-artifacts.ts apply",
     "stickers:review": "bun --env-file=.env.local --env-file=.env.production.local --conditions react-server scripts/render-pet-sticker-review.ts",
