@@ -17,6 +17,10 @@ import {
   readEditZipAsset,
 } from "../src/edit-assets.js";
 import {
+  fetchManifest as fetchCatalogManifest,
+  type ManifestPet,
+} from "../src/manifest.js";
+import {
   emit,
   getStatus,
   maybeShowFirstRunNotice,
@@ -47,6 +51,7 @@ const RETIRED_COMMANDS = new Map<string, string>([
   ["stop", DESKTOP_STOP_REDIRECT],
   ["toggle", "Toggle the mascot from the Petdex menu bar icon."],
   ["desktop", "The desktop app manages its own lifecycle."],
+  ["select", "Select pets from the Petdex desktop app."],
   ["update", "The desktop app updates itself automatically."],
   // Desktop Settings → Agents:
   // packages/petdex-desktop-native/src/settings_view.zig (`agentsSection`).
@@ -273,26 +278,11 @@ async function cmdWhoami() {
   }
 }
 
-type ManifestPet = {
-  slug: string;
-  displayName: string;
-  spritesheetUrl: string;
-  petJsonUrl: string;
-  spriteVersionNumber?: 1 | 2;
-};
-
 function parseSpriteVersionNumber(petJson: Record<string, unknown>): 1 | 2 {
   const value = petJson.spriteVersionNumber;
   if (value === undefined || value === 1) return 1;
   if (value === 2) return 2;
   throw new Error("spriteVersionNumber must be omitted, 1, or 2");
-}
-
-async function fetchManifest(): Promise<ManifestPet[]> {
-  const res = await fetch(`${PETDEX_URL}/api/manifest`);
-  if (!res.ok) throw new Error(`manifest fetch ${res.status}`);
-  const data = (await res.json()) as { pets: ManifestPet[] };
-  return data.pets;
 }
 
 async function installOne(pet: ManifestPet): Promise<void> {
@@ -379,7 +369,7 @@ async function cmdInstall(args: string[]) {
 
   let manifest: ManifestPet[];
   try {
-    manifest = await fetchManifest();
+    manifest = await fetchCatalogManifest(PETDEX_URL);
   } catch (err) {
     s.stop(pc.red("manifest failed"));
     throw err;
@@ -470,23 +460,16 @@ async function cmdInstall(args: string[]) {
 async function cmdList() {
   const s = p.spinner();
   s.start("Fetching gallery");
-  const res = await fetch(`${PETDEX_URL}/api/manifest`);
-  if (!res.ok) {
+  let data: ManifestPet[];
+  try {
+    data = await fetchCatalogManifest(PETDEX_URL);
+  } catch (error) {
     s.stop(pc.red("failed"));
-    throw new Error(`failed to fetch manifest: ${res.status}`);
+    throw error;
   }
-  const data = (await res.json()) as {
-    total: number;
-    pets: Array<{
-      slug: string;
-      displayName: string;
-      kind: string;
-      submittedBy: string | null;
-    }>;
-  };
-  s.stop(`${data.total} pets`);
+  s.stop(`${data.length} pets`);
 
-  const lines = data.pets.map((pet) => {
+  const lines = data.map((pet) => {
     const tag = pet.submittedBy ? pc.dim(` by ${pet.submittedBy}`) : "";
     return `  ${pc.cyan(pet.slug.padEnd(26))} ${pet.displayName}${tag}`;
   });

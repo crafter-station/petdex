@@ -33,4 +33,12 @@ describe("retired command aliases", () => {
       normalizeCommand(expected.stderr, canonical),
     );
   });
+
+  test("select points legacy users to the desktop app", () => {
+    const result = runCli("select");
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).not.toContain("Unknown command");
+    expect(result.stderr).toContain("desktop app");
+  });
 });
