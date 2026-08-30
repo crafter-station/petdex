@@ -166,14 +166,14 @@ export default async function BuiltWithPage({
               <p className="font-mono text-[11px] font-medium tracking-[0.24em] text-brand uppercase">
                 {t("eyebrow")}
               </p>
-              <h1 className="mt-5 max-w-[620px] text-balance text-[46px] leading-[0.98] font-semibold tracking-[-0.05em] sm:text-[58px] lg:text-[48px] xl:text-[62px]">
+              <h1 className="mt-5 max-w-[620px] text-balance text-[46px] leading-[0.98] font-semibold tracking-[-0.05em] sm:text-[58px] lg:text-[48px] xl:text-[62px] [@media(min-width:1280px)_and_(max-height:900px)]:mt-2.5 [@media(min-width:1280px)_and_(max-height:900px)]:text-[48px]">
                 {t("title")}
               </h1>
-              <p className="mt-6 max-w-xl text-pretty text-base leading-7 text-muted-1 sm:text-lg sm:leading-8">
+              <p className="mt-6 max-w-xl text-pretty text-base leading-7 text-muted-1 sm:text-lg sm:leading-8 [@media(min-width:1280px)_and_(max-height:900px)]:mt-3.5 [@media(min-width:1280px)_and_(max-height:900px)]:text-base [@media(min-width:1280px)_and_(max-height:900px)]:leading-[26px]">
                 {t("subtitle", { total })}
               </p>
 
-              <div className="mt-9 flex flex-wrap items-center gap-3">
+              <div className="mt-9 flex flex-wrap items-center gap-3 [@media(min-width:1280px)_and_(max-height:900px)]:mt-[18px]">
                 <Link
                   href={SUBMIT_ISSUE_URL}
                   target="_blank"
@@ -193,7 +193,7 @@ export default async function BuiltWithPage({
               </div>
             </div>
 
-            <div className="relative z-10 mt-10 grid grid-cols-2 border-y border-border-base sm:grid-cols-4">
+            <div className="relative z-10 mt-10 grid grid-cols-2 border-y border-border-base sm:grid-cols-4 [@media(min-width:1280px)_and_(max-height:900px)]:mt-4">
               <Stat value={total.toString()} label={t("stats.projectsLabel")} />
               <Stat
                 value={CATEGORY_ORDER.length.toString()}
@@ -412,7 +412,7 @@ export default async function BuiltWithPage({
 
 function Stat({ value, label }: { value: string; label: string }) {
   return (
-    <div className="border-border-base px-3 py-3 even:border-l sm:border-l sm:first:border-l-0">
+    <div className="border-border-base px-3 py-4 even:border-l sm:border-l sm:first:border-l-0">
       <p className="font-mono text-lg font-semibold tracking-[-0.04em] text-foreground">
         {value}
       </p>
