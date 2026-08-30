@@ -922,6 +922,7 @@ const auth_token_key: u64 = 43;
 const auth_library_key: u64 = 44;
 const auth_avatar_key: u64 = 45;
 const auth_preview_key: u64 = 46;
+const auth_keychain_save_keys = [_]u64{ auth_keychain_save_key, 47, 48 };
 const update_boot_delay_ms: u32 = 5000;
 const update_background_interval_ms: i64 = 24 * 60 * 60 * 1000;
 const update_settings_interval_ms: i64 = 5 * 60 * 1000;
@@ -931,7 +932,17 @@ const homebrew_timeout_ms: u64 = 8000;
 fn loadAuthSession(model: *Model, fx: *Effects) void {
     if (!desktop_auth.available) return;
     model.auth.phase = .loading;
-    const argv = [_][]const u8{ "/usr/bin/security", "find-generic-password", "-a", desktop_auth.account, "-s", desktop_auth.service, "-w" };
+    const argv = [_][]const u8{
+        "/bin/sh",
+        "-c",
+        "petdex_legacy=$(/usr/bin/security find-generic-password -a \"$1\" -s \"$5\" -w 2>/dev/null) && { printf '%s' \"$petdex_legacy\"; exit 0; }; for petdex_account in \"$2\" \"$3\" \"$4\"; do petdex_part=$(/usr/bin/security find-generic-password -a \"$petdex_account\" -s \"$5\" -w 2>/dev/null) || exit 1; printf '%s' \"$petdex_part\"; done",
+        "petdex-keychain",
+        desktop_auth.account,
+        desktop_auth.keychain_accounts[0],
+        desktop_auth.keychain_accounts[1],
+        desktop_auth.keychain_accounts[2],
+        desktop_auth.service,
+    };
     fx.spawn(.{
         .key = auth_keychain_load_key,
         .argv = &argv,
@@ -942,23 +953,25 @@ fn loadAuthSession(model: *Model, fx: *Effects) void {
 
 fn saveAuthSession(model: *const Model, fx: *Effects) void {
     if (!desktop_auth.available) return;
-    var json_buf: [4096]u8 = undefined;
-    const json = desktop_auth.storedTokens(&model.auth, &json_buf) orelse return;
-    const argv = [_][]const u8{
-        "/bin/sh",
-        "-c",
-        "IFS= read -r petdex_secret; printf '%s\\n%s\\n' \"$petdex_secret\" \"$petdex_secret\" | /usr/bin/security add-generic-password -U -a \"$1\" -s \"$2\" -w",
-        "petdex-keychain",
-        desktop_auth.account,
-        desktop_auth.service,
-    };
-    fx.spawn(.{
-        .key = auth_keychain_save_key,
-        .argv = &argv,
-        .stdin = json,
-        .output = .collect,
-        .on_exit = Effects.exitMsg(.auth_keychain_saved),
-    });
+    const token = model.auth.refreshToken();
+    for (desktop_auth.keychain_accounts, auth_keychain_save_keys, 0..) |account_name, effect_key, index| {
+        const chunk = desktop_auth.keychainChunk(token, index) orelse return;
+        const argv = [_][]const u8{
+            "/bin/sh",
+            "-c",
+            "IFS= read -r petdex_secret; printf '%s\\n%s\\n' \"$petdex_secret\" \"$petdex_secret\" | /usr/bin/security add-generic-password -U -a \"$1\" -s \"$2\" -w",
+            "petdex-keychain",
+            account_name,
+            desktop_auth.service,
+        };
+        fx.spawn(.{
+            .key = effect_key,
+            .argv = &argv,
+            .stdin = chunk,
+            .output = .collect,
+            .on_exit = Effects.exitMsg(.auth_keychain_saved),
+        });
+    }
 }
 
 fn fetchAuthLibrary(model: *Model, fx: *Effects) void {
@@ -2555,7 +2568,17 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             auth_avatar_ready = false;
             model.auth_preview_ready = @splat(false);
             if (!desktop_auth.available) return;
-            const argv = [_][]const u8{ "/usr/bin/security", "delete-generic-password", "-a", desktop_auth.account, "-s", desktop_auth.service };
+            const argv = [_][]const u8{
+                "/bin/sh",
+                "-c",
+                "for petdex_account in \"$1\" \"$2\" \"$3\" \"$4\"; do /usr/bin/security delete-generic-password -a \"$petdex_account\" -s \"$5\" >/dev/null 2>&1 || true; done",
+                "petdex-keychain",
+                desktop_auth.account,
+                desktop_auth.keychain_accounts[0],
+                desktop_auth.keychain_accounts[1],
+                desktop_auth.keychain_accounts[2],
+                desktop_auth.service,
+            };
             fx.spawn(.{
                 .key = auth_keychain_delete_key,
                 .argv = &argv,
