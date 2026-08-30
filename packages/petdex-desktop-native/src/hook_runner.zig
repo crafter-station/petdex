@@ -109,7 +109,7 @@ pub fn run(phase: []const u8, arg_agent: ?[]const u8, origin_app: plat.OriginApp
     var post_count: usize = 0;
     var body_buf: [1536]u8 = undefined;
     if (text.len > 0) {
-        const body = bubbleBodyWithMetadata(&body_buf, text, title, busy, agent, session_id, source_app, source_tty, source_cwd, herdr_pane);
+        const body = bubbleBodyWithMetadata(&body_buf, text, title, busy, agent, session_id, source_app, source_tty, source_cwd, herdr_pane, state);
         if (body) |b| {
             if (startPost("/bubble", b, token)) |post| {
                 posts[post_count] = post;
@@ -174,10 +174,16 @@ fn isToolFailurePhase(phase: []const u8) bool {
 /// precisely how session_id got parsed, used for titles, and then left out of
 /// the POST that needed it.
 pub fn bubbleBody(out: []u8, text: []const u8, title: []const u8, busy: bool, agent: []const u8, session_id: ?[]const u8) ?[]const u8 {
-    return bubbleBodyWithMetadata(out, text, title, busy, agent, session_id, "", "", "", "");
+    return bubbleBodyWithMetadata(out, text, title, busy, agent, session_id, "", "", "", "", null);
 }
 
-fn bubbleBodyWithMetadata(out: []u8, text: []const u8, title: []const u8, busy: bool, agent: []const u8, session_id: ?[]const u8, source_app: []const u8, source_tty: []const u8, source_cwd: []const u8, herdr_pane: []const u8) ?[]const u8 {
+/// `agent_state` carries what this one session is doing to the bubble the
+/// desktop keys by session. The same value already goes to /state, but
+/// that endpoint aggregates: with several agents live it can only show
+/// one. The flock renders a body per session, so the rich states the
+/// hooks already compute (failed, review, waiting) have to travel here to
+/// survive. Senders that pass null keep the previous body byte for byte.
+pub fn bubbleBodyWithMetadata(out: []u8, text: []const u8, title: []const u8, busy: bool, agent: []const u8, session_id: ?[]const u8, source_app: []const u8, source_tty: []const u8, source_cwd: []const u8, herdr_pane: []const u8, agent_state: ?[]const u8) ?[]const u8 {
     var title_buf: [256]u8 = undefined;
     const title_part: []const u8 = if (title.len > 0)
         (std.fmt.bufPrint(&title_buf, ",\"title\":\"{s}\"", .{title}) catch return null)
@@ -193,7 +199,12 @@ fn bubbleBodyWithMetadata(out: []u8, text: []const u8, title: []const u8, busy: 
         (std.fmt.bufPrint(&metadata_buf, ",\"source_app\":\"{s}\",\"source_tty\":\"{s}\",\"source_cwd\":\"{s}\",\"herdr_pane_id\":\"{s}\"", .{ source_app, source_tty, source_cwd, herdr_pane }) catch return null)
     else
         "";
-    return std.fmt.bufPrint(out, "{{\"text\":\"{s}\"{s},\"busy\":{},\"agent_source\":\"{s}\"{s}{s}}}", .{ text, title_part, busy, agent, session_part, metadata }) catch null;
+    var state_buf: [48]u8 = undefined;
+    const state_part: []const u8 = if (agent_state) |st|
+        (std.fmt.bufPrint(&state_buf, ",\"agent_state\":\"{s}\"", .{st}) catch return null)
+    else
+        "";
+    return std.fmt.bufPrint(out, "{{\"text\":\"{s}\"{s},\"busy\":{},\"agent_source\":\"{s}\"{s}{s}{s}}}", .{ text, title_part, busy, agent, session_part, metadata, state_part }) catch null;
 }
 
 /// The /state request body. Extracted and pure for one reason: `run()` reaches
@@ -844,7 +855,7 @@ test "bubbleBody carries session_id, and omits it when there is none" {
 
 test "bubble metadata carries the exact Herdr pane id" {
     var buf: [1024]u8 = undefined;
-    const body = bubbleBodyWithMetadata(&buf, "Needs approval", "Fix auth", false, "cursor", "session-1", "ghostty", "", "/repo", "w1:p5").?;
+    const body = bubbleBodyWithMetadata(&buf, "Needs approval", "Fix auth", false, "cursor", "session-1", "ghostty", "", "/repo", "w1:p5", null).?;
     try t.expectEqualStrings("w1:p5", hook_server.jsonStringPub(body, "herdr_pane_id").?);
 }
 
@@ -922,4 +933,31 @@ test "clipEscaped cuts on a safe boundary" {
     const clipped = clipEscaped(&long, 110, &buf).?;
     try t.expect(clipped.len <= 110);
     try t.expect(clipped[clipped.len - 1] != '\\');
+}
+
+test "a bubble without a reported state is byte-identical to before" {
+    // The flock reads agent_state, but every sender that does not know one
+    // must keep producing exactly the body that shipped before the field
+    // existed: this is the compatibility promise, not a preference.
+    var with: [1536]u8 = undefined;
+    var without: [1536]u8 = undefined;
+    const a = bubbleBodyWithMetadata(&with, "text", "title", true, "claude", "s1", "", "", "", "", null).?;
+    const b = bubbleBody(&without, "text", "title", true, "claude", "s1").?;
+    try std.testing.expectEqualStrings(b, a);
+    try std.testing.expect(std.mem.indexOf(u8, a, "agent_state") == null);
+}
+
+test "a reported state rides the bubble that carries the session" {
+    var buf: [1536]u8 = undefined;
+    const body = bubbleBodyWithMetadata(&buf, "text", "title", true, "claude", "s1", "", "", "", "", "failed").?;
+    try std.testing.expect(std.mem.indexOf(u8, body, "\"agent_state\":\"failed\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, body, "\"session_id\":\"s1\"") != null);
+}
+
+test "the states only direct hooks can see reach the bubble" {
+    // stateForEvent already computes these; before this they only went to
+    // /state, which aggregates and cannot show two agents at once.
+    try std.testing.expectEqualStrings("failed", stateForEvent("tool-failure", "Bash").?);
+    try std.testing.expectEqualStrings("review", stateForEvent("pre", "Read").?);
+    try std.testing.expectEqualStrings("waiting", stateForEvent("approval-request", null).?);
 }

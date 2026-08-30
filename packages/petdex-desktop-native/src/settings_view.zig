@@ -34,6 +34,7 @@ const max_catalog = catalog_mod.max_catalog;
 const agent_hooks = @import("agent_hooks.zig");
 const remote_runtime = @import("remote_runtime.zig");
 const settingsBackground = app.settingsBackground;
+const companion_header_h = app.companion_header_h;
 
 /// Where the agent logos are, handed in so this file does not reach into
 /// main.zig's registration state.
@@ -747,7 +748,10 @@ pub fn settingsView(ui: *AppUi, model: *const Model, icons: IconAtlas, thumbs: T
         // of the scroll extent, so the last card needs explicit air.
         ui.el(.stack, .{ .height = 8 }, .{}),
     })});
-    var root = ui.el(.panel, .{ .grow = 1 }, .{page});
+    var root = ui.column(.{ .grow = 1 }, .{
+        ui.el(.stack, .{ .height = companion_header_h, .window_drag = true }, .{}),
+        page,
+    });
     root.widget.style.background = settingsBackground(model);
     return root;
 }

@@ -37,6 +37,9 @@ export type BridgeConfig = {
 export type PetdexUpdate = {
   bubble: {
     agent_source: string;
+    /// This pane's own status, not the aggregate. Petdex renders one body
+    /// per session, so collapsing here would lose which agent is blocked.
+    agent_state: AgentStatus;
     busy: boolean;
     herdr_pane_id: string;
     session_id: string;
@@ -167,6 +170,7 @@ export function updateFromEvent(
   return {
     bubble: {
       agent_source: agent,
+      agent_state: status,
       busy: status === "working",
       herdr_pane_id: paneId,
       session_id: nativeSession || `herdr:${paneId}`,
