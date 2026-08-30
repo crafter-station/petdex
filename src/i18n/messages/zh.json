@@ -640,16 +640,38 @@
       "description": "{total} 个基于 Petdex 构建的开源和源码可见项目：桌面伙伴、专注工具、可穿戴设备、SDK 和 pet 创作者。"
     },
     "eyebrow": "用 Petdex 构建",
-    "title": "社区正在 Petdex 上发布的应用",
-    "subtitle": "{total} 个开源和源码可见项目使用 Petdex 的图库、API 或 pet 格式。专注工具、可穿戴设备、SDK 和创作者。精选、有证据、不靠感觉。",
+    "title": "真实项目，真实集成。",
+    "subtitle": "一份收录 {total} 个使用 Petdex 构建的开源和源码可见产品的编辑指南。了解它们发布了什么、如何集成，以及下一步走向哪里。",
     "stats": {
       "stars": "总计 {total} stars",
       "projects": "{total} 个项目",
-      "categories": "{total} 个分类"
+      "categories": "{total} 个分类",
+      "projectsLabel": "项目",
+      "categoriesLabel": "分类",
+      "starsLabel": "总 Stars",
+      "updatedLabel": "更新于"
     },
     "cta": {
       "submit": "提交你的项目",
-      "starPetdex": "为 Petdex 加星"
+      "starPetdex": "为 Petdex 加星",
+      "browseRegistry": "浏览项目目录"
+    },
+    "featured": {
+      "eyebrow": "精选故事",
+      "evidence": "集成证据"
+    },
+    "chapters": {
+      "eyebrow": "生态系统指南",
+      "title": "按章节探索",
+      "description": "按类别浏览 Petdex 生态系统。每个章节重点介绍开发者发布的内容以及他们如何让 Petdex 生动起来。",
+      "viewAll": "查看全部（{count}）"
+    },
+    "registry": {
+      "eyebrow": "所有已验证项目",
+      "title": "完整项目指南",
+      "description": "每个条目都链接到公开证据，说明项目如何使用 Petdex 图库、API 或 pet 格式。",
+      "entries": "个条目",
+      "evidence": "证据"
     },
     "categoryCount": "{count}",
     "categories": {
@@ -685,7 +707,8 @@
       "step2": "用 \"Add my project to /built-with\" 模板开一个 GitHub issue。",
       "step3": "提供证据引文（README 链接或代码路径，证明集成）。",
       "step4": "我们审核、截取 1280x720 截图并合并。",
-      "openIssue": "打开提交 issue"
+      "openIssue": "打开提交 issue",
+      "summary": "使用图库、API 或 pet 格式进行构建，明确注明来源并提交证据。每个条目都会在发布前经过审核。"
     },
     "card": {
       "screenshotAlt": "{name} 截图",

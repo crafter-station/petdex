@@ -546,16 +546,38 @@
       "description": "{total} proyectos open source y source-available construidos sobre Petdex: companions de escritorio, apps de wellness, wearables, SDKs y creadores de pets."
     },
     "eyebrow": "Hecho con Petdex",
-    "title": "Apps que la comunidad está shippeando sobre Petdex",
-    "subtitle": "{total} proyectos open source y source-available consumen la galería, la API o el formato de Petdex. Apps de wellness, wearables, SDKs y creadores. Curado, con evidencia, sin vibes.",
+    "title": "Proyectos reales. Integraciones reales.",
+    "subtitle": "Una guía editorial de {total} productos open source y source-available construidos con Petdex. Mirá qué shippean, cómo se integran y hacia dónde van.",
     "stats": {
       "stars": "{total} stars combinadas",
       "projects": "{total} proyectos",
-      "categories": "{total} categorías"
+      "categories": "{total} categorías",
+      "projectsLabel": "Proyectos",
+      "categoriesLabel": "Categorías",
+      "starsLabel": "Stars combinadas",
+      "updatedLabel": "Actualizado"
     },
     "cta": {
       "submit": "Enviá tu proyecto",
-      "starPetdex": "Dale star a Petdex"
+      "starPetdex": "Dale star a Petdex",
+      "browseRegistry": "Explorar el registro"
+    },
+    "featured": {
+      "eyebrow": "Historia destacada",
+      "evidence": "Evidencia de integración"
+    },
+    "chapters": {
+      "eyebrow": "La guía del ecosistema",
+      "title": "Explorá por capítulo",
+      "description": "Recorré el ecosistema Petdex por categoría. Cada capítulo muestra qué están shippeando y cómo le dan vida a Petdex.",
+      "viewAll": "Ver todos ({count})"
+    },
+    "registry": {
+      "eyebrow": "Cada proyecto verificado",
+      "title": "La guía completa",
+      "description": "Cada entrada enlaza evidencia pública que muestra cómo el proyecto usa la galería, la API o el formato de Petdex.",
+      "entries": "entradas",
+      "evidence": "Evidencia"
     },
     "categoryCount": "{count}",
     "categories": {
@@ -591,7 +613,8 @@
       "step2": "Abrí un issue de GitHub usando el template \"Add my project to /built-with\".",
       "step3": "Mandanos una cita como evidencia (link al README o ruta del código que prueba la integración).",
       "step4": "Revisamos, tomamos un screenshot 1280x720 y mergeamos.",
-      "openIssue": "Abrir issue de submission"
+      "openIssue": "Abrir issue de submission",
+      "summary": "Construí con la galería, la API o el formato de pets, agregá atribución explícita y mandanos la evidencia. Revisamos cada entrada antes de publicarla."
     },
     "card": {
       "screenshotAlt": "Screenshot de {name}",
