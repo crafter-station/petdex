@@ -28,6 +28,7 @@ const remote_ssh = @import("remote_ssh.zig");
 const remote_writeback = @import("remote_writeback.zig");
 const remote_runtime = @import("remote_runtime.zig");
 const herdr_status = @import("herdr_status.zig");
+pub const desktop_auth = @import("desktop_auth.zig");
 pub const updates = @import("updates.zig");
 
 pub const panic = std.debug.FullPanic(native_sdk.debug.capturePanic);
@@ -96,6 +97,8 @@ pub const Msg = union(enum) {
     set_scale: f32,
     open_pets_folder,
     open_pet_page: u32,
+    open_active_pet_page,
+    open_website,
     appearance: native_sdk.platform.Appearance,
     toggle_bubbles,
     toggle_bubbles_per_conversation,
@@ -138,9 +141,25 @@ pub const Msg = union(enum) {
     download_update,
     copy_brew_command,
     brew_command_copied: native_sdk.EffectClipboardResult,
+    auth_sign_in,
+    auth_refresh,
+    auth_sign_out,
+    auth_install_pet: u32,
+    auth_open_pet: u32,
+    auth_open_library,
+    auth_open_community,
+    set_pet_source: u32,
+    settings_scrolled: canvas.ScrollState,
+    auth_keychain_loaded: native_sdk.EffectExit,
+    auth_keychain_saved: native_sdk.EffectExit,
+    auth_keychain_deleted: native_sdk.EffectExit,
+    auth_token_response: native_sdk.EffectResponse,
+    auth_avatar_response: native_sdk.EffectResponse,
+    auth_preview_response: native_sdk.EffectResponse,
+    auth_library_done: native_sdk.EffectExit,
     noop,
 
-    pub const view_unbound = .{ "frame_tick", "poll_tick", "physics_tick", "frame_clock", "cycle_state", "native_drag_watchdog", "chime_done", "quit_app", "toggle_focus_mode", "shuffle_pet", "dsh_install_done", "dsh_remove_done", "remote_line", "remote_done", "remote_backoff", "update_boot_check", "update_response", "homebrew_done", "homebrew_timeout", "brew_command_copied" };
+    pub const view_unbound = .{ "frame_tick", "poll_tick", "physics_tick", "frame_clock", "cycle_state", "native_drag_watchdog", "chime_done", "quit_app", "toggle_focus_mode", "shuffle_pet", "dsh_install_done", "dsh_remove_done", "remote_line", "remote_done", "remote_backoff", "update_boot_check", "update_response", "homebrew_done", "homebrew_timeout", "brew_command_copied", "auth_keychain_loaded", "auth_keychain_saved", "auth_keychain_deleted", "auth_token_response", "auth_avatar_response", "auth_preview_response", "auth_library_done" };
 };
 
 pub const Model = struct {
@@ -331,6 +350,11 @@ pub const Model = struct {
     dark: bool = true,
     high_contrast: bool = false,
     reduce_motion: bool = false,
+    auth: desktop_auth.State = .{},
+    pet_source: desktop_auth.LibraryView = .installed,
+    settings_scroll: f32 = 0,
+    auth_preview_next: usize = 0,
+    auth_preview_ready: [12]bool = @splat(false),
 };
 
 /// Petdex web tokens (globals.css) translated from OKLCH: brand purple
@@ -884,11 +908,178 @@ const update_boot_timer_key: u64 = 33;
 const homebrew_timeout_timer_key: u64 = 34;
 const dsh_install_key: u64 = 35;
 const dsh_remove_key: u64 = 36;
+const auth_keychain_load_key: u64 = 40;
+const auth_keychain_save_key: u64 = 41;
+const auth_keychain_delete_key: u64 = 42;
+const auth_token_key: u64 = 43;
+const auth_library_key: u64 = 44;
+const auth_avatar_key: u64 = 45;
+const auth_preview_key: u64 = 46;
 const update_boot_delay_ms: u32 = 5000;
 const update_background_interval_ms: i64 = 24 * 60 * 60 * 1000;
 const update_settings_interval_ms: i64 = 5 * 60 * 1000;
 const update_failure_retry_ms: u64 = 60 * 60 * 1000;
 const homebrew_timeout_ms: u64 = 8000;
+
+fn loadAuthSession(model: *Model, fx: *Effects) void {
+    if (!desktop_auth.available) return;
+    model.auth.phase = .loading;
+    const argv = [_][]const u8{ "/usr/bin/security", "find-generic-password", "-a", desktop_auth.account, "-s", desktop_auth.service, "-w" };
+    fx.spawn(.{
+        .key = auth_keychain_load_key,
+        .argv = &argv,
+        .output = .collect,
+        .on_exit = Effects.exitMsg(.auth_keychain_loaded),
+    });
+}
+
+fn saveAuthSession(model: *const Model, fx: *Effects) void {
+    if (!desktop_auth.available) return;
+    var json_buf: [4096]u8 = undefined;
+    const json = desktop_auth.storedTokens(&model.auth, &json_buf) orelse return;
+    const argv = [_][]const u8{
+        "/bin/sh",
+        "-c",
+        "IFS= read -r petdex_secret; printf '%s\\n%s\\n' \"$petdex_secret\" \"$petdex_secret\" | /usr/bin/security add-generic-password -U -a \"$1\" -s \"$2\" -w",
+        "petdex-keychain",
+        desktop_auth.account,
+        desktop_auth.service,
+    };
+    fx.spawn(.{
+        .key = auth_keychain_save_key,
+        .argv = &argv,
+        .stdin = json,
+        .output = .collect,
+        .on_exit = Effects.exitMsg(.auth_keychain_saved),
+    });
+}
+
+fn fetchAuthLibrary(model: *Model, fx: *Effects) void {
+    if (model.auth.access_token_len == 0) {
+        model.auth.setError("Your Petdex session is missing an access token");
+        return;
+    }
+    model.auth.phase = .syncing;
+    var config_buf: [9000]u8 = undefined;
+    const config = std.fmt.bufPrint(&config_buf, "url = \"{s}\"\nheader = \"Authorization: Bearer {s}\"\nsilent\nshow-error\nwrite-out = \"\\n%{{http_code}}\"\n", .{ env_auth_library_url, model.auth.accessToken() }) catch {
+        model.auth.setError("Your Petdex session token is too large");
+        return;
+    };
+    const argv = [_][]const u8{ "/usr/bin/curl", "--max-time", "15", "--config", "-" };
+    fx.spawn(.{
+        .key = auth_library_key,
+        .argv = &argv,
+        .stdin = config,
+        .output = .collect,
+        .on_exit = Effects.exitMsg(.auth_library_done),
+    });
+}
+
+fn requestAuthTokens(model: *Model, code: ?[]const u8, fx: *Effects) void {
+    var body_buf: [10000]u8 = undefined;
+    const body = if (code) |value| desktop_auth.tokenBody(&model.auth, value, &body_buf) else desktop_auth.refreshBody(&model.auth, &body_buf);
+    const payload = body orelse {
+        model.auth.setError("Could not prepare the Petdex sign-in request");
+        return;
+    };
+    model.auth.refreshing = code == null;
+    model.auth.phase = .exchanging;
+    const headers = [_]std.http.Header{.{ .name = "content-type", .value = "application/x-www-form-urlencoded" }};
+    fx.fetch(.{
+        .key = auth_token_key,
+        .method = .POST,
+        .url = desktop_auth.issuer ++ "/oauth/token",
+        .headers = &headers,
+        .body = payload,
+        .timeout_ms = 15000,
+        .on_response = Effects.responseMsg(.auth_token_response),
+    });
+}
+
+fn authPetForCell(model: *const Model, cell: usize) ?*const desktop_auth.Pet {
+    if (cell < 6) {
+        if (cell >= model.auth.owned_len) return null;
+        return &model.auth.owned[cell];
+    }
+    const index = cell - 6;
+    if (index >= model.auth.caught_len) return null;
+    return &model.auth.caught[index];
+}
+
+fn fetchNextAuthPreview(model: *Model, fx: *Effects) void {
+    while (model.auth_preview_next < auth_preview_count) {
+        const cell = model.auth_preview_next;
+        model.auth_preview_next += 1;
+        const pet = authPetForCell(model, cell) orelse continue;
+        if (pet.thumbnail_url_len == 0) continue;
+        fx.fetch(.{
+            .key = auth_preview_key,
+            .url = pet.thumbnailUrl(),
+            .timeout_ms = 10000,
+            .on_response = Effects.responseMsg(.auth_preview_response),
+        });
+        return;
+    }
+}
+
+fn startAuthImages(model: *Model, fx: *Effects) void {
+    auth_avatar_ready = false;
+    model.auth_preview_next = 0;
+    model.auth_preview_ready = @splat(false);
+    if (auth_preview_pixels.len == 0) {
+        auth_preview_pixels = boot_allocator.alloc(u8, auth_preview_columns * auth_preview_cell * 2 * auth_preview_cell * 4) catch return;
+    }
+    @memset(auth_preview_pixels, 0);
+    if (model.auth.avatar_url_len > 0) {
+        fx.fetch(.{
+            .key = auth_avatar_key,
+            .url = model.auth.avatarUrl(),
+            .timeout_ms = 10000,
+            .on_response = Effects.responseMsg(.auth_avatar_response),
+        });
+    }
+    fetchNextAuthPreview(model, fx);
+}
+
+fn registerAuthPreview(model: *Model, response: native_sdk.EffectResponse, fx: *Effects) void {
+    const cell = model.auth_preview_next -| 1;
+    if (cell >= auth_preview_count or response.outcome != .ok or response.status != 200 or response.truncated) {
+        fetchNextAuthPreview(model, fx);
+        return;
+    }
+    const services = fx.services orelse {
+        fetchNextAuthPreview(model, fx);
+        return;
+    };
+    const scratch = boot_allocator.alloc(u8, 512 * 512 * 4) catch {
+        fetchNextAuthPreview(model, fx);
+        return;
+    };
+    defer boot_allocator.free(scratch);
+    const decoded = services.decodeImage(response.body, scratch) catch {
+        fetchNextAuthPreview(model, fx);
+        return;
+    };
+    if (decoded.width == 0 or decoded.height == 0) {
+        fetchNextAuthPreview(model, fx);
+        return;
+    }
+    const atlas_width = auth_preview_columns * auth_preview_cell;
+    const cell_x = (cell % auth_preview_columns) * auth_preview_cell;
+    const cell_y = (cell / auth_preview_columns) * auth_preview_cell;
+    for (0..auth_preview_cell) |y| {
+        const src_y = y * decoded.height / auth_preview_cell;
+        for (0..auth_preview_cell) |x| {
+            const src_x = x * decoded.width / auth_preview_cell;
+            const src_off = (src_y * decoded.width + src_x) * 4;
+            const dst_off = ((cell_y + y) * atlas_width + cell_x + x) * 4;
+            @memcpy(auth_preview_pixels[dst_off..][0..4], scratch[src_off..][0..4]);
+        }
+    }
+    model.auth_preview_ready[cell] = true;
+    fx.registerImage(auth_preview_atlas_id, atlas_width, auth_preview_cell * 2, auth_preview_pixels) catch {};
+    fetchNextAuthPreview(model, fx);
+}
 
 fn updateCachePhase(model: *Model) void {
     if (model.latest_version_len == 0) {
@@ -1011,6 +1202,7 @@ var sheet: Sheet = .{};
 /// global getenv; env rides std.process.Init).
 var env_home: ?[]const u8 = null;
 var env_wanted_pet: ?[]const u8 = null;
+var env_auth_library_url: []const u8 = desktop_auth.library_url;
 
 fn readFileAbsolute(io: std.Io, allocator: std.mem.Allocator, path: []const u8, max: usize) ![]u8 {
     var file = try std.Io.Dir.openFileAbsolute(io, path, .{});
@@ -1328,6 +1520,13 @@ var initial_pet_y: ?f64 = null;
 // assets/agents/, re-registered only when the agent changes.
 const avatar_image_id: u64 = 13;
 const tail_image_id: u64 = 14;
+const auth_avatar_image_id: u64 = 15;
+const auth_preview_atlas_id: u64 = 16;
+const auth_preview_cell: usize = 48;
+const auth_preview_columns: usize = 6;
+const auth_preview_count: usize = 12;
+var auth_avatar_ready: bool = false;
+var auth_preview_pixels: []u8 = &.{};
 // One slot for every agent logo plus fallback, packed side by side and read back with
 // `image_src` (the thumbnail atlas above does the same). Previously each
 // agent held its own registry id, which ran the app into the SDK's
@@ -1896,6 +2095,7 @@ pub fn boot(model: *Model, fx: *Effects) void {
         };
         startRemotes(model, fx);
     }
+    loadAuthSession(model, fx);
     fx.startTimer(.{
         .key = poll_timer_key,
         .interval_ms = poll_interval_ms,
@@ -2246,11 +2446,144 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             }
             model.settings_open = true;
         },
+        .auth_sign_in => {
+            if (!desktop_auth.available or model.auth.phase == .authorizing or model.auth.phase == .exchanging) return;
+            var url_buf: [1024]u8 = undefined;
+            const url = desktop_auth.begin(&model.auth, &url_buf) orelse {
+                model.auth.setError("Could not start Petdex sign-in");
+                return;
+            };
+            plat.openExternal(url);
+        },
+        .auth_refresh => {
+            if (model.auth.phase != .signed_in and model.auth.phase != .failed) return;
+            if (model.auth.access_token_len > 0) {
+                fetchAuthLibrary(model, fx);
+            } else {
+                requestAuthTokens(model, null, fx);
+            }
+        },
+        .auth_sign_out => {
+            model.auth.clearSession();
+            model.pet_source = .installed;
+            auth_avatar_ready = false;
+            model.auth_preview_ready = @splat(false);
+            if (!desktop_auth.available) return;
+            const argv = [_][]const u8{ "/usr/bin/security", "delete-generic-password", "-a", desktop_auth.account, "-s", desktop_auth.service };
+            fx.spawn(.{
+                .key = auth_keychain_delete_key,
+                .argv = &argv,
+                .output = .collect,
+                .on_exit = Effects.exitMsg(.auth_keychain_deleted),
+            });
+        },
+        .auth_install_pet => |cloud_id| {
+            const caught = cloud_id >= desktop_auth.max_pets;
+            const index: usize = if (caught) cloud_id - desktop_auth.max_pets else cloud_id;
+            const pet = if (caught) blk: {
+                if (index >= model.auth.caught_len) return;
+                break :blk &model.auth.caught[index];
+            } else blk: {
+                if (index >= model.auth.owned_len) return;
+                break :blk &model.auth.owned[index];
+            };
+            if (pet.status != .approved and pet.status != .caught) return;
+            if (catalogIndexOf(pet.slugSlice())) |catalog_index| {
+                update(model, .{ .select_pet = @intCast(catalog_index) }, fx);
+                return;
+            }
+            if (model.install.busy()) return;
+            model.install.error_len = 0;
+            _ = model.install.enqueueRequest(pet.slugSlice(), true);
+            startInstallQueue(model, fx);
+        },
+        .auth_open_pet => |cloud_id| {
+            const caught = cloud_id >= desktop_auth.max_pets;
+            const index: usize = if (caught) cloud_id - desktop_auth.max_pets else cloud_id;
+            const pet = if (caught) blk: {
+                if (index >= model.auth.caught_len) return;
+                break :blk &model.auth.caught[index];
+            } else blk: {
+                if (index >= model.auth.owned_len) return;
+                break :blk &model.auth.owned[index];
+            };
+            if (pet.status != .approved and pet.status != .caught) {
+                plat.openExternal("https://petdex.dev/my-pets");
+                return;
+            }
+            var url: [256]u8 = undefined;
+            const value = std.fmt.bufPrint(&url, "https://petdex.dev/pets/{s}", .{pet.slugSlice()}) catch return;
+            plat.openExternal(value);
+        },
+        .auth_open_library => plat.openExternal("https://petdex.dev/my-pets"),
+        .auth_open_community => plat.openExternal("https://petdex.dev"),
+        .set_pet_source => |source| {
+            model.pet_source = switch (source) {
+                0 => .installed,
+                1 => .yours,
+                2 => .caught,
+                else => return,
+            };
+            model.pets_expanded = false;
+            model.settings_scroll = 0;
+        },
+        .settings_scrolled => |state| model.settings_scroll = state.offset,
+        .auth_keychain_loaded => |exit| {
+            if (exit.reason != .exited or exit.code != 0 or exit.output_truncated or !desktop_auth.applyStoredTokens(&model.auth, boot_allocator, exit.output)) {
+                model.auth.clearSession();
+                return;
+            }
+            fetchAuthLibrary(model, fx);
+        },
+        .auth_keychain_saved => |exit| {
+            if (exit.reason != .exited or exit.code != 0) {
+                std.debug.print("petdex: macOS Keychain could not save the session\n", .{});
+            }
+        },
+        .auth_keychain_deleted => {},
+        .auth_token_response => |response| {
+            if (response.outcome != .ok or response.status != 200 or response.truncated or !desktop_auth.applyTokenResponse(&model.auth, boot_allocator, response.body)) {
+                model.auth.refreshing = false;
+                model.auth.setError("Petdex sign-in could not complete");
+                return;
+            }
+            saveAuthSession(model, fx);
+            fetchAuthLibrary(model, fx);
+        },
+        .auth_avatar_response => |response| {
+            if (response.outcome != .ok or response.status != 200 or response.truncated) return;
+            _ = fx.registerImageBytes(auth_avatar_image_id, response.body) catch return;
+            auth_avatar_ready = true;
+        },
+        .auth_preview_response => |response| registerAuthPreview(model, response, fx),
+        .auth_library_done => |exit| {
+            const output = std.mem.trimEnd(u8, exit.output, "\r\n");
+            const newline = std.mem.lastIndexOfScalar(u8, output, '\n');
+            const status = if (newline) |at| std.fmt.parseInt(u16, output[at + 1 ..], 10) catch 0 else 0;
+            const body = if (newline) |at| output[0..at] else "";
+            if (exit.reason == .exited and exit.code == 0 and status == 401 and model.auth.refresh_token_len > 0 and !model.auth.refreshing) {
+                requestAuthTokens(model, null, fx);
+                return;
+            }
+            if (exit.reason != .exited or exit.code != 0 or exit.output_truncated or status != 200 or !desktop_auth.applyLibrary(&model.auth, boot_allocator, body)) {
+                model.auth.refreshing = false;
+                model.auth.setError("Could not sync your My Petdex library");
+                return;
+            }
+            model.auth.refreshing = false;
+            startAuthImages(model, fx);
+        },
         .settings_closed => model.settings_open = false,
         .update_boot_check => |timer| {
             if (timer.outcome == .fired and model.update_checks_enabled) startUpdateCheck(model, false, fx);
         },
-        .check_updates => startUpdateCheck(model, true, fx),
+        .check_updates => {
+            if (model.update_phase == .available) {
+                plat.openExternal(updates.downloadUrl());
+            } else {
+                startUpdateCheck(model, true, fx);
+            }
+        },
         .toggle_update_checks => {
             model.update_checks_enabled = !model.update_checks_enabled;
             if (!model.update_checks_enabled) {
@@ -2502,6 +2835,13 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             const url = std.fmt.bufPrint(&buf, "https://petdex.dev/pets/{s}", .{catalog[index].slice()}) catch return;
             plat.openExternal(url);
         },
+        .open_active_pet_page => {
+            if (model.active_pet >= catalog_mod.catalog_len) return;
+            var buf: [256]u8 = undefined;
+            const url = std.fmt.bufPrint(&buf, "https://petdex.dev/pets/{s}", .{catalog[model.active_pet].slice()}) catch return;
+            plat.openExternal(url);
+        },
+        .open_website => plat.openExternal("https://petdex.dev"),
         .appearance => |a| {
             model.dark = a.color_scheme == .dark;
             if (newestBubble(model)) |newest| {
@@ -2751,6 +3091,19 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
         },
         .poll_tick => |timer| {
             if (timer.outcome != .fired) return;
+            if (hook_server.auth_mailbox.take()) |callback| {
+                if (model.auth.phase == .authorizing) {
+                    if (!std.mem.eql(u8, callback.stateSlice(), model.auth.oauthState())) {
+                        model.auth.setError("Petdex rejected the sign-in callback");
+                    } else if (callback.error_len > 0) {
+                        model.auth.setError(callback.errorSlice());
+                    } else if (callback.code_len > 0) {
+                        requestAuthTokens(model, callback.codeSlice(), fx);
+                    } else {
+                        model.auth.setError("Petdex rejected the sign-in callback");
+                    }
+                }
+            }
             // Ahead of the sheet guard on purpose: a machine with no pet
             // installed has no sheet, and that is precisely when a
             // `petdex://<slug>` link has work to do.
@@ -2866,6 +3219,9 @@ pub fn onCommand(name: []const u8) ?Msg {
     if (std.mem.eql(u8, name, "petdex.quit")) return .quit_app;
     if (std.mem.eql(u8, name, "petdex.focus")) return .toggle_focus_mode;
     if (std.mem.eql(u8, name, "petdex.shuffle")) return .shuffle_pet;
+    if (std.mem.eql(u8, name, "petdex.website")) return .open_website;
+    if (std.mem.eql(u8, name, "petdex.pet-page")) return .open_active_pet_page;
+    if (std.mem.eql(u8, name, "petdex.updates")) return .check_updates;
     return null;
 }
 
@@ -2876,6 +3232,7 @@ pub const AppUi = canvas.Ui(Msg);
 const pet_menu = [_]AppUi.ContextMenuItem{
     .{ .label = "Open Settings", .msg = .open_settings },
     .{ .label = "Close Pet", .msg = .close_pet },
+    .{ .label = "View Pet on Petdex", .msg = .open_active_pet_page },
 };
 
 // The visible card remains intrinsic and grows only with the text it actually
@@ -4303,6 +4660,13 @@ fn petdexWindowView(ui: *PetdexApp.Ui, model: *const Model, window_label: []cons
         .ready = &thumbs_ready,
         .cell_w = @floatFromInt(thumb_w),
         .cell_h = @floatFromInt(thumb_h),
+    }, .{
+        .avatar_ready = auth_avatar_ready,
+        .avatar_image = auth_avatar_image_id,
+        .preview_image = auth_preview_atlas_id,
+        .preview_ready = &model.auth_preview_ready,
+        .preview_cell = @floatFromInt(auth_preview_cell),
+        .preview_columns = auth_preview_columns,
     });
 }
 
@@ -4343,16 +4707,27 @@ fn refreshHookEntry(argv0: []const u8) void {
 /// Model-derived (the `status_item_fn` shape) so Focus Mode can show
 /// its state in the label; the static options keep icon and tooltip.
 fn petdexStatusItem(model: *const Model, scratch: *PetdexApp.StatusItemScratch) PetdexApp.StatusItemState {
+    const update_label = switch (model.update_phase) {
+        .checking => "Checking for Updates…",
+        .available => std.fmt.bufPrint(&scratch.title_buffer, "Update to Petdex {s}…", .{model.latest_version[0..model.latest_version_len]}) catch "Update Petdex…",
+        .current => std.fmt.bufPrint(&scratch.title_buffer, "Petdex is up to date · {s}", .{updates.current_version}) catch "Petdex is up to date",
+        .idle, .failed => std.fmt.bufPrint(&scratch.title_buffer, "Check for Updates… · {s}", .{updates.current_version}) catch "Check for Updates…",
+    };
     scratch.items[0] = .{ .id = 1, .label = "Open Settings", .command = "petdex.settings" };
-    scratch.items[1] = .{
-        .id = 2,
+    scratch.items[1] = .{ .id = 2, .label = "Open petdex.dev", .command = "petdex.website" };
+    scratch.items[2] = .{ .id = 3, .separator = true };
+    scratch.items[3] = .{
+        .id = 4,
         .label = if (model.focus_mode) "Focus Mode: On" else "Focus Mode: Off",
         .command = "petdex.focus",
     };
-    scratch.items[2] = .{ .id = 3, .label = "Shuffle Pet", .command = "petdex.shuffle" };
-    scratch.items[3] = .{ .id = 4, .separator = true };
-    scratch.items[4] = .{ .id = 5, .label = "Quit Petdex", .command = "petdex.quit" };
-    return .{ .items = scratch.items[0..5] };
+    scratch.items[4] = .{ .id = 5, .label = "Shuffle Pet", .command = "petdex.shuffle" };
+    scratch.items[5] = .{ .id = 6, .label = "View Pet on Petdex", .command = "petdex.pet-page" };
+    scratch.items[6] = .{ .id = 7, .separator = true };
+    scratch.items[7] = .{ .id = 8, .label = update_label, .command = "petdex.updates", .enabled = model.update_phase != .checking };
+    scratch.items[8] = .{ .id = 9, .separator = true };
+    scratch.items[9] = .{ .id = 10, .label = "Quit Petdex", .command = "petdex.quit" };
+    return .{ .items = scratch.items[0..10] };
 }
 
 /// The menu-bar button icon: the brand mark's silhouette with the face
@@ -4397,6 +4772,7 @@ pub fn main(init: std.process.Init) !void {
     // %USERPROFILE%\.petdex\pets. HOME still wins where it exists, so a
     // POSIX user pointing it elsewhere keeps that.
     env_home = init.environ_map.get("HOME") orelse init.environ_map.get("USERPROFILE");
+    env_auth_library_url = init.environ_map.get("PETDEX_LIBRARY_URL") orelse desktop_auth.library_url;
     // Claude Code honors CLAUDE_CONFIG_DIR for fully isolated installs;
     // wiring hooks into ~/.claude for those users writes a settings.json
     // their Claude Code never reads, and detection shows them as
@@ -4743,6 +5119,26 @@ test "cached update versions restore the correct phase" {
     model.latest_version_len = "0.8.0".len;
     updateCachePhase(&model);
     try std.testing.expectEqual(updates.Phase.current, model.update_phase);
+}
+
+test "tray exposes website active pet and updater commands" {
+    try std.testing.expectEqual(std.meta.Tag(Msg).open_website, std.meta.activeTag(onCommand("petdex.website").?));
+    try std.testing.expectEqual(std.meta.Tag(Msg).open_active_pet_page, std.meta.activeTag(onCommand("petdex.pet-page").?));
+    try std.testing.expectEqual(std.meta.Tag(Msg).check_updates, std.meta.activeTag(onCommand("petdex.updates").?));
+
+    var model: Model = .{};
+    var scratch: PetdexApp.StatusItemScratch = .{};
+    var state = petdexStatusItem(&model, &scratch);
+    try std.testing.expectEqual(@as(usize, 10), state.items.len);
+    try std.testing.expectEqualStrings("Open petdex.dev", state.items[1].label);
+    try std.testing.expectEqualStrings("View Pet on Petdex", state.items[5].label);
+    try std.testing.expect(std.mem.startsWith(u8, state.items[7].label, "Check for Updates"));
+
+    model.update_phase = .available;
+    @memcpy(model.latest_version[0.."0.9.0".len], "0.9.0");
+    model.latest_version_len = "0.9.0".len;
+    state = petdexStatusItem(&model, &scratch);
+    try std.testing.expectEqualStrings("Update to Petdex 0.9.0…", state.items[7].label);
 }
 
 test "bubble text default is its own value, not the range floor" {
