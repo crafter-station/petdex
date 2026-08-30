@@ -89,7 +89,13 @@ export function validateSubmission(
       };
     }
   }
-  if (!isPetLicenseChoice(body.license)) {
+  // Transition window: a CLI published before the license field existed
+  // sends no license at all, and rejecting those would break `petdex
+  // submit` for everyone who has not upgraded yet. Absent is accepted and
+  // stored as 'unspecified'. A license that IS sent must still be valid —
+  // silently discarding a typo would record "no grant" for a creator who
+  // believed they gave one. Tighten to required once the new CLI is out.
+  if (body.license !== undefined && !isPetLicenseChoice(body.license)) {
     return {
       ok: false,
       status: 400,

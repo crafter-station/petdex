@@ -116,8 +116,8 @@ export async function persistSubmission(
     creditName: credit.name,
     creditUrl: credit.url,
     creditImage: credit.imageUrl,
-    license: body.license,
-    licenseDeclaredAt: new Date(),
+    license: body.license ?? "unspecified",
+    licenseDeclaredAt: body.license ? new Date() : null,
   });
 
   // Fire-and-forget admin notification.
