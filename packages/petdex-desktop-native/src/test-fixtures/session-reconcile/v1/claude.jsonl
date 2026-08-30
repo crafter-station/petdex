@@ -1,0 +1,3 @@
+{"_fixture":{"schema":"claude-code-jsonl","version":"2.1","provider":"claude-code","sanitized":true,"source":"provider-owned transcript"}}
+{"type":"user","sessionId":"claude-primary","uuid":"claude-user-1","parentUuid":null,"isSidechain":false,"cwd":"C:/fixture/project","message":{"role":"user","content":"Review the rounded bubble controls"}}
+{"type":"assistant","sessionId":"claude-primary","uuid":"claude-assistant-entry-1","parentUuid":"claude-user-1","isSidechain":false,"cwd":"C:/fixture/project","message":{"id":"claude-assistant-1","role":"assistant","content":[{"type":"text","text":"Claude review complete"}],"stop_reason":"end_turn"}}

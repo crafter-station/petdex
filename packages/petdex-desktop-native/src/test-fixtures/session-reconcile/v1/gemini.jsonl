@@ -1,0 +1,4 @@
+{"_fixture":{"schema":"gemini-chat-recording-jsonl","version":"0.38","provider":"gemini","sanitized":true,"source":"provider-owned chats/session JSONL"}}
+{"sessionId":"gemini-child","projectHash":"fixture-project-hash","startTime":"2026-08-14T00:00:00.000Z","lastUpdated":"2026-08-14T00:00:01.000Z","summary":"Gemini authoritative title","kind":"subagent","directories":["C:/fixture/project"]}
+{"id":"gemini-user-1","timestamp":"2026-08-14T00:00:00.100Z","type":"user","content":[{"text":"Research native bubble accessibility"}]}
+{"id":"gemini-model-1","timestamp":"2026-08-14T00:00:01.000Z","type":"gemini","content":[{"text":"Gemini research complete"}],"model":"gemini-fixture"}

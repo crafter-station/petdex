@@ -10,6 +10,17 @@ APP_PATH="${PETDEX_DEV_APP_PATH:-$HOME/Applications/Petdex Dev.app}"
 APP_EXECUTABLE="$APP_PATH/Contents/MacOS/PetdexDev"
 NATIVE_CLI="${NATIVE_CLI:-$(command -v native || true)}"
 NATIVE_SDK_PATH="${NATIVE_SDK_PATH:-}"
+# Petdex Dev is what we use for interactive desktop smoke tests, so it should
+# behave like a responsive app rather than a trace recorder.  Override either
+# setting explicitly when diagnosing Native SDK internals.
+PETDEX_DEV_OPTIMIZE="${PETDEX_DEV_OPTIMIZE:-ReleaseSafe}"
+PETDEX_DEV_TRACE="${PETDEX_DEV_TRACE:-off}"
+# Native SDK's file-backed automation publisher writes a complete snapshot
+# after every application event.  It is useful for CI smoke tests, but turns
+# ordinary bubble timers into disk work in an interactive desktop build.
+# Keep it opt-in for Petdex Dev; hooks and remote-agent transport do not use
+# this diagnostic surface.
+PETDEX_DEV_AUTOMATION="${PETDEX_DEV_AUTOMATION:-false}"
 
 if [[ -n "$NATIVE_CLI" && "$NATIVE_CLI" != /* ]]; then
   NATIVE_CLI="$ROOT/$NATIVE_CLI"
@@ -30,7 +41,7 @@ fi
 "$ROOT/scripts/patch-native-sdk.sh"
 
 echo "==> Build native desktop"
-(cd "$DESKTOP_DIR" && "$NATIVE_CLI" build -Dcpu=baseline)
+(cd "$DESKTOP_DIR" && "$NATIVE_CLI" build -Dcpu=baseline "-Doptimize=$PETDEX_DEV_OPTIMIZE" "-Dtrace=$PETDEX_DEV_TRACE" "-Dautomation=$PETDEX_DEV_AUTOMATION")
 
 echo "==> Ensure Petdex Dev.app"
 "$ROOT/scripts/macos-dev-app.sh" >/dev/null

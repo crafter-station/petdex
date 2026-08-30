@@ -236,7 +236,11 @@ pub fn storedTokens(state: *const State, out: []u8) ?[]const u8 {
 }
 
 pub fn loadStoredSession(out: []u8) ?[]const u8 {
-    if (!available) return null;
+    // The SDK's unit-test linker deliberately avoids application frameworks.
+    // Keep these process-global Keychain calls out of that link path; token
+    // serialization and restoration are exercised below without touching a
+    // developer or CI runner's real login keychain.
+    if (builtin.is_test or !available) return null;
     var password_len: u32 = 0;
     var password_data: ?*anyopaque = null;
     var item_ref: ?*anyopaque = null;
@@ -252,7 +256,7 @@ pub fn loadStoredSession(out: []u8) ?[]const u8 {
 }
 
 pub fn saveStoredSession(session: []const u8) bool {
-    if (!available or session.len == 0 or session.len > std.math.maxInt(u32)) return false;
+    if (builtin.is_test or !available or session.len == 0 or session.len > std.math.maxInt(u32)) return false;
     var item_ref: ?*anyopaque = null;
     const status = SecKeychainFindGenericPassword(null, service.len, service.ptr, account.len, account.ptr, null, null, &item_ref);
     if (status == err_sec_success) {
@@ -264,7 +268,7 @@ pub fn saveStoredSession(session: []const u8) bool {
 }
 
 pub fn deleteStoredSession() bool {
-    if (!available) return false;
+    if (builtin.is_test or !available) return false;
     var item_ref: ?*anyopaque = null;
     const status = SecKeychainFindGenericPassword(null, service.len, service.ptr, account.len, account.ptr, null, null, &item_ref);
     if (status == err_sec_item_not_found) return true;
@@ -374,4 +378,11 @@ test "Keychain payload persists access-only OAuth sessions" {
     try std.testing.expect(applyStoredTokens(&restored, std.testing.allocator, stored));
     try std.testing.expectEqualStrings(access, restored.accessToken());
     try std.testing.expectEqual(@as(usize, 0), restored.refresh_token_len);
+}
+
+test "Keychain calls stay inert in unit tests" {
+    var stored: [16]u8 = undefined;
+    try std.testing.expect(loadStoredSession(&stored) == null);
+    try std.testing.expect(!saveStoredSession("test-token"));
+    try std.testing.expect(!deleteStoredSession());
 }
