@@ -153,16 +153,13 @@ pub const Msg = union(enum) {
     auth_open_community,
     set_pet_source: u32,
     settings_scrolled: canvas.ScrollState,
-    auth_keychain_loaded: native_sdk.EffectExit,
-    auth_keychain_saved: native_sdk.EffectExit,
-    auth_keychain_deleted: native_sdk.EffectExit,
     auth_token_response: native_sdk.EffectResponse,
     auth_avatar_response: native_sdk.EffectResponse,
     auth_preview_response: native_sdk.EffectResponse,
     auth_library_done: native_sdk.EffectExit,
     noop,
 
-    pub const view_unbound = .{ "frame_tick", "poll_tick", "physics_tick", "frame_clock", "cycle_state", "native_drag_watchdog", "chime_done", "quit_app", "toggle_focus_mode", "shuffle_pet", "dsh_install_done", "dsh_remove_done", "remote_line", "remote_done", "remote_backoff", "update_boot_check", "update_response", "homebrew_done", "homebrew_timeout", "brew_command_copied", "auth_keychain_loaded", "auth_keychain_saved", "auth_keychain_deleted", "auth_token_response", "auth_avatar_response", "auth_preview_response", "auth_library_done" };
+    pub const view_unbound = .{ "frame_tick", "poll_tick", "physics_tick", "frame_clock", "cycle_state", "native_drag_watchdog", "chime_done", "quit_app", "toggle_focus_mode", "shuffle_pet", "dsh_install_done", "dsh_remove_done", "remote_line", "remote_done", "remote_backoff", "update_boot_check", "update_response", "homebrew_done", "homebrew_timeout", "brew_command_copied", "auth_token_response", "auth_avatar_response", "auth_preview_response", "auth_library_done" };
 };
 
 pub const Model = struct {
@@ -915,14 +912,10 @@ const update_boot_timer_key: u64 = 33;
 const homebrew_timeout_timer_key: u64 = 34;
 const dsh_install_key: u64 = 35;
 const dsh_remove_key: u64 = 36;
-const auth_keychain_load_key: u64 = 40;
-const auth_keychain_save_key: u64 = 41;
-const auth_keychain_delete_key: u64 = 42;
 const auth_token_key: u64 = 43;
 const auth_library_key: u64 = 44;
 const auth_avatar_key: u64 = 45;
 const auth_preview_key: u64 = 46;
-const auth_keychain_save_keys = [_]u64{ auth_keychain_save_key, 47, 48, 49, 50 };
 const update_boot_delay_ms: u32 = 5000;
 const update_background_interval_ms: i64 = 24 * 60 * 60 * 1000;
 const update_settings_interval_ms: i64 = 5 * 60 * 1000;
@@ -932,49 +925,24 @@ const homebrew_timeout_ms: u64 = 8000;
 fn loadAuthSession(model: *Model, fx: *Effects) void {
     if (!desktop_auth.available) return;
     model.auth.phase = .loading;
-    const argv = [_][]const u8{
-        "/bin/sh",
-        "-c",
-        "petdex_legacy=$(/usr/bin/security find-generic-password -a \"$1\" -s \"$7\" -w 2>/dev/null) && { printf '%s' \"$petdex_legacy\"; exit 0; }; for petdex_account in \"$2\" \"$3\" \"$4\" \"$5\" \"$6\"; do petdex_part=$(/usr/bin/security find-generic-password -a \"$petdex_account\" -s \"$7\" -w 2>/dev/null) || exit 1; printf '%s' \"$petdex_part\"; done",
-        "petdex-keychain",
-        desktop_auth.account,
-        desktop_auth.keychain_accounts[0],
-        desktop_auth.keychain_accounts[1],
-        desktop_auth.keychain_accounts[2],
-        desktop_auth.keychain_accounts[3],
-        desktop_auth.keychain_accounts[4],
-        desktop_auth.service,
+    var stored_buf: [17000]u8 = undefined;
+    const stored = desktop_auth.loadStoredSession(&stored_buf) orelse {
+        model.auth.clearSession();
+        return;
     };
-    fx.spawn(.{
-        .key = auth_keychain_load_key,
-        .argv = &argv,
-        .output = .collect,
-        .on_exit = Effects.exitMsg(.auth_keychain_loaded),
-    });
+    if (!desktop_auth.applyStoredTokens(&model.auth, boot_allocator, stored)) {
+        model.auth.clearSession();
+        return;
+    }
+    fetchAuthLibrary(model, fx);
 }
 
 fn saveAuthSession(model: *const Model, fx: *Effects) void {
+    _ = fx;
     if (!desktop_auth.available) return;
     var session_buf: [17000]u8 = undefined;
     const token = desktop_auth.storedTokens(&model.auth, &session_buf) orelse return;
-    for (desktop_auth.keychain_accounts, auth_keychain_save_keys, 0..) |account_name, effect_key, index| {
-        const chunk = desktop_auth.keychainChunk(token, index) orelse return;
-        const argv = [_][]const u8{
-            "/bin/sh",
-            "-c",
-            "IFS= read -r petdex_secret; printf '%s\\n%s\\n' \"$petdex_secret\" \"$petdex_secret\" | /usr/bin/security add-generic-password -U -a \"$1\" -s \"$2\" -w",
-            "petdex-keychain",
-            account_name,
-            desktop_auth.service,
-        };
-        fx.spawn(.{
-            .key = effect_key,
-            .argv = &argv,
-            .stdin = chunk,
-            .output = .collect,
-            .on_exit = Effects.exitMsg(.auth_keychain_saved),
-        });
-    }
+    if (!desktop_auth.saveStoredSession(token)) std.debug.print("petdex: macOS Keychain could not save the session\n", .{});
 }
 
 fn fetchAuthLibrary(model: *Model, fx: *Effects) void {
@@ -2570,26 +2538,7 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             model.pet_source = .installed;
             auth_avatar_ready = false;
             model.auth_preview_ready = @splat(false);
-            if (!desktop_auth.available) return;
-            const argv = [_][]const u8{
-                "/bin/sh",
-                "-c",
-                "for petdex_account in \"$1\" \"$2\" \"$3\" \"$4\" \"$5\" \"$6\"; do /usr/bin/security delete-generic-password -a \"$petdex_account\" -s \"$7\" >/dev/null 2>&1 || true; done",
-                "petdex-keychain",
-                desktop_auth.account,
-                desktop_auth.keychain_accounts[0],
-                desktop_auth.keychain_accounts[1],
-                desktop_auth.keychain_accounts[2],
-                desktop_auth.keychain_accounts[3],
-                desktop_auth.keychain_accounts[4],
-                desktop_auth.service,
-            };
-            fx.spawn(.{
-                .key = auth_keychain_delete_key,
-                .argv = &argv,
-                .output = .collect,
-                .on_exit = Effects.exitMsg(.auth_keychain_deleted),
-            });
+            if (desktop_auth.available and !desktop_auth.deleteStoredSession()) std.debug.print("petdex: macOS Keychain could not delete the session\n", .{});
         },
         .auth_install_pet => |cloud_id| {
             const caught = cloud_id >= desktop_auth.max_pets;
@@ -2642,19 +2591,6 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             model.settings_scroll = 0;
         },
         .settings_scrolled => |state| model.settings_scroll = state.offset,
-        .auth_keychain_loaded => |exit| {
-            if (exit.reason != .exited or exit.code != 0 or exit.output_truncated or !desktop_auth.applyStoredTokens(&model.auth, boot_allocator, exit.output)) {
-                model.auth.clearSession();
-                return;
-            }
-            fetchAuthLibrary(model, fx);
-        },
-        .auth_keychain_saved => |exit| {
-            if (exit.reason != .exited or exit.code != 0) {
-                std.debug.print("petdex: macOS Keychain could not save the session\n", .{});
-            }
-        },
-        .auth_keychain_deleted => {},
         .auth_token_response => |response| {
             if (response.outcome != .ok or response.status != 200 or response.truncated or !desktop_auth.applyTokenResponse(&model.auth, boot_allocator, response.body)) {
                 model.auth.refreshing = false;

@@ -10,8 +10,35 @@ pub const scopes = "profile email openid offline_access";
 pub const library_url = "https://petdex.dev/api/desktop/library";
 pub const service = "dev.petdex.desktop-native";
 pub const account = "oauth";
-pub const keychain_accounts = [_][]const u8{ "oauth-0", "oauth-1", "oauth-2", "oauth-3", "oauth-4" };
 pub const max_pets = 64;
+
+const err_sec_success: c_int = 0;
+const err_sec_item_not_found: c_int = -25300;
+
+extern "c" fn SecKeychainFindGenericPassword(
+    keychain_or_array: ?*const anyopaque,
+    service_name_length: u32,
+    service_name: [*]const u8,
+    account_name_length: u32,
+    account_name: [*]const u8,
+    password_length: ?*u32,
+    password_data: ?*?*anyopaque,
+    item_ref: ?*?*anyopaque,
+) c_int;
+extern "c" fn SecKeychainAddGenericPassword(
+    keychain: ?*const anyopaque,
+    service_name_length: u32,
+    service_name: [*]const u8,
+    account_name_length: u32,
+    account_name: [*]const u8,
+    password_length: u32,
+    password_data: *const anyopaque,
+    item_ref: ?*?*anyopaque,
+) c_int;
+extern "c" fn SecKeychainItemModifyAttributesAndData(item_ref: *anyopaque, attr_list: ?*const anyopaque, length: u32, data: *const anyopaque) c_int;
+extern "c" fn SecKeychainItemDelete(item_ref: *anyopaque) c_int;
+extern "c" fn SecKeychainItemFreeContent(attr_list: ?*anyopaque, data: ?*anyopaque) c_int;
+extern "c" fn CFRelease(value: *const anyopaque) void;
 
 pub const Phase = enum { signed_out, loading, authorizing, exchanging, syncing, signed_in, failed, unavailable };
 pub const PetStatus = enum { pending, approved, rejected, caught };
@@ -203,16 +230,47 @@ pub fn applyStoredTokens(state: *State, allocator: std.mem.Allocator, body: []co
     return restored;
 }
 
-pub fn keychainChunk(token: []const u8, index: usize) ?[]const u8 {
-    if (token.len < keychain_accounts.len or index >= keychain_accounts.len) return null;
-    const start = token.len * index / keychain_accounts.len;
-    const end = token.len * (index + 1) / keychain_accounts.len;
-    return token[start..end];
-}
-
 pub fn storedTokens(state: *const State, out: []u8) ?[]const u8 {
     if (state.access_token_len == 0 and state.refresh_token_len == 0) return null;
     return std.fmt.bufPrint(out, "{{\"access_token\":\"{s}\",\"refresh_token\":\"{s}\"}}", .{ state.accessToken(), state.refreshToken() }) catch null;
+}
+
+pub fn loadStoredSession(out: []u8) ?[]const u8 {
+    if (!available) return null;
+    var password_len: u32 = 0;
+    var password_data: ?*anyopaque = null;
+    var item_ref: ?*anyopaque = null;
+    const status = SecKeychainFindGenericPassword(null, service.len, service.ptr, account.len, account.ptr, &password_len, &password_data, &item_ref);
+    defer {
+        if (password_data != null) _ = SecKeychainItemFreeContent(null, password_data);
+        if (item_ref) |item| CFRelease(item);
+    }
+    if (status != err_sec_success or password_len == 0 or password_len > out.len) return null;
+    const source: [*]const u8 = @ptrCast(password_data.?);
+    @memcpy(out[0..password_len], source[0..password_len]);
+    return out[0..password_len];
+}
+
+pub fn saveStoredSession(session: []const u8) bool {
+    if (!available or session.len == 0 or session.len > std.math.maxInt(u32)) return false;
+    var item_ref: ?*anyopaque = null;
+    const status = SecKeychainFindGenericPassword(null, service.len, service.ptr, account.len, account.ptr, null, null, &item_ref);
+    if (status == err_sec_success) {
+        defer CFRelease(item_ref.?);
+        return SecKeychainItemModifyAttributesAndData(item_ref.?, null, @intCast(session.len), session.ptr) == err_sec_success;
+    }
+    if (status != err_sec_item_not_found) return false;
+    return SecKeychainAddGenericPassword(null, service.len, service.ptr, account.len, account.ptr, @intCast(session.len), session.ptr, null) == err_sec_success;
+}
+
+pub fn deleteStoredSession() bool {
+    if (!available) return false;
+    var item_ref: ?*anyopaque = null;
+    const status = SecKeychainFindGenericPassword(null, service.len, service.ptr, account.len, account.ptr, null, null, &item_ref);
+    if (status == err_sec_item_not_found) return true;
+    if (status != err_sec_success) return false;
+    defer CFRelease(item_ref.?);
+    return SecKeychainItemDelete(item_ref.?) == err_sec_success;
 }
 
 fn petStatus(value: []const u8) ?PetStatus {
@@ -316,20 +374,4 @@ test "Keychain payload persists access-only OAuth sessions" {
     try std.testing.expect(applyStoredTokens(&restored, std.testing.allocator, stored));
     try std.testing.expectEqualStrings(access, restored.accessToken());
     try std.testing.expectEqual(@as(usize, 0), restored.refresh_token_len);
-}
-
-test "Keychain chunks reassemble the full refresh token" {
-    const token = "abcdefghijklmnopqrstuvwxyz";
-    var restored: [token.len]u8 = undefined;
-    var offset: usize = 0;
-    for (0..keychain_accounts.len) |index| {
-        const chunk = keychainChunk(token, index).?;
-        @memcpy(restored[offset..][0..chunk.len], chunk);
-        offset += chunk.len;
-    }
-    try std.testing.expectEqualStrings(token, restored[0..offset]);
-
-    var state: State = .{};
-    try std.testing.expect(applyStoredTokens(&state, std.testing.allocator, &restored));
-    try std.testing.expectEqualStrings(token, state.refreshToken());
 }
