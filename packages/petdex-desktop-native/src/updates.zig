@@ -4,7 +4,7 @@ const builtin = @import("builtin");
 pub const endpoint = "https://petdex.crafter.run/api/desktop/latest-release?format=json";
 pub const release_page = "https://github.com/crafter-station/petdex/releases";
 pub const brew_command = "brew upgrade --cask petdex";
-pub const current_version = "0.8.0";
+pub const current_version = "0.9.0";
 
 pub const Phase = enum { idle, checking, current, available, failed };
 pub const InstallSource = enum { unknown, checking, direct, homebrew };

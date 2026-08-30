@@ -5426,12 +5426,12 @@ test "cached update versions restore the correct phase" {
     var model: Model = .{};
     updateCachePhase(&model);
     try std.testing.expectEqual(updates.Phase.idle, model.update_phase);
-    @memcpy(model.latest_version[0.."0.9.0".len], "0.9.0");
-    model.latest_version_len = "0.9.0".len;
+    @memcpy(model.latest_version[0.."0.10.0".len], "0.10.0");
+    model.latest_version_len = "0.10.0".len;
     updateCachePhase(&model);
     try std.testing.expectEqual(updates.Phase.available, model.update_phase);
-    @memcpy(model.latest_version[0.."0.8.0".len], "0.8.0");
-    model.latest_version_len = "0.8.0".len;
+    @memcpy(model.latest_version[0.."0.9.0".len], "0.9.0");
+    model.latest_version_len = "0.9.0".len;
     updateCachePhase(&model);
     try std.testing.expectEqual(updates.Phase.current, model.update_phase);
 }
@@ -5451,10 +5451,10 @@ test "tray exposes website active pet and updater commands" {
     try std.testing.expect(std.mem.startsWith(u8, state.items[8].label, "Check for Updates"));
 
     model.update_phase = .available;
-    @memcpy(model.latest_version[0.."0.9.0".len], "0.9.0");
-    model.latest_version_len = "0.9.0".len;
+    @memcpy(model.latest_version[0.."0.10.0".len], "0.10.0");
+    model.latest_version_len = "0.10.0".len;
     state = petdexStatusItem(&model, &scratch);
-    try std.testing.expectEqualStrings("Update to Petdex 0.9.0…", state.items[8].label);
+    try std.testing.expectEqualStrings("Update to Petdex 0.10.0…", state.items[8].label);
 }
 
 test "bubble text default is its own value, not the range floor" {
