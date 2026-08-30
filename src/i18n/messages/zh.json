@@ -326,7 +326,17 @@
         "displayNameLabel": "宠物名称",
         "displayNamePlaceholder": "输入宠物名称",
         "descriptionLabel": "描述",
-        "descriptionPlaceholder": "输入简短描述"
+        "descriptionPlaceholder": "输入简短描述",
+        "licenseLabel": "许可协议",
+        "licensePlaceholder": "选择一个许可协议",
+        "licenseHint": "版权仍归你所有。这只是告诉别人他们可以如何使用你的作品。",
+        "licenseOption": {
+          "cc0": "CC0 — 公共领域，无需署名",
+          "cc-by": "CC BY — 任意用途，需署名",
+          "cc-by-sa": "CC BY-SA — 任意用途，需署名，相同方式共享",
+          "cc-by-nc": "CC BY-NC — 仅限非商业用途，需署名",
+          "all-rights-reserved": "保留所有权利 — 请先联系我"
+        }
       },
       "path": {
         "prefix": "宠物资源位于",

@@ -300,7 +300,17 @@
         "displayNameLabel": "Nombre de la mascota",
         "displayNamePlaceholder": "Ingresa un nombre",
         "descriptionLabel": "Descripción",
-        "descriptionPlaceholder": "Ingresa una descripción corta"
+        "descriptionPlaceholder": "Ingresa una descripción corta",
+        "licenseLabel": "Licencia",
+        "licensePlaceholder": "Elegí una licencia",
+        "licenseHint": "Vos mantenés el copyright. Esto le dice a los demás qué pueden hacer con tu arte.",
+        "licenseOption": {
+          "cc0": "CC0 — dominio público, sin crédito",
+          "cc-by": "CC BY — cualquier uso, con crédito",
+          "cc-by-sa": "CC BY-SA — cualquier uso, con crédito, compartir igual",
+          "cc-by-nc": "CC BY-NC — solo uso no comercial, con crédito",
+          "all-rights-reserved": "Todos los derechos reservados — consultame antes"
+        }
       },
       "path": {
         "prefix": "Los assets viven en",

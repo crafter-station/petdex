@@ -336,6 +336,7 @@ async function vibeSearch(args: {
       sp.featured, sp.dhash, sp.status, sp.source,
       sp.owner_id, sp.owner_email,
       sp.credit_name, sp.credit_url, sp.credit_image,
+      sp.license, sp.license_declared_at,
       sp.created_at, sp.approved_at, sp.rejected_at, sp.rejection_reason,
       coalesce(pm.install_count, 0) as install_count,
       coalesce(pm.like_count, 0) as like_count,
@@ -489,6 +490,10 @@ function rowToSchema(
     creditName: (row.credit_name as string | null) ?? null,
     creditUrl: (row.credit_url as string | null) ?? null,
     creditImage: (row.credit_image as string | null) ?? null,
+    license:
+      (row.license as typeof schema.submittedPets.$inferSelect.license) ??
+      "unspecified",
+    licenseDeclaredAt: (row.license_declared_at as Date | null) ?? null,
     createdAt: new Date(row.created_at as string),
     approvedAt: row.approved_at ? new Date(row.approved_at as string) : null,
     rejectedAt: row.rejected_at ? new Date(row.rejected_at as string) : null,

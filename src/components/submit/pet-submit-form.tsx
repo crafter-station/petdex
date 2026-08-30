@@ -23,6 +23,10 @@ import {
   detectSpriteAtlas,
 } from "@/lib/sprite-atlas";
 import { parseSpriteVersionNumber } from "@/lib/sprite-version";
+import {
+  PET_LICENSE_CHOICES,
+  type PetLicenseChoice,
+} from "@/lib/submissions-validation";
 import { PET_ASSET_MAX_BYTES } from "@/lib/upload-limits";
 
 import { Input } from "@/components/ui/input";
@@ -99,6 +103,9 @@ export function PetSubmitForm() {
   // package is read; the user can then override them before submit.
   const [editedDisplayName, setEditedDisplayName] = useState("");
   const [editedDescription, setEditedDescription] = useState("");
+  // No preselected value: the creator has to pick, so the grant is an
+  // actual choice and not something we inferred from their silence.
+  const [license, setLicense] = useState<PetLicenseChoice | "">("");
 
   const uploadErrorRef = useRef<string | null>(null);
   const [, setUploadError] = useState<string | null>(null);
@@ -570,6 +577,7 @@ export function PetSubmitForm() {
         spritesheetWidth: parsed.spritesheetWidth,
         spritesheetHeight: parsed.spritesheetHeight,
         spriteVersionNumber: parsed.spriteVersionNumber,
+        license,
       }),
     });
 
@@ -759,6 +767,33 @@ export function PetSubmitForm() {
                   disabled={submission.kind === "uploading"}
                 />
               </div>
+              <div>
+                <label
+                  htmlFor="pet-license"
+                  className="font-mono text-[10px] tracking-[0.18em] text-muted-4 uppercase"
+                >
+                  {t("edit.licenseLabel")}
+                </label>
+                <select
+                  id="pet-license"
+                  className="mt-1 h-9 w-full rounded-xl border border-border-base bg-surface px-3 text-sm"
+                  value={license}
+                  onChange={(event) =>
+                    setLicense(event.target.value as PetLicenseChoice | "")
+                  }
+                  disabled={submission.kind === "uploading"}
+                >
+                  <option value="">{t("edit.licensePlaceholder")}</option>
+                  {PET_LICENSE_CHOICES.map((choice) => (
+                    <option key={choice} value={choice}>
+                      {t(`edit.licenseOption.${choice}`)}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-[11px] leading-4 text-muted-4">
+                  {t("edit.licenseHint")}
+                </p>
+              </div>
               {parsed.spritesheetWidth ? (
                 <p className="font-mono text-[10px] tracking-[0.18em] text-muted-4 uppercase">
                   {parsed.spritesheetWidth}×{parsed.spritesheetHeight}
@@ -784,6 +819,7 @@ export function PetSubmitForm() {
             <SubmitButton
               disabled={
                 effectiveIssues.length > 0 ||
+                !license ||
                 !isSignedIn ||
                 submission.kind === "uploading" ||
                 submission.kind === "success"

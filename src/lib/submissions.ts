@@ -21,10 +21,16 @@ import {
 } from "@/lib/submissions-validation";
 import { getPreferredLocaleForUser } from "@/lib/user-locale";
 
-export type { SubmissionInput } from "@/lib/submissions-validation";
+export type {
+  PetLicenseChoice,
+  SubmissionInput,
+} from "@/lib/submissions-validation";
 export {
+  COMMERCIAL_PET_LICENSES,
   deriveSlug,
+  isPetLicenseChoice,
   MIN_SPRITE_DIM,
+  PET_LICENSE_CHOICES,
   REQUIRED_FIELDS,
   validateSubmission,
 } from "@/lib/submissions-validation";
@@ -110,6 +116,8 @@ export async function persistSubmission(
     creditName: credit.name,
     creditUrl: credit.url,
     creditImage: credit.imageUrl,
+    license: body.license,
+    licenseDeclaredAt: new Date(),
   });
 
   // Fire-and-forget admin notification.

@@ -39,6 +39,21 @@ export const petSource = pgEnum("pet_source", [
   "claimed",
 ]);
 
+// What the creator declared their pet artwork may be used for. The code
+// in this repo is MIT, but pet assets belong to whoever made them, so the
+// license travels per pet. 'unspecified' is the honest state for anything
+// submitted before this column existed: the creator never declared
+// anything, so nothing may be assumed. Never default an existing row to a
+// permissive value on their behalf.
+export const petLicense = pgEnum("pet_license", [
+  "unspecified",
+  "cc0",
+  "cc-by",
+  "cc-by-sa",
+  "cc-by-nc",
+  "all-rights-reserved",
+]);
+
 export const submittedPets = pgTable(
   "submitted_pets",
   {
@@ -73,6 +88,10 @@ export const submittedPets = pgTable(
     creditName: text("credit_name"),
     creditUrl: text("credit_url"),
     creditImage: text("credit_image"),
+    license: petLicense("license").notNull().default("unspecified"),
+    licenseDeclaredAt: timestamp("license_declared_at", {
+      withTimezone: true,
+    }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -116,6 +135,7 @@ export const submittedPets = pgTable(
   (table) => ({
     statusIdx: index("submitted_pets_status_idx").on(table.status),
     ownerIdx: index("submitted_pets_owner_idx").on(table.ownerId),
+    licenseIdx: index("submitted_pets_license_idx").on(table.license),
     slugUnique: uniqueIndex("submitted_pets_slug_unique").on(table.slug),
     reviewDhashIdx: index("submitted_pets_review_dhash_idx")
       .on(table.status, table.createdAt.desc())

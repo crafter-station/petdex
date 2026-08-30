@@ -300,7 +300,17 @@
         "displayNameLabel": "Pet name",
         "displayNamePlaceholder": "Enter a pet name",
         "descriptionLabel": "Description",
-        "descriptionPlaceholder": "Enter a short description"
+        "descriptionPlaceholder": "Enter a short description",
+        "licenseLabel": "License",
+        "licensePlaceholder": "Choose a license",
+        "licenseHint": "You keep the copyright. This tells others what they may do with your art.",
+        "licenseOption": {
+          "cc0": "CC0 — public domain, no credit needed",
+          "cc-by": "CC BY — any use, with credit",
+          "cc-by-sa": "CC BY-SA — any use, with credit, share alike",
+          "cc-by-nc": "CC BY-NC — non-commercial only, with credit",
+          "all-rights-reserved": "All rights reserved — ask me first"
+        }
       },
       "path": {
         "prefix": "Pet assets live in",

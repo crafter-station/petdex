@@ -479,12 +479,59 @@ async function cmdList() {
   );
 }
 
+const LICENSE_CHOICES = [
+  { value: "cc0", label: "CC0 — public domain, no credit needed" },
+  { value: "cc-by", label: "CC BY — any use, with credit" },
+  { value: "cc-by-sa", label: "CC BY-SA — any use, credit, share alike" },
+  { value: "cc-by-nc", label: "CC BY-NC — non-commercial only, with credit" },
+  { value: "all-rights-reserved", label: "All rights reserved — ask me first" },
+] as const;
+
+type LicenseChoice = (typeof LICENSE_CHOICES)[number]["value"];
+
+function parseLicenseFlag(args: string[]): string | null {
+  const inline = args.find((a) => a.startsWith("--license="));
+  if (inline) return inline.slice("--license=".length);
+  const i = args.indexOf("--license");
+  return i >= 0 ? (args[i + 1] ?? "") : null;
+}
+
 async function cmdSubmit(args: string[]) {
   const positionals = args.filter((a) => !a.startsWith("--"));
   const target = positionals[0];
   if (!target) {
-    p.cancel(`Usage: ${pc.cyan("petdex submit <path> [--force]")}`);
+    p.cancel(
+      `Usage: ${pc.cyan("petdex submit <path> [--license <id>] [--force]")}`,
+    );
     process.exit(1);
+  }
+
+  // Pet artwork belongs to whoever drew it, so every submission has to say
+  // what others may do with it. Asked up front to fail before uploading.
+  const licenseFlag = parseLicenseFlag(args);
+  let license: LicenseChoice;
+  if (licenseFlag !== null) {
+    const match = LICENSE_CHOICES.find((c) => c.value === licenseFlag);
+    if (!match) {
+      p.cancel(
+        `Unknown --license ${pc.red(licenseFlag || "(empty)")}. Options: ${LICENSE_CHOICES.map((c) => c.value).join(", ")}`,
+      );
+      process.exit(1);
+    }
+    license = match.value;
+  } else {
+    const picked = await p.select({
+      message: "License for this pet's artwork (you keep the copyright)",
+      options: LICENSE_CHOICES.map((c) => ({
+        value: c.value,
+        label: c.label,
+      })),
+    });
+    if (p.isCancel(picked)) {
+      p.cancel("Cancelled.");
+      process.exit(1);
+    }
+    license = picked as LicenseChoice;
   }
 
   // Ensure auth before doing any work.
@@ -606,7 +653,7 @@ async function cmdSubmit(args: string[]) {
       const t = await auth.getAccessToken();
       if (!t) throw new Error("session expired");
       token = t;
-      const result = await submitOne(cand, token);
+      const result = await submitOne(cand, token, license);
       profileUrl = absoluteProfileUrl(result.profileUrl) ?? profileUrl;
       ps.stop(
         `${pc.green("✓")} ${pc.cyan(cand.label)} → ${formatSubmissionOutcome(result)}`,
@@ -963,6 +1010,7 @@ async function readZipCandidate(zipPath: string): Promise<Candidate | null> {
 async function submitOne(
   cand: Candidate,
   bearer: string,
+  license: LicenseChoice,
 ): Promise<SubmitOneResult> {
   const { width, height } = parseImageDims(cand.spritesheetBuffer);
   if (width === 0 || height === 0) {
@@ -1035,6 +1083,7 @@ async function submitOne(
       spritesheetWidth: width,
       spritesheetHeight: height,
       spriteVersionNumber: parseSpriteVersionNumber(cand.petJsonObj),
+      license,
     }),
   });
 
