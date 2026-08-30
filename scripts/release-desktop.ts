@@ -65,11 +65,13 @@ const BUILD_MANIFEST_PATH = path.join(
 );
 
 type BuildManifest = {
-  format: 2;
+  format: 3;
   version: string;
   commit: string;
   sdkCommit: string;
   cliCommit: string;
+  packagerSdkCommit: string;
+  packagerCliCommit: string;
   artifacts: Record<string, { size: number; sha256: string }>;
 };
 
@@ -79,6 +81,10 @@ type NativeToolchain = {
   sdkCommit: string;
   cliPath: string;
   cliCommit: string;
+  packagerSdkPath: string;
+  packagerSdkCommit: string;
+  packagerCliPath: string;
+  packagerCliCommit: string;
 };
 
 type Args = {
@@ -184,6 +190,10 @@ function resolveNativeToolchain(): NativeToolchain {
     die("NATIVE_CLI is required (build it from the pinned Native SDK)");
   if (!process.env.NATIVE_SDK_PATH)
     die("NATIVE_SDK_PATH is required (use the same SDK as NATIVE_CLI)");
+  if (!process.env.NATIVE_PACKAGER_CLI)
+    die("NATIVE_PACKAGER_CLI is required (build it from Native SDK 0.10.1)");
+  if (!process.env.NATIVE_PACKAGER_SDK_PATH)
+    die("NATIVE_PACKAGER_SDK_PATH is required");
 
   const cliInput = path.isAbsolute(process.env.NATIVE_CLI)
     ? process.env.NATIVE_CLI
@@ -247,12 +257,88 @@ function resolveNativeToolchain(): NativeToolchain {
     die("NATIVE_CLI was built from a different Native SDK commit");
   }
 
+  const packagerCliInput = path.isAbsolute(process.env.NATIVE_PACKAGER_CLI)
+    ? process.env.NATIVE_PACKAGER_CLI
+    : path.resolve(process.cwd(), process.env.NATIVE_PACKAGER_CLI);
+  const packagerSdkInput = path.isAbsolute(process.env.NATIVE_PACKAGER_SDK_PATH)
+    ? process.env.NATIVE_PACKAGER_SDK_PATH
+    : path.resolve(process.cwd(), process.env.NATIVE_PACKAGER_SDK_PATH);
+  try {
+    accessSync(packagerCliInput, fsConstants.X_OK);
+  } catch {
+    die(`NATIVE_PACKAGER_CLI is not executable: ${packagerCliInput}`);
+  }
+  if (
+    !existsSync(packagerSdkInput) ||
+    !statSync(packagerSdkInput).isDirectory()
+  ) {
+    die(`NATIVE_PACKAGER_SDK_PATH is not a directory: ${packagerSdkInput}`);
+  }
+  const packagerCliPath = realpathSync(packagerCliInput);
+  const packagerSdkPath = realpathSync(packagerSdkInput);
+  const relativePackagerCli = path.relative(packagerSdkPath, packagerCliPath);
+  if (
+    relativePackagerCli !== path.join("zig-out", "bin", "native") &&
+    relativePackagerCli !== path.join("zig-out", "bin", "native.exe")
+  ) {
+    die(
+      "NATIVE_PACKAGER_CLI must be zig-out/bin/native from NATIVE_PACKAGER_SDK_PATH",
+    );
+  }
+  const packagerCommitResult = spawnSync(
+    "git",
+    ["-C", packagerSdkPath, "rev-parse", "HEAD"],
+    { encoding: "utf8" },
+  );
+  const packagerSdkCommit = (packagerCommitResult.stdout || "").trim();
+  const expectedPackagerCommit = "064ca9890cc0cf8adc198215bd0ddaeb586c220a";
+  if (packagerSdkCommit !== expectedPackagerCommit) {
+    die("NATIVE_PACKAGER_SDK_PATH must be at Native SDK v0.10.1");
+  }
+  const packagerCliResult = spawnSync(packagerCliPath, ["version"], {
+    cwd: packagerSdkPath,
+    encoding: "utf8",
+    timeout: 5000,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const packagerCliCommit =
+    (packagerCliResult.stdout || "").match(
+      /\bcommit\s+([0-9a-f]{7,40})\b/i,
+    )?.[1] ?? "";
+  if (
+    packagerCliResult.status !== 0 ||
+    !packagerSdkCommit.startsWith(packagerCliCommit)
+  ) {
+    die("NATIVE_PACKAGER_CLI was built from a different Native SDK commit");
+  }
+  const packagerStrings = spawnSync("strings", [packagerCliPath], {
+    encoding: "utf8",
+  });
+  if (
+    packagerStrings.status !== 0 ||
+    !packagerStrings.stdout.includes("set sidebar width of dmgWindow to 0") ||
+    !packagerStrings.stdout.includes("set toolbar visible of dmgWindow to true")
+  ) {
+    die(
+      "NATIVE_PACKAGER_CLI is missing patches/native-sdk-modern-dmg-window.patch",
+    );
+  }
+
   return {
-    env: { NATIVE_CLI: cliPath, NATIVE_SDK_PATH: sdkPath },
+    env: {
+      NATIVE_CLI: cliPath,
+      NATIVE_SDK_PATH: sdkPath,
+      NATIVE_PACKAGER_CLI: packagerCliPath,
+      NATIVE_PACKAGER_SDK_PATH: packagerSdkPath,
+    },
     sdkPath,
     sdkCommit,
     cliPath,
     cliCommit,
+    packagerSdkPath,
+    packagerSdkCommit,
+    packagerCliPath,
+    packagerCliCommit,
   };
 }
 
@@ -342,10 +428,14 @@ function preflightTree(): void {
       "--",
       "packages/petdex-desktop-native/src",
       "packages/petdex-desktop-native/app.zon",
+      "packages/petdex-desktop-native/app.package.json",
+      "packages/petdex-desktop-native/packaging",
       "patches/native-sdk-macos-headerpad.patch",
+      "patches/native-sdk-modern-dmg-window.patch",
       "patches/native-sdk-windows-pet-input.patch",
       "packages/petdex-desktop-native/assets",
       "scripts/patch-native-sdk.sh",
+      "scripts/patch-native-packager.sh",
       "scripts/release-desktop.ts",
       "scripts/sign-macos.sh",
     ],
@@ -361,6 +451,25 @@ function preflightTree(): void {
     if (!process.env.RELEASE_DESKTOP_ALLOW_DIRTY) {
       die("re-run with RELEASE_DESKTOP_ALLOW_DIRTY=1 to override");
     }
+  }
+}
+
+function preflightDesktopVersion(version: string): void {
+  const appZon = readFileSync(
+    path.join(REPO_ROOT, "packages/petdex-desktop-native/app.zon"),
+    "utf8",
+  );
+  const appZonVersion = appZon.match(/\.version\s*=\s*"([^"]+)"/)?.[1];
+  const packageManifest = JSON.parse(
+    readFileSync(
+      path.join(REPO_ROOT, "packages/petdex-desktop-native/app.package.json"),
+      "utf8",
+    ),
+  ) as { version?: string };
+  if (appZonVersion !== version || packageManifest.version !== version) {
+    die(
+      `desktop manifests must both declare ${version}; app.zon=${appZonVersion ?? "missing"}, app.package.json=${packageManifest.version ?? "missing"}`,
+    );
   }
 }
 
@@ -417,11 +526,13 @@ function writeBuildManifest(version: string, toolchain: NativeToolchain): void {
     };
   }
   const manifest: BuildManifest = {
-    format: 2,
+    format: 3,
     version,
     commit: gitCommit(),
     sdkCommit: toolchain.sdkCommit,
     cliCommit: toolchain.cliCommit,
+    packagerSdkCommit: toolchain.packagerSdkCommit,
+    packagerCliCommit: toolchain.packagerCliCommit,
     artifacts,
   };
   writeFileSync(BUILD_MANIFEST_PATH, `${JSON.stringify(manifest)}\n`, "utf8");
@@ -484,10 +595,12 @@ function verifyArtifacts(
     die("build manifest is not valid JSON");
   }
   if (
-    manifest.format !== 2 ||
+    manifest.format !== 3 ||
     manifest.version !== version ||
     manifest.sdkCommit !== toolchain.sdkCommit ||
-    manifest.cliCommit !== toolchain.cliCommit
+    manifest.cliCommit !== toolchain.cliCommit ||
+    manifest.packagerSdkCommit !== toolchain.packagerSdkCommit ||
+    manifest.packagerCliCommit !== toolchain.packagerCliCommit
   ) {
     die(`build manifest does not match requested version ${version}`);
   }
@@ -587,6 +700,7 @@ async function main() {
   if (args.draft) console.log("  mode: DRAFT (will not publish)");
 
   preflightTree();
+  preflightDesktopVersion(args.version);
   const tag = preflightTag(args.version);
   const toolchain = resolveNativeToolchain();
 

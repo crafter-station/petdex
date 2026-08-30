@@ -30,6 +30,10 @@ if [[ -n "${NATIVE_SDK_PATH:-}" && "$NATIVE_SDK_PATH" != /* ]]; then
   NATIVE_SDK_PATH="$REPO_ROOT/$NATIVE_SDK_PATH"
   export NATIVE_SDK_PATH
 fi
+if [[ -n "${NATIVE_PACKAGER_CLI:-}" && "$NATIVE_PACKAGER_CLI" != /* ]]; then
+  NATIVE_PACKAGER_CLI="$REPO_ROOT/$NATIVE_PACKAGER_CLI"
+  export NATIVE_PACKAGER_CLI
+fi
 # Which Mac this build runs on. arm64 by default so the common case is
 # unchanged; pass x64 for the Intel build (#609). Cross-compiled from
 # either host: Zig does not need an Intel machine, but the signature and
@@ -55,6 +59,7 @@ KEY="$APPLE_API_KEY"
 
 : "${NATIVE_CLI:?set NATIVE_CLI to the native CLI built from the pinned SDK}"
 : "${NATIVE_SDK_PATH:?set NATIVE_SDK_PATH to the pinned SDK checkout}"
+: "${NATIVE_PACKAGER_CLI:?set NATIVE_PACKAGER_CLI to the patched Native SDK 0.10.1 CLI}"
 
 "$(dirname "${BASH_SOURCE[0]}")/patch-native-sdk.sh"
 
@@ -74,12 +79,43 @@ echo "==> build ($ARCH)"
 echo "==> package + sign"
 # The bundle must be named Petdex.app: the name is baked into the
 # signature, so renaming it afterwards breaks the seal.
-(cd "$PKG" && "$NATIVE_CLI" package \
+ALIAS_PATH="$PKG/packaging/dmg/Applications"
+rm -f "$ALIAS_PATH"
+osascript - "$PKG/packaging/dmg" <<'APPLESCRIPT'
+on run argv
+  set outputFolder to POSIX file (item 1 of argv) as alias
+  tell application "Finder"
+    set createdAlias to make new alias file at outputFolder to folder "Applications" of startup disk
+    set name of createdAlias to "Applications"
+  end tell
+end run
+APPLESCRIPT
+swift - "$ALIAS_PATH" <<'SWIFT'
+import AppKit
+import Foundation
+
+let path = CommandLine.arguments[1]
+let workspace = NSWorkspace.shared
+let icon = workspace.icon(forFile: "/Applications")
+icon.size = NSSize(width: 512, height: 512)
+if !workspace.setIcon(icon, forFile: path, options: []) {
+  exit(1)
+}
+SWIFT
+
+(cd "$PKG" && "$NATIVE_PACKAGER_CLI" package \
   --target macos \
+  --manifest app.package.json \
   --binary zig-out/bin/petdex-desktop-native \
   --output "$OUT/Petdex.app" \
   --signing identity \
-  --identity "$SIGN_IDENTITY")
+  --identity "$SIGN_IDENTITY" \
+  --archive)
+
+PACKAGE_VERSION="$(bun -e 'const value = await Bun.file(process.argv[1]).json(); console.log(value.version)' "$PKG/app.package.json")"
+PACKAGED_DMG="$OUT/petdex-desktop-native-$PACKAGE_VERSION-macos-ReleaseFast.dmg"
+DMG="$OUT/Petdex-$ARCH.dmg"
+mv "$PACKAGED_DMG" "$DMG"
 
 # Agent logos are compiled into the binary, so only the app icon still
 # has to survive packaging.
@@ -105,15 +141,6 @@ echo "==> dmg"
 # macOS App Translocation: the app runs from a random read-only path
 # under /var/folders, so anything it writes that points at its own
 # binary (the agent hook symlink, for one) breaks on the next boot.
-DMG="$OUT/Petdex-$ARCH.dmg"
-STAGE="$OUT/dmg-stage"
-rm -rf "$STAGE" "$DMG"
-mkdir -p "$STAGE"
-cp -R "$OUT/Petdex.app" "$STAGE/"
-ln -s /Applications "$STAGE/Applications"
-hdiutil create -volname "Petdex" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
-rm -rf "$STAGE"
-
 # The DMG is signed and notarized in its own right: Gatekeeper checks
 # the container the user actually double-clicks, not just what is
 # inside it.

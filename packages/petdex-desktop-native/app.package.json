@@ -1,0 +1,27 @@
+{
+  "$schema": "https://schema.native-sdk.dev/app/v1.json",
+  "id": "dev.petdex.desktop-native",
+  "name": "petdex-desktop-native",
+  "display_name": "Petdex",
+  "description": "Your pixel companion, always nearby.",
+  "version": "0.9.0",
+  "icons": ["assets/icon.png"],
+  "platforms": ["macos"],
+  "url_schemes": [{ "scheme": "petdex" }],
+  "dmg": {
+    "volume_name": "Petdex",
+    "background": "packaging/dmg/background.png",
+    "window_width": 720,
+    "window_height": 440,
+    "icon_size": 144,
+    "items": [
+      { "kind": "app", "position": { "x": 180, "y": 220 } },
+      {
+        "kind": "file",
+        "path": "packaging/dmg/Applications",
+        "name": "Applications",
+        "position": { "x": 540, "y": 220 }
+      }
+    ]
+  }
+}

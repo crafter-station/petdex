@@ -1,0 +1,52 @@
+diff --git a/src/tooling/package.zig b/src/tooling/package.zig
+index 1f12e6c..ef91239 100644
+--- a/src/tooling/package.zig
++++ b/src/tooling/package.zig
+@@ -2572,9 +2572,9 @@ fn dmgFinderScriptAlloc(allocator: std.mem.Allocator, dmg: manifest_tool.DmgMeta
+     const right = 100 + @as(u32, dmg.window_width);
+     // `bounds` includes Finder's title bar; the manifest dimensions describe
+     // the usable icon/background canvas so artwork stays exactly W×H.
+-    const bottom = 100 + @as(u32, dmg.window_height) + 36;
++    const bottom = 100 + @as(u32, dmg.window_height) + 52;
+     const inset_right = right - 10;
+-    const inset_bottom = bottom - 10;
++    const inset_bottom = bottom;
+     // Capture the window opened from our mount path immediately. Asking
+     // Finder for the container window by disk name can select an older,
+     // read-only copy of the same app DMG that the developer still has mounted.
+@@ -2585,7 +2585,8 @@ fn dmgFinderScriptAlloc(allocator: std.mem.Allocator, dmg: manifest_tool.DmgMeta
+         \\  set dmgWindow to front window
+         \\  delay 1
+         \\  set current view of dmgWindow to icon view
+-        \\  set toolbar visible of dmgWindow to false
++        \\  set toolbar visible of dmgWindow to true
++        \\  set sidebar width of dmgWindow to 0
+         \\  set statusbar visible of dmgWindow to false
+         \\  set pathbar visible of dmgWindow to false
+         \\  set the bounds of dmgWindow to {{100, 100, {d}, {d}}}
+@@ -2599,6 +2600,8 @@ fn dmgFinderScriptAlloc(allocator: std.mem.Allocator, dmg: manifest_tool.DmgMeta
+         \\  open dmgFolder
+         \\  set dmgWindow to front window
+         \\  delay 1
++        \\  set toolbar visible of dmgWindow to true
++        \\  set sidebar width of dmgWindow to 0
+         \\  set statusbar visible of dmgWindow to false
+         \\  set the bounds of dmgWindow to {{100, 100, {d}, {d}}}
+         \\  delay 1
+@@ -2802,11 +2805,13 @@ test "DMG Finder script carries custom layout and escapes paths and names" {
+     }, "/Volumes/Demo \"Installer\"", "Demo \"App\".app", "background.jpeg");
+     defer std.testing.allocator.free(script);
+     try std.testing.expect(std.mem.indexOf(u8, script, "POSIX file \"/Volumes/Demo \\\"Installer\\\"\" as alias") != null);
+-    try std.testing.expect(std.mem.indexOf(u8, script, "set the bounds of dmgWindow to {100, 100, 820, 576}") != null);
+-    try std.testing.expect(std.mem.indexOf(u8, script, "set the bounds of dmgWindow to {100, 100, 810, 566}") != null);
+-    try std.testing.expect(std.mem.count(u8, script, "set the bounds of dmgWindow to {100, 100, 820, 576}") == 2);
++    try std.testing.expect(std.mem.indexOf(u8, script, "set the bounds of dmgWindow to {100, 100, 820, 592}") != null);
++    try std.testing.expect(std.mem.indexOf(u8, script, "set the bounds of dmgWindow to {100, 100, 810, 592}") != null);
++    try std.testing.expect(std.mem.count(u8, script, "set the bounds of dmgWindow to {100, 100, 820, 592}") == 2);
+     try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, script, "set dmgWindow to front window"));
+     try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, script, "close dmgWindow"));
++    try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, script, "set toolbar visible of dmgWindow to true"));
++    try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, script, "set sidebar width of dmgWindow to 0"));
+     try std.testing.expect(std.mem.indexOf(u8, script, "delay 2") != null);
+     try std.testing.expect(std.mem.indexOf(u8, script, "set pathbar visible of dmgWindow to false") != null);
+     try std.testing.expect(std.mem.indexOf(u8, script, "set icon size of theViewOptions to 144") != null);
