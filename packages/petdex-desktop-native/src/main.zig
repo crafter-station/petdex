@@ -1601,20 +1601,31 @@ fn registerStateFrames(state: State, fx: *Effects) void {
 /// per state is enough to tell them apart at a glance, and it fits the
 /// registry's remaining budget where eight animated frames per body would
 /// not.
-const flock_waiting_image_id: u64 = 10;
-const flock_running_image_id: u64 = 11;
-const flock_idle_image_id: u64 = 12;
-const flock_failed_image_id: u64 = 15;
-const flock_review_image_id: u64 = 16;
+const flock_atlas_image_id: u64 = 10;
+const flock_states = [_]State{ .waiting, .running, .idle, .failed, .review };
 
 pub fn flockImageId(state: State) u64 {
+    _ = state;
+    return flock_atlas_image_id;
+}
+
+fn flockFrameIndex(state: State) usize {
     return switch (state) {
-        .waiting => flock_waiting_image_id,
-        .running, .@"running-right", .@"running-left" => flock_running_image_id,
-        .failed => flock_failed_image_id,
-        .review => flock_review_image_id,
-        else => flock_idle_image_id,
+        .waiting => 0,
+        .running, .@"running-right", .@"running-left" => 1,
+        .failed => 3,
+        .review => 4,
+        else => 2,
     };
+}
+
+fn flockImageRect(state: State) geometry.RectF {
+    return geometry.RectF.init(
+        @as(f32, @floatFromInt(flockFrameIndex(state))) * frame_w,
+        0,
+        frame_w,
+        frame_h,
+    );
 }
 
 /// Register one representative still per flock state. Called when the
@@ -1623,32 +1634,23 @@ fn registerFlockFrames(fx: *Effects) void {
     if (sheet.pixels.len == 0) return;
     const fw = sheet.width / cols;
     const fh = sheet.height / sheet.rows;
-    var scratch = boot_allocator.alloc(u8, fw * fh * 4) catch return;
+    const atlas_w = fw * flock_states.len;
+    var scratch = boot_allocator.alloc(u8, atlas_w * fh * 4) catch return;
     defer boot_allocator.free(scratch);
-    // Five stills fill the registry to its 16-slot cap alongside the pet
-    // window's eight frames, the agent strip, the avatar and the tail.
-    // Nothing else may claim a slot without freeing one here.
-    const entries = [_]struct { state: State, id: u64 }{
-        .{ .state = .waiting, .id = flock_waiting_image_id },
-        .{ .state = .running, .id = flock_running_image_id },
-        .{ .state = .idle, .id = flock_idle_image_id },
-        .{ .state = .failed, .id = flock_failed_image_id },
-        .{ .state = .review, .id = flock_review_image_id },
-    };
-    for (entries) |entry| {
-        const def = stateDef(entry.state);
-        // The first frame is each state's resting pose.
+    for (flock_states, 0..) |state, index| {
+        const def = stateDef(state);
         const src_x = def.frames[0].col * fw;
         const src_y = def.row * fh;
         for (0..fh) |y| {
             const src_off = ((src_y + y) * sheet.width + src_x) * 4;
-            @memcpy(scratch[y * fw * 4 ..][0 .. fw * 4], sheet.pixels[src_off..][0 .. fw * 4]);
+            const dst_off = (y * atlas_w + index * fw) * 4;
+            @memcpy(scratch[dst_off..][0 .. fw * 4], sheet.pixels[src_off..][0 .. fw * 4]);
         }
-        fx.registerImage(entry.id, fw, fh, scratch) catch |err| {
-            std.debug.print("petdex: flock frame register failed ({s})\n", .{@errorName(err)});
-            return;
-        };
     }
+    fx.registerImage(flock_atlas_image_id, atlas_w, fh, scratch) catch |err| {
+        std.debug.print("petdex: flock frame register failed ({s})\n", .{@errorName(err)});
+        return;
+    };
 }
 
 const poll_timer_key: u64 = 2;
@@ -2813,8 +2815,18 @@ pub const AppUi = canvas.Ui(Msg);
 
 const pet_menu = [_]AppUi.ContextMenuItem{
     .{ .label = "Open Settings", .msg = .open_settings },
+    .{ .label = "Open Flock", .msg = .toggle_flock_window },
     .{ .label = "Close Pet", .msg = .close_pet },
 };
+
+test "pet context menu opens the flock" {
+    try std.testing.expectEqualStrings("Open Flock", pet_menu[1].label);
+    const msg = pet_menu[1].msg orelse return error.TestUnexpectedResult;
+    switch (msg) {
+        .toggle_flock_window => {},
+        else => return error.TestUnexpectedResult,
+    }
+}
 
 // The visible card remains intrinsic and grows only with the text it actually
 // contains. These values size the surrounding transparent canvas generously
@@ -4072,6 +4084,7 @@ fn bubbleView(ui: *AppUi, model: *const Model) AppUi.Node {
 
 const flock_window_label = "flock";
 const flock_canvas_label = "flock-canvas";
+pub const companion_header_h: f32 = 28;
 /// Room under each body for its agent badge, plus the gap above it.
 const flock_badge_px: f32 = 18;
 /// Badge, the gap above it, and breathing room below: at exactly badge +
@@ -4098,9 +4111,14 @@ fn flockLayout(model: *const Model) flock_mod.LayoutSpec {
 /// artwork is not yet. V3 gives each session its own pet.
 fn flockView(ui: *AppUi, model: *const Model) AppUi.Node {
     if (model.flock.len == 0 or !model.sheet_loaded) {
-        return ui.column(.{ .grow = 1, .main = .center, .cross = .center, .window_drag = true }, .{
-            ui.text(.{ .size = .sm, .text_alignment = .center }, "No agents running"),
+        var root = ui.column(.{ .grow = 1 }, .{
+            ui.el(.stack, .{ .height = companion_header_h, .window_drag = true }, .{}),
+            ui.column(.{ .grow = 1, .main = .center, .cross = .center }, .{
+                ui.text(.{ .size = .sm, .text_alignment = .center }, "No agents running"),
+            }),
         });
+        root.widget.style.background = settingsBackground(model);
+        return root;
     }
     const spec = flockLayout(model);
     const columns = flock_mod.columnsFor(model.flock.len, flock_max_columns);
@@ -4117,7 +4135,12 @@ fn flockView(ui: *AppUi, model: *const Model) AppUi.Node {
         rows[row_count] = ui.row(.{ .gap = spec.gap, .cross = .end }, cells[0..cell_count]);
         row_count += 1;
     }
-    return ui.column(.{ .grow = 1, .main = .center, .cross = .center, .gap = spec.gap, .window_drag = true }, rows[0..row_count]);
+    var root = ui.column(.{ .grow = 1 }, .{
+        ui.el(.stack, .{ .height = companion_header_h, .window_drag = true }, .{}),
+        ui.column(.{ .grow = 1, .main = .center, .cross = .center, .gap = spec.gap }, rows[0..row_count]),
+    });
+    root.widget.style.background = settingsBackground(model);
+    return root;
 }
 
 fn flockSemanticLabel(state: State) []const u8 {
@@ -4149,6 +4172,7 @@ fn flockMember(ui: *AppUi, model: *const Model, index: usize, spec: flock_mod.La
     });
     body.widget.image_fit = .stretch;
     body.widget.image_sampling = .nearest;
+    body.widget.image_src = flockImageRect(member.state);
     // Whole cell, not just the sprite: a 115px target beats a 18px one,
     // and the badge is part of the same body. A member with no pane (a
     // direct hook outside Herdr) stays inert rather than offering a jump
@@ -4247,11 +4271,9 @@ fn petdexWindows(model: *const Model, scratch: *PetdexApp.WindowsScratch) []cons
             .canvas_label = flock_canvas_label,
             .title = "Petdex Flock",
             .width = size.w,
-            .height = size.h,
+            .height = size.h + companion_header_h,
             .resizable = false,
-            .titlebar = .chromeless,
-            .floating = true,
-            .transparent = true,
+            .titlebar = .hidden_inset,
             .on_close = .toggle_flock_window,
         };
         count += 1;
@@ -4264,11 +4286,29 @@ fn petdexWindows(model: *const Model, scratch: *PetdexApp.WindowsScratch) []cons
             .width = 420,
             .height = 680,
             .resizable = false,
+            .titlebar = .hidden_inset,
             .on_close = .settings_closed,
         };
         count += 1;
     }
     return scratch.windows[0..count];
+}
+
+test "companion windows use the unified opaque shell" {
+    var model: Model = .{};
+    model.flock.open = true;
+    model.settings_open = true;
+    var scratch: PetdexApp.WindowsScratch = undefined;
+    const windows = petdexWindows(&model, &scratch);
+    try std.testing.expectEqual(@as(usize, 2), windows.len);
+    try std.testing.expectEqualStrings(flock_window_label, windows[0].label);
+    try std.testing.expectEqual(.hidden_inset, windows[0].titlebar);
+    try std.testing.expect(!windows[0].transparent);
+    try std.testing.expect(!windows[0].floating);
+    try std.testing.expectEqualStrings(settings_window_label, windows[1].label);
+    try std.testing.expectEqual(.hidden_inset, windows[1].titlebar);
+    try std.testing.expect(!windows[1].transparent);
+    try std.testing.expect(!windows[1].floating);
 }
 
 fn petdexWindowView(ui: *PetdexApp.Ui, model: *const Model, window_label: []const u8) PetdexApp.Ui.Node {
@@ -4574,26 +4614,16 @@ test "a body earns the marker when a human has to act" {
     try std.testing.expect(!flockNeedsAttention(.review));
 }
 
-test "flock states that must look different get different image slots" {
-    // Bodies render stills from separate slots, so two agents in
-    // different states cannot collapse onto the same artwork.
-    const flock_states = [_]State{ .waiting, .running, .idle, .failed, .review };
-    for (flock_states, 0..) |a, i| {
-        for (flock_states[i + 1 ..]) |b| {
-            try std.testing.expect(flockImageId(a) != flockImageId(b));
-        }
+test "flock states use distinct cells in one atlas" {
+    for (flock_states, 0..) |state, index| {
+        try std.testing.expectEqual(flock_atlas_image_id, flockImageId(state));
+        try std.testing.expectEqual(@as(f32, @floatFromInt(index)) * frame_w, flockImageRect(state).x);
     }
-    // And they must not collide with the slots the rest of the app owns.
-    for (flock_states) |state| {
-        const id = flockImageId(state);
-        try std.testing.expect(id != sheet_image_id);
-        try std.testing.expect(id != agent_icon_atlas_id);
-        try std.testing.expect(id != avatar_image_id);
-        try std.testing.expect(id != tail_image_id);
-        try std.testing.expect(id > cols);
-        // The registry caps at 16 slots and these are the last free ones.
-        try std.testing.expect(id <= 16);
-    }
+    try std.testing.expect(flock_atlas_image_id != sheet_image_id);
+    try std.testing.expect(flock_atlas_image_id != agent_icon_atlas_id);
+    try std.testing.expect(flock_atlas_image_id != thumb_atlas_id);
+    try std.testing.expect(flock_atlas_image_id != avatar_image_id);
+    try std.testing.expect(flock_atlas_image_id != tail_image_id);
 }
 
 test "one image slot covers every agent" {
