@@ -10,7 +10,7 @@ pub const scopes = "profile email openid offline_access";
 pub const library_url = "https://petdex.dev/api/desktop/library";
 pub const service = "dev.petdex.desktop-native";
 pub const account = "oauth";
-pub const keychain_accounts = [_][]const u8{ "oauth-0", "oauth-1", "oauth-2" };
+pub const keychain_accounts = [_][]const u8{ "oauth-0", "oauth-1", "oauth-2", "oauth-3", "oauth-4" };
 pub const max_pets = 64;
 
 pub const Phase = enum { signed_out, loading, authorizing, exchanging, syncing, signed_in, failed, unavailable };
@@ -113,7 +113,7 @@ const TokenResponse = struct {
 
 const StoredTokens = struct {
     access_token: ?[]const u8 = null,
-    refresh_token: []const u8,
+    refresh_token: ?[]const u8 = null,
 };
 
 const LibraryPet = struct {
@@ -187,11 +187,20 @@ pub fn applyStoredTokens(state: *State, allocator: std.mem.Allocator, body: []co
     if (trimmed[0] != '{') return copyField(&state.refresh_token, &state.refresh_token_len, trimmed);
     var parsed = std.json.parseFromSlice(StoredTokens, allocator, trimmed, .{ .ignore_unknown_fields = true }) catch return false;
     defer parsed.deinit();
+    var restored = false;
     if (parsed.value.access_token) |access| {
-        if (!copyField(&state.access_token, &state.access_token_len, access)) return false;
+        if (access.len > 0) {
+            if (!copyField(&state.access_token, &state.access_token_len, access)) return false;
+            restored = true;
+        }
     }
-    if (!copyField(&state.refresh_token, &state.refresh_token_len, parsed.value.refresh_token)) return false;
-    return true;
+    if (parsed.value.refresh_token) |refresh| {
+        if (refresh.len > 0) {
+            if (!copyField(&state.refresh_token, &state.refresh_token_len, refresh)) return false;
+            restored = true;
+        }
+    }
+    return restored;
 }
 
 pub fn keychainChunk(token: []const u8, index: usize) ?[]const u8 {
@@ -202,8 +211,8 @@ pub fn keychainChunk(token: []const u8, index: usize) ?[]const u8 {
 }
 
 pub fn storedTokens(state: *const State, out: []u8) ?[]const u8 {
-    if (state.refresh_token_len == 0) return null;
-    return std.fmt.bufPrint(out, "{{\"refresh_token\":\"{s}\"}}", .{state.refreshToken()}) catch null;
+    if (state.access_token_len == 0 and state.refresh_token_len == 0) return null;
+    return std.fmt.bufPrint(out, "{{\"access_token\":\"{s}\",\"refresh_token\":\"{s}\"}}", .{ state.accessToken(), state.refreshToken() }) catch null;
 }
 
 fn petStatus(value: []const u8) ?PetStatus {
@@ -279,18 +288,34 @@ test "library payload copies bounded user and pet data" {
     try std.testing.expectEqual(PetStatus.caught, state.caught[0].status);
 }
 
-test "Keychain payload persists only the refresh token" {
+test "Keychain payload persists available OAuth tokens" {
     var state: State = .{};
+    const access = "access-token";
     const refresh = "refresh-token";
+    @memcpy(state.access_token[0..access.len], access);
+    state.access_token_len = access.len;
     @memcpy(state.refresh_token[0..refresh.len], refresh);
     state.refresh_token_len = refresh.len;
-    var out: [128]u8 = undefined;
-    try std.testing.expectEqualStrings("{\"refresh_token\":\"refresh-token\"}", storedTokens(&state, &out).?);
+    var out: [256]u8 = undefined;
+    try std.testing.expectEqualStrings("{\"access_token\":\"access-token\",\"refresh_token\":\"refresh-token\"}", storedTokens(&state, &out).?);
 
     var restored: State = .{};
     try std.testing.expect(applyStoredTokens(&restored, std.testing.allocator, storedTokens(&state, &out).?));
-    try std.testing.expectEqual(@as(usize, 0), restored.access_token_len);
+    try std.testing.expectEqualStrings(access, restored.accessToken());
     try std.testing.expectEqualStrings(refresh, restored.refreshToken());
+}
+
+test "Keychain payload persists access-only OAuth sessions" {
+    var state: State = .{};
+    const access = "access-token";
+    @memcpy(state.access_token[0..access.len], access);
+    state.access_token_len = access.len;
+    var out: [128]u8 = undefined;
+    const stored = storedTokens(&state, &out).?;
+    var restored: State = .{};
+    try std.testing.expect(applyStoredTokens(&restored, std.testing.allocator, stored));
+    try std.testing.expectEqualStrings(access, restored.accessToken());
+    try std.testing.expectEqual(@as(usize, 0), restored.refresh_token_len);
 }
 
 test "Keychain chunks reassemble the full refresh token" {

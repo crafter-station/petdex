@@ -922,7 +922,7 @@ const auth_token_key: u64 = 43;
 const auth_library_key: u64 = 44;
 const auth_avatar_key: u64 = 45;
 const auth_preview_key: u64 = 46;
-const auth_keychain_save_keys = [_]u64{ auth_keychain_save_key, 47, 48 };
+const auth_keychain_save_keys = [_]u64{ auth_keychain_save_key, 47, 48, 49, 50 };
 const update_boot_delay_ms: u32 = 5000;
 const update_background_interval_ms: i64 = 24 * 60 * 60 * 1000;
 const update_settings_interval_ms: i64 = 5 * 60 * 1000;
@@ -935,12 +935,14 @@ fn loadAuthSession(model: *Model, fx: *Effects) void {
     const argv = [_][]const u8{
         "/bin/sh",
         "-c",
-        "petdex_legacy=$(/usr/bin/security find-generic-password -a \"$1\" -s \"$5\" -w 2>/dev/null) && { printf '%s' \"$petdex_legacy\"; exit 0; }; for petdex_account in \"$2\" \"$3\" \"$4\"; do petdex_part=$(/usr/bin/security find-generic-password -a \"$petdex_account\" -s \"$5\" -w 2>/dev/null) || exit 1; printf '%s' \"$petdex_part\"; done",
+        "petdex_legacy=$(/usr/bin/security find-generic-password -a \"$1\" -s \"$7\" -w 2>/dev/null) && { printf '%s' \"$petdex_legacy\"; exit 0; }; for petdex_account in \"$2\" \"$3\" \"$4\" \"$5\" \"$6\"; do petdex_part=$(/usr/bin/security find-generic-password -a \"$petdex_account\" -s \"$7\" -w 2>/dev/null) || exit 1; printf '%s' \"$petdex_part\"; done",
         "petdex-keychain",
         desktop_auth.account,
         desktop_auth.keychain_accounts[0],
         desktop_auth.keychain_accounts[1],
         desktop_auth.keychain_accounts[2],
+        desktop_auth.keychain_accounts[3],
+        desktop_auth.keychain_accounts[4],
         desktop_auth.service,
     };
     fx.spawn(.{
@@ -953,7 +955,8 @@ fn loadAuthSession(model: *Model, fx: *Effects) void {
 
 fn saveAuthSession(model: *const Model, fx: *Effects) void {
     if (!desktop_auth.available) return;
-    const token = model.auth.refreshToken();
+    var session_buf: [17000]u8 = undefined;
+    const token = desktop_auth.storedTokens(&model.auth, &session_buf) orelse return;
     for (desktop_auth.keychain_accounts, auth_keychain_save_keys, 0..) |account_name, effect_key, index| {
         const chunk = desktop_auth.keychainChunk(token, index) orelse return;
         const argv = [_][]const u8{
@@ -2571,12 +2574,14 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             const argv = [_][]const u8{
                 "/bin/sh",
                 "-c",
-                "for petdex_account in \"$1\" \"$2\" \"$3\" \"$4\"; do /usr/bin/security delete-generic-password -a \"$petdex_account\" -s \"$5\" >/dev/null 2>&1 || true; done",
+                "for petdex_account in \"$1\" \"$2\" \"$3\" \"$4\" \"$5\" \"$6\"; do /usr/bin/security delete-generic-password -a \"$petdex_account\" -s \"$7\" >/dev/null 2>&1 || true; done",
                 "petdex-keychain",
                 desktop_auth.account,
                 desktop_auth.keychain_accounts[0],
                 desktop_auth.keychain_accounts[1],
                 desktop_auth.keychain_accounts[2],
+                desktop_auth.keychain_accounts[3],
+                desktop_auth.keychain_accounts[4],
                 desktop_auth.service,
             };
             fx.spawn(.{
