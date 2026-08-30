@@ -2,6 +2,7 @@ import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
 
 import { IS_MOCK } from "./mock";
+import { createNeonRatelimit } from "./neon-ratelimit";
 
 const redis = Redis.fromEnv();
 
@@ -58,36 +59,34 @@ function createRatelimit(config: RatelimitConfig): Ratelimit {
   return failOpen(new Ratelimit(config));
 }
 
-export const submitRatelimit = createRatelimit({
-  redis,
-  limiter: Ratelimit.slidingWindow(10, "24 h"),
+export const submitRatelimit = createNeonRatelimit({
+  requests: 10,
+  window: "24h",
   prefix: "petdex:submit",
-  analytics: true,
 });
 
 // CLI presign requests are separate from persisted submissions. Keeping a
 // dedicated bucket prevents abandoned uploads from consuming the submission
 // quota while still bounding R2 orphan creation.
-export const cliPresignRatelimit = createRatelimit({
-  redis,
-  limiter: Ratelimit.slidingWindow(20, "1 h"),
+export const cliPresignRatelimit = createNeonRatelimit({
+  requests: 20,
+  window: "1h",
   prefix: "petdex:cli-presign",
-  analytics: true,
 });
 
 // Withdrawals from /my-pets — generous so retries don't lock you out, but
 // stops a malicious automated loop.
-export const withdrawRatelimit = createRatelimit({
-  redis,
-  limiter: Ratelimit.slidingWindow(20, "10 m"),
+export const withdrawRatelimit = createNeonRatelimit({
+  requests: 20,
+  window: "10m",
   prefix: "petdex:withdraw",
 });
 
 // Claim attempts — anti-bruteforce for the cross-account flow even though
 // the verified-email check already blocks the actual data move.
-export const claimRatelimit = createRatelimit({
-  redis,
-  limiter: Ratelimit.slidingWindow(20, "1 h"),
+export const claimRatelimit = createNeonRatelimit({
+  requests: 20,
+  window: "1h",
   prefix: "petdex:claim",
 });
 
@@ -139,26 +138,26 @@ export const metricsReadRatelimit = createRatelimit({
 
 // Likes — generous so legit users browsing the gallery never hit the cap,
 // but stops a 100-account brigade from inflating one pet to the top.
-export const likeRatelimit = createRatelimit({
-  redis,
-  limiter: Ratelimit.slidingWindow(60, "1 h"),
+export const likeRatelimit = createNeonRatelimit({
+  requests: 60,
+  window: "1h",
   prefix: "petdex:like",
 });
 
 // Pet requests + upvotes share a generous bucket — one user can shape the
 // roadmap up to 30 actions / 10 min before we slow them down.
-export const petRequestRatelimit = createRatelimit({
-  redis,
-  limiter: Ratelimit.slidingWindow(30, "10 m"),
+export const petRequestRatelimit = createNeonRatelimit({
+  requests: 30,
+  window: "10m",
   prefix: "petdex:requests",
 });
 
 // R2 presign requests. Without this, a logged-in attacker can request
 // thousands of presigned PUT URLs in a loop and waste R2 storage cost
 // even if they never call /api/submit/register afterwards.
-export const presignRatelimit = createRatelimit({
-  redis,
-  limiter: Ratelimit.slidingWindow(20, "1 h"),
+export const presignRatelimit = createNeonRatelimit({
+  requests: 20,
+  window: "1h",
   prefix: "petdex:presign",
 });
 
@@ -173,9 +172,9 @@ export const cliVerifyRatelimit = createRatelimit({
 // Owner edits to displayName/description/tags. Generous within the day so
 // the owner can iterate copy, but caps a malicious loop that floods the
 // admin queue with edit churn. Keyed by petId.
-export const editRatelimit = createRatelimit({
-  redis,
-  limiter: Ratelimit.slidingWindow(5, "24 h"),
+export const editRatelimit = createNeonRatelimit({
+  requests: 5,
+  window: "24h",
   prefix: "petdex:edit",
 });
 
@@ -183,27 +182,27 @@ export const editRatelimit = createRatelimit({
 // transport budget separate so an upload retry does not consume the actual
 // edit quota enforced by applyPetEdit. Key by user because orphan creation is
 // global across all pets owned by that user.
-export const editPresignRatelimit = createRatelimit({
-  redis,
-  limiter: Ratelimit.slidingWindow(20, "1 h"),
+export const editPresignRatelimit = createNeonRatelimit({
+  requests: 20,
+  window: "1h",
   prefix: "petdex:edit-presign",
 });
 
 // User profile identity edits (display name, handle, bio, locale).
 // Self-expression, no admin review, so we only need to stop spam loops.
 // Keyed by userId.
-export const profileEditRatelimit = createRatelimit({
-  redis,
-  limiter: Ratelimit.slidingWindow(10, "24 h"),
+export const profileEditRatelimit = createNeonRatelimit({
+  requests: 10,
+  window: "24h",
   prefix: "petdex:profile-edit",
 });
 
 // Pin and pinned-order edits can happen repeatedly while curating a
 // profile. Keep the abuse cap, but make it generous enough for drag
 // auto-save and one-click pin/unpin flows.
-export const profilePinRatelimit = createRatelimit({
-  redis,
-  limiter: Ratelimit.slidingWindow(60, "24 h"),
+export const profilePinRatelimit = createNeonRatelimit({
+  requests: 60,
+  window: "24h",
   prefix: "petdex:profile-pin",
 });
 
@@ -214,9 +213,9 @@ export const profilePinRatelimit = createRatelimit({
 // per user covers any reasonable CLI / dashboard / scripting workflow
 // (CLI does 1 per `petdex install`, ~50/h is the realistic ceiling)
 // while shutting down a loop. Keyed by userId.
-export const manifestFullRatelimit = createRatelimit({
-  redis,
-  limiter: Ratelimit.slidingWindow(120, "1 h"),
+export const manifestFullRatelimit = createNeonRatelimit({
+  requests: 120,
+  window: "1h",
   prefix: "petdex:manifest-full",
 });
 

@@ -39,6 +39,7 @@
     "@clerk/localizations": "^4.5.8",
     "@clerk/nextjs": "^7.3.0",
     "@clerk/themes": "^2.4.57",
+    "@crafter/limit": "^0.1.0",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",

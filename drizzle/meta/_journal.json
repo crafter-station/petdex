@@ -155,6 +155,13 @@
       "when": 1778918406000,
       "tag": "0020_pending_asset_gc_claims",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1788064500000,
+      "tag": "0021_crafter_rate_limits",
+      "breakpoints": true
     }
   ]
 }
