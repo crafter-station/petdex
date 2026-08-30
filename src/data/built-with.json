@@ -1,7 +1,7 @@
 {
   "$schema": "./built-with.schema.json",
   "version": 1,
-  "lastUpdated": "2026-08-20",
+  "lastUpdated": "2026-08-30",
   "categories": {
     "desktop-companion": {
       "label": "Desktop companions",
@@ -550,6 +550,24 @@
         "url": "https://github.com/04mg/caw/blob/develop/src/internal/pets/pets.go"
       },
       "screenshot": "/built-with/caw.png"
+    },
+    {
+      "slug": "pets-driven",
+      "name": "Pets Driven",
+      "tagline": "Windows desktop companion that hatches one pet per project directory and reacts to Claude Code and Codex CLI agent events.",
+      "category": "desktop-companion",
+      "repo": "young1the/pets-driven",
+      "homepage": "https://pets-driven.xyz",
+      "stars": 1,
+      "language": "TypeScript",
+      "platforms": ["Windows"],
+      "addedAt": "2026-08-30",
+      "evidence": {
+        "type": "readme",
+        "quote": "Pets installed with this command are stored in `~/.petdex/pets`. Pets Driven automatically discovers this directory and lists its pets during onboarding and pet selection, ready to bind to a working directory.",
+        "url": "https://github.com/young1the/pets-driven#-petdex-integration"
+      },
+      "screenshot": "/built-with/pets-driven.png"
     }
   ]
 }
