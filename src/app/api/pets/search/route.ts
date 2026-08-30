@@ -46,6 +46,9 @@ export async function GET(req: Request): Promise<Response> {
   ) as ColorFamily[];
   const batches = parseBatchList(params.get("batches"));
   const spriteVersions = parseSpriteVersionList(params.get("spriteVersions"));
+  // ?commercial=1 narrows results to pets whose creator declared a license
+  // allowing commercial use. Pets predating that field stay out.
+  const commercialOnly = params.get("commercial") === "1";
 
   const defaultSort: SortKey = q ? "curated" : "alpha";
   const sortRaw = (params.get("sort") ?? defaultSort).toLowerCase();
@@ -77,6 +80,7 @@ export async function GET(req: Request): Promise<Response> {
       colorFamilies: colors,
       batches,
       spriteVersions,
+      commercialOnly,
       sort,
       cursor,
       limit,
