@@ -49,6 +49,7 @@ PATH=$fixture/bin:$PATH \
 grep -qx 'run check -- --vcs-enabled=false' "$fixture/bun.log"
 test "$(grep -c '^3$' "$fixture/zig.log")" -eq 2
 test "$(grep -c 'fmt --check .*sample.*\.zig$' "$fixture/zig.log")" -eq 2
+git -C "$fixture" commit -qm 'fixture baseline'
 
 printf '%s\n' '#!/bin/sh' 'if then' >"$fixture/.githooks/pre-commit"
 git -C "$fixture" add .githooks/pre-commit
@@ -108,5 +109,12 @@ if PETDEX_HOOK_TEST_BUN_LOG=$fixture/bun.log \
     echo "pre-commit self-test: malformed staged Zig fixture unexpectedly passed" >&2
     exit 1
 fi
+
+git -C "$fixture" add sample.zig
+git -C "$fixture" rm -q .githooks/pre-commit
+PETDEX_HOOK_TEST_BUN_LOG=$fixture/bun.log \
+PETDEX_HOOK_TEST_ZIG_LOG=$fixture/zig.log \
+PATH=$fixture/bin:$PATH \
+    sh -c 'cd "$1" && "$2"' sh "$fixture" "$root/.githooks/pre-commit"
 
 echo "pre-commit hook self-test: PASS"
