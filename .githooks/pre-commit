@@ -4,6 +4,35 @@ set -eu
 root=$(git rev-parse --show-toplevel)
 cd "$root"
 
+check_staged_file() {
+    language=$1
+    snapshot=$2
+    file=$3
+    staged_file=$snapshot/$file
+
+    case "$language" in
+        zig)
+            zig fmt --check "$staged_file"
+            ;;
+        shell)
+            /bin/sh -n "$staged_file"
+            ;;
+        python)
+            python3 -c 'import ast, pathlib, sys; path = pathlib.Path(sys.argv[1]); ast.parse(path.read_text(encoding="utf-8"), filename=str(path))' "$staged_file"
+            ;;
+        *)
+            echo "pre-commit: unknown staged-file language: $language" >&2
+            exit 1
+            ;;
+    esac
+}
+
+if [ "${1:-}" = "--check-staged-file" ]; then
+    shift
+    check_staged_file "$@"
+    exit
+fi
+
 if command -v bun >/dev/null 2>&1; then
     bun_bin=$(command -v bun)
 elif [ -x "$HOME/.bun/bin/bun" ]; then
@@ -13,50 +42,46 @@ else
     exit 1
 fi
 
-"$bun_bin" run check
-
-staged_dir=$(mktemp -d "${TMPDIR:-/tmp}/petdex-pre-commit-index.XXXXXX")
+work_dir=$(mktemp -d "${TMPDIR:-/tmp}/petdex-pre-commit-index.XXXXXX")
+staged_dir=$work_dir/index
+staged_paths=$work_dir/paths
 cleanup() {
-    rm -rf "$staged_dir"
+    rm -rf "$work_dir"
 }
 trap cleanup EXIT
 
-zig_files=$(git diff --cached --name-only --diff-filter=ACMR -- '*.zig')
-if [ -n "$zig_files" ]; then
+mkdir -p "$staged_dir"
+git checkout-index --all --prefix="$staged_dir/"
+if [ -d "$root/node_modules" ]; then
+    ln -s "$root/node_modules" "$staged_dir/node_modules"
+fi
+
+(
+    cd "$staged_dir"
+    "$bun_bin" run check -- --vcs-enabled=false
+)
+
+git diff --cached --name-only --diff-filter=ACMR -z -- '*.zig' >"$staged_paths"
+if [ -s "$staged_paths" ]; then
     command -v zig >/dev/null 2>&1 || {
         echo "pre-commit: Zig is required to check native sources" >&2
         exit 1
     }
-    printf '%s\n' "$zig_files" | while IFS= read -r file; do
-        staged_file=$staged_dir/$file
-        mkdir -p "$(dirname "$staged_file")"
-        git show ":$file" >"$staged_file"
-        zig fmt --check "$staged_file"
-    done
+    xargs -0 -n 1 "$0" --check-staged-file zig "$staged_dir" <"$staged_paths"
 fi
 
-shell_files=$(git diff --cached --name-only --diff-filter=ACMR -- '*.sh')
-if [ -n "$shell_files" ]; then
-    printf '%s\n' "$shell_files" | while IFS= read -r file; do
-        staged_file=$staged_dir/$file
-        mkdir -p "$(dirname "$staged_file")"
-        git show ":$file" >"$staged_file"
-        /bin/sh -n "$staged_file"
-    done
+git diff --cached --name-only --diff-filter=ACMR -z -- '*.sh' >"$staged_paths"
+if [ -s "$staged_paths" ]; then
+    xargs -0 -n 1 "$0" --check-staged-file shell "$staged_dir" <"$staged_paths"
 fi
 
-python_files=$(git diff --cached --name-only --diff-filter=ACMR -- '*.py')
-if [ -n "$python_files" ]; then
+git diff --cached --name-only --diff-filter=ACMR -z -- '*.py' >"$staged_paths"
+if [ -s "$staged_paths" ]; then
     command -v python3 >/dev/null 2>&1 || {
         echo "pre-commit: Python 3 is required to check Python sources" >&2
         exit 1
     }
-    printf '%s\n' "$python_files" | while IFS= read -r file; do
-        staged_file=$staged_dir/$file
-        mkdir -p "$(dirname "$staged_file")"
-        git show ":$file" >"$staged_file"
-        python3 -c 'import ast, pathlib, sys; path = pathlib.Path(sys.argv[1]); ast.parse(path.read_text(encoding="utf-8"), filename=str(path))' "$staged_file"
-    done
+    xargs -0 -n 1 "$0" --check-staged-file python "$staged_dir" <"$staged_paths"
 fi
 
 /bin/sh -n "$0"

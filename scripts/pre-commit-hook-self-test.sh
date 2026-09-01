@@ -13,7 +13,11 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 mkdir -p "$fixture/bin"
-printf '%s\n' '#!/bin/sh' 'printf "%s\\n" "$*" >> "$PETDEX_HOOK_TEST_BUN_LOG"' >"$fixture/bin/bun"
+printf '%s\n' \
+    '#!/bin/sh' \
+    'printf "%s\\n" "$*" >> "$PETDEX_HOOK_TEST_BUN_LOG"' \
+    'if [ "$1" = run ] && [ "$2" = check ] && grep -q BROKEN_BIOME sample.ts; then exit 1; fi' \
+    >"$fixture/bin/bun"
 printf '%s\n' \
     '#!/bin/sh' \
     'printf "%s\\n%s\\n" "$#" "$*" >> "$PETDEX_HOOK_TEST_ZIG_LOG"' \
@@ -30,17 +34,32 @@ printf '%s\n' 'const spaced_value: u8 = 2;' >"$fixture/sample space.zig"
 printf '%s\n' '#!/bin/sh' 'exit 0' >"$fixture/sample.sh"
 printf '%s\n' '#!/bin/sh' 'exit 0' >"$fixture/sample space.sh"
 printf '%s\n' 'value = 1' >"$fixture/sample.py"
-git -C "$fixture" add sample.ts sample.zig 'sample space.zig' sample.sh 'sample space.sh' sample.py
+printf '%s\n' 'value = 2' >"$fixture/café.py"
+newline_shell=$(printf 'sample\nnewline.sh')
+printf '%s\n' '#!/bin/sh' 'exit 0' >"$fixture/$newline_shell"
+git -C "$fixture" add -- sample.ts sample.zig 'sample space.zig' sample.sh 'sample space.sh' sample.py 'café.py' "$newline_shell"
 
 PETDEX_HOOK_TEST_BUN_LOG=$fixture/bun.log \
 PETDEX_HOOK_TEST_ZIG_LOG=$fixture/zig.log \
 PATH=$fixture/bin:$PATH \
     sh -c 'cd "$1" && "$2"' sh "$fixture" "$root/.githooks/pre-commit"
 
-grep -qx 'run check' "$fixture/bun.log"
+grep -qx 'run check -- --vcs-enabled=false' "$fixture/bun.log"
 test "$(grep -c '^3$' "$fixture/zig.log")" -eq 2
 test "$(grep -c 'fmt --check .*sample.*\.zig$' "$fixture/zig.log")" -eq 2
 
+printf '%s\n' 'BROKEN_BIOME' >"$fixture/sample.ts"
+git -C "$fixture" add sample.ts
+printf '%s\n' 'const value = 1;' >"$fixture/sample.ts"
+if PETDEX_HOOK_TEST_BUN_LOG=$fixture/bun.log \
+    PETDEX_HOOK_TEST_ZIG_LOG=$fixture/zig.log \
+    PATH=$fixture/bin:$PATH \
+    sh -c 'cd "$1" && "$2"' sh "$fixture" "$root/.githooks/pre-commit" >/dev/null 2>&1; then
+    echo "pre-commit self-test: malformed staged Biome fixture unexpectedly passed" >&2
+    exit 1
+fi
+
+git -C "$fixture" add sample.ts
 printf '%s\n' '#!/bin/sh' 'if then' >"$fixture/sample.sh"
 git -C "$fixture" add sample.sh
 printf '%s\n' '#!/bin/sh' 'exit 0' >"$fixture/sample.sh"
