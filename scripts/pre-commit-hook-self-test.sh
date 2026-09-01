@@ -35,11 +35,12 @@ printf '%s\n' 'const value: u8 = 1;' >"$fixture/sample.zig"
 printf '%s\n' 'const spaced_value: u8 = 2;' >"$fixture/sample space.zig"
 printf '%s\n' '#!/bin/sh' 'exit 0' >"$fixture/sample.sh"
 printf '%s\n' '#!/bin/sh' 'exit 0' >"$fixture/sample space.sh"
+printf '%s\n' '#!/usr/bin/env bash' 'values=(one two)' '[[ ${#values[@]} -eq 2 ]]' >"$fixture/sample-bash.sh"
 printf '%s\n' 'value = 1' >"$fixture/sample.py"
 printf '%s\n' 'value = 2' >"$fixture/café.py"
 newline_shell=$(printf 'sample\nnewline.sh')
 printf '%s\n' '#!/bin/sh' 'exit 0' >"$fixture/$newline_shell"
-git -C "$fixture" add -- .githooks/pre-commit sample.ts sample.zig 'sample space.zig' sample.sh 'sample space.sh' sample.py 'café.py' "$newline_shell"
+git -C "$fixture" add -- .githooks/pre-commit sample.ts sample.zig 'sample space.zig' sample.sh 'sample space.sh' sample-bash.sh sample.py 'café.py' "$newline_shell"
 
 PETDEX_HOOK_TEST_BUN_LOG=$fixture/bun.log \
 PETDEX_HOOK_TEST_ZIG_LOG=$fixture/zig.log \

@@ -15,7 +15,19 @@ check_staged_file() {
             zig fmt --check "$staged_file"
             ;;
         shell)
-            /bin/sh -n "$staged_file"
+            shebang=$(sed -n '1p' "$staged_file")
+            case "$shebang" in
+                '#!'*bash*)
+                    command -v bash >/dev/null 2>&1 || {
+                        echo "pre-commit: Bash is required to check $file" >&2
+                        exit 1
+                    }
+                    bash -n "$staged_file"
+                    ;;
+                *)
+                    /bin/sh -n "$staged_file"
+                    ;;
+            esac
             ;;
         python)
             python3 -c 'import ast, pathlib, sys; path = pathlib.Path(sys.argv[1]); ast.parse(path.read_text(encoding="utf-8"), filename=str(path))' "$staged_file"
