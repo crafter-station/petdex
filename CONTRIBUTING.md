@@ -102,6 +102,21 @@ stack. Copy `.env.example` to `.env.local`, fill in the values, run
   explicit: `DATABASE_URL=... bun run test:db`.
 - **Commit style**: conventional commits (`feat:`, `fix:`, `docs:`, etc.).
 
+### Optional local pre-commit checks
+
+Install the tracked hook for this checkout explicitly:
+
+```bash
+bun run hooks:install
+```
+
+The installer changes only this worktree's `core.hooksPath`; sibling worktrees
+and dependency installation are unaffected. The hook runs Biome across the
+repository, `zig fmt --check` on staged Zig sources, staged shell and Python
+syntax checks, and staged whitespace validation. Bash shebangs are respected
+for staged shell files. Run its isolated regression test with `bun run
+hooks:test`.
+
 ## Where to look
 
 - UI: `src/components/`, `src/app/[locale]/`

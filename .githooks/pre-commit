@@ -1,0 +1,103 @@
+#!/bin/sh
+set -eu
+
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+
+check_staged_file() {
+    language=$1
+    snapshot=$2
+    file=$3
+    staged_file=$snapshot/$file
+
+    case "$language" in
+        zig)
+            zig fmt --check "$staged_file"
+            ;;
+        shell)
+            shebang=$(sed -n '1p' "$staged_file")
+            case "$shebang" in
+                '#!'*bash*)
+                    command -v bash >/dev/null 2>&1 || {
+                        echo "pre-commit: Bash is required to check $file" >&2
+                        exit 1
+                    }
+                    bash -n "$staged_file"
+                    ;;
+                *)
+                    /bin/sh -n "$staged_file"
+                    ;;
+            esac
+            ;;
+        python)
+            python3 -c 'import ast, pathlib, sys; path = pathlib.Path(sys.argv[1]); ast.parse(path.read_text(encoding="utf-8"), filename=str(path))' "$staged_file"
+            ;;
+        *)
+            echo "pre-commit: unknown staged-file language: $language" >&2
+            exit 1
+            ;;
+    esac
+}
+
+if [ "${1:-}" = "--check-staged-file" ]; then
+    shift
+    check_staged_file "$@"
+    exit
+fi
+
+if command -v bun >/dev/null 2>&1; then
+    bun_bin=$(command -v bun)
+elif [ -x "$HOME/.bun/bin/bun" ]; then
+    bun_bin=$HOME/.bun/bin/bun
+else
+    echo "pre-commit: Bun is required (https://bun.sh/docs/installation)" >&2
+    exit 1
+fi
+
+work_dir=$(mktemp -d "${TMPDIR:-/tmp}/petdex-pre-commit-index.XXXXXX")
+staged_dir=$work_dir/index
+staged_paths=$work_dir/paths
+cleanup() {
+    rm -rf "$work_dir"
+}
+trap cleanup EXIT
+
+mkdir -p "$staged_dir"
+git checkout-index --all --prefix="$staged_dir/"
+if [ -d "$root/node_modules" ]; then
+    ln -s "$root/node_modules" "$staged_dir/node_modules"
+fi
+
+(
+    cd "$staged_dir"
+    "$bun_bin" run check -- --vcs-enabled=false
+)
+
+git diff --cached --name-only --diff-filter=ACMR -z -- '*.zig' >"$staged_paths"
+if [ -s "$staged_paths" ]; then
+    command -v zig >/dev/null 2>&1 || {
+        echo "pre-commit: Zig is required to check native sources" >&2
+        exit 1
+    }
+    xargs -0 -n 1 "$0" --check-staged-file zig "$staged_dir" <"$staged_paths"
+fi
+
+git diff --cached --name-only --diff-filter=ACMR -z -- '*.sh' >"$staged_paths"
+if [ -s "$staged_paths" ]; then
+    xargs -0 -n 1 "$0" --check-staged-file shell "$staged_dir" <"$staged_paths"
+fi
+
+git diff --cached --name-only --diff-filter=ACMR -z -- '*.py' >"$staged_paths"
+if [ -s "$staged_paths" ]; then
+    command -v python3 >/dev/null 2>&1 || {
+        echo "pre-commit: Python 3 is required to check Python sources" >&2
+        exit 1
+    }
+    xargs -0 -n 1 "$0" --check-staged-file python "$staged_dir" <"$staged_paths"
+fi
+
+if [ -f "$staged_dir/.githooks/pre-commit" ]; then
+    /bin/sh -n "$staged_dir/.githooks/pre-commit"
+fi
+
+git diff --check --cached
