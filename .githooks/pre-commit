@@ -15,6 +15,12 @@ fi
 
 "$bun_bin" run check
 
+staged_dir=$(mktemp -d "${TMPDIR:-/tmp}/petdex-pre-commit-index.XXXXXX")
+cleanup() {
+    rm -rf "$staged_dir"
+}
+trap cleanup EXIT
+
 zig_files=$(git diff --cached --name-only --diff-filter=ACMR -- '*.zig')
 if [ -n "$zig_files" ]; then
     command -v zig >/dev/null 2>&1 || {
@@ -22,14 +28,20 @@ if [ -n "$zig_files" ]; then
         exit 1
     }
     printf '%s\n' "$zig_files" | while IFS= read -r file; do
-        zig fmt --check "$file"
+        staged_file=$staged_dir/$file
+        mkdir -p "$(dirname "$staged_file")"
+        git show ":$file" >"$staged_file"
+        zig fmt --check "$staged_file"
     done
 fi
 
 shell_files=$(git diff --cached --name-only --diff-filter=ACMR -- '*.sh')
 if [ -n "$shell_files" ]; then
     printf '%s\n' "$shell_files" | while IFS= read -r file; do
-        /bin/sh -n "$file"
+        staged_file=$staged_dir/$file
+        mkdir -p "$(dirname "$staged_file")"
+        git show ":$file" >"$staged_file"
+        /bin/sh -n "$staged_file"
     done
 fi
 
@@ -40,7 +52,10 @@ if [ -n "$python_files" ]; then
         exit 1
     }
     printf '%s\n' "$python_files" | while IFS= read -r file; do
-        python3 -c 'import ast, pathlib, sys; path = pathlib.Path(sys.argv[1]); ast.parse(path.read_text(encoding="utf-8"), filename=str(path))' "$file"
+        staged_file=$staged_dir/$file
+        mkdir -p "$(dirname "$staged_file")"
+        git show ":$file" >"$staged_file"
+        python3 -c 'import ast, pathlib, sys; path = pathlib.Path(sys.argv[1]); ast.parse(path.read_text(encoding="utf-8"), filename=str(path))' "$staged_file"
     done
 fi
 

@@ -14,7 +14,11 @@ trap cleanup EXIT INT TERM
 
 mkdir -p "$fixture/bin"
 printf '%s\n' '#!/bin/sh' 'printf "%s\\n" "$*" >> "$PETDEX_HOOK_TEST_BUN_LOG"' >"$fixture/bin/bun"
-printf '%s\n' '#!/bin/sh' 'printf "%s\\n%s\\n" "$#" "$*" >> "$PETDEX_HOOK_TEST_ZIG_LOG"' >"$fixture/bin/zig"
+printf '%s\n' \
+    '#!/bin/sh' \
+    'printf "%s\\n%s\\n" "$#" "$*" >> "$PETDEX_HOOK_TEST_ZIG_LOG"' \
+    'if [ "$1" = fmt ] && [ "$2" = --check ] && grep -q BROKEN "$3"; then exit 1; fi' \
+    >"$fixture/bin/zig"
 chmod +x "$fixture/bin/bun" "$fixture/bin/zig"
 
 git -C "$fixture" init -q
@@ -35,27 +39,40 @@ PATH=$fixture/bin:$PATH \
 
 grep -qx 'run check' "$fixture/bun.log"
 test "$(grep -c '^3$' "$fixture/zig.log")" -eq 2
-grep -Fqx 'fmt --check sample.zig' "$fixture/zig.log"
-grep -Fqx 'fmt --check sample space.zig' "$fixture/zig.log"
+test "$(grep -c 'fmt --check .*sample.*\.zig$' "$fixture/zig.log")" -eq 2
 
 printf '%s\n' '#!/bin/sh' 'if then' >"$fixture/sample.sh"
 git -C "$fixture" add sample.sh
+printf '%s\n' '#!/bin/sh' 'exit 0' >"$fixture/sample.sh"
 if PETDEX_HOOK_TEST_BUN_LOG=$fixture/bun.log \
     PETDEX_HOOK_TEST_ZIG_LOG=$fixture/zig.log \
     PATH=$fixture/bin:$PATH \
     sh -c 'cd "$1" && "$2"' sh "$fixture" "$root/.githooks/pre-commit" >/dev/null 2>&1; then
-    echo "pre-commit self-test: malformed shell fixture unexpectedly passed" >&2
+    echo "pre-commit self-test: malformed staged shell fixture unexpectedly passed" >&2
     exit 1
 fi
 
-printf '%s\n' '#!/bin/sh' 'exit 0' >"$fixture/sample.sh"
+git -C "$fixture" add sample.sh
 printf '%s\n' 'if True print("broken")' >"$fixture/sample.py"
-git -C "$fixture" add sample.sh sample.py
+git -C "$fixture" add sample.py
+printf '%s\n' 'value = 1' >"$fixture/sample.py"
 if PETDEX_HOOK_TEST_BUN_LOG=$fixture/bun.log \
     PETDEX_HOOK_TEST_ZIG_LOG=$fixture/zig.log \
     PATH=$fixture/bin:$PATH \
     sh -c 'cd "$1" && "$2"' sh "$fixture" "$root/.githooks/pre-commit" >/dev/null 2>&1; then
-    echo "pre-commit self-test: malformed Python fixture unexpectedly passed" >&2
+    echo "pre-commit self-test: malformed staged Python fixture unexpectedly passed" >&2
+    exit 1
+fi
+
+git -C "$fixture" add sample.py
+printf '%s\n' 'BROKEN' >"$fixture/sample.zig"
+git -C "$fixture" add sample.zig
+printf '%s\n' 'const value: u8 = 1;' >"$fixture/sample.zig"
+if PETDEX_HOOK_TEST_BUN_LOG=$fixture/bun.log \
+    PETDEX_HOOK_TEST_ZIG_LOG=$fixture/zig.log \
+    PATH=$fixture/bin:$PATH \
+    sh -c 'cd "$1" && "$2"' sh "$fixture" "$root/.githooks/pre-commit" >/dev/null 2>&1; then
+    echo "pre-commit self-test: malformed staged Zig fixture unexpectedly passed" >&2
     exit 1
 fi
 
