@@ -8,6 +8,9 @@ cleanup() {
     status=$?
     trap - EXIT INT TERM
     rm -rf "$fixture"
+    if [ -n "${installer_fixture:-}" ]; then
+        rm -rf "$installer_fixture"
+    fi
     exit "$status"
 }
 trap cleanup EXIT INT TERM
@@ -117,5 +120,21 @@ PETDEX_HOOK_TEST_BUN_LOG=$fixture/bun.log \
 PETDEX_HOOK_TEST_ZIG_LOG=$fixture/zig.log \
 PATH=$fixture/bin:$PATH \
     sh -c 'cd "$1" && "$2"' sh "$fixture" "$root/.githooks/pre-commit"
+
+installer_fixture=$(mktemp -d "${TMPDIR:-/tmp}/petdex-hooks-install.XXXXXX")
+mkdir -p "$installer_fixture/main/scripts"
+git -C "$installer_fixture/main" init -q
+git -C "$installer_fixture/main" config user.name 'Petdex Hook Test'
+git -C "$installer_fixture/main" config user.email 'hook-test@petdex.invalid'
+git -C "$installer_fixture/main" commit --allow-empty -qm 'fixture baseline'
+git -C "$installer_fixture/main" worktree add -qb sibling "$installer_fixture/sibling"
+git -C "$installer_fixture/main" config --local core.hooksPath .githooks
+cp "$root/scripts/install-git-hooks.sh" "$installer_fixture/main/scripts/install-git-hooks.sh"
+sh "$installer_fixture/main/scripts/install-git-hooks.sh" >/dev/null
+test "$(git -C "$installer_fixture/main" config --worktree --get core.hooksPath)" = .githooks
+if git -C "$installer_fixture/sibling" config --get core.hooksPath >/dev/null; then
+    echo "pre-commit self-test: hook installer leaked into a sibling worktree" >&2
+    exit 1
+fi
 
 echo "pre-commit hook self-test: PASS"

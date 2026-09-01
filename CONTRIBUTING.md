@@ -110,8 +110,8 @@ Install the tracked hook for this checkout explicitly:
 bun run hooks:install
 ```
 
-The installer changes only this repository's `core.hooksPath`; dependency
-installation never changes Git configuration. The hook runs Biome across the
+The installer changes only this worktree's `core.hooksPath`; sibling worktrees
+and dependency installation are unaffected. The hook runs Biome across the
 repository, `zig fmt --check` on staged Zig sources, staged shell and Python
 syntax checks, and staged whitespace validation. Bash shebangs are respected
 for staged shell files. Run its isolated regression test with `bun run
