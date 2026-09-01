@@ -222,6 +222,11 @@ jobs:
         run: |
           "$NATIVE_CLI" test .
 
+      - name: Test journal rotation across processes
+        working-directory: packages/petdex-desktop-native
+        shell: bash
+        run: bun tests/journal_process_check.mjs
+
       - name: Test remote helper runtimes
         if: matrix.platform != 'windows'
         working-directory: packages/petdex-desktop-native

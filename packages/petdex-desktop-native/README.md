@@ -26,6 +26,22 @@ native automate screenshot pet-canvas
 
 Requires the `@native-sdk/cli` global (`bun add -g @native-sdk/cli`).
 
+## Durable session recovery
+
+Installed hooks remain the low-latency path for every supported agent. Local,
+read-only durable recovery is enabled only for formats backed by
+provider-owned artifacts and adapter-specific fixture/test evidence: Codex
+rollouts, Claude transcripts, Gemini chats, OMP session logs, and Hermes
+`state.db`. OpenCode, Qoder, Kimi Code, and CodeBuddy remain hook-supported,
+but their stores have no stable evidenced contract here; durable recovery
+fails closed instead of guessing a session from unrelated data.
+
+Recovery scans are bounded and remain the source of truth. Native directory
+notifications are coalesced hints, with a periodic polling sweep covering
+dropped events and backend failure. Only relevant durable roots are watched,
+including configured `CLAUDE_CONFIG_DIR`, `PI_CODING_AGENT_DIR`, and
+`HERMES_HOME` locations.
+
 For the pinned desktop build, set `NATIVE_CLI` and `NATIVE_SDK_PATH` to the
 CLI and SDK checkout used by the matching release workflow. The build scripts
 apply the Petdex-owned macOS Mach-O headerpad patch before compiling; they

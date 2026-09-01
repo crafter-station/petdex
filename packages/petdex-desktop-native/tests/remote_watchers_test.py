@@ -68,6 +68,58 @@ class CodexWatcherTests(unittest.TestCase):
             self.assertEqual(size, offset)
             self.assertEqual("Done now", event["text"])
 
+    def test_bare_completion_replaces_transient_copy_and_keeps_prose(self) -> None:
+        watcher = load("petdex_codex_completion_test", "petdex-codex-watch.py")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            transient = root / "rollout-00000000-0000-0000-0000-000000000010.jsonl"
+            transient_rows = [
+                {"type": "event_msg", "payload": {"type": "task_started"}},
+                {
+                    "type": "response_item",
+                    "payload": {
+                        "type": "function_call",
+                        "name": "request_user_input",
+                        "call_id": "q1",
+                        "arguments": json.dumps({"questions": [{"question": "Continue?"}]}),
+                    },
+                },
+                {
+                    "type": "response_item",
+                    "payload": {"type": "function_call_output", "call_id": "q1"},
+                },
+                {"type": "event_msg", "payload": {"type": "task_complete"}},
+            ]
+            transient.write_text(
+                "".join(json.dumps(row) + "\n" for row in transient_rows),
+                encoding="utf-8",
+            )
+            event = watcher.parse_rollout(transient, "Transient")
+            self.assertEqual("completed", event["status"])
+            self.assertFalse(event["busy"])
+            self.assertEqual("Done.", event["text"])
+
+            prose = root / "rollout-00000000-0000-0000-0000-000000000011.jsonl"
+            prose_rows = [
+                {"type": "event_msg", "payload": {"type": "task_started"}},
+                {
+                    "type": "event_msg",
+                    "payload": {"type": "agent_message", "message": "Useful final answer."},
+                },
+                {
+                    "type": "event_msg",
+                    "payload": {"type": "task_complete", "last_agent_message": "   "},
+                },
+            ]
+            prose.write_text(
+                "".join(json.dumps(row) + "\n" for row in prose_rows),
+                encoding="utf-8",
+            )
+            retained = watcher.parse_rollout(prose, "Prose")
+            self.assertEqual("completed", retained["status"])
+            self.assertFalse(retained["busy"])
+            self.assertEqual("Useful final answer.", retained["text"])
+
     def test_subagent_rollouts_do_not_hide_an_older_primary(self) -> None:
         watcher = load("petdex_codex_subagent_test", "petdex-codex-watch.py")
         with tempfile.TemporaryDirectory() as directory:
@@ -221,6 +273,26 @@ class WatcherOwnershipTests(unittest.TestCase):
                     release.start()
                     self.assertTrue(watcher.acquire_lock(second))
                     release.join()
+
+
+class RemoteIdentityTests(unittest.TestCase):
+    def test_watchers_publish_the_configured_remote_principal(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            remote_host = Path(directory) / "remote-host"
+            remote_host.write_text("configured-alias\n", encoding="utf-8")
+            watchers = []
+            for name, filename in (
+                ("codex_remote_identity_test", "petdex-codex-watch.py"),
+                ("hermes_remote_identity_test", "petdex-hermes-watch.py"),
+            ):
+                watcher = load(name, filename)
+                watcher.REMOTE_HOST = remote_host
+                watchers.append(watcher)
+                self.assertEqual("configured-alias", watcher.remote_hostname())
+
+            remote_host.unlink()
+            for watcher in watchers:
+                self.assertEqual("", watcher.remote_hostname())
 
 
 if __name__ == "__main__":

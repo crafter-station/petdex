@@ -12,7 +12,6 @@ import fcntl
 import hashlib
 import json
 import os
-import socket
 import sys
 import time
 import urllib.request
@@ -24,6 +23,7 @@ HOME = Path.home()
 CODEX = HOME / ".codex"
 RUNTIME = HOME / ".petdex" / "runtime"
 TOKEN = RUNTIME / "update-token"
+REMOTE_HOST = RUNTIME / "remote-host"
 LEASE = RUNTIME / "tunnel-lease"
 LOCK = RUNTIME / "codex-watch.lock"
 PID = RUNTIME / "codex-watch.pid"
@@ -81,6 +81,13 @@ def session_meta_prefix(path: Path) -> bytes:
 
 def compact(value: Any, limit: int) -> str:
     return " ".join(str(value or "").split())[:limit]
+
+
+def remote_hostname() -> str:
+    try:
+        return compact(REMOTE_HOST.read_text(encoding="utf-8"), 64)
+    except OSError:
+        return ""
 
 
 def lease_alive() -> bool:
@@ -283,6 +290,13 @@ def apply_rollout_bytes(state: dict[str, Any], raw: bytes) -> None:
             if final:
                 state["text"] = final
                 state["message_kind"] = "assistant"
+            elif state["message_kind"] != "assistant" or not str(state["text"]).strip():
+                # Codex can finish without repeating the final response.
+                # Preserve actual assistant prose, but clear a transient
+                # prompt, reasoning, or “Thinking…” cue from the terminal
+                # card.
+                state["text"] = "Done."
+                state["message_kind"] = "status"
             continue
         if event_type in {"turn_aborted", "task_failed"}:
             state["lifecycle"] = True
@@ -374,7 +388,7 @@ def event_from_state(path: Path, title: str, state: dict[str, Any]) -> dict[str,
         "source_session_id": path.stem[-36:],
         "session_id": path.stem[-36:],
         "session_kind": "primary",
-        "hostname": compact(socket.gethostname(), 64),
+        "hostname": remote_hostname(),
         "remote": True,
         "source_cwd": state["cwd"],
         "turn_id": state["turn_id"],

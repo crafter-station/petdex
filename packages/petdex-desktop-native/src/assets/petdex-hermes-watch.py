@@ -17,7 +17,6 @@ import hashlib
 import json
 import os
 import re
-import socket
 import sqlite3
 import sys
 import time
@@ -32,6 +31,7 @@ HERMES_ROOT = Path(sys.argv[1]).expanduser() if len(sys.argv) > 1 else Path(
 ).expanduser()
 RUNTIME = HOME / ".petdex" / "runtime"
 TOKEN = RUNTIME / "update-token"
+REMOTE_HOST = RUNTIME / "remote-host"
 LEASE = RUNTIME / "tunnel-lease"
 LOCK = RUNTIME / "hermes-watch.lock"
 PID = RUNTIME / "hermes-watch.pid"
@@ -60,6 +60,13 @@ SUBAGENT_SOURCES = {
 
 def compact(value: Any, limit: int) -> str:
     return " ".join(str(value or "").split())[:limit]
+
+
+def remote_hostname() -> str:
+    try:
+        return compact(REMOTE_HOST.read_text(encoding="utf-8"), 64)
+    except OSError:
+        return ""
 
 
 def canonical_key(value: Any) -> str:
@@ -176,7 +183,7 @@ def snapshot() -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]] | None:
         return None
 
     now = time.time()
-    hostname = compact(socket.gethostname(), 64)
+    hostname = remote_hostname()
     events: list[dict[str, Any]] = []
     terminals: dict[str, dict[str, Any]] = {}
     for row in rows:
