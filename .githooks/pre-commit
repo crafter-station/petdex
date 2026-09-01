@@ -84,6 +84,6 @@ if [ -s "$staged_paths" ]; then
     xargs -0 -n 1 "$0" --check-staged-file python "$staged_dir" <"$staged_paths"
 fi
 
-/bin/sh -n "$0"
+/bin/sh -n "$staged_dir/.githooks/pre-commit"
 
 git diff --check --cached
