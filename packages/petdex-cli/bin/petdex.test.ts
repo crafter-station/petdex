@@ -1,8 +1,12 @@
 import { describe, expect, test } from "bun:test";
 
-function runCli(command: string): { exitCode: number; stderr: string } {
+function runCli(...args: string[]): {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+} {
   const result = Bun.spawnSync({
-    cmd: [process.execPath, import.meta.dir + "/petdex.ts", command],
+    cmd: [process.execPath, import.meta.dir + "/petdex.ts", ...args],
     env: { ...process.env, NO_COLOR: "1" },
     stderr: "pipe",
     stdout: "pipe",
@@ -10,6 +14,7 @@ function runCli(command: string): { exitCode: number; stderr: string } {
 
   return {
     exitCode: result.exitCode,
+    stdout: result.stdout.toString(),
     stderr: result.stderr.toString(),
   };
 }
@@ -40,5 +45,21 @@ describe("retired command aliases", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stderr).not.toContain("Unknown command");
     expect(result.stderr).toContain("desktop app");
+  });
+});
+
+describe("submit --license", () => {
+  // main() used to run before LICENSE_CHOICES was initialized, so every
+  // `petdex submit` crashed on startup, before any auth or network call.
+  test("rejects an unknown license id and lists the valid ones", () => {
+    const result = runCli("submit", "./some-pet", "--license", "bogus");
+    const output = result.stdout + result.stderr;
+
+    expect(result.exitCode).toBe(1);
+    expect(output).not.toContain("Cannot read properties of undefined");
+    expect(output).not.toContain("before initialization");
+    expect(output).toContain("Unknown --license bogus");
+    expect(output).toContain("cc0");
+    expect(output).toContain("all-rights-reserved");
   });
 });

@@ -34,8 +34,7 @@ const DOWNLOAD_URL = `${PETDEX_URL.replace(/\/+$/, "")}/download`;
 
 // Every command the desktop app absorbed. Value is the sentence that
 // replaces it, so the user learns where the capability went instead of
-// hunting for a flag that no longer exists. Declared here, above the
-// top-level main() call, so the lookup is not in the temporal dead zone.
+// hunting for a flag that no longer exists.
 const DESKTOP_START_REDIRECT =
   "The desktop app runs on its own. Launch Petdex from Applications.";
 const DESKTOP_STOP_REDIRECT = "Quit Petdex from its menu bar icon to stop it.";
@@ -83,11 +82,7 @@ async function getAuth({
 const VERSION = pkg.version;
 
 // ─── entrypoint ────────────────────────────────────────────────────────────
-main().catch((err) => {
-  p.cancel(`petdex: ${(err as Error).message}`);
-  process.exit(1);
-});
-
+// Called at the bottom of the file.
 async function main() {
   const args = process.argv.slice(2);
   const cmd = args[0];
@@ -1327,3 +1322,12 @@ function cmdTelemetry(args: string[]): void {
     process.exit(1);
   }
 }
+
+// ─── run ───────────────────────────────────────────────────────────────────
+// Last statement on purpose. main() dispatches synchronously up to a command's
+// first await, so every const it reads has to be initialized by now. Calling
+// it earlier left LICENSE_CHOICES in the temporal dead zone and broke `submit`.
+main().catch((err) => {
+  p.cancel(`petdex: ${(err as Error).message}`);
+  process.exit(1);
+});
