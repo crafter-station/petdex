@@ -19,6 +19,7 @@ extern "c" fn system(command: [*:0]const u8) c_int;
 const native_sdk = @import("native_sdk");
 const hook_server = @import("hook_server.zig");
 const hook_runner = @import("hook_runner.zig");
+const session_reconcile = @import("session_reconcile.zig");
 const agent_hooks = @import("agent_hooks.zig");
 const dsh_integration = @import("dsh_integration.zig");
 const plat = @import("plat.zig");
@@ -1947,6 +1948,7 @@ fn registerFlockFrames(fx: *Effects) void {
 
 const poll_timer_key: u64 = 2;
 const poll_interval_ms: u32 = 100;
+const stale_running_grace_ms: i64 = 30_000;
 const min_dwell_ms: u32 = 250;
 
 /// Transient states whose duration is intrinsic to the animation;
@@ -2139,10 +2141,19 @@ pub fn boot(model: *Model, fx: *Effects) void {
         if (migration.failed > 0) {
             std.debug.print("petdex: {d} legacy hook configuration(s) could not be migrated; repair the config and update the affected agent in Settings\n", .{migration.failed});
         }
-        hook_server.start(boot_allocator, home) catch |err| {
+        var owns_hook_listener = false;
+        if (hook_server.start(boot_allocator, home)) |result| {
+            owns_hook_listener = result.ownsListener();
+        } else |err| {
             std.debug.print("petdex: hook server failed to start ({s})\n", .{@errorName(err)});
+        }
+        session_reconcile.start(boot_allocator, home) catch |err| {
+            std.debug.print("petdex: local session recovery failed to start ({s})\n", .{@errorName(err)});
         };
-        startRemotes(model, fx);
+        // Remote credentials live in the hook listener's process-local
+        // registry. A secondary desktop forwarding to the first process must
+        // not supervise tunnels with credentials that listener cannot know.
+        if (owns_hook_listener) startRemotes(model, fx);
     }
     loadAuthSession(model, fx);
     fx.startTimer(.{
@@ -3162,6 +3173,7 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             if (!model.sheet_loaded) return;
             if (model.settings_open and thumbs_built < catalog_mod.catalog_len) buildNextThumb(fx);
             const now = fx.wallMs();
+            _ = hook_server.mailbox.suppressStaleRunning(now, stale_running_grace_ms);
             var drained: [hook_server.max_bubbles]hook_server.Bubble = undefined;
             if (hook_server.mailbox.takeBubbles(&drained)) |raw_count| {
                 if (model.settings_open) {
@@ -4063,7 +4075,14 @@ fn expireBubbles(model: *Model, now_ms: i64) bool {
         if (bubbleLifetimeExpired(model.bubble_expires_at_ms[i], now_ms, model.state)) {
             // Tell the server too: a slot the app stopped drawing must
             // not keep a session alive against the eviction policy.
-            hook_server.mailbox.dropBubble(model.bubbles[i].sessionSlice());
+            const expired = &model.bubbles[i];
+            hook_server.mailbox.dropBubbleIdentity(
+                expired.sessionSlice(),
+                expired.agent[0..expired.agent_len],
+                expired.hostnameSlice(),
+                expired.remote,
+                true,
+            );
             dropped = true;
             continue;
         }
@@ -4089,7 +4108,7 @@ fn syncBubbleDeadlines(model: *Model, previous: []const hook_server.Bubble, prev
         const fresh = bubbleExpiryMs(now_ms, model.bubble_lifetime_secs, model.bubbles[i].busy);
         model.bubble_expires_at_ms[i] = fresh;
         for (previous, previous_deadlines) |old, deadline| {
-            if (!std.mem.eql(u8, old.sessionSlice(), model.bubbles[i].sessionSlice())) continue;
+            if (!old.sameIdentity(&model.bubbles[i])) continue;
             if (old.counter == model.bubbles[i].counter) model.bubble_expires_at_ms[i] = deadline;
             break;
         }
@@ -5036,6 +5055,16 @@ pub fn main(init: std.process.Init) !void {
     agent_hooks.env_qoder_cn_cli_home = init.environ_map.get("QODERCN_CLI_HOME");
     agent_hooks.env_hermes_home = init.environ_map.get("HERMES_HOME");
     dsh_integration.env_dsh_home = init.environ_map.get("DSH_HOME");
+    session_reconcile.env_claude_config_dir = init.environ_map.get("CLAUDE_CONFIG_DIR");
+    session_reconcile.env_kimi_code_home = init.environ_map.get("KIMI_CODE_HOME");
+    session_reconcile.env_kimi_share_dir = init.environ_map.get("KIMI_SHARE_DIR");
+    session_reconcile.env_pi_coding_agent_dir = init.environ_map.get("PI_CODING_AGENT_DIR");
+    session_reconcile.env_xdg_data_home = init.environ_map.get("XDG_DATA_HOME");
+    session_reconcile.env_qoder_config_dir = init.environ_map.get("QODER_CONFIG_DIR");
+    session_reconcile.env_qoder_cn_config_dir = init.environ_map.get("QODERCN_CONFIG_DIR");
+    session_reconcile.env_qoder_cli_home = init.environ_map.get("QODER_CLI_HOME");
+    session_reconcile.env_qoder_cn_cli_home = init.environ_map.get("QODERCN_CLI_HOME");
+    session_reconcile.env_hermes_home = init.environ_map.get("HERMES_HOME");
     // Hook hot path: `<binary> bubble <phase> [agent]` runs the
     // in-binary runner and exits before any UI machinery spins up.
     // initAllocator, not init: on Windows the command line arrives as
@@ -5467,6 +5496,7 @@ test {
     _ = agent_hooks;
     _ = hook_runner;
     _ = hook_server;
+    _ = session_reconcile;
     _ = installer;
     _ = plat;
     _ = remote_agents;
@@ -6634,6 +6664,31 @@ test "expiry drops only the bubbles past their deadline" {
     try std.testing.expect(!expireBubbles(&model, 6000));
 }
 
+test "expiry drops only the matching agent and remote host" {
+    hook_server.mailbox.clearBubbles();
+    defer hook_server.mailbox.clearBubbles();
+    _ = hook_server.mailbox.setBubbleWithContext("shared", "Host A", "codex", "", .none, "", "", "host-a", "", true, false);
+    _ = hook_server.mailbox.setBubbleWithContext("shared", "Host B", "codex", "", .none, "", "", "host-b", "", true, false);
+    // Updating A leaves it in the first mailbox slot but makes B the oldest
+    // rendered card after the consumer's counter sort.
+    _ = hook_server.mailbox.setBubbleWithContext("shared", "Host A newest", "codex", "", .none, "", "", "host-a", "", true, false);
+
+    var drained: [hook_server.max_bubbles]hook_server.Bubble = @splat(.{});
+    const count = hook_server.mailbox.takeBubbles(&drained).?;
+    try std.testing.expectEqual(@as(usize, 2), count);
+    sortBubblesByCounter(drained[0..count]);
+    try std.testing.expectEqualStrings("host-b", drained[0].hostnameSlice());
+
+    var model: Model = .{};
+    @memcpy(model.bubbles[0..count], drained[0..count]);
+    model.bubbles_len = count;
+    model.bubble_expires_at_ms[0] = 5_000;
+    model.bubble_expires_at_ms[1] = 9_000;
+    try std.testing.expect(expireBubbles(&model, 6_000));
+    try std.testing.expectEqual(@as(usize, 1), hook_server.mailbox.bubbles_len);
+    try std.testing.expectEqualStrings("host-a", hook_server.mailbox.bubbles[0].hostnameSlice());
+}
+
 test "an unchanged bubble keeps its deadline when another one updates" {
     var model: Model = .{};
     model.bubble_lifetime_secs = 5;
@@ -6647,4 +6702,36 @@ test "an unchanged bubble keeps its deadline when another one updates" {
     syncBubbleDeadlines(&model, previous[0..2], previous_deadlines[0..2], 10_000);
     try std.testing.expectEqual(@as(i64, 4000), model.bubble_expires_at_ms[0]);
     try std.testing.expectEqual(@as(i64, 15_000), model.bubble_expires_at_ms[1]);
+}
+
+test "deadline reconciliation matches the full bubble identity" {
+    var model: Model = .{};
+    model.bubble_lifetime_secs = 5;
+    testPushBubble(&model, "shared", "Host A", false, 4_000);
+    testPushBubble(&model, "shared", "Host B", false, 5_000);
+    testPushBubble(&model, "shared", "Hermes A", false, 6_000);
+    const identities = [_]struct { agent: []const u8, hostname: []const u8 }{
+        .{ .agent = "codex", .hostname = "host-a" },
+        .{ .agent = "codex", .hostname = "host-b" },
+        .{ .agent = "hermes", .hostname = "host-a" },
+    };
+    for (identities, 0..) |identity, i| {
+        model.bubbles[i].agent_len = identity.agent.len;
+        @memcpy(model.bubbles[i].agent[0..identity.agent.len], identity.agent);
+        model.bubbles[i].hostname_len = identity.hostname.len;
+        @memcpy(model.bubbles[i].hostname[0..identity.hostname.len], identity.hostname);
+        model.bubbles[i].remote = true;
+    }
+    const previous = model.bubbles;
+    const previous_deadlines = model.bubble_expires_at_ms;
+
+    // A fresh mailbox drain may arrive in a different order from the prior
+    // rendered stack. Each unchanged sibling must retain its own lease.
+    model.bubbles[0] = previous[2];
+    model.bubbles[1] = previous[1];
+    model.bubbles[2] = previous[0];
+    syncBubbleDeadlines(&model, previous[0..3], previous_deadlines[0..3], 10_000);
+    try std.testing.expectEqual(@as(i64, 6_000), model.bubble_expires_at_ms[0]);
+    try std.testing.expectEqual(@as(i64, 5_000), model.bubble_expires_at_ms[1]);
+    try std.testing.expectEqual(@as(i64, 4_000), model.bubble_expires_at_ms[2]);
 }

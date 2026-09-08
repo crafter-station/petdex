@@ -6,6 +6,7 @@ fixture=$(mktemp -d)
 trap 'rm -rf "$fixture"' 0 1 2 15
 mkdir -p "$fixture/home/.petdex/runtime" "$fixture/bin"
 printf 'test-token\n' > "$fixture/home/.petdex/runtime/update-token"
+printf 'configured-alias\n' > "$fixture/home/.petdex/runtime/remote-host"
 python3_path=$(command -v python3 || true)
 if [ -n "$python3_path" ]; then
     test_path="$(dirname "$python3_path"):/usr/bin:/bin"
@@ -44,6 +45,7 @@ printf '%s' "$payload" | HOME="$fixture/home" PATH="$fixture/bin:$test_path" \
 grep -Eq '"session_id":"[0-9a-f]{64}"' "$fixture/capture"
 grep -q '"source_session_id":"raw-turn"' "$fixture/capture"
 grep -q '"session_kind":"primary"' "$fixture/capture"
+grep -q '"hostname":"configured-alias"' "$fixture/capture"
 
 # A host may keep the stdin write end open after the JSON is complete. The
 # remote hook must return within its bounded drain window instead of waiting
@@ -198,3 +200,20 @@ payload='{"session_id":"00000000-0000-0000-0000-000000000001","last_assistant_me
 printf '%s' "$payload" | HOME="$fixture/home" PATH="$fixture/bin:/usr/bin:/bin" \
     PETDEX_CAPTURE="$fixture/capture" sh "$root/src/assets/petdex-remote-hook.sh" bubble stop codex
 tail -n 1 "$fixture/capture" | grep -q '"title":"Parent conversation"'
+
+# A failed tool is intermediate: keep the session busy/running while the
+# per-agent failed state drives only the temporary sprite.
+payload='{"session_id":"gemini-tool-failure","tool_name":"shell"}'
+printf '%s' "$payload" | HOME="$fixture/home" PATH="$fixture/bin:$test_path" \
+    PETDEX_CAPTURE="$fixture/capture" sh "$root/src/assets/petdex-remote-hook.sh" bubble tool-failure gemini
+failure_body=$(tail -n 1 "$fixture/capture")
+printf '%s\n' "$failure_body" | grep -q '"busy":true'
+printf '%s\n' "$failure_body" | grep -q '"status":"running"'
+printf '%s\n' "$failure_body" | grep -q '"agent_state":"failed"'
+
+# Gemini's final turn event names its assistant prose prompt_response.
+payload='{"session_id":"gemini-final","prompt_response":"Gemini answer"}'
+printf '%s' "$payload" | HOME="$fixture/home" PATH="$fixture/bin:$test_path" \
+    PETDEX_CAPTURE="$fixture/capture" sh "$root/src/assets/petdex-remote-hook.sh" bubble assistant gemini
+answer_body=$(tail -n 1 "$fixture/capture")
+printf '%s\n' "$answer_body" | grep -q '"text":"Gemini answer"'

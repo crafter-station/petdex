@@ -233,24 +233,37 @@ fn qoderStatus(allocator: std.mem.Allocator, home: []const u8) HookStatus {
 
 /// The five Claude-shaped hook events the bubble pipeline rides.
 const claude_events = [_]HookEvent{
-    .{ .event = "UserPromptSubmit", .phase = "user-prompt" },
-    .{ .event = "PreToolUse", .phase = "pre" },
-    .{ .event = "PostToolUse", .phase = "post" },
-    .{ .event = "Notification", .phase = "notification" },
-    .{ .event = "Stop", .phase = "stop" },
-};
-
-/// The Claude five plus PostToolUseFailure, the one event no other wired agent
-/// reports — it is what lights the `failed` sprite row. The two Post* events are
-/// mutually exclusive per tool call (coreToolHookTriggers.ts:288 gates
-/// PostToolUse on `!toolResult.error`), so no trailing `idle` stomps it.
-const qoder_events = [_]HookEvent{
+    .{ .event = "SessionStart", .phase = "session-start" },
     .{ .event = "UserPromptSubmit", .phase = "user-prompt" },
     .{ .event = "PreToolUse", .phase = "pre" },
     .{ .event = "PostToolUse", .phase = "post" },
     .{ .event = "PostToolUseFailure", .phase = "tool-failure" },
+    .{ .event = "PermissionRequest", .phase = "approval-request" },
     .{ .event = "Notification", .phase = "notification" },
+    .{ .event = "SubagentStart", .phase = "subagent-start" },
+    .{ .event = "SubagentStop", .phase = "subagent-stop" },
+    .{ .event = "StopFailure", .phase = "tool-failure" },
     .{ .event = "Stop", .phase = "stop" },
+    .{ .event = "SessionEnd", .phase = "session-end" },
+};
+
+/// Qoder exposes the same full lifecycle shape as Claude, including explicit
+/// permission, failure, and subagent events. Keeping those event names intact
+/// lets the shared normalizer correlate input and child sessions without
+/// guessing from prose in a tool result.
+const qoder_events = [_]HookEvent{
+    .{ .event = "SessionStart", .phase = "session-start" },
+    .{ .event = "UserPromptSubmit", .phase = "user-prompt" },
+    .{ .event = "PreToolUse", .phase = "pre" },
+    .{ .event = "PostToolUse", .phase = "post" },
+    .{ .event = "PostToolUseFailure", .phase = "tool-failure" },
+    .{ .event = "PermissionRequest", .phase = "approval-request" },
+    .{ .event = "Notification", .phase = "notification" },
+    .{ .event = "SubagentStart", .phase = "subagent-start" },
+    .{ .event = "SubagentStop", .phase = "subagent-stop" },
+    .{ .event = "StopFailure", .phase = "tool-failure" },
+    .{ .event = "Stop", .phase = "stop" },
+    .{ .event = "SessionEnd", .phase = "session-end" },
 };
 
 const codex_events = [_]HookEvent{
@@ -656,8 +669,16 @@ fn uninstallQoder(allocator: std.mem.Allocator, home: []const u8) bool {
 /// Gemini rides the exact same settings.json hook shape as Claude,
 /// with its own event names.
 const gemini_events = [_]HookEvent{
+    .{ .event = "SessionStart", .phase = "session-start" },
+    .{ .event = "BeforeAgent", .phase = "user-prompt" },
+    .{ .event = "BeforeModel", .phase = "pre-llm" },
     .{ .event = "BeforeTool", .phase = "pre" },
     .{ .event = "AfterTool", .phase = "post" },
+    // AfterModel fires for every model response inside the agent loop. Only
+    // AfterAgent marks the final response for the turn.
+    .{ .event = "AfterModel", .phase = "post-model" },
+    .{ .event = "AfterAgent", .phase = "assistant" },
+    .{ .event = "Notification", .phase = "notification" },
     .{ .event = "SessionEnd", .phase = "stop" },
 };
 
@@ -720,23 +741,20 @@ pub fn installOmp(allocator: std.mem.Allocator, home: []const u8) bool {
 /// shape but never Claude's own file, so it needs its own row instead of
 /// a second config root on the Claude one.
 ///
-/// It declares 27+ events, of which only the Claude-shaped core has
-/// documented payload schemas. Wiring the long tail (Elicitation,
-/// TeammateIdle, WorktreeCreate, and friends) would mean guessing at
-/// field names, so this stays on the documented set.
-///
-/// No tool-failure event: unlike Kimi and Qoder, a failed call surfaces
-/// as the `tool_response` field on PostToolUse. Reading that would mean
-/// pattern-matching prose to decide what "failed" looks like, and a pet
-/// that flashes `failed` on a successful grep is worse than one that
-/// never flashes it at all. So `failed` stays dark here until CodeBuddy
-/// grows a distinct event, and `post` reports plain `idle`.
+/// CodeBuddy documents only the Claude-shaped core below. Its larger event
+/// enum is not a payload contract, so unrelated names remain unwired.
+/// In particular, tool failure is `tool_response.success == false` on the
+/// supported PostToolUse payload and is lowered by hook_runner; there is no
+/// separate failure hook to install.
 const codebuddy_events = [_]HookEvent{
+    .{ .event = "SessionStart", .phase = "session-start" },
     .{ .event = "UserPromptSubmit", .phase = "user-prompt" },
     .{ .event = "PreToolUse", .phase = "pre" },
     .{ .event = "PostToolUse", .phase = "post" },
     .{ .event = "Notification", .phase = "notification" },
+    .{ .event = "SubagentStop", .phase = "subagent-stop" },
     .{ .event = "Stop", .phase = "stop" },
+    .{ .event = "SessionEnd", .phase = "session-end" },
 };
 
 pub fn installCodeBuddy(allocator: std.mem.Allocator, home: []const u8) bool {
@@ -760,12 +778,18 @@ pub fn installCodeBuddy(allocator: std.mem.Allocator, home: []const u8) bool {
 /// success), so the `failed` sprite row lights up the same way Qoder's
 /// does, with no trailing `idle` to stomp it.
 const kimi_events = [_]HookEvent{
+    .{ .event = "SessionStart", .phase = "session-start" },
     .{ .event = "UserPromptSubmit", .phase = "user-prompt" },
     .{ .event = "PreToolUse", .phase = "pre" },
     .{ .event = "PostToolUse", .phase = "post" },
     .{ .event = "PostToolUseFailure", .phase = "tool-failure" },
+    .{ .event = "PermissionRequest", .phase = "approval-request" },
     .{ .event = "Notification", .phase = "notification" },
+    .{ .event = "SubagentStart", .phase = "subagent-start" },
+    .{ .event = "SubagentStop", .phase = "subagent-stop" },
+    .{ .event = "StopFailure", .phase = "tool-failure" },
     .{ .event = "Stop", .phase = "stop" },
+    .{ .event = "SessionEnd", .phase = "session-end" },
 };
 
 /// `$KIMI_CODE_HOME/config.toml` when the variable is set and non-empty,
@@ -2173,6 +2197,14 @@ fn expectedCanonicalHookTextOccurrences() usize {
     return if (builtin.os.tag == .windows) 2 else 1;
 }
 
+fn hookPhaseCount(events: []const HookEvent, phase: []const u8) usize {
+    var count: usize = 0;
+    for (events) |event| {
+        if (std.mem.eql(u8, event.phase, phase)) count += 1;
+    }
+    return count;
+}
+
 test "claude merge preserves foreign keys and hooks, replaces petdex entries" {
     // Build a fixture settings.json with a user hook and an old petdex
     // node hook, run the merge logic pieces on it via Value.
@@ -2302,7 +2334,7 @@ test "CLAUDE_CONFIG_DIR redirects install, scan and uninstall" {
     try t.expectEqual(HookStatus.absent, blank[0].status);
 }
 
-test "installQoder writes six events and stays out of the rest of the config" {
+test "installQoder writes its documented lifecycle and preserves the rest of the config" {
     const home = ".zig-cache/petdex-qoder-fixture";
     plat.makeDir(home ++ "/.qoder");
     const fixture =
@@ -2317,8 +2349,20 @@ test "installQoder writes six events and stays out of the rest of the config" {
     const merged = readFileAlloc(t.allocator, cfg, 1024 * 1024).?;
     defer t.allocator.free(merged);
 
-    // All six events, including the one no other agent reports.
-    for ([_][]const u8{ "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "Notification", "Stop" }) |event| {
+    for ([_][]const u8{
+        "SessionStart",
+        "UserPromptSubmit",
+        "PreToolUse",
+        "PostToolUse",
+        "PostToolUseFailure",
+        "PermissionRequest",
+        "Notification",
+        "SubagentStart",
+        "SubagentStop",
+        "StopFailure",
+        "Stop",
+        "SessionEnd",
+    }) |event| {
         try t.expect(std.mem.indexOf(u8, merged, event) != null);
     }
     try t.expect(std.mem.indexOf(u8, merged, "bubble tool-failure qoder") != null);
@@ -2336,7 +2380,10 @@ test "installQoder writes six events and stays out of the rest of the config" {
     const merged2 = readFileAlloc(t.allocator, cfg, 1024 * 1024).?;
     defer t.allocator.free(merged2);
     try t.expectEqual(expectedCanonicalHookTextOccurrences(), std.mem.count(u8, merged2, "bubble pre qoder"));
-    try t.expectEqual(expectedCanonicalHookTextOccurrences(), std.mem.count(u8, merged2, "bubble tool-failure qoder"));
+    try t.expectEqual(
+        expectedCanonicalHookTextOccurrences() * hookPhaseCount(&qoder_events, "tool-failure"),
+        std.mem.count(u8, merged2, "bubble tool-failure qoder"),
+    );
 
     const bak = std.fmt.bufPrint(&pb, "{s}/.qoder/settings.json.pre-petdex-backup", .{home}) catch unreachable;
     try t.expect(fileExists(bak));
@@ -2730,6 +2777,17 @@ test "installGemini enables hooks and uses a millisecond timeout" {
     try t.expect(std.mem.indexOf(u8, written, "\"keep\": true") != null);
 }
 
+test "Gemini model responses stay active until AfterAgent" {
+    var after_model_phase: ?[]const u8 = null;
+    var after_agent_phase: ?[]const u8 = null;
+    for (gemini_events) |hook| {
+        if (std.mem.eql(u8, hook.event, "AfterModel")) after_model_phase = hook.phase;
+        if (std.mem.eql(u8, hook.event, "AfterAgent")) after_agent_phase = hook.phase;
+    }
+    try t.expectEqualStrings("post-model", after_model_phase.?);
+    try t.expectEqualStrings("assistant", after_agent_phase.?);
+}
+
 test "legacy curl migration requires the complete Petdex command signature" {
     const command = "T=\"$(cat $HOME/.petdex/runtime/update-token 2>/dev/null)\"; [ -n \"$T\" ] && curl -s -m 0.3 -X POST http://127.0.0.1:7777/state -H \"X-Petdex-Update-Token: $T\"";
     try t.expectEqual(ManagedHookGeneration.legacy, commandGeneration(command));
@@ -2956,7 +3014,10 @@ test "codebuddy merges into its own config and leaves Claude's alone" {
     var pb: [512]u8 = undefined;
     const cfg = std.fmt.bufPrint(&pb, "{s}/.codebuddy/settings.json", .{home}) catch unreachable;
     try t.expect(writeFile(cfg,
-        \\{"model":"codebuddy-pro","hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"my-own-hook"}]}]}}
+        \\{"model":"codebuddy-pro","hooks":{
+        \\  "PreToolUse":[{"hooks":[{"type":"command","command":"my-own-hook"}]}],
+        \\  "PostToolUseFailure":[{"hooks":[{"type":"command","command":"$HOME/.petdex/bin/petdex-hook bubble tool-failure codebuddy"}]}]
+        \\}}
     ));
     // A Claude config that must not be touched: CodeBuddy is derived from
     // Claude Code, so writing to the wrong file is the plausible mistake.
@@ -2970,6 +3031,10 @@ test "codebuddy merges into its own config and leaves Claude's alone" {
     try t.expect(std.mem.indexOf(u8, written, "petdex-hook") != null);
     try t.expect(std.mem.indexOf(u8, written, "my-own-hook") != null);
     try t.expect(std.mem.indexOf(u8, written, "codebuddy-pro") != null);
+    try t.expect(std.mem.indexOf(u8, written, "bubble post codebuddy") != null);
+    try t.expect(std.mem.indexOf(u8, written, "bubble tool-failure codebuddy") == null);
+    try t.expect(std.mem.indexOf(u8, written, "bubble approval-request codebuddy") == null);
+    try t.expect(std.mem.indexOf(u8, written, "bubble subagent-start codebuddy") == null);
 
     const claude_after = readFileAlloc(t.allocator, claude_cfg, 1024 * 1024).?;
     defer t.allocator.free(claude_after);
@@ -2985,23 +3050,22 @@ test "codebuddy merges into its own config and leaves Claude's alone" {
     try t.expect(std.mem.indexOf(u8, cleared, "my-own-hook") != null);
 }
 
-test "codebuddy wires only events with documented payloads" {
-    // It declares 27+ events; the long tail has no documented schema, so
-    // guessing at field names is how an adapter starts reading garbage.
-    for (codebuddy_events) |ev| {
-        const documented = std.mem.eql(u8, ev.event, "UserPromptSubmit") or
-            std.mem.eql(u8, ev.event, "PreToolUse") or
-            std.mem.eql(u8, ev.event, "PostToolUse") or
-            std.mem.eql(u8, ev.event, "Notification") or
-            std.mem.eql(u8, ev.event, "Stop");
-        try t.expect(documented);
-    }
-    // No tool-failure phase: CodeBuddy reports failure as a field on
-    // PostToolUse rather than its own event, and inferring it from prose
-    // would light `failed` on healthy calls. Deliberate, not an omission.
-    for (codebuddy_events) |ev| {
-        try t.expect(!std.mem.eql(u8, ev.phase, "tool-failure"));
-    }
+test "codebuddy wires the documented lifecycle without guessing at unrelated events" {
+    const expected = [_][]const u8{
+        "SessionStart",
+        "UserPromptSubmit",
+        "PreToolUse",
+        "PostToolUse",
+        "Notification",
+        "SubagentStop",
+        "Stop",
+        "SessionEnd",
+    };
+    try t.expectEqual(expected.len, codebuddy_events.len);
+    for (expected, codebuddy_events) |event, hook| try t.expectEqualStrings(event, hook.event);
+    try t.expectEqual(@as(usize, 0), hookPhaseCount(&codebuddy_events, "tool-failure"));
+    try t.expectEqual(@as(usize, 0), hookPhaseCount(&codebuddy_events, "subagent-start"));
+    try t.expectEqual(@as(usize, 1), hookPhaseCount(&codebuddy_events, "subagent-stop"));
 }
 
 test "omp install writes the extension where OMP discovers it" {
@@ -3025,6 +3089,9 @@ test "omp install writes the extension where OMP discovers it" {
     try t.expect(std.mem.indexOf(u8, written, "export default function") != null);
     // Failure comes from isError on tool_result, not from parsing text.
     try t.expect(std.mem.indexOf(u8, written, "isError") != null);
+    // Every later bubble overwrites a temporary failed state, so a successful
+    // tool result or terminal event cannot leave the Flock body stuck.
+    try t.expect(std.mem.indexOf(u8, written, "bubbleBody.agent_state = state") != null);
     // Each OMP event must identify its conversation so concurrent sessions
     // remain separate in the desktop mailbox.
     try t.expect(std.mem.indexOf(u8, written, "session_id") != null);

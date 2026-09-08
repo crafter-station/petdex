@@ -1,0 +1,20 @@
+{
+  "_fixture": {
+    "schema": "petdex-hermes-row",
+    "version": 1,
+    "provider": "hermes",
+    "sanitized": true
+  },
+  "enriched_schema": true,
+  "id": "hermes-parent",
+  "session_key": "hermes-parent",
+  "title": "Hermes input title",
+  "source": "cli",
+  "model_config": "{}",
+  "parent_session_id": "",
+  "started_ms": 1700000000000,
+  "activity_ms": 1700000001000,
+  "description": "petdex:needs-input:Choose a deployment target",
+  "ended": false,
+  "end_reason": ""
+}

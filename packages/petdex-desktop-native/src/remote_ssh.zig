@@ -44,6 +44,8 @@ pub const remote_hook_script = "~/.petdex/bin/petdex-hook";
 pub const remote_codex_watcher = "~/.petdex/bin/petdex-codex-watch";
 pub const remote_hermes_watcher = "~/.petdex/bin/petdex-hermes-watch";
 pub const remote_token_file = "~/.petdex/runtime/update-token";
+/// Configured remote name embedded in the scoped credential. Every helper
+/// publishes this principal instead of the machine's unrelated OS hostname.
 pub const remote_host_file = "~/.petdex/runtime/remote-host";
 pub const remote_hermes_home_file = "~/.petdex/runtime/hermes-home";
 pub const remote_lease_file = "~/.petdex/runtime/tunnel-lease";
@@ -96,6 +98,7 @@ pub const Scratch = struct {
     quote_c: [512]u8 = undefined,
     quote_d: [512]u8 = undefined,
     quote_e: [512]u8 = undefined,
+    quote_f: [512]u8 = undefined,
     cmd: [4096]u8 = undefined,
 };
 
@@ -311,7 +314,8 @@ pub fn tokenArgv(buf: *[max_argv][]const u8, scratch: *Scratch, remote: *const R
     const host_file = shQuote(&scratch.quote_c, remote_host_file) orelse return null;
     const hermes_home_file = shQuote(&scratch.quote_d, remote_hermes_home_file) orelse return null;
     const hermes_home = shQuote(&scratch.quote_e, remote.agents.hermes.home orelse remote_agents.default_hermes_home) orelse return null;
-    buf[n] = std.fmt.bufPrint(&scratch.cmd, "umask 077; mkdir -p {s} || exit; tmp=\"$HOME/.petdex/runtime/update-token.tmp.$$\"; trap 'rm -f \"$tmp\"' 0 1 2 15; hermes_home={s}; cat > \"$tmp\" && chmod 600 \"$tmp\" && hostname > {s} && printf '%s\\n' \"$hermes_home\" > {s} && mv -f \"$tmp\" {s}", .{ dir, hermes_home, host_file, hermes_home_file, quoted }) catch return null;
+    const remote_name = shQuote(&scratch.quote_f, remote.name) orelse return null;
+    buf[n] = std.fmt.bufPrint(&scratch.cmd, "umask 077; mkdir -p {s} || exit; tmp=\"$HOME/.petdex/runtime/update-token.tmp.$$\"; trap 'rm -f \"$tmp\"' 0 1 2 15; hermes_home={s}; remote_name={s}; cat > \"$tmp\" && chmod 600 \"$tmp\" && printf '%s\\n' \"$remote_name\" > {s} && printf '%s\\n' \"$hermes_home\" > {s} && mv -f \"$tmp\" {s}", .{ dir, hermes_home, remote_name, host_file, hermes_home_file, quoted }) catch return null;
     return buf[0 .. n + 1];
 }
 
@@ -530,7 +534,8 @@ test "tokenArgv lands the token 0600 under ~/.petdex" {
     const command = argv[argv.len - 1];
     try t.expect(std.mem.indexOf(u8, command, "update-token.tmp.$$") != null);
     try t.expect(std.mem.indexOf(u8, command, "chmod 600") != null);
-    try t.expect(std.mem.indexOf(u8, command, "hostname > \"$HOME\"/'.petdex/runtime/remote-host'") != null);
+    try t.expect(std.mem.indexOf(u8, command, "remote_name='rogue'") != null);
+    try t.expect(std.mem.indexOf(u8, command, "printf '%s\\n' \"$remote_name\" > \"$HOME\"/'.petdex/runtime/remote-host'") != null);
     try t.expect(std.mem.indexOf(u8, command, "mv -f \"$tmp\" \"$HOME\"/'.petdex/runtime/update-token'") != null);
 }
 

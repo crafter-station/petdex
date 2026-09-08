@@ -341,6 +341,9 @@ test "remote hook preserves Codex conversation metadata and rich updates" {
     try t.expect(std.mem.indexOf(u8, hook_script, "not bool(row.get(\"session_key\"))") != null);
     try t.expect(std.mem.indexOf(u8, hook_script, "[ \"$session_kind\" = \"subagent\" ]") != null);
     try t.expect(std.mem.indexOf(u8, hook_script, "child_summary") != null);
+    // A successful/terminal bubble following a tool failure must overwrite
+    // the exact conversation's temporary failed Flock state.
+    try t.expect(std.mem.indexOf(u8, hook_script, "agent_state=$state") != null);
 }
 
 test "hermes writeback preserves foreign YAML and allowlist entries" {
