@@ -93,7 +93,9 @@ mirrors the desktop hook runner's contract: stdin drain, killswitch
 never fails outward. The opencode plugin POSTs directly and works unchanged.
 
 Notes:
-- SSH only; there is no API fallback transport. Windows remotes are out of scope.
+- SSH only; there is no API fallback transport. Windows desktops use the
+  installed OpenSSH client, but remote target accounts must still be POSIX;
+  Windows remote targets are out of scope.
 - Remote accounts need a POSIX shell and `ps`; Codex/Hermes reconciliation
   additionally needs `python3`, and their shell hooks need `curl`. Startup
   stays gated and reports a retrying state when a required dependency is absent.

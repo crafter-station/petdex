@@ -71,12 +71,61 @@ pub const tunnel_ready_marker = "petdex-tunnel-ready";
 /// Absolute paths first so a hijacked PATH cannot substitute ssh,
 /// matching installer's downloader probing.
 const ssh_candidates = [_][]const u8{ "/usr/bin/ssh", "/bin/ssh" };
+fn windowsAbsolute(path: []const u8) bool {
+    if (path.len >= 3 and std.ascii.isAlphabetic(path[0]) and path[1] == ':' and (path[2] == '\\' or path[2] == '/')) return true;
+    return path.len >= 3 and path[0] == '\\' and path[1] == '\\' and path[2] != '\\';
+}
 
-/// Path to a usable ssh client, null when none exists (Windows remotes
-/// are out of scope for v1; a desktop without ssh cannot manage
-/// remotes at all).
+/// Turn one PATH directory into an absolute ssh.exe candidate. Empty and
+/// relative entries are rejected: Windows treats those as current-directory
+/// searches, which would let an unrelated checkout substitute an executable.
+fn windowsSshCandidate(output: []u8, raw_entry: []const u8) ?[]const u8 {
+    var entry = std.mem.trim(u8, raw_entry, " \t\r\n");
+    if (entry.len >= 2 and entry[0] == '"' and entry[entry.len - 1] == '"') entry = entry[1 .. entry.len - 1];
+    if (!windowsAbsolute(entry)) return null;
+    while (entry.len > 3 and (entry[entry.len - 1] == '\\' or entry[entry.len - 1] == '/')) entry = entry[0 .. entry.len - 1];
+    const separator = if (entry.len > 0 and (entry[entry.len - 1] == '\\' or entry[entry.len - 1] == '/')) "" else "\\";
+    return std.fmt.bufPrint(output, "{s}{s}ssh.exe", .{ entry, separator }) catch null;
+}
+
+fn detectWindowsInto(output: []u8) ?[]const u8 {
+    const allocator = std.heap.page_allocator;
+    var environ_map = std.process.Environ.createMap(.{ .block = .global }, allocator) catch return null;
+    defer environ_map.deinit();
+    if (environ_map.get("SystemRoot")) |root| {
+        // Sysnative lets a 32-bit process address the native system directory;
+        // it is absent and harmless for a 64-bit process.
+        for ([_][]const u8{ "System32", "Sysnative" }) |system_dir| {
+            var dir_buf: [768]u8 = undefined;
+            if (std.fmt.bufPrint(&dir_buf, "{s}\\{s}\\OpenSSH", .{ root, system_dir })) |dir| {
+                if (windowsSshCandidate(output, dir)) |candidate| if (plat.fileExists(candidate)) return candidate;
+            } else |_| {}
+        }
+    }
+
+    const path_env = environ_map.get("PATH") orelse return null;
+    var entries = std.mem.splitScalar(u8, path_env, ';');
+    while (entries.next()) |entry| {
+        const candidate = windowsSshCandidate(output, entry) orelse continue;
+        if (plat.fileExists(candidate)) return candidate;
+    }
+    return null;
+}
+
+fn detectInto(output: []u8) ?[]const u8 {
+    if (builtin.os.tag == .windows) return detectWindowsInto(output);
+    for (ssh_candidates) |path| if (plat.fileExists(path)) return path;
+    return null;
+}
+
+/// Availability probe used during startup. Builders resolve Windows PATH
+/// entries into their own Scratch buffer before spawning, so this sentinel is
+/// never used as an executable path.
 pub fn detect() ?[]const u8 {
-    if (builtin.os.tag == .windows) return null;
+    if (builtin.os.tag == .windows) {
+        var path: [1024]u8 = undefined;
+        return if (detectWindowsInto(&path) != null) "ssh.exe" else null;
+    }
     for (ssh_candidates) |path| {
         if (plat.fileExists(path)) return path;
     }
@@ -86,6 +135,7 @@ pub fn detect() ?[]const u8 {
 /// Scratch storage for formatted port numbers, quoted paths, and the
 /// remote command string. One per spawn; builders null on overflow.
 pub const Scratch = struct {
+    ssh_path: [1024]u8 = undefined,
     port: [12]u8 = undefined,
     identity: [384]u8 = undefined,
     supervisor: [512]u8 = undefined,
@@ -104,6 +154,11 @@ pub const Scratch = struct {
 /// children, but SIGTERM/crash paths cannot run it; without the wrapper,
 /// ssh is reparented to launchd and holds the remote port forever.
 pub fn installTunnelSupervisor(home: []const u8) bool {
+    // Windows launches OpenSSH directly. The remote command's `$PPID` is the
+    // sshd session, not the desktop process, so its health probe is what
+    // closes an orphan after three two-second misses (about six seconds).
+    // No local shell wrapper is installed or invoked.
+    if (builtin.os.tag == .windows) return detect() != null;
     var dir_buf: [512]u8 = undefined;
     const dir = std.fmt.bufPrint(&dir_buf, "{s}/.petdex/runtime", .{home}) catch return false;
     plat.makeDir(dir);
@@ -159,8 +214,7 @@ fn dirname(path: []const u8) []const u8 {
 /// destination is always the element right before any remote command,
 /// never embedded in it. Flags use ssh's attached form (-oX, -pN, -iP)
 /// because fx.spawn caps argv at 16 elements and the tunnel adds six.
-fn appendBase(buf: *[max_argv][]const u8, scratch: *Scratch, remote: *const Remote) ?usize {
-    const ssh = detect() orelse return null;
+fn appendBaseWithSsh(buf: *[max_argv][]const u8, scratch: *Scratch, remote: *const Remote, ssh: []const u8) ?usize {
     var n: usize = 0;
     buf[n] = ssh;
     n += 1;
@@ -192,6 +246,11 @@ fn appendBase(buf: *[max_argv][]const u8, scratch: *Scratch, remote: *const Remo
     return n;
 }
 
+fn appendBase(buf: *[max_argv][]const u8, scratch: *Scratch, remote: *const Remote) ?usize {
+    const ssh = detectInto(&scratch.ssh_path) orelse return null;
+    return appendBaseWithSsh(buf, scratch, remote, ssh);
+}
+
 /// Long-lived reverse tunnel: remote 127.0.0.1:7777 back to the desktop hook
 /// server. The remote command probes `/health`, emits `tunnel_ready_marker`,
 /// and keeps probing while it owns the lease. Repeated health failures revoke
@@ -206,7 +265,20 @@ pub fn tunnelArgv(
     home: []const u8,
     parent_pid: u32,
 ) ?[]const []const u8 {
-    const n = appendBase(buf, scratch, remote) orelse return null;
+    const ssh = detectInto(&scratch.ssh_path) orelse return null;
+    return tunnelArgvWithSsh(buf, scratch, remote, home, parent_pid, ssh, builtin.os.tag != .windows);
+}
+
+fn tunnelArgvWithSsh(
+    buf: *[max_argv][]const u8,
+    scratch: *Scratch,
+    remote: *const Remote,
+    home: []const u8,
+    parent_pid: u32,
+    ssh: []const u8,
+    supervise_posix: bool,
+) ?[]const []const u8 {
+    const n = appendBaseWithSsh(buf, scratch, remote, ssh) orelse return null;
     if (n + 6 > max_argv) return null;
     // appendBase ends with `-- <destination>`. Tunnel switches are ssh
     // options, so insert them before that pair; the readiness/hold command is
@@ -220,9 +292,10 @@ pub fn tunnelArgv(
     buf[destination_idx + 1] = std.fmt.bufPrint(&scratch.reverse, "-R{s}", .{tunnel_spec}) catch return null;
     buf[destination_idx + 2] = separator;
     buf[destination_idx + 3] = destination;
-    buf[destination_idx + 4] = std.fmt.bufPrint(&scratch.cmd, "umask 077; runtime=\"$HOME/.petdex/runtime\"; lease=\"$runtime/tunnel-lease\"; token=\"$runtime/update-token\"; mkdir -p \"$runtime\" || exit; command -v ps >/dev/null 2>&1 || exit 69; if command -v curl >/dev/null 2>&1; then healthy() {{ curl -fsS --max-time 1 http://127.0.0.1:7777/health >/dev/null 2>&1; }}; elif command -v python3 >/dev/null 2>&1; then healthy() {{ python3 -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:7777/health\",timeout=1).read()' >/dev/null 2>&1; }}; else exit 69; fi; owner=$PPID; owner_alive() {{ kill -0 \"$owner\" 2>/dev/null || return 1; state=$(ps -o stat= -p \"$owner\" 2>/dev/null) || return 1; case \"$state\" in *Z*) return 1 ;; esac; return 0; }}; rm -f \"$lease\"; trap 'rm -f \"$lease\" \"$token\"' 0; trap 'trap - 0 1 2 15; rm -f \"$lease\" \"$token\"; exit 143' 1 2 15; i=0; until healthy; do owner_alive || exit 75; i=$((i+1)); test \"$i\" -ge 20 && exit 75; sleep 1; done; owner_alive || exit 75; : > \"$lease\" || exit; printf '{s}\\n'; missed=0; while owner_alive; do if healthy; then missed=0; : > \"$lease\" || exit; else missed=$((missed+1)); test \"$missed\" -ge 3 && exit 75; fi; sleep 2; done", .{tunnel_ready_marker}) catch return null;
+    buf[destination_idx + 4] = std.fmt.bufPrint(&scratch.cmd, "umask 077;runtime=\"$HOME/.petdex/runtime\";lease=\"$runtime/tunnel-lease\";token=\"$runtime/update-token\";mkdir -p \"$runtime\"||exit;chmod 700 \"$runtime\"||exit;command -v ps>/dev/null 2>&1||exit 69;if command -v curl>/dev/null 2>&1;then healthy(){{ curl -fsS --max-time 1 http://127.0.0.1:7777/health >/dev/null 2>&1; }}; elif command -v python3 >/dev/null 2>&1; then healthy(){{ python3 -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:7777/health\",timeout=1).read()' >/dev/null 2>&1; }}; else exit 69; fi; owner=$PPID; owner_alive(){{ kill -0 \"$owner\" 2>/dev/null || return 1; state=$(ps -o stat= -p \"$owner\" 2>/dev/null) || return 1; case \"$state\" in *Z*) return 1 ;; esac; return 0; }}; rm -f \"$lease\"; trap 'rm -f \"$lease\" \"$token\"' 0; trap 'trap - 0 1 2 15; rm -f \"$lease\" \"$token\"; exit 143' 1 2 15; i=0; until healthy; do owner_alive || exit 75; i=$((i+1)); test \"$i\" -ge 20 && exit 75; sleep 1; done; owner_alive || exit 75; : > \"$lease\" || exit; printf '{s}\\n'; missed=0; while owner_alive; do if healthy; then missed=0; : > \"$lease\" || exit; else missed=$((missed+1)); test \"$missed\" -ge 3 && exit 75; fi; sleep 2; done", .{tunnel_ready_marker}) catch return null;
 
     const ssh_len = n + 3;
+    if (!supervise_posix) return buf[0..ssh_len];
     var i = ssh_len;
     while (i > 0) {
         i -= 1;
@@ -243,7 +316,7 @@ pub fn tunnelArgv(
 pub fn quiesceArgv(buf: *[max_argv][]const u8, scratch: *Scratch, remote: *const Remote) ?[]const []const u8 {
     const n = appendBase(buf, scratch, remote) orelse return null;
     if (n + 1 > max_argv) return null;
-    buf[n] = "umask 077; runtime=\"$HOME/.petdex/runtime\"; mkdir -p \"$runtime\" || exit; rm -f \"$runtime/update-token\" \"$runtime/tunnel-lease\"; is_owned() { old=$1; needle=$2; case \"$old\" in ''|*[!0-9]*) return 1 ;; esac; command=$(ps -ww -p \"$old\" -o command= 2>/dev/null) || return 1; case \"$command\" in *\"$needle\"*) return 0 ;; *) return 1 ;; esac; }; stop_one() { p=$1; needle=$2; if test -r \"$p\"; then old=$(cat \"$p\"); if is_owned \"$old\" \"$needle\"; then kill \"$old\" 2>/dev/null || true; fi; fi; }; stop_one \"$runtime/codex-watch.pid\" \"$HOME/.petdex/bin/petdex-codex-watch\"; stop_one \"$runtime/hermes-watch.pid\" \"$HOME/.petdex/bin/petdex-hermes-watch\"; sleep 2";
+    buf[n] = "umask 077; runtime=\"$HOME/.petdex/runtime\"; mkdir -p \"$runtime\" || exit; chmod 700 \"$HOME/.petdex\" \"$runtime\" || exit; rm -f \"$runtime/update-token\" \"$runtime/tunnel-lease\"; is_owned() { old=$1; needle=$2; case \"$old\" in ''|*[!0-9]*) return 1 ;; esac; command=$(ps -ww -p \"$old\" -o command= 2>/dev/null) || return 1; case \"$command\" in *\"$needle\"*) return 0 ;; *) return 1 ;; esac; }; stop_one() { p=$1; needle=$2; if test -r \"$p\"; then old=$(cat \"$p\"); if is_owned \"$old\" \"$needle\"; then kill \"$old\" 2>/dev/null || true; fi; fi; }; stop_one \"$runtime/codex-watch.pid\" \"$HOME/.petdex/bin/petdex-codex-watch\"; stop_one \"$runtime/hermes-watch.pid\" \"$HOME/.petdex/bin/petdex-hermes-watch\"; sleep 2";
     return buf[0 .. n + 1];
 }
 
@@ -270,8 +343,11 @@ pub fn readArgv(buf: *[max_argv][]const u8, scratch: *Scratch, remote: *const Re
 }
 
 /// Write one chunk into a private sibling temporary. The last chunk sets the
-/// final mode and atomically renames it over the live path. Existing symlink
-/// targets are resolved first so writeback preserves user-managed relocation.
+/// final mode and atomically renames it over the live path. Config symlink
+/// targets are resolved so user-managed relocation remains supported. Managed
+/// executables replace a symlink entry itself: following one could overwrite
+/// an app binary (the historical local petdex-hook layout) or another
+/// attacker-selected file instead of installing the helper.
 pub fn writeArgv(
     buf: *[max_argv][]const u8,
     scratch: *Scratch,
@@ -296,7 +372,11 @@ pub fn writeArgv(
             "chmod 600 \"$tmp\" && mv -f \"$tmp\" \"$target\"")
     else
         ":";
-    buf[n] = std.fmt.bufPrint(&scratch.cmd, "umask 077; target={s}; remote_name={s}; if test -L \"$target\"; then link=$(readlink \"$target\") || exit; case \"$link\" in /*) target=$link ;; *) target=$(dirname \"$target\")/$link ;; esac; fi; dir=$(dirname \"$target\") || exit; mkdir -p \"$dir\" || exit; tmp=\"${{target}}.petdex-tmp-${{remote_name}}\"; trap 'rm -f \"$tmp\"; exit 1' 1 2 15; {s} || {{ rm -f \"$tmp\"; exit 1; }}; {s} || {{ rm -f \"$tmp\"; exit 1; }}", .{ quoted, remote_name, write, finish }) catch return null;
+    const resolve_link = if (executable)
+        ":"
+    else
+        "if test -L \"$target\"; then link=$(readlink \"$target\") || exit; case \"$link\" in /*) target=$link ;; *) target=$(dirname \"$target\")/$link ;; esac; fi";
+    buf[n] = std.fmt.bufPrint(&scratch.cmd, "umask 077; target={s}; remote_name={s}; {s}; dir=$(dirname \"$target\") || exit; mkdir -p \"$dir\" || exit; tmp=\"${{target}}.petdex-tmp-${{remote_name}}\"; trap 'rm -f \"$tmp\"; exit 1' 1 2 15; {s} || {{ rm -f \"$tmp\"; exit 1; }}; {s} || {{ rm -f \"$tmp\"; exit 1; }}", .{ quoted, remote_name, resolve_link, write, finish }) catch return null;
     return buf[0 .. n + 1];
 }
 
@@ -311,7 +391,7 @@ pub fn tokenArgv(buf: *[max_argv][]const u8, scratch: *Scratch, remote: *const R
     const host_file = shQuote(&scratch.quote_c, remote_host_file) orelse return null;
     const hermes_home_file = shQuote(&scratch.quote_d, remote_hermes_home_file) orelse return null;
     const hermes_home = shQuote(&scratch.quote_e, remote.agents.hermes.home orelse remote_agents.default_hermes_home) orelse return null;
-    buf[n] = std.fmt.bufPrint(&scratch.cmd, "umask 077; mkdir -p {s} || exit; tmp=\"$HOME/.petdex/runtime/update-token.tmp.$$\"; trap 'rm -f \"$tmp\"' 0 1 2 15; hermes_home={s}; cat > \"$tmp\" && chmod 600 \"$tmp\" && hostname > {s} && printf '%s\\n' \"$hermes_home\" > {s} && mv -f \"$tmp\" {s}", .{ dir, hermes_home, host_file, hermes_home_file, quoted }) catch return null;
+    buf[n] = std.fmt.bufPrint(&scratch.cmd, "umask 077; mkdir -p {s} || exit; chmod 700 \"$HOME/.petdex\" \"$HOME/.petdex/runtime\" || exit; tmp=\"$HOME/.petdex/runtime/update-token.tmp.$$\"; trap 'rm -f \"$tmp\"' 0 1 2 15; hermes_home={s}; cat > \"$tmp\" && chmod 600 \"$tmp\" && hostname > {s} && printf '%s\\n' \"$hermes_home\" > {s} && mv -f \"$tmp\" {s}", .{ dir, hermes_home, host_file, hermes_home_file, quoted }) catch return null;
     return buf[0 .. n + 1];
 }
 
@@ -329,7 +409,7 @@ pub fn watcherArgv(
     const n = appendBase(buf, scratch, remote) orelse return null;
     if (n + 1 > max_argv) return null;
     const hermes_home = shQuote(&scratch.quote_a, remote.agents.hermes.home orelse remote_agents.default_hermes_home) orelse return null;
-    const helper = "umask 077; for x in python3 curl ps; do command -v \"$x\" >/dev/null 2>&1 || exit 69; done; r=\"$HOME/.petdex/runtime\"; l=\"$r/tunnel-lease\"; mkdir -p \"$r\" || exit; test -f \"$l\" || exit 75; own() { q=$1; n=$2; case \"$q\" in ''|*[!0-9]*) return 1 ;; esac; c=$(ps -ww -p \"$q\" -o command= 2>/dev/null) || return 1; case \"$c\" in *\"$n\"*) return 0 ;; *) return 1 ;; esac; }; start_one() { p=$1; exe=$2; shift 2; if test -r \"$p\"; then old=$(cat \"$p\"); if own \"$old\" \"$exe\"; then kill \"$old\" 2>/dev/null || true; fi; fi; nohup \"$exe\" \"$@\" >/dev/null 2>&1 </dev/null & child=$!; i=0; stable=0; while test \"$i\" -lt 30; do if test -r \"$p\"; then actual=$(cat \"$p\"); if test \"$actual\" = \"$child\" && kill -0 \"$actual\" 2>/dev/null && own \"$actual\" \"$exe\"; then stable=$((stable+1)); test \"$stable\" -ge 3 && return 0; else stable=0; fi; fi; i=$((i+1)); sleep 0.1; done; if own \"$child\" \"$exe\"; then kill \"$child\" 2>/dev/null || true; fi; test \"$(cat \"$p\" 2>/dev/null)\" = \"$child\" && rm -f \"$p\"; return 1; }; ";
+    const helper = "umask 077;for x in python3 curl ps;do command -v \"$x\">/dev/null 2>&1||exit 69;done;r=\"$HOME/.petdex/runtime\";l=\"$r/tunnel-lease\";mkdir -p \"$r\"||exit;chmod 700 \"$HOME/.petdex\" \"$r\"||exit;test -f \"$l\"||exit 75;own() { q=$1; n=$2; case \"$q\" in ''|*[!0-9]*) return 1 ;; esac; c=$(ps -ww -p \"$q\" -o command= 2>/dev/null) || return 1; case \"$c\" in *\"$n\"*) return 0 ;; *) return 1 ;; esac; }; start_one() { p=$1; exe=$2; shift 2; if test -r \"$p\"; then old=$(cat \"$p\"); if own \"$old\" \"$exe\"; then kill \"$old\" 2>/dev/null || true; fi; fi; nohup \"$exe\" \"$@\" >/dev/null 2>&1 </dev/null & child=$!; i=0; stable=0; while test \"$i\" -lt 30; do if test -r \"$p\"; then actual=$(cat \"$p\"); if test \"$actual\" = \"$child\" && kill -0 \"$actual\" 2>/dev/null && own \"$actual\" \"$exe\"; then stable=$((stable+1)); test \"$stable\" -ge 3 && return 0; else stable=0; fi; fi; i=$((i+1)); sleep 0.1; done; if own \"$child\" \"$exe\"; then kill \"$child\" 2>/dev/null || true; fi; test \"$(cat \"$p\" 2>/dev/null)\" = \"$child\" && rm -f \"$p\"; return 1; }; ";
     if (start_codex and start_hermes) {
         const codex = shQuote(&scratch.quote_b, remote_codex_watcher) orelse return null;
         const codex_pid = shQuote(&scratch.quote_c, "~/.petdex/runtime/codex-watch.pid") orelse return null;
@@ -440,11 +520,17 @@ test "tunnelArgv requests the reverse forward with fast failure" {
     var buf: [max_argv][]const u8 = undefined;
     var scratch: Scratch = .{};
     const argv = tunnelArgv(&buf, &scratch, &test_remote, "/tmp/petdex-home", 4242).?;
-    try t.expectEqual(@as(usize, max_argv), argv.len);
-    try t.expectEqualStrings("/bin/sh", argv[0]);
-    try t.expectEqualStrings("/tmp/petdex-home/.petdex/runtime/ssh-tunnel-supervisor.sh", argv[1]);
-    try t.expectEqualStrings("4242", argv[2]);
-    try t.expectEqualStrings("/usr/bin/ssh", argv[3]);
+    if (builtin.os.tag == .windows) {
+        try t.expectEqual(@as(usize, max_argv - 3), argv.len);
+        try t.expect(argv[0].len >= "ssh.exe".len);
+        try t.expect(std.ascii.eqlIgnoreCase(argv[0][argv[0].len - "ssh.exe".len ..], "ssh.exe"));
+    } else {
+        try t.expectEqual(@as(usize, max_argv), argv.len);
+        try t.expectEqualStrings("/bin/sh", argv[0]);
+        try t.expectEqualStrings("/tmp/petdex-home/.petdex/runtime/ssh-tunnel-supervisor.sh", argv[1]);
+        try t.expectEqualStrings("4242", argv[2]);
+        try t.expectEqualStrings("/usr/bin/ssh", argv[3]);
+    }
     // All tunnel switches are parsed locally by ssh. The only remote command
     // probes the forwarded health endpoint before publishing readiness.
     try t.expectEqualStrings("--", argv[argv.len - 3]);
@@ -452,6 +538,7 @@ test "tunnelArgv requests the reverse forward with fast failure" {
     try t.expectEqualStrings("-R" ++ tunnel_spec, argv[argv.len - 4]);
     try t.expect(std.mem.indexOf(u8, argv[argv.len - 1], tunnel_ready_marker) != null);
     try t.expect(std.mem.indexOf(u8, argv[argv.len - 1], "/health") != null);
+    try t.expect(std.mem.indexOf(u8, argv[argv.len - 1], "chmod 700 \"$runtime\"") != null);
     try t.expect(std.mem.indexOf(u8, argv[argv.len - 1], "rm -f \"$lease\" \"$token\"") != null);
     try t.expect(std.mem.indexOf(u8, argv[argv.len - 1], "exit 143' 1 2 15") != null);
     try t.expect(std.mem.indexOf(u8, argv[argv.len - 1], "owner=$PPID") != null);
@@ -473,6 +560,7 @@ test "quiesceArgv removes token and stops both feed watchers" {
     const argv = quiesceArgv(&buf, &scratch, &test_remote).?;
     const command = argv[argv.len - 1];
     try t.expect(std.mem.indexOf(u8, command, "rm -f \"$runtime/update-token\" \"$runtime/tunnel-lease\"") != null);
+    try t.expect(std.mem.indexOf(u8, command, "chmod 700 \"$HOME/.petdex\" \"$runtime\"") != null);
     try t.expect(std.mem.indexOf(u8, command, "codex-watch.pid") != null);
     try t.expect(std.mem.indexOf(u8, command, "hermes-watch.pid") != null);
     try t.expect(std.mem.indexOf(u8, command, "kill \"$old\"") != null);
@@ -482,11 +570,50 @@ test "quiesceArgv removes token and stops both feed watchers" {
 }
 
 test "tunnel supervisor is installed under the runtime directory" {
+    if (builtin.os.tag == .windows) {
+        try t.expect(installTunnelSupervisor("unused"));
+        return;
+    }
     const home = ".zig-cache/petdex-ssh-supervisor-home";
     try t.expect(installTunnelSupervisor(home));
     var bytes: [2048]u8 = undefined;
     const installed = plat.readFile(home ++ "/.petdex/runtime/ssh-tunnel-supervisor.sh", &bytes).?;
     try t.expectEqualStrings(tunnel_supervisor_script, installed);
+}
+
+test "Windows PATH candidates are absolute normalized ssh executables" {
+    var candidate_buf: [512]u8 = undefined;
+    try t.expectEqualStrings(
+        "C:\\Windows\\System32\\OpenSSH\\ssh.exe",
+        windowsSshCandidate(&candidate_buf, "  \"C:\\Windows\\System32\\OpenSSH\\\"  ").?,
+    );
+    try t.expectEqualStrings(
+        "D:/Tools/OpenSSH\\ssh.exe",
+        windowsSshCandidate(&candidate_buf, "D:/Tools/OpenSSH").?,
+    );
+    try t.expect(windowsSshCandidate(&candidate_buf, "") == null);
+    try t.expect(windowsSshCandidate(&candidate_buf, ".\\tools") == null);
+    try t.expect(windowsSshCandidate(candidate_buf[0..8], "C:\\OpenSSH") == null);
+}
+
+test "Windows tunnel argv launches OpenSSH directly without a local shell" {
+    var buf: [max_argv][]const u8 = undefined;
+    var scratch: Scratch = .{};
+    const ssh = "C:\\Windows\\System32\\OpenSSH\\ssh.exe";
+    const argv = tunnelArgvWithSsh(&buf, &scratch, &test_remote, "ignored", 4242, ssh, false).?;
+    try t.expectEqualStrings(ssh, argv[0]);
+    try t.expectEqual(@as(usize, max_argv - 3), argv.len);
+    for (argv) |arg| {
+        try t.expect(!std.mem.eql(u8, arg, "/bin/sh"));
+        try t.expect(std.mem.indexOf(u8, arg, "ssh-tunnel-supervisor") == null);
+    }
+    try t.expectEqualStrings("-oExitOnForwardFailure=yes", argv[argv.len - 5]);
+    try t.expectEqualStrings("-R" ++ tunnel_spec, argv[argv.len - 4]);
+    try t.expectEqualStrings("--", argv[argv.len - 3]);
+    try t.expectEqualStrings(test_remote.host, argv[argv.len - 2]);
+    try t.expect(std.mem.indexOf(u8, argv[argv.len - 1], tunnel_ready_marker) != null);
+    try t.expect(std.mem.indexOf(u8, argv[argv.len - 1], "/health") != null);
+    try t.expect(std.mem.indexOf(u8, argv[argv.len - 1], "while owner_alive") != null);
 }
 
 test "read and write quote remote paths for the remote shell" {
@@ -507,11 +634,12 @@ test "read and write quote remote paths for the remote shell" {
     const app = writeArgv(&buf, &scratch3, &test_remote, remote_opencode_plugin, false, true, false).?;
     try t.expect(std.mem.indexOf(u8, app[app.len - 1], "cat >> \"$tmp\"") != null);
     try t.expect(std.mem.indexOf(u8, app[app.len - 1], "chmod 600 \"$tmp\" && mv -f") != null);
+    try t.expect(std.mem.indexOf(u8, app[app.len - 1], "readlink") != null);
 
     var scratch4: Scratch = .{};
     const exe = writeArgv(&buf, &scratch4, &test_remote, remote_hook_script, true, true, true).?;
     try t.expect(std.mem.indexOf(u8, exe[exe.len - 1], "chmod 755 \"$tmp\" && mv -f") != null);
-    try t.expect(std.mem.indexOf(u8, exe[exe.len - 1], "readlink") != null);
+    try t.expect(std.mem.indexOf(u8, exe[exe.len - 1], "readlink") == null);
 }
 
 test "shQuote escapes embedded quotes instead of trusting the path" {
@@ -530,6 +658,7 @@ test "tokenArgv lands the token 0600 under ~/.petdex" {
     const command = argv[argv.len - 1];
     try t.expect(std.mem.indexOf(u8, command, "update-token.tmp.$$") != null);
     try t.expect(std.mem.indexOf(u8, command, "chmod 600") != null);
+    try t.expect(std.mem.indexOf(u8, command, "chmod 700 \"$HOME/.petdex\" \"$HOME/.petdex/runtime\"") != null);
     try t.expect(std.mem.indexOf(u8, command, "hostname > \"$HOME\"/'.petdex/runtime/remote-host'") != null);
     try t.expect(std.mem.indexOf(u8, command, "mv -f \"$tmp\" \"$HOME\"/'.petdex/runtime/update-token'") != null);
 }
@@ -549,6 +678,7 @@ test "watcherArgv replaces the selected Petdesk watchers and detaches cleanly" {
     try t.expect(std.mem.indexOf(u8, command, "start_one() { p=$1;") != null);
     try t.expect(std.mem.indexOf(u8, command, "kill -0 \"$actual\"") != null);
     try t.expect(std.mem.indexOf(u8, command, "tunnel-lease") != null);
+    try t.expect(std.mem.indexOf(u8, command, "chmod 700 \"$HOME/.petdex\" \"$r\"") != null);
 
     var hermes_scratch: Scratch = .{};
     const hermes = watcherArgv(&buf, &hermes_scratch, &test_remote, false, true).?;
