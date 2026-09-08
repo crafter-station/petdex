@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 function runCli(command: string): { exitCode: number; stderr: string } {
   const result = Bun.spawnSync({
-    cmd: [process.execPath, import.meta.dir + "/petdex.ts", command],
+    cmd: [process.execPath, `${import.meta.dir}/petdex.ts`, command],
     env: { ...process.env, NO_COLOR: "1" },
     stderr: "pipe",
     stdout: "pipe",
