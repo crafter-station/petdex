@@ -41,12 +41,14 @@ on:
       - "packages/petdex-desktop-native/**"
       - "patches/native-sdk-*.patch"
       - "scripts/patch-native-sdk.sh"
+      - "scripts/release-desktop.ts"
       - ".github/workflows/desktop-native-ci.yml"
   pull_request:
     paths:
       - "packages/petdex-desktop-native/**"
       - "patches/native-sdk-*.patch"
       - "scripts/patch-native-sdk.sh"
+      - "scripts/release-desktop.ts"
       - ".github/workflows/desktop-native-ci.yml"
   workflow_dispatch:
 
@@ -100,6 +102,11 @@ jobs:
       - name: Install Bun
         uses: oven-sh/setup-bun@v2
 
+      - name: Install Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
       - name: Test DSH plugin and embedded archive
         if: matrix.platform == 'macos'
         working-directory: packages/petdex-desktop-native/integrations/dsh
@@ -142,7 +149,10 @@ jobs:
           # by default, so every sheet in the catalog (60 of 63 are .webp)
           # fails to decode and the window comes up empty. libwebp alone is
           # not enough: that is the codec, this is the plugin that reaches it.
-          sudo apt-get install -y libgtk-4-dev libx11-dev pkg-config webp-pixbuf-loader
+          sudo apt-get install -y \
+            libgtk-4-dev libx11-dev pkg-config webp-pixbuf-loader \
+            xvfb xcompmgr imagemagick x11-utils x11-xserver-utils xdotool jq \
+            dbus-daemon tesseract-ocr weston
 
       - name: Clone the Native SDK
         # Pinned to the same commit desktop-release.yml uses: the
@@ -194,7 +204,7 @@ jobs:
           # Match the release build: baseline x86-64, so CI exercises
           # the same instruction set users actually get. See the note in
           # desktop-release.yml.
-          "$NATIVE_CLI" build -Dcpu=baseline -Dtrace=off
+          "$NATIVE_CLI" build -Dcpu=baseline -Dtrace=off -Dautomation=true
           ls -lh zig-out/bin/
 
       - name: Verify native hook exits without stdin EOF
@@ -222,6 +232,11 @@ jobs:
         run: |
           "$NATIVE_CLI" test .
 
+      - name: Test journal rotation across processes
+        working-directory: packages/petdex-desktop-native
+        shell: bash
+        run: bun tests/journal_process_check.mjs
+
       - name: Test remote helper runtimes
         if: matrix.platform != 'windows'
         working-directory: packages/petdex-desktop-native
@@ -243,67 +258,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p ~/.petdex/pets/ci-pet
-          # Read the compact v2 manifest instead of the retired install-pet
-          # route. This keeps the fixture on the same public contract as
-          # the CLI and fails clearly when the catalog itself is unavailable.
-          {
-            read -r SPRITE_URL
-            read -r SPRITE_VERSION
-            read -r SPRITE_EXT
-          } < <(bun -e '
-            const response = await fetch("https://petdex.dev/api/manifest/v2");
-            if (!response.ok) throw new Error(`manifest ${response.status}`);
-            const manifest = await response.json();
-            const fields = Object.fromEntries(manifest.fields.map((name, index) => [name, index]));
-            const row = manifest.pets.find((pet) => {
-              const sprite = String(pet[fields.spritesheet] ?? "").split("?", 1)[0].toLowerCase();
-              return Number(pet[fields.spriteVersionNumber]) === 2 && sprite.endsWith(".png");
-            });
-            if (!row) throw new Error("manifest has no v2 PNG fixture");
-            const sprite = new URL(row[fields.spritesheet], manifest.assetBase);
-            if (sprite.protocol !== "https:" || sprite.hostname !== "assets.petdex.dev") throw new Error("untrusted sprite host");
-            console.log(sprite.href);
-            console.log(row[fields.spriteVersionNumber]);
-            console.log("png");
-          ')
-          SPRITE_PATH="$HOME/.petdex/pets/ci-pet/spritesheet.$SPRITE_EXT"
-          curl -fsSL -o "$SPRITE_PATH" "$SPRITE_URL"
-          printf '{"id":"ci-pet","displayName":"CI Pet","description":"ci","spriteVersionNumber":%s,"spritesheetPath":"spritesheet.%s"}' \
-            "$SPRITE_VERSION" "$SPRITE_EXT" > ~/.petdex/pets/ci-pet/pet.json
+          # Generate a fixed v2 atlas locally before runtime isolation. The
+          # desktop smoke has no catalog/CDN dependency and compares the same
+          # pixels on every run.
+          python3 packages/petdex-desktop-native/tests/linux_smoke_fixture.py --self-test
+          python3 packages/petdex-desktop-native/tests/linux_smoke_fixture.py \
+            --dest ~/.petdex/pets/ci-pet
           ls -lh ~/.petdex/pets/ci-pet/
 
       - name: Install a pet (Windows)
         # PowerShell, not bash: git-bash's `~` is not $env:USERPROFILE on
-        # this runner, so the bash version wrote the pet somewhere the
-        # app never looks and the app reported NoPetInstalled with the
-        # files sitting right there.
+        # this runner. Generate the same local fixture as Linux so catalog
+        # and CDN changes cannot make the Windows smoke flaky.
         if: matrix.platform == 'windows'
         shell: pwsh
         run: |
           $dir = "$env:USERPROFILE\.petdex\pets\ci-pet"
-          New-Item -ItemType Directory -Force -Path $dir | Out-Null
-          # Keep Windows on the same compact v2 manifest contract as Unix;
-          # the old /api/install-pet route is no longer a reliable fixture.
-          $manifest = Invoke-RestMethod -Uri "https://petdex.dev/api/manifest/v2"
-          $fields = @{}
-          for ($i = 0; $i -lt $manifest.fields.Count; $i++) { $fields[[string]$manifest.fields[$i]] = $i }
-          $row = @($manifest.pets | Where-Object {
-            $path = ([string]$_[$fields["spritesheet"]]).Split("?", 2)[0].ToLowerInvariant()
-            [int]$_[$fields["spriteVersionNumber"]] -eq 2 -and $path.EndsWith(".png")
-          } | Select-Object -First 1)
-          if ($row.Count -eq 0) { throw "manifest has no v2 PNG fixture" }
-          $sprite = [Uri]::new([Uri]$manifest.assetBase, [string]$row[0][$fields["spritesheet"]])
-          if ($sprite.Scheme -ne "https" -or $sprite.Host -ne "assets.petdex.dev") { throw "untrusted sprite host" }
-          $ext = "png"
-          Invoke-WebRequest -Uri $sprite.AbsoluteUri -OutFile "$dir\spritesheet.png"
-          [ordered]@{
-            id = "ci-pet"
-            displayName = "CI Pet"
-            description = "ci"
-            spriteVersionNumber = [int]$row[0][$fields["spriteVersionNumber"]]
-            spritesheetPath = "spritesheet.$ext"
-          } | ConvertTo-Json -Compress | Set-Content -Path "$dir\pet.json" -NoNewline
+          python packages/petdex-desktop-native/tests/linux_smoke_fixture.py --dest $dir
+          if ($LASTEXITCODE -ne 0) { throw "fixture generator failed" }
           Get-ChildItem $dir | Select-Object Name, Length | Format-Table -AutoSize
 
       - name: Exercise managed Herdr plugin (macOS)
@@ -324,74 +296,39 @@ jobs:
           kill "$APP_PID" || true
           wait "$APP_PID" 2>/dev/null || true
 
-      - name: Run and exercise the hook server (Linux)
+      - name: Run Linux desktop interaction and performance smoke
         if: matrix.platform == 'linux'
         shell: bash
         working-directory: packages/petdex-desktop-native
         run: |
           set -euo pipefail
-          sudo apt-get install -y xvfb imagemagick x11-utils
-          # Xvfb gives the GTK host a real display to draw into; without
-          # one the app has nothing to present to and the screenshot
-          # would prove nothing.
-          export DISPLAY=:99
-          Xvfb :99 -screen 0 1280x800x24 &
-          sleep 3
-          PETDEX_PET=ci-pet ./zig-out/bin/petdex-desktop-native > run.log 2>&1 &
-          APP_PID=$!
-          sleep 10
-          kill -0 "$APP_PID" || { echo "app died"; cat run.log; exit 1; }
-          for _ in $(seq 1 60); do
-            test -s "$HOME/.petdex/runtime/update-token" && break
-            kill -0 "$APP_PID" || { echo "app died"; cat run.log; exit 1; }
-            sleep 1
-          done
-          test -s ~/.petdex/runtime/update-token || { cat run.log; exit 1; }
-          TOKEN=$(cat ~/.petdex/runtime/update-token)
-          bun run integrations/herdr/managed-smoke.ts action
-          curl -fsS -X POST -H "x-petdex-update-token: $TOKEN" \
-            -H "Content-Type: application/json" -d '{"state":"running"}' \
-            http://127.0.0.1:7777/state
-          echo
-          curl -fsS http://127.0.0.1:7777/state
-          echo
-          import -window root /tmp/linux-screen.png
-          # The first run drew a titled window with a blank interior:
-          # frames present, the sheet decodes, nothing paints. These
-          # narrow it down. GTK's renderer matters because the default
-          # picks GL, which has no driver under Xvfb; the cairo fallback
-          # says whether that is the reason.
-          echo "=== window tree ==="
-          xwininfo -root -tree | head -20 || true
-          echo "=== app log (full) ==="
-          cat run.log
-          kill "$APP_PID" || true
-          wait "$APP_PID" 2>/dev/null || true
-          sleep 2
-          echo "=== retry with the cairo renderer ==="
-          # The hook server intentionally disables address reuse so a stale
-          # process cannot silently replace the active token owner. Wait for
-          # the kernel to release 7777 before the diagnostic retry; otherwise
-          # the retry only tests a UI that never started its hook server.
-          port_is_free() {
-            python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 7777)); s.close()' 2>/dev/null
-          }
-          for _ in $(seq 1 60); do
-            port_is_free && break
-            sleep 1
-          done
-          port_is_free || {
-            echo "FAIL: hook server endpoint remained unavailable before Cairo retry"
-            command -v ss >/dev/null 2>&1 && ss -ltnp '( sport = :7777 )' || true
-            exit 1
-          }
-          GSK_RENDERER=cairo PETDEX_PET=ci-pet ./zig-out/bin/petdex-desktop-native > cairo.log 2>&1 &
-          CAIRO_PID=$!
-          sleep 10
-          import -window root /tmp/linux-screen-cairo.png || true
-          kill "$CAIRO_PID" || true
-          wait "$CAIRO_PID" 2>/dev/null || true
-          tail -20 cairo.log
+          sh tests/linux_desktop_smoke.sh --self-test
+          sh tests/linux_desktop_smoke.sh \
+            --scenario idle \
+            --artifacts .zig-cache/ci-linux-smoke/idle \
+            --fixture "$HOME/.petdex/pets/ci-pet"
+          sh tests/linux_desktop_smoke.sh \
+            --scenario bubble \
+            --artifacts .zig-cache/ci-linux-smoke/bubble \
+            --fixture "$HOME/.petdex/pets/ci-pet"
+          sh tests/linux_desktop_smoke.sh \
+            --scenario interaction \
+            --artifacts .zig-cache/ci-linux-smoke/interaction \
+            --fixture "$HOME/.petdex/pets/ci-pet"
+          sh tests/linux_desktop_smoke.sh \
+            --scenario interaction \
+            --gdk-scale 2 \
+            --artifacts .zig-cache/ci-linux-smoke/x11-scale-2 \
+            --fixture "$HOME/.petdex/pets/ci-pet"
+          sh tests/linux_wayland_smoke.sh --self-test
+          sh tests/linux_wayland_smoke.sh \
+            --artifacts .zig-cache/ci-linux-smoke/wayland \
+            --fixture "$HOME/.petdex/pets/ci-pet" \
+            --native-cli "$NATIVE_CLI"
+          sh tests/linux_perf_smoke.sh \
+            --quick \
+            --artifacts .zig-cache/ci-linux-smoke/perf \
+            --fixture "$HOME/.petdex/pets/ci-pet"
 
       # Deep links were verified by hand on macOS only. GTK's ::open path
       # and Win32's argv path shipped with the SDK commit above carrying an
@@ -585,23 +522,26 @@ jobs:
           # APP_PID out here is an unbound variable, and under set -u that
           # failed the step after every assertion had already passed.
 
-      - name: Run and exercise the hook server (Windows)
+      - name: Run Windows desktop and hook smoke
         if: matrix.platform == 'windows'
         shell: pwsh
         working-directory: packages/petdex-desktop-native
         run: |
-          # Everything diagnostic runs before anything that can throw.
-          # The first version put the log dump after the token read, so
-          # a missing token killed the step and the app's own output
-          # never reached the log, leaving nothing to diagnose.
-          $ErrorActionPreference = "Continue"
+          # Strict errors prevent a dead process or failed HTTP request from
+          # producing a green smoke result. The finally block still reaps both
+          # processes when any assertion fails.
+          $ErrorActionPreference = "Stop"
           $env:PETDEX_PET = "ci-pet"
-          $app = Start-Process -FilePath ".\zig-out\bin\petdex-desktop-native.exe" `
-            -RedirectStandardOutput run.log -RedirectStandardError run.err -PassThru
+          $app = $null
+          $herdrServer = $null
+          try {
+            $app = Start-Process -FilePath ".\zig-out\bin\petdex-desktop-native.exe" `
+              -RedirectStandardOutput run.log -RedirectStandardError run.err -PassThru
           Start-Sleep -Seconds 12
 
           "=== process ==="
-          if ($app.HasExited) { "EXITED, code $($app.ExitCode)" } else { "alive, pid $($app.Id)" }
+          if ($app.HasExited) { throw "desktop exited before smoke probes, code $($app.ExitCode)" }
+          "alive, pid $($app.Id)"
 
           "=== stdout ==="; Get-Content run.log -ErrorAction SilentlyContinue
           "=== stderr ==="; Get-Content run.err -ErrorAction SilentlyContinue
@@ -611,8 +551,13 @@ jobs:
             Select-Object -First 40 FullName, Length | Format-Table -AutoSize
 
           "=== listening on 7777 ==="
-          Get-NetTCPConnection -LocalPort 7777 -State Listen -ErrorAction SilentlyContinue |
-            Select-Object LocalAddress, OwningProcess | Format-Table -AutoSize
+          $listener = Get-NetTCPConnection -LocalPort 7777 -State Listen -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if ($null -eq $listener) { throw "desktop did not bind port 7777" }
+          if ($listener.OwningProcess -ne $app.Id) {
+            throw "port 7777 belongs to PID $($listener.OwningProcess), expected $($app.Id)"
+          }
+          $listener | Select-Object LocalAddress, OwningProcess | Format-Table -AutoSize
 
           "=== titled windows ==="
           Get-Process | Where-Object { $_.MainWindowTitle } |
@@ -626,13 +571,44 @@ jobs:
           $g = [System.Drawing.Graphics]::FromImage($bmp)
           $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
           $bmp.Save("$env:RUNNER_TEMP\windows-screen.png")
+          $g.Dispose()
+          $bmp.Dispose()
           "screenshot saved"
 
           $tokenPath = "$env:USERPROFILE\.petdex\runtime\update-token"
           if (Test-Path $tokenPath) {
             $token = Get-Content $tokenPath -Raw
             "=== pre-Herdr health probe ==="
-            Invoke-RestMethod -Uri "http://127.0.0.1:7777/health" | ConvertTo-Json -Compress
+            $health = Invoke-RestMethod -Uri "http://127.0.0.1:7777/health"
+            if (-not $health.ok) { throw "health probe did not report ok" }
+            $health | ConvertTo-Json -Compress
+            $whoami = Invoke-RestMethod -Uri "http://127.0.0.1:7777/whoami"
+            if ($whoami.pid -ne $app.Id) {
+              throw "whoami PID $($whoami.pid) did not match launched PID $($app.Id)"
+            }
+            $whoami | ConvertTo-Json -Compress
+            "=== stalled-request deadline and recovery ==="
+            $slow = [System.Net.Sockets.TcpClient]::new()
+            $slow.ReceiveTimeout = 6000
+            $clock = [System.Diagnostics.Stopwatch]::StartNew()
+            try {
+              $slow.Connect("127.0.0.1", 7777)
+              $slowStream = $slow.GetStream()
+              $partial = [System.Text.Encoding]::ASCII.GetBytes("POST /state HTTP/1.1`r`nContent-Length: 32`r`n")
+              $slowStream.Write($partial, 0, $partial.Length)
+              $discard = New-Object byte[] 512
+              try { $null = $slowStream.Read($discard, 0, $discard.Length) } catch [System.IO.IOException] {}
+            } finally {
+              $clock.Stop()
+              $slow.Dispose()
+            }
+            if ($clock.ElapsedMilliseconds -lt 1000 -or $clock.ElapsedMilliseconds -gt 5500) {
+              throw "stalled request closed outside deadline window: $($clock.ElapsedMilliseconds) ms"
+            }
+            if ($app.HasExited) { throw "desktop exited while expiring a stalled request" }
+            $afterTimeout = Invoke-RestMethod -Uri "http://127.0.0.1:7777/health"
+            if (-not $afterTimeout.ok) { throw "health failed after stalled request" }
+            $afterTimeout | ConvertTo-Json -Compress
             "=== pre-Herdr stderr ==="
             Get-Content run.err -ErrorAction SilentlyContinue
             $herdrServer = Start-Process -FilePath (Get-Command herdr).Source `
@@ -656,27 +632,223 @@ jobs:
             "=== Herdr plugin logs ==="
             herdr plugin log list --plugin dev.petdex.bridge --limit 20
             "=== hook round trip ==="
-            Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:7777/state" `
+            $posted = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:7777/state" `
               -Headers @{ "x-petdex-update-token" = $token } `
-              -ContentType "application/json" -Body '{"state":"running"}' | ConvertTo-Json -Compress
-            Invoke-RestMethod -Uri "http://127.0.0.1:7777/state" | ConvertTo-Json -Compress
+              -ContentType "application/json" -Body '{"state":"running"}'
+            if (-not $posted.ok) { throw "state update was not accepted" }
+            $posted | ConvertTo-Json -Compress
+            $state = Invoke-RestMethod -Uri "http://127.0.0.1:7777/state"
+            if ($state.state -ne "running") { throw "state round trip did not persist running" }
+            $state | ConvertTo-Json -Compress
+            "=== real Win32 mouse input regression (#703) ==="
+            & tests/windows_input_smoke.ps1 `
+              -ProcessId $app.Id `
+              -Token $token `
+              -ArtifactsDirectory $env:RUNNER_TEMP
+            "=== rounded overlay pixel assertion ==="
+            Add-Type -AssemblyName UIAutomationClient
+            function Find-PetdexUiaElement {
+              param([string]$Name)
+              try {
+                $rootElement = [System.Windows.Automation.AutomationElement]::RootElement
+                $processCondition = New-Object System.Windows.Automation.PropertyCondition(
+                  [System.Windows.Automation.AutomationElement]::ProcessIdProperty,
+                  $app.Id)
+                $elements = $rootElement.FindAll(
+                  [System.Windows.Automation.TreeScope]::Descendants,
+                  $processCondition)
+                for ($index = 0; $index -lt $elements.Count; $index++) {
+                  $candidate = $elements.Item($index)
+                  if ($candidate.Current.Name -eq $Name) { return $candidate }
+                }
+              } catch [System.Windows.Automation.ElementNotAvailableException] {}
+              return $null
+            }
+            function Wait-PetdexUiaElement {
+              param([string]$Name, [AllowNull()][string]$HelpText = $null)
+              # A [string] parameter coerces an omitted $null default to an
+              # empty string. Track whether the caller supplied HelpText so
+              # card lookups match any value while disclosure lookups still
+              # wait for one exact state.
+              $matchAnyHelpText = -not $PSBoundParameters.ContainsKey("HelpText")
+              for ($attempt = 0; $attempt -lt 80; $attempt++) {
+                $candidate = Find-PetdexUiaElement -Name $Name
+                if ($null -ne $candidate) {
+                  try {
+                    if ($matchAnyHelpText -or $candidate.Current.HelpText -eq $HelpText) {
+                      return $candidate
+                    }
+                  } catch [System.Windows.Automation.ElementNotAvailableException] {}
+                }
+                Start-Sleep -Milliseconds 100
+              }
+              if ($matchAnyHelpText) { throw "UIA omitted $Name" }
+              throw "UIA $Name did not reach '$HelpText'"
+            }
+            function Toggle-PetdexDisclosure {
+              param([string]$From, [string]$To)
+              $element = Wait-PetdexUiaElement -Name "Show or hide agent sessions" -HelpText $From
+              $pattern = $element.GetCurrentPattern(
+                [System.Windows.Automation.TogglePattern]::Pattern)
+              $pattern.Toggle()
+              return Wait-PetdexUiaElement -Name "Show or hide agent sessions" -HelpText $To
+            }
+
+            # Herdr leaves an active card in the stack. Hide it before taking
+            # the baseline; otherwise the new card replaces the same painted
+            # pixels and a valid rounded center has a zero before/after delta.
+            $disclosureElement = Toggle-PetdexDisclosure `
+              -From "All sessions shown" -To "Recent sessions shown"
+            $disclosureElement = Toggle-PetdexDisclosure `
+              -From "Recent sessions shown" -To "Sessions hidden"
+            Start-Sleep -Milliseconds 500
+            # The real-input probe can foreground the originating application.
+            # Capture the corner baseline after that focus change so transparent
+            # overlay pixels are compared with the same background underneath,
+            # and after the existing native card windows have been hidden.
+            $beforeBubbleBitmap = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+            $beforeBubbleGraphics = [System.Drawing.Graphics]::FromImage($beforeBubbleBitmap)
+            $beforeBubbleGraphics.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+            $beforeBubbleBitmap.Save("$env:RUNNER_TEMP\windows-bubble-before.png")
+            $beforeBubbleGraphics.Dispose()
+            $beforeBubbleBitmap.Dispose()
+            $bubbleRequest = @{
+              session_id = "windows-rounded-corner-ci"
+              title = "Rounded corner CI"
+              text = "Inspecting native overlay corners"
+              status = "running"
+              remote = $false
+            } | ConvertTo-Json -Compress
+            $bubbleReply = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:7777/bubble" `
+              -Headers @{ "x-petdex-update-token" = $token } `
+              -ContentType "application/json" -Body $bubbleRequest
+            if (-not $bubbleReply.ok) { throw "rounded-corner bubble was not accepted" }
+
+            $disclosureElement = Toggle-PetdexDisclosure `
+              -From "Sessions hidden" -To "All sessions shown"
+
+            # Query the native UIA fragment, not the portable canvas snapshot:
+            # Windows cards are real overlay HWNDs and intentionally do not
+            # duplicate themselves into the canvas semantics tree.
+            $cardElement = Wait-PetdexUiaElement -Name "Agent session: Rounded corner CI"
+            $disclosureElement = Wait-PetdexUiaElement `
+              -Name "Show or hide agent sessions" -HelpText "All sessions shown"
+            $cardBounds = $cardElement.Current.BoundingRectangle
+            $left = [int][Math]::Round($cardBounds.Left)
+            $top = [int][Math]::Round($cardBounds.Top)
+            $width = [int][Math]::Round($cardBounds.Width)
+            $height = [int][Math]::Round($cardBounds.Height)
+            if ($width -lt 20 -or $height -lt 20) { throw "invalid rounded card bounds ${width}x${height}" }
+
+            Start-Sleep -Milliseconds 500
+            $bubbleBitmap = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+            $bubbleGraphics = [System.Drawing.Graphics]::FromImage($bubbleBitmap)
+            $bubbleGraphics.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+            $bubbleBitmap.Save("$env:RUNNER_TEMP\windows-bubble.png")
+            $bubbleGraphics.Dispose()
+            $bubbleBitmap.Dispose()
+
+            $before = [System.Drawing.Bitmap]::FromFile("$env:RUNNER_TEMP\windows-bubble-before.png")
+            $after = [System.Drawing.Bitmap]::FromFile("$env:RUNNER_TEMP\windows-bubble.png")
+            try {
+              $points = @(
+                [System.Drawing.Point]::new($left + 1, $top + 1)
+                [System.Drawing.Point]::new($left + $width - 2, $top + 1)
+                [System.Drawing.Point]::new($left + 1, $top + $height - 2)
+                [System.Drawing.Point]::new($left + $width - 2, $top + $height - 2)
+              )
+              $cornerDeltas = @()
+              foreach ($point in $points) {
+                $old = $before.GetPixel($point.X, $point.Y)
+                $new = $after.GetPixel($point.X, $point.Y)
+                $delta = [Math]::Abs($old.R - $new.R) + [Math]::Abs($old.G - $new.G) + [Math]::Abs($old.B - $new.B)
+                $cornerDeltas += $delta
+                if ($delta -gt 50) { throw "square corner leakage at $($point.X),$($point.Y); RGB delta $delta" }
+              }
+              $centerX = $left + [int]($width / 2)
+              $centerY = $top + [int]($height / 2)
+              $oldCenter = $before.GetPixel($centerX, $centerY)
+              $newCenter = $after.GetPixel($centerX, $centerY)
+              $centerDelta = [Math]::Abs($oldCenter.R - $newCenter.R) + [Math]::Abs($oldCenter.G - $newCenter.G) + [Math]::Abs($oldCenter.B - $newCenter.B)
+              if ($centerDelta -lt 25) { throw "rounded overlay did not paint its center; RGB delta $centerDelta" }
+              @{
+                bounds = @($left, $top, $width, $height)
+                cornerDeltas = $cornerDeltas
+                centerDelta = $centerDelta
+              } | ConvertTo-Json -Compress | Set-Content "$env:RUNNER_TEMP\windows-rounded-corners.json"
+            } finally {
+              $before.Dispose()
+              $after.Dispose()
+            }
+
+            "=== UIA nonactivating Toggle ==="
+            Add-Type @'
+            using System;
+            using System.Runtime.InteropServices;
+            public static class PetdexCiForeground {
+              [DllImport("user32.dll")]
+              public static extern IntPtr GetForegroundWindow();
+            }
+          '@
+            $foregroundBefore = [PetdexCiForeground]::GetForegroundWindow()
+            $toggle = $disclosureElement.GetCurrentPattern(
+              [System.Windows.Automation.TogglePattern]::Pattern)
+            if ($disclosureElement.Current.HelpText -ne "All sessions shown") {
+              throw "unexpected initial UIA disclosure value: $($disclosureElement.Current.HelpText)"
+            }
+            $toggle.Toggle()
+            $disclosureElement = Wait-PetdexUiaElement `
+              -Name "Show or hide agent sessions" -HelpText "Recent sessions shown"
+            $toggle = $disclosureElement.GetCurrentPattern(
+              [System.Windows.Automation.TogglePattern]::Pattern)
+            $toggle.Toggle()
+            $disclosureElement = Wait-PetdexUiaElement `
+              -Name "Show or hide agent sessions" -HelpText "Sessions hidden"
+            $toggle = $disclosureElement.GetCurrentPattern(
+              [System.Windows.Automation.TogglePattern]::Pattern)
+            if ($disclosureElement.Current.HelpText -ne "Sessions hidden" -or
+                $toggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::Off) {
+              throw "UIA Toggle did not advance Recent to Hidden/Off"
+            }
+            $toggle.Toggle()
+            $disclosureElement = Wait-PetdexUiaElement `
+              -Name "Show or hide agent sessions" -HelpText "All sessions shown"
+            $toggle = $disclosureElement.GetCurrentPattern(
+              [System.Windows.Automation.TogglePattern]::Pattern)
+            if ($disclosureElement.Current.HelpText -ne "All sessions shown" -or
+                $toggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::On) {
+              throw "UIA Toggle did not restore Hidden to All/On"
+            }
+            $foregroundAfter = [PetdexCiForeground]::GetForegroundWindow()
+            if ($foregroundAfter -ne $foregroundBefore) { throw "UIA Toggle stole foreground focus" }
+            @(
+              "All -> Recent -> Hidden -> All: PASS",
+              "Foreground unchanged: PASS"
+            ) | Set-Content "$env:RUNNER_TEMP\windows-uia-toggle.txt"
             "=== runtime mirrors after requests ==="
             Get-Content "$env:USERPROFILE\.petdex\runtime\state.json" -ErrorAction SilentlyContinue
             Get-Content "$env:USERPROFILE\.petdex\runtime\bubble.json" -ErrorAction SilentlyContinue
             "=== stderr after requests ==="
             Get-Content run.err -ErrorAction SilentlyContinue
             "=== process after requests ==="
-            if ($app.HasExited) { "EXITED, code $($app.ExitCode)" } else { "alive, pid $($app.Id)" }
+            if ($app.HasExited) { throw "desktop exited during hook round trip, code $($app.ExitCode)" }
+            "alive, pid $($app.Id)"
             herdr server stop
             $herdrServer.WaitForExit(10000) | Out-Null
             if ($bridgeExit -ne 0) { throw "managed Herdr action failed" }
           } else {
-            "NO TOKEN at $tokenPath"
+            throw "token was never written: $tokenPath"
           }
 
-          Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue
-          $app.WaitForExit(10000) | Out-Null
-          if (-not (Test-Path $tokenPath)) { throw "token was never written" }
+          } finally {
+            if ($null -ne $herdrServer -and -not $herdrServer.HasExited) {
+              herdr server stop 2>$null
+              Stop-Process -Id $herdrServer.Id -Force -ErrorAction SilentlyContinue
+            }
+            if ($null -ne $app -and -not $app.HasExited) {
+              Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue
+            }
+          }
 
       - name: Fire a real deep link (Windows)
         if: matrix.platform == 'windows' && steps.capabilities.outputs.run_deeplink == 'true'
@@ -1178,8 +1350,12 @@ jobs:
         with:
           name: screen-linux
           path: |
-            /tmp/linux-screen.png
-            /tmp/linux-screen-cairo.png
+            packages/petdex-desktop-native/.zig-cache/ci-linux-smoke/idle/
+            packages/petdex-desktop-native/.zig-cache/ci-linux-smoke/bubble/
+            packages/petdex-desktop-native/.zig-cache/ci-linux-smoke/interaction/
+            packages/petdex-desktop-native/.zig-cache/ci-linux-smoke/x11-scale-2/
+            packages/petdex-desktop-native/.zig-cache/ci-linux-smoke/wayland/
+            packages/petdex-desktop-native/.zig-cache/ci-linux-smoke/perf/
             /tmp/linux-screen-deeplink.png
             packages/petdex-desktop-native/before.png
             packages/petdex-desktop-native/after1.png
@@ -1188,7 +1364,7 @@ jobs:
             packages/petdex-desktop-native/menu-closed.png
             packages/petdex-desktop-native/drag-before.png
             packages/petdex-desktop-native/drag-after.png
-          if-no-files-found: ignore
+          if-no-files-found: warn
 
       - name: Upload Windows screenshots
         if: always() && matrix.platform == 'windows'
@@ -1197,6 +1373,13 @@ jobs:
           name: screen-windows
           path: |
             ${{ runner.temp }}/windows-screen.png
+            ${{ runner.temp }}/windows-bubble-before.png
+            ${{ runner.temp }}/windows-bubble.png
+            ${{ runner.temp }}/windows-rounded-corners.json
+            ${{ runner.temp }}/windows-uia-toggle.txt
+            ${{ runner.temp }}/windows-input-before.png
+            ${{ runner.temp }}/windows-input-left-click.png
+            ${{ runner.temp }}/windows-input-smoke.json
             ${{ runner.temp }}/windows-screen-deeplink.png
             packages/petdex-desktop-native/before.png
             packages/petdex-desktop-native/after1.png

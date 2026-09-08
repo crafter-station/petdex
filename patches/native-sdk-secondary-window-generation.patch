@@ -1,0 +1,279 @@
+diff --git a/src/runtime/ui_app.zig b/src/runtime/ui_app.zig
+index bedf1c3..557a7a0 100644
+--- a/src/runtime/ui_app.zig
++++ b/src/runtime/ui_app.zig
+@@ -67,6 +67,14 @@ pub const reach_end_rearm_ratio: f32 = 1.5;
+ pub const reach_start_fire_ratio: f32 = 1.0;
+ pub const reach_start_rearm_ratio: f32 = 1.5;
+
++/// Decide whether a model-declared secondary window needs another view build.
++/// Generation zero preserves the original always-rebuild contract. Apps with
++/// an expensive, independently-invalidated companion surface can opt into a
++/// non-zero generation and advance it only when that surface's content changes.
++pub fn windowContentGenerationRequiresRebuild(installed: bool, requested: u64, built_generation: u64) bool {
++    return !installed or requested == 0 or requested != built_generation;
++}
++
+ /// A correction of at least this many points (the anchor-preserving
+ /// offset delta a variable-extent window left pending after the measure
+ /// step) earns the one coverage-style retry build, so the first
+@@ -275,6 +283,12 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
+             /// unique across the app — distinct from the main
+             /// `canvas_label` and every other descriptor's.
+             canvas_label: []const u8,
++            /// Optional content generation for independently-invalidated
++            /// companion surfaces. Zero keeps the legacy behavior and
++            /// rebuilds this window after every dispatched Msg. A non-zero
++            /// value rebuilds only when it differs from the last successful
++            /// view build; install, resize, and scale changes still rebuild.
++            content_generation: u64 = 0,
+             /// Window title, applied at creation (the platform window
+             /// channel has no retitle; re-create under a new label for a
+             /// different title).
+@@ -679,8 +693,11 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
+             windows_fn: ?*const fn (model: *const ModelT, scratch: *WindowsScratch) []const WindowDescriptor = null,
+             /// Per-window view for declared secondary windows, keyed by
+             /// the descriptor's window label — the `view` seam with the
+-            /// window identity alongside. Rebuilt for every open window
+-            /// on every dispatched Msg. Markup deliberately binds ONE
++            /// window identity alongside. Generation-zero descriptors are
++            /// rebuilt on every dispatched Msg; a non-zero
++            /// `content_generation` opts that window into rebuilding only
++            /// when the value advances (plus install, resize, scale, and
++            /// runtime-owned forced rebuilds). Markup deliberately binds ONE
+             /// window's content (the main canvas): there is no `window`
+             /// element in the closed grammar because windows are shell
+             /// concerns, not view-tree concerns — a markup-authored
+@@ -722,6 +736,8 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
+             window_id: platform.WindowId = 0,
+             on_close: ?MsgT = null,
+             installed: bool = false,
++            requested_content_generation: u64 = 0,
++            built_content_generation: u64 = 0,
+             canvas_size: geometry.SizeF = .{ .width = 1, .height = 1 },
+             popup_anchor_x: f32 = 0,
+             popup_anchor_y: f32 = 0,
+@@ -1166,7 +1182,7 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
+             // used to cost a full view build on the launch path.
+             if (!self.installed) return;
+             try self.rebuild(runtime, self.canvas_window_id);
+-            try self.rebuildWindowSlots(runtime);
++            try self.rebuildWindowSlots(runtime, false);
+             // A Msg dispatched FROM a secondary window still rebuilt the
+             // main canvas above (one model, every window's view derives
+             // from it); `window_id` names the dispatch origin for apps
+@@ -1203,7 +1219,7 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
+             self.publishAudioState(runtime);
+             if (dispatched) {
+                 try self.rebuild(runtime, self.canvas_window_id);
+-                try self.rebuildWindowSlots(runtime);
++                try self.rebuildWindowSlots(runtime, false);
+             }
+         }
+
+@@ -1852,6 +1868,7 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
+                     // Already live: the close Msg follows the model.
+                     const slot = &self.window_slots[slot_index];
+                     slot.on_close = descriptor.on_close;
++                    slot.requested_content_generation = descriptor.content_generation;
+                     if (descriptor.popup_parent != null) {
+                         const anchor_x = descriptor.x orelse 0;
+                         const anchor_y = descriptor.y orelse 0;
+@@ -1861,6 +1878,14 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
+                             slot.popup_anchor_x != anchor_x or
+                             slot.popup_anchor_y != anchor_y)
+                         {
++                            // A descriptor-driven size change alters the view
++                            // bounds even when app content is unchanged. Mark
++                            // an opted-in generation stale so the post-reconcile
++                            // slot pass lays out against the new dimensions.
++                            if (!slot.is_popup or
++                                slot.canvas_size.width != descriptor.width or
++                                slot.canvas_size.height != descriptor.height)
++                                slot.built_content_generation = 0;
+                             runtime.options.platform.services.updatePopupWindow(
+                                 slot.window_id,
+                                 descriptor.width,
+@@ -1976,6 +1993,8 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
+             slot.window_id = info.id;
+             slot.on_close = descriptor.on_close;
+             slot.installed = false;
++            slot.requested_content_generation = descriptor.content_generation;
++            slot.built_content_generation = 0;
+             slot.canvas_size = .{ .width = descriptor.width, .height = descriptor.height };
+             slot.popup_anchor_x = descriptor.x orelse 0;
+             slot.popup_anchor_y = descriptor.y orelse 0;
+@@ -2051,19 +2070,26 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
+             return on_close;
+         }
+
+-        /// Rebuild every installed secondary window's tree from the
+-        /// model — every dispatched Msg funnels through here after the
+-        /// main rebuild, so all open windows always render the same
+-        /// model generation.
+-        fn rebuildWindowSlots(self: *Self, runtime: *Runtime) anyerror!void {
++        /// Rebuild installed secondary windows whose declared content
++        /// generation changed. Generation zero preserves the legacy contract
++        /// where every dispatched Msg rebuilds every open window.
++        fn rebuildWindowSlots(self: *Self, runtime: *Runtime, force: bool) anyerror!void {
+             for (self.window_slots[0..self.window_slot_count]) |*slot| {
+                 if (!slot.installed) continue;
++                if (!force and !windowContentGenerationRequiresRebuild(
++                    slot.installed,
++                    slot.requested_content_generation,
++                    slot.built_content_generation,
++                )) continue;
+                 try self.rebuildWindowSlot(runtime, slot);
+             }
+         }
+
+         fn rebuildWindowSlot(self: *Self, runtime: *Runtime, slot: *WindowSlot) anyerror!void {
+-            if (self.options.window_view == null) return;
++            if (self.options.window_view == null) {
++                slot.built_content_generation = slot.requested_content_generation;
++                return;
++            }
+             var tokens = runtime.tokensWithTextMeasure(self.slotEffectiveTokens(slot));
+             const next_index = slot.arena_index ^ 1;
+             const bounds = geometry.RectF.fromSize(slot.canvas_size).deflate(runtime.viewportInsetsForWindow(slot.window_id));
+@@ -2086,6 +2112,7 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
+             }
+             slot.tree = tree;
+             slot.arena_index = next_index;
++            slot.built_content_generation = slot.requested_content_generation;
+             // Same close-on-vanish rule as the main canvas rebuild.
+             if (self.contextMenuFallbackTargetForLabel(slot.canvasLabel()) != 0 and tree.context_menu_fallback == null) {
+                 self.clearContextMenuFallback();
+@@ -3623,7 +3650,7 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
+         fn rebuildAllViews(self: *Self, runtime: *Runtime) anyerror!void {
+             if (!self.installed) return;
+             try self.rebuild(runtime, self.canvas_window_id);
+-            try self.rebuildWindowSlots(runtime);
++            try self.rebuildWindowSlots(runtime, true);
+         }
+
+         /// A pointer press or keyboard activation resolved to one of the
+diff --git a/src/runtime/ui_app_window_tests.zig b/src/runtime/ui_app_window_tests.zig
+index c64caed..154a50b 100644
+--- a/src/runtime/ui_app_window_tests.zig
++++ b/src/runtime/ui_app_window_tests.zig
+@@ -18,10 +18,18 @@ const canvas_label = "panel-canvas";
+ const settings_canvas_label = "settings-canvas";
+ const settings_window_label = "settings";
+
++test "secondary window content generations preserve legacy rebuilds and skip settled opt-in windows" {
++    try std.testing.expect(ui_app_model.windowContentGenerationRequiresRebuild(false, 7, 7));
++    try std.testing.expect(ui_app_model.windowContentGenerationRequiresRebuild(true, 0, 0));
++    try std.testing.expect(ui_app_model.windowContentGenerationRequiresRebuild(true, 8, 7));
++    try std.testing.expect(!ui_app_model.windowContentGenerationRequiresRebuild(true, 7, 7));
++}
++
+ const PanelModel = struct {
+     settings_open: bool = false,
+     bumps: u32 = 0,
+     user_closes: u32 = 0,
++    window_content_generation: u64 = 0,
+ };
+
+ const PanelMsg = union(enum) {
+@@ -56,6 +64,7 @@ fn panelWindows(model: *const PanelModel, scratch: *PanelApp.WindowsScratch) []c
+         scratch.windows[count] = .{
+             .label = settings_window_label,
+             .canvas_label = settings_canvas_label,
++            .content_generation = model.window_content_generation,
+             .title = "Settings",
+             .width = 320,
+             .height = 240,
+@@ -226,6 +235,33 @@ test "a Msg declares the settings window, its canvas installs, and automation dr
+     try std.testing.expect(reopened.open);
+ }
+
++test "an opted-in secondary window rebuilds only when its content generation advances" {
++    const fixture = try Fixture.create();
++    defer fixture.destroy();
++
++    try fixture.clickSettingsButton();
++    const info = fixture.settingsWindowInfo() orelse return error.TestUnexpectedResult;
++    try fixture.installSettingsCanvas(info.id);
++
++    fixture.app_state.model.window_content_generation = 7;
++    try fixture.app_state.dispatch(&fixture.harness.runtime, info.id, .bump);
++    var layout = try fixture.harness.runtime.canvasWidgetLayout(info.id, settings_canvas_label);
++    try std.testing.expect(widgetIdByText(layout, .text, "bumped 1") != null);
++
++    // The model changes, but a settled non-zero generation leaves the
++    // companion tree untouched after an unrelated dispatch.
++    try fixture.app_state.dispatch(&fixture.harness.runtime, 1, .bump);
++    try std.testing.expectEqual(@as(u32, 2), fixture.app_state.model.bumps);
++    layout = try fixture.harness.runtime.canvasWidgetLayout(info.id, settings_canvas_label);
++    try std.testing.expect(widgetIdByText(layout, .text, "bumped 1") != null);
++    try std.testing.expect(widgetIdByText(layout, .text, "bumped 2") == null);
++
++    fixture.app_state.model.window_content_generation = 8;
++    try fixture.app_state.dispatch(&fixture.harness.runtime, 1, .bump);
++    layout = try fixture.harness.runtime.canvasWidgetLayout(info.id, settings_canvas_label);
++    try std.testing.expect(widgetIdByText(layout, .text, "bumped 3") != null);
++}
++
+ test "a user close dispatches on_close and the model owns the consequence" {
+     const fixture = try Fixture.create();
+     defer fixture.destroy();
+
+diff --git a/src/runtime/effects.zig b/src/runtime/effects.zig
+index 284f05d..102bd68 100644
+--- a/src/runtime/effects.zig
++++ b/src/runtime/effects.zig
+@@ -219,6 +219,7 @@ pub const WindowActionBinding = struct {
+     move_fn: *const fn (context: *anyopaque, window_label: []const u8, dx: f64, dy: f64, clamp: bool) ?MoveWindowResult,
+     resize_fn: *const fn (context: *anyopaque, window_label: []const u8, width: f64, height: f64, anchor: WindowResizeAnchor) bool,
+     focus_fn: *const fn (context: *anyopaque, window_label: []const u8) bool,
++    emit_event_fn: *const fn (context: *anyopaque, window_label: []const u8, name: []const u8, detail_json: []const u8) bool,
+ };
+
+ pub const MoveWindowResult = platform.MoveWindowResult;
+@@ -3365,6 +3366,19 @@ pub fn Effects(comptime Msg: type) type {
+             _ = binding.focus_fn(binding.context, window_label);
+         }
+
++        /// Deliver a private, label-addressed presentation event to a
++        /// live window through the platform's existing event channel.
++        /// The payload is copied or consumed synchronously by the host;
++        /// callers retain ownership. False means the label did not
++        /// resolve, the fake executor is active, or the platform rejected
++        /// the event. This deliberately extends only the internal effects
++        /// binding: PlatformServices and its public ABI remain unchanged.
++        pub fn emitWindowEvent(self: *Self, window_label: []const u8, name: []const u8, detail_json: []const u8) bool {
++            if (self.executor == .fake) return false;
++            const binding = self.window_actions orelse return false;
++            return binding.emit_event_fn(binding.context, window_label, name, detail_json);
++        }
++
+         /// Minimize a window by its declared label — the REAL OS verb
+         /// (macOS genies into the Dock, Windows animates to the
+         /// taskbar, GTK minimizes). The seam behind app-drawn minimize
+diff --git a/src/runtime/ui_app.zig b/src/runtime/ui_app.zig
+index bedf1c3..b971d0a 100644
+--- a/src/runtime/ui_app.zig
++++ b/src/runtime/ui_app.zig
+@@ -1099,6 +1099,7 @@ pub fn UiAppWithFeatures(comptime ModelT: type, comptime MsgT: type, comptime fe
+                 .move_fn = effectsMoveWindowByLabel,
+                 .resize_fn = effectsResizeWindowByLabel,
+                 .focus_fn = effectsFocusWindowByLabel,
++                .emit_event_fn = effectsEmitWindowEventByLabel,
+                 .minimize_fn = effectsMinimizeWindowByLabel,
+             });
+             if (runtime.options.session_recorder) |recorder| {
+@@ -3689,6 +3690,13 @@ fn effectsFocusWindowByLabel(context: *anyopaque, window_label: []const u8) bool
+     return true;
+ }
+
++fn effectsEmitWindowEventByLabel(context: *anyopaque, window_label: []const u8, name: []const u8, detail_json: []const u8) bool {
++    const runtime: *Runtime = @ptrCast(@alignCast(context));
++    const window_id = effectsWindowIdByLabel(runtime, window_label) orelse return false;
++    runtime.options.platform.services.emitWindowEvent(window_id, name, detail_json) catch return false;
++    return true;
++}
++
+ fn effectsMinimizeWindowByLabel(context: *anyopaque, window_label: []const u8) bool {
+     const runtime: *Runtime = @ptrCast(@alignCast(context));
+     const window_id = effectsWindowIdByLabel(runtime, window_label) orelse return false;

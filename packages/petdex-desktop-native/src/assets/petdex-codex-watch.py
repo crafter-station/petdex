@@ -283,6 +283,13 @@ def apply_rollout_bytes(state: dict[str, Any], raw: bytes) -> None:
             if final:
                 state["text"] = final
                 state["message_kind"] = "assistant"
+            elif state["message_kind"] != "assistant" or not str(state["text"]).strip():
+                # Codex can finish without repeating the final response.
+                # Preserve actual assistant prose, but clear a transient
+                # prompt, reasoning, or “Thinking…” cue from the terminal
+                # card.
+                state["text"] = "Done."
+                state["message_kind"] = "status"
             continue
         if event_type in {"turn_aborted", "task_failed"}:
             state["lifecycle"] = True

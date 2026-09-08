@@ -1,0 +1,45 @@
+diff --git a/src/platform/macos/appkit_host.m b/src/platform/macos/appkit_host.m
+--- a/src/platform/macos/appkit_host.m
++++ b/src/platform/macos/appkit_host.m
+@@ -393,7 +393,8 @@
+ @interface NativeSdkWidgetAccessibilityElement : NSAccessibilityElement
+ @property(nonatomic, assign) NativeSdkMetalSurfaceView *surfaceView;
+ @property(nonatomic, assign) uint64_t widgetId;
+ @property(nonatomic, assign) uint32_t actionFlags;
++@property(nonatomic, weak) id nativeSdkAccessibilityParent;
+ - (BOOL)emitSetTextAccessibilityValue:(id)value;
+ - (BOOL)emitSetSelectionAccessibilityValue:(id)value;
+ @end
+@@ -1143,5 +1143,16 @@
+ @implementation NativeSdkWidgetAccessibilityElement
+
++/* macOS 26's NSAccessibilityElement no longer implements the deprecated
++ * generic attribute-settable selector.  Keep the parent in this element
++ * directly instead of forwarding through that legacy path. */
++- (id)accessibilityParent {
++    return self.nativeSdkAccessibilityParent;
++}
++
++- (void)setAccessibilityParent:(id)parent {
++    self.nativeSdkAccessibilityParent = parent;
++}
++
+ /* The action-flag gate for advertising AXPress: press, toggle, and
+  * select all have an honest press-shaped actuation (activate, flip,
+  * or move the selection — the same things a pointer press does on
+@@ -1249,7 +1259,7 @@
+          [attribute isEqualToString:NSAccessibilitySelectedTextRangesAttribute])) {
+         return (self.actionFlags & NATIVE_SDK_APPKIT_WIDGET_ACTION_SET_SELECTION) != 0;
+     }
+-    return [super accessibilityIsAttributeSettable:attribute];
++    return NO;
+ }
+
+ - (void)accessibilitySetValue:(id)value forAttribute:(NSAccessibilityAttributeName)attribute {
+@@ -1262,5 +1272,5 @@
+         [self emitSetSelectionAccessibilityValue:value];
+         return;
+     }
+-    [super accessibilitySetValue:value forAttribute:attribute];
++    (void)value;
+ }

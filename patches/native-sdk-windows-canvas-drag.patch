@@ -1,0 +1,2367 @@
+diff --git a/build/app.zig b/build/app.zig
+index 71533bd..4bf0d08 100644
+--- a/build/app.zig
++++ b/build/app.zig
+@@ -1008,8 +1008,17 @@ fn linkPlatform(b: *std.Build, dep: *std.Build.Dependency, target: std.Build.Res
+         app_mod.linkSystemLibrary("imm32", .{});
+         app_mod.linkSystemLibrary("comctl32", .{});
+         app_mod.linkSystemLibrary("ole32", .{});
++        app_mod.linkSystemLibrary("oleaut32", .{});
+         app_mod.linkSystemLibrary("oleacc", .{});
++        app_mod.linkSystemLibrary("uiautomationcore", .{});
+         app_mod.linkSystemLibrary("shell32", .{});
++        // Native retained bubble overlays: D2D/DirectWrite render card text
++        // and controls, DirectComposition owns the shimmer visual, and DWM
++        // supplies bounded Desktop Acrylic where the OS permits it.
++        app_mod.linkSystemLibrary("d2d1", .{});
++        app_mod.linkSystemLibrary("dwrite", .{});
++        app_mod.linkSystemLibrary("dcomp", .{});
++        app_mod.linkSystemLibrary("dwmapi", .{});
+         // The audio backend: Media Foundation (session + source resolver
+         // + streaming audio renderer) and WinHTTP (the cache fill).
+         app_mod.linkSystemLibrary("mf", .{});
+diff --git a/src/platform/windows/root.zig b/src/platform/windows/root.zig
+index 7debdf9..62b2897 100644
+--- a/src/platform/windows/root.zig
++++ b/src/platform/windows/root.zig
+@@ -34,6 +34,7 @@ const WindowsEventKind = enum(c_int) {
+     appearance = 17,
+     audio = 18,
+     urls_opened = 19,
++    context_menu_action = 20,
+ };
+
+ const WindowsEvent = extern struct {
+@@ -102,6 +103,8 @@ const WindowsEvent = extern struct {
+     /// NUL-separated, reusing the drop-path wire shape.
+     open_urls: [*]const u8,
+     open_urls_len: usize,
++    context_menu_token: u64,
++    context_menu_item_id: u32,
+ };
+
+ const WindowsCallback = *const fn (context: ?*anyopaque, event: *const WindowsEvent) callconv(.c) void;
+@@ -131,6 +134,8 @@ extern fn native_sdk_windows_set_security_policy(host: *WindowsHost, allowed_ori
+ extern fn native_sdk_windows_set_menus(host: *WindowsHost, menu_titles: [*]const [*]const u8, menu_title_lens: [*]const usize, menu_count: usize, item_menu_indices: [*]const u32, item_labels: [*]const [*]const u8, item_label_lens: [*]const usize, item_commands: [*]const [*]const u8, item_command_lens: [*]const usize, item_keys: [*]const [*]const u8, item_key_lens: [*]const usize, item_modifiers: [*]const u32, item_separators: [*]const c_int, item_enabled: [*]const c_int, item_checked: [*]const c_int, item_count: usize) void;
+ extern fn native_sdk_windows_set_shortcuts(host: *WindowsHost, ids: [*]const [*]const u8, id_lens: [*]const usize, keys: [*]const [*]const u8, key_lens: [*]const usize, modifiers: [*]const u32, count: usize) void;
+ extern fn native_sdk_windows_create_window(host: *WindowsHost, window_id: u64, window_title: [*]const u8, window_title_len: usize, window_label: [*]const u8, window_label_len: usize, x: f64, y: f64, width: f64, height: f64, restore_frame: c_int, resizable: c_int, titlebar_style: c_int, window_flags: c_int, min_width: f64, min_height: f64) c_int;
++extern fn native_sdk_windows_move_window(host: *WindowsHost, window_id: u64, dx: f64, dy: f64, clamp: c_int, out_x: *f64, out_y: *f64, out_hit_x: *c_int, out_hit_y: *c_int, out_primary: *c_int, out_vx: *f64, out_vy: *f64, out_released: *c_int, out_cursor_x: *f64, out_cursor_y: *f64) c_int;
++extern fn native_sdk_windows_resize_window(host: *WindowsHost, window_id: u64, width: f64, height: f64, bottom_center: c_int) c_int;
+ extern fn native_sdk_windows_start_window_drag(host: *WindowsHost, window_id: u64) c_int;
+ extern fn native_sdk_windows_set_window_drag_regions(host: *WindowsHost, window_id: u64, label: [*]const u8, label_len: usize, rects: [*]const f64, exclusions: [*]const c_int, count: usize) c_int;
+ extern fn native_sdk_windows_window_chrome(host: *WindowsHost, window_id: u64, top: *f64, left: *f64, bottom: *f64, right: *f64, buttons_x: *f64, buttons_y: *f64, buttons_width: *f64, buttons_height: *f64) c_int;
+@@ -147,6 +152,7 @@ extern fn native_sdk_windows_focus_view(host: *WindowsHost, window_id: u64, labe
+ extern fn native_sdk_windows_close_view(host: *WindowsHost, window_id: u64, label: [*]const u8, label_len: usize) c_int;
+ extern fn native_sdk_windows_request_gpu_surface_frame(host: *WindowsHost, window_id: u64, label: [*]const u8, label_len: usize) c_int;
+ extern fn native_sdk_windows_note_gpu_surface_input(host: *WindowsHost, window_id: u64, label: [*]const u8, label_len: usize) c_int;
++extern fn native_sdk_windows_show_context_menu(host: *WindowsHost, window_id: u64, label: [*]const u8, label_len: usize, x: f64, y: f64, token: u64, item_ids: [*]const u32, item_labels: [*]const [*]const u8, item_label_lens: [*]const usize, enabled: [*]const c_int, separators: [*]const c_int, count: usize) c_int;
+ extern fn native_sdk_windows_present_gpu_surface_pixels(host: *WindowsHost, window_id: u64, label: [*]const u8, label_len: usize, width: usize, height: usize, scale: f64, has_dirty_rect: c_int, dirty_x: f64, dirty_y: f64, dirty_width: f64, dirty_height: f64, rgba8: [*]const u8, rgba8_len: usize) c_int;
+ extern fn native_sdk_windows_create_webview(host: *WindowsHost, window_id: u64, label: [*]const u8, label_len: usize, url: [*]const u8, url_len: usize, x: f64, y: f64, width: f64, height: f64, layer: c_int, transparent: c_int, bridge_enabled: c_int) c_int;
+ extern fn native_sdk_windows_set_webview_frame(host: *WindowsHost, window_id: u64, label: [*]const u8, label_len: usize, x: f64, y: f64, width: f64, height: f64) c_int;
+@@ -281,9 +287,17 @@ pub const WindowsPlatform = struct {
+                 .create_window_fn = createWindow,
+                 .focus_window_fn = focusWindow,
+                 .close_window_fn = closeWindow,
++                .move_window_fn = moveWindow,
++                .resize_window_fn = resizeWindow,
+                 .minimize_window_fn = minimizeWindow,
+                 .start_window_drag_fn = startWindowDrag,
+-                .set_window_drag_regions_fn = setWindowDragRegions,
++                // Keep canvas drag regions in the runtime input path. The
++                // Win32 WM_NCHITTEST mirror turns the whole region into
++                // HTCAPTION, which steals secondary presses for the system
++                // window menu before widget context menus can see them.
++                // startWindowDrag still hands primary presses to the native
++                // move loop after the canvas resolves the drag target.
++                .set_window_drag_regions_fn = null,
+                 .window_chrome_fn = windowChrome,
+                 .create_view_fn = createView,
+                 .update_view_fn = updateView,
+@@ -293,6 +307,7 @@ pub const WindowsPlatform = struct {
+                 .close_view_fn = closeView,
+                 .request_gpu_surface_frame_fn = requestGpuSurfaceFrame,
+                 .note_gpu_surface_input_fn = noteGpuSurfaceInput,
++                .show_context_menu_fn = showContextMenu,
+                 .present_gpu_surface_pixels_fn = presentGpuSurfacePixels,
+                 .create_webview_fn = createWebView,
+                 .set_webview_frame_fn = setWebViewFrame,
+@@ -364,11 +379,11 @@ pub const WindowsPlatform = struct {
+             // in Windows 10 2004 — the host probes the activation
+             // support live instead of assuming the build.
+             .audio_spectrum => self.web_engine == .system and audioSpectrumAvailable(self.host),
+-            // Native scroll drivers, native context menus, and app-owned
+-            // view-surface adoption are macOS-only today; Win32 keeps
+-            // the engine's wheel physics (TrackPopupMenu is the natural
+-            // future context-menu seam — the tray already uses it).
+-            .gpu_surface_scroll_drivers, .context_menus, .view_surface_adoption => false,
++            // Win32 presents context menus with TrackPopupMenu. Native
++            // scroll drivers and app-owned view-surface adoption remain
++            // macOS-only; Windows keeps the engine's wheel physics.
++            .context_menus => true,
++            .gpu_surface_scroll_drivers, .view_surface_adoption => false,
+         };
+     }
+
+@@ -444,6 +459,12 @@ fn windowsCallback(context: ?*anyopaque, event: *const WindowsEvent) callconv(.c
+             const urls = platform_mod.splitDropPaths(event.open_urls[0..event.open_urls_len], urls_buffer[0..]);
+             state.emit(.{ .urls_opened = .{ .urls = urls } });
+         },
++        .context_menu_action => state.emit(.{ .context_menu_action = .{
++            .window_id = event.window_id,
++            .view_label = event.view_label[0..event.view_label_len],
++            .token = event.context_menu_token,
++            .item_id = event.context_menu_item_id,
++        } }),
+         .resize => {
+             const surface: platform_mod.Surface = .{
+                 .id = event.window_id,
+@@ -749,6 +770,27 @@ fn closeWindow(context: ?*anyopaque, window_id: platform_mod.WindowId) anyerror!
+     if (native_sdk_windows_close_window(self.host, window_id) == 0) return error.CloseFailed;
+ }
+
++fn moveWindow(context: ?*anyopaque, window_id: platform_mod.WindowId, dx: f64, dy: f64, clamp: bool) anyerror!platform_mod.MoveWindowResult {
++    const self: *WindowsPlatform = @ptrCast(@alignCast(context.?));
++    var out_x: f64 = 0;
++    var out_y: f64 = 0;
++    var out_hit_x: c_int = 0;
++    var out_hit_y: c_int = 0;
++    var out_primary: c_int = 0;
++    var out_vx: f64 = 0;
++    var out_vy: f64 = 0;
++    var out_released: c_int = 0;
++    var out_cursor_x: f64 = 0;
++    var out_cursor_y: f64 = 0;
++    if (native_sdk_windows_move_window(self.host, window_id, dx, dy, if (clamp) 1 else 0, &out_x, &out_y, &out_hit_x, &out_hit_y, &out_primary, &out_vx, &out_vy, &out_released, &out_cursor_x, &out_cursor_y) == 0) return error.WindowNotFound;
++    return .{ .x = out_x, .y = out_y, .hit_x = out_hit_x != 0, .hit_y = out_hit_y != 0, .primary_down = out_primary != 0, .vx = out_vx, .vy = out_vy, .released = out_released != 0, .cursor_x = out_cursor_x, .cursor_y = out_cursor_y };
++}
++
++fn resizeWindow(context: ?*anyopaque, window_id: platform_mod.WindowId, width: f64, height: f64, anchor: platform_mod.WindowResizeAnchor) anyerror!void {
++    const self: *WindowsPlatform = @ptrCast(@alignCast(context.?));
++    if (native_sdk_windows_resize_window(self.host, window_id, width, height, if (anchor == .bottom_center) 1 else 0) == 0) return error.WindowNotFound;
++}
++
+ fn minimizeWindow(context: ?*anyopaque, window_id: platform_mod.WindowId) anyerror!void {
+     const self: *WindowsPlatform = @ptrCast(@alignCast(context.?));
+     if (native_sdk_windows_minimize_window(self.host, window_id) == 0) return error.WindowNotFound;
+@@ -930,6 +972,38 @@ fn noteGpuSurfaceInput(context: ?*anyopaque, window_id: platform_mod.WindowId, l
+     _ = native_sdk_windows_note_gpu_surface_input(self.host, window_id, label.ptr, label.len);
+ }
+
++fn showContextMenu(context: ?*anyopaque, request: platform_mod.ContextMenuRequest) anyerror!void {
++    const self: *WindowsPlatform = @ptrCast(@alignCast(context.?));
++    var ids: [platform_mod.max_context_menu_items]u32 = undefined;
++    var labels: [platform_mod.max_context_menu_items][*]const u8 = undefined;
++    var label_lens: [platform_mod.max_context_menu_items]usize = undefined;
++    var enabled: [platform_mod.max_context_menu_items]c_int = undefined;
++    var separators: [platform_mod.max_context_menu_items]c_int = undefined;
++    const count = @min(request.items.len, ids.len);
++    for (request.items[0..count], 0..) |item, index| {
++        ids[index] = item.id;
++        labels[index] = item.label.ptr;
++        label_lens[index] = item.label.len;
++        enabled[index] = if (item.enabled) 1 else 0;
++        separators[index] = if (item.separator) 1 else 0;
++    }
++    if (native_sdk_windows_show_context_menu(
++        self.host,
++        request.window_id,
++        request.view_label.ptr,
++        request.view_label.len,
++        request.point.x,
++        request.point.y,
++        request.token,
++        &ids,
++        &labels,
++        &label_lens,
++        &enabled,
++        &separators,
++        count,
++    ) == 0) return error.WindowNotFound;
++}
++
+ fn presentGpuSurfacePixels(context: ?*anyopaque, pixels: platform_mod.GpuSurfacePixels) anyerror!void {
+     const self: *WindowsPlatform = @ptrCast(@alignCast(context.?));
+     if (self.web_engine != .system) return error.UnsupportedViewKind;
+diff --git a/src/platform/windows/webview2_host.cpp b/src/platform/windows/webview2_host.cpp
+index 4dd7ecd..acc4b44 100644
+--- a/src/platform/windows/webview2_host.cpp
++++ b/src/platform/windows/webview2_host.cpp
+@@ -6,9 +6,13 @@
+ #include <objbase.h>
+ #include <commctrl.h>
+ #include <oleacc.h>
++#include <uiautomation.h>
+ #include <wincodec.h>
+ #include <uxtheme.h>
+ #include <dwmapi.h>
++#include <d2d1.h>
++#include <dwrite.h>
++#include <dcomp.h>
+
+ #include <stdint.h>
+ #include <stdlib.h>
+@@ -20,9 +24,11 @@
+ #include <cctype>
+ #include <climits>
+ #include <cmath>
++#include <cstdlib>
+ #include <map>
+ #include <memory>
+ #include <mutex>
++#include <new>
+ #include <string>
+ #include <thread>
+ #include <vector>
+@@ -122,6 +128,7 @@ enum EventKind {
+     kAppearance = 17,
+     kAudio = 18,
+     kUrlsOpened = 19,
++    kContextMenuAction = 20,
+ };
+
+ constexpr uint32_t kShortcutModifierPrimary = 1u << 0;
+@@ -153,6 +160,9 @@ constexpr UINT kAudioSessionMessage = WM_APP + 45;
+  * loop starves it far below the contract cadence, while posted messages
+  * keep their place in the queue. */
+ constexpr UINT kAudioSpectrumMessage = WM_APP + 46;
++/* Posted after TrackPopupMenu's nested loop returns so the runtime sees the
++ * selection after the pointer-down dispatch that requested the menu. */
++constexpr UINT kContextMenuActionMessage = WM_APP + 47;
+ constexpr const char *kAssetVirtualOrigin = "https://native-sdk-app.localhost";
+
+ /* COPYDATASTRUCT::dwData tag on the single-instance forward. dwData is
+@@ -253,6 +263,9 @@ struct WindowsEvent {
+      * NUL, so the separator stays unambiguous). */
+     const char *open_urls;
+     size_t open_urls_len;
++    /* kContextMenuAction payload. */
++    uint64_t context_menu_token;
++    uint32_t context_menu_item_id;
+ };
+
+ struct WindowsOpenDialogOpts {
+@@ -301,6 +314,148 @@ struct WindowsMessageDialogOpts {
+ using EventCallback = void (*)(void *, const WindowsEvent *);
+ using BridgeCallback = void (*)(void *, uint64_t, const char *, size_t, const char *, size_t, const char *, size_t);
+
++struct WindowMoveSample {
++    double x = 0;
++    double y = 0;
++    double scale = 1;
++    ULONGLONG at_ms = 0;
++};
++
++struct WindowClampResult {
++    LONG x = 0;
++    LONG y = 0;
++    bool hit_x = false;
++    bool hit_y = false;
++};
++
++struct AnchoredWindowOrigin {
++    LONG x = 0;
++    LONG y = 0;
++};
++
++struct Host;
++
++/* Petdex's private retained bubble presentation. These are deliberately
++ * host-internal and mirror only the capped v1 window-event payload; the
++ * Native SDK public PlatformServices ABI is unchanged. */
++struct BubbleFrame {
++    float x = 0;
++    float y = 0;
++    float w = 0;
++    float h = 0;
++};
++
++struct BubbleGlass {
++    uint64_t identity = 0;
++    BubbleFrame frame;
++    float alpha = 1;
++    float radius = 14;
++    int state = 0;
++    int interaction = 0;
++    int materialization = 2;
++    bool dark = false;
++    bool high_contrast = false;
++};
++
++struct BubbleLine {
++    std::string text;
++    BubbleFrame frame;
++};
++
++struct BubbleCardPresentation {
++    BubbleGlass glass;
++    float content_alpha = 1;
++    float metadata_alpha = 1;
++    float nested_alpha = 0;
++    std::string agent;
++    std::string hostname;
++    std::string project;
++    std::string title;
++    std::string accessibility_label;
++    std::string accessibility_value;
++    int accessibility_role = 1;
++    bool action_available = false;
++    std::vector<BubbleLine> messages;
++    std::vector<BubbleLine> nested;
++    BubbleFrame metadata_frame;
++    BubbleFrame metadata_left_frame;
++    BubbleFrame metadata_right_frame;
++    BubbleFrame title_frame;
++    BubbleFrame status_frame;
++    float action_fade_start = 0;
++    float action_fade_alpha = 0;
++    float metadata_font_size = 10;
++    float title_font_size = 16;
++    float message_font_size = 12;
++    float nested_font_size = 10;
++    bool busy = false;
++    bool reduce_motion = false;
++    float shimmer_phase = 0;
++};
++
++struct BubbleControlPresentation {
++    uint64_t identity = 0;
++    int action = 0;
++    BubbleFrame frame;
++    bool selected = false;
++    int badge_count = 0;
++    float alpha = 1;
++    float activation_inset = 0;
++    bool overlay = false;
++    bool points_up = false;
++    int mode = 0;
++    int state = 0;
++    bool show_status_icon = false;
++    std::string accessibility_label;
++    std::string accessibility_value;
++    int accessibility_role = 1;
++    bool enabled = true;
++    bool toggled = false;
++};
++
++struct BubbleDisclosurePresentation {
++    BubbleGlass glass;
++    bool visible = false;
++    int mode = 0;
++    int state = 0;
++    int session_count = 0;
++    bool show_status_icon = false;
++    float alpha = 1;
++    std::string accessibility_label;
++    std::string accessibility_value;
++    int accessibility_role = 2;
++    bool enabled = true;
++    bool toggled = false;
++};
++
++enum BubbleOverlayKind { kBubbleCardOverlay, kBubbleDisclosureOverlay, kBubbleControlOverlay };
++
++struct BubbleOverlay {
++    Host *host = nullptr;
++    HWND hwnd = nullptr;
++    HWND tooltip = nullptr;
++    uint64_t owner_window_id = 0;
++    BubbleOverlayKind kind = kBubbleCardOverlay;
++    uint64_t identity = 0;
++    int action = 0;
++    BubbleFrame frame;
++    BubbleCardPresentation card;
++    BubbleControlPresentation control;
++    BubbleDisclosurePresentation disclosure;
++    ID2D1HwndRenderTarget *render_target = nullptr;
++    IDCompositionTarget *composition_target = nullptr;
++    IDCompositionVisual *root_visual = nullptr;
++    IDCompositionVisual *shimmer_visual = nullptr;
++    std::wstring accessibility_name;
++    bool rounded_region_active = false;
++    bool hovered = false;
++    bool pressed = false;
++    bool dragging = false;
++    POINT press_screen = {};
++    RECT pet_start = {};
++    RECT owner_start = {};
++};
++
+ struct Window {
+     uint64_t id = 1;
+     HWND hwnd = nullptr;
+@@ -333,6 +488,13 @@ struct Window {
+      * behind the button cluster matches the app's header). */
+     COLORREF hidden_caption_color = 0;
+     bool hidden_caption_color_set = false;
++    /* Screen-space movement telemetry for PlatformServices.moveWindow.
++     * Win32's interactive move loop can stall the app callback, so samples
++     * are recorded from WM_MOVE as well as explicit service calls. */
++    std::vector<WindowMoveSample> move_samples;
++    bool primary_state_known = false;
++    bool primary_was_down = false;
++    bool release_pending = false;
+ };
+
+ /* One rectangle of a canvas view's window-drag mirror (runtime push,
+@@ -575,6 +737,12 @@ struct Host {
+     std::map<uint64_t, Window> windows;
+     std::map<std::string, ChildWebView> webviews;
+     std::map<std::string, NativeView> native_views;
++    std::map<std::string, std::unique_ptr<BubbleOverlay>> bubble_overlays;
++    uint64_t bubble_presentation_digest = 0;
++    uint64_t bubble_presentation_generation = 0;
++    ID2D1Factory *bubble_d2d_factory = nullptr;
++    IDWriteFactory *bubble_dwrite_factory = nullptr;
++    IDCompositionDevice *bubble_dcomp_device = nullptr;
+     uint64_t next_child_order = 1;
+     std::vector<std::string> allowed_origins;
+     std::vector<std::string> allowed_external_urls;
+@@ -582,6 +750,10 @@ struct Host {
+     std::vector<Menu> menus;
+     std::map<uint32_t, std::string> menu_commands;
+     std::vector<TrayItem> tray_items;
++    uint64_t context_menu_window_id = 0;
++    uint64_t context_menu_token = 0;
++    uint32_t context_menu_item_id = 0;
++    std::string context_menu_view_label;
+     int external_link_action = 0;
+     bool app_active = false;
+     bool notification_icon_added = false;
+@@ -1798,6 +1970,43 @@ static constexpr LONG physicalContentExtent(double value) {
+ static_assert(physicalContentExtent(726 * 1.25) == 908 && (LONG)(726 * 1.25) == 907,
+     "truncation must land a pixel short of the round so the rounding is load-bearing");
+
++static constexpr LONG physicalWindowDelta(double logical_delta, double scale) {
++    const double physical = logical_delta * scale;
++    return (LONG)(physical >= 0 ? physical + 0.5 : physical - 0.5);
++}
++
++static constexpr WindowClampResult clampWindowOrigin(LONG wanted_x, LONG wanted_y, LONG width, LONG height, const RECT &work) {
++    const LONG work_width = work.right - work.left;
++    const LONG work_height = work.bottom - work.top;
++    const LONG max_x = work.right - width;
++    const LONG max_y = work.bottom - height;
++    const LONG x = width >= work_width ? work.left : (wanted_x < work.left ? work.left : (wanted_x > max_x ? max_x : wanted_x));
++    const LONG y = height >= work_height ? work.top : (wanted_y < work.top ? work.top : (wanted_y > max_y ? max_y : wanted_y));
++    return { x, y, x != wanted_x, y != wanted_y };
++}
++
++static constexpr AnchoredWindowOrigin resizedWindowOrigin(const RECT &before, LONG width, LONG height, bool bottom_center) {
++    if (!bottom_center) return { before.left, before.top };
++    const LONG center_x = before.left + (before.right - before.left) / 2;
++    return { center_x - width / 2, before.bottom - height };
++}
++
++static_assert(physicalWindowDelta(10, 1.25) == 13 && physicalWindowDelta(-10, 1.5) == -15,
++    "logical movement must round once at the active monitor DPI in both directions");
++static_assert(clampWindowOrigin(-2200, -100, 400, 300, RECT{ -1920, -200, 0, 880 }).x == -1920 &&
++        clampWindowOrigin(-2200, -100, 400, 300, RECT{ -1920, -200, 0, 880 }).hit_x &&
++        !clampWindowOrigin(-2200, -100, 400, 300, RECT{ -1920, -200, 0, 880 }).hit_y,
++    "negative-coordinate monitors must clamp only the overflowing axis");
++static_assert(clampWindowOrigin(3700, 900, 400, 300, RECT{ 1920, 0, 3840, 1040 }).x == 3440 &&
++        clampWindowOrigin(3700, 900, 400, 300, RECT{ 1920, 0, 3840, 1040 }).y == 740,
++    "destination-monitor work areas must constrain multi-monitor transitions and taskbars");
++static_assert(resizedWindowOrigin(RECT{ -300, 100, 100, 500 }, 600, 250, false).x == -300 &&
++        resizedWindowOrigin(RECT{ -300, 100, 100, 500 }, 600, 250, false).y == 100,
++    "top-left resize anchors must preserve the signed origin");
++static_assert(resizedWindowOrigin(RECT{ -300, 100, 100, 500 }, 600, 250, true).x == -400 &&
++        resizedWindowOrigin(RECT{ -300, 100, 100, 500 }, 600, 250, true).y == 250,
++    "bottom-center resize anchors must preserve center and ground line");
++
+ static bool validNativeViewFrame(double x, double y, double width, double height) {
+     return x >= 0 && y >= 0 && width >= 0 && height >= 0;
+ }
+@@ -2407,6 +2616,60 @@ static SIZE hiddenOuterSizeForContent(DWORD style, DWORD ex_style, bool has_menu
+     return outer;
+ }
+
++static SIZE windowOuterSizeForContent(const Window &window, double logical_width, double logical_height) {
++    const UINT dpi = dpiForWindow(window.hwnd);
++    const double scale = (double)dpi / 96.0;
++    const double content_width = logical_width * scale;
++    const double content_height = logical_height * scale;
++    const DWORD style = (DWORD)GetWindowLongPtrW(window.hwnd, GWL_STYLE);
++    const DWORD ex_style = (DWORD)GetWindowLongPtrW(window.hwnd, GWL_EXSTYLE);
++    const bool has_menu = GetMenu(window.hwnd) != nullptr;
++    RECT frame = { 0, 0, physicalContentExtent(content_width), physicalContentExtent(content_height) };
++    adjustWindowRectForDpi(&frame, style, has_menu ? TRUE : FALSE, ex_style, dpi);
++    SIZE outer = { frame.right - frame.left, frame.bottom - frame.top };
++    if (windowUsesHiddenTitlebar(window)) {
++        outer = hiddenOuterSizeForContent(style, ex_style, has_menu, content_width, content_height, dpi);
++    }
++    return outer;
++}
++
++static void recordWindowMoveSample(Window &window) {
++    if (!window.hwnd) return;
++    RECT rect = {};
++    if (!GetWindowRect(window.hwnd, &rect)) return;
++    const double scale = (double)dpiForWindow(window.hwnd) / 96.0;
++    window.x = (double)rect.left / scale;
++    window.y = (double)rect.top / scale;
++    const ULONGLONG now = GetTickCount64();
++    if (!window.move_samples.empty()) {
++        const WindowMoveSample &last = window.move_samples.back();
++        if (last.scale != scale) window.move_samples.clear();
++    }
++    if (!window.move_samples.empty()) {
++        const WindowMoveSample &last = window.move_samples.back();
++        if (last.x == window.x && last.y == window.y && now == last.at_ms) return;
++    }
++    window.move_samples.push_back({ window.x, window.y, scale, now });
++    while (window.move_samples.size() > 2 && now - window.move_samples.front().at_ms > 100) {
++        window.move_samples.erase(window.move_samples.begin());
++    }
++    if (window.move_samples.size() > 16) {
++        window.move_samples.erase(window.move_samples.begin(), window.move_samples.end() - 16);
++    }
++}
++
++static void recentWindowVelocity(const Window &window, double *vx, double *vy) {
++    *vx = 0;
++    *vy = 0;
++    if (window.move_samples.size() < 2) return;
++    const WindowMoveSample &first = window.move_samples.front();
++    const WindowMoveSample &last = window.move_samples.back();
++    const ULONGLONG elapsed = last.at_ms - first.at_ms;
++    if (elapsed == 0) return;
++    *vx = (last.x - first.x) * 1000.0 / (double)elapsed;
++    *vy = (last.y - first.y) * 1000.0 / (double)elapsed;
++}
++
+ /* The gpu-surface child's origin in its parent's client coordinates. */
+ static POINT childOriginInParentClient(HWND child, HWND parent) {
+     RECT rect = {};
+@@ -4865,6 +5128,1539 @@ static bool handleAppTimerMessage(Host *host, WPARAM wparam) {
+     return true;
+ }
+
++/* Small, bounded JSON reader for petdex.bubble.presentation.v1. It accepts
++ * exactly the ordinary JSON value grammar and deliberately has no file or
++ * network surface; the caller has already capped the payload at 64 KiB. */
++struct BubbleJsonValue {
++    enum Kind { kNull, kBool, kNumber, kString, kArray, kObject } kind = kNull;
++    bool boolean = false;
++    double number = 0;
++    uint64_t integer = 0;
++    bool integer_valid = false;
++    std::string string;
++    std::vector<BubbleJsonValue> array;
++    std::map<std::string, BubbleJsonValue> object;
++};
++
++class BubbleJsonParser {
++public:
++    BubbleJsonParser(const char *bytes, size_t length) : current_(bytes), end_(bytes + length) {}
++
++    bool parse(BubbleJsonValue *out) {
++        if (!out || !value(out, 0)) return false;
++        whitespace();
++        return current_ == end_;
++    }
++
++private:
++    const char *current_;
++    const char *end_;
++
++    void whitespace() {
++        while (current_ < end_ && (*current_ == ' ' || *current_ == '\t' || *current_ == '\r' || *current_ == '\n')) ++current_;
++    }
++
++    bool take(char wanted) {
++        whitespace();
++        if (current_ >= end_ || *current_ != wanted) return false;
++        ++current_;
++        return true;
++    }
++
++    bool literal(const char *word) {
++        whitespace();
++        size_t length = strlen(word);
++        if ((size_t)(end_ - current_) < length || memcmp(current_, word, length) != 0) return false;
++        current_ += length;
++        return true;
++    }
++
++    static void appendUtf8(std::string *out, unsigned codepoint) {
++        if (codepoint <= 0x7f) out->push_back((char)codepoint);
++        else if (codepoint <= 0x7ff) {
++            out->push_back((char)(0xc0 | (codepoint >> 6)));
++            out->push_back((char)(0x80 | (codepoint & 0x3f)));
++        } else if (codepoint <= 0xffff) {
++            out->push_back((char)(0xe0 | (codepoint >> 12)));
++            out->push_back((char)(0x80 | ((codepoint >> 6) & 0x3f)));
++            out->push_back((char)(0x80 | (codepoint & 0x3f)));
++        } else {
++            out->push_back((char)(0xf0 | (codepoint >> 18)));
++            out->push_back((char)(0x80 | ((codepoint >> 12) & 0x3f)));
++            out->push_back((char)(0x80 | ((codepoint >> 6) & 0x3f)));
++            out->push_back((char)(0x80 | (codepoint & 0x3f)));
++        }
++    }
++
++    bool hex4(unsigned *out) {
++        if ((size_t)(end_ - current_) < 4) return false;
++        unsigned value = 0;
++        for (int index = 0; index < 4; ++index) {
++            char ch = *current_++;
++            value <<= 4;
++            if (ch >= '0' && ch <= '9') value |= (unsigned)(ch - '0');
++            else if (ch >= 'a' && ch <= 'f') value |= (unsigned)(ch - 'a' + 10);
++            else if (ch >= 'A' && ch <= 'F') value |= (unsigned)(ch - 'A' + 10);
++            else return false;
++        }
++        *out = value;
++        return true;
++    }
++
++    bool text(std::string *out) {
++        if (!take('"')) return false;
++        out->clear();
++        while (current_ < end_) {
++            unsigned char ch = (unsigned char)*current_++;
++            if (ch == '"') return true;
++            if (ch < 0x20) return false;
++            if (ch != '\\') {
++                out->push_back((char)ch);
++                continue;
++            }
++            if (current_ >= end_) return false;
++            char escape = *current_++;
++            switch (escape) {
++                case '"': out->push_back('"'); break;
++                case '\\': out->push_back('\\'); break;
++                case '/': out->push_back('/'); break;
++                case 'b': out->push_back('\b'); break;
++                case 'f': out->push_back('\f'); break;
++                case 'n': out->push_back('\n'); break;
++                case 'r': out->push_back('\r'); break;
++                case 't': out->push_back('\t'); break;
++                case 'u': {
++                    unsigned codepoint = 0;
++                    if (!hex4(&codepoint)) return false;
++                    if (codepoint >= 0xd800 && codepoint <= 0xdbff) {
++                        if ((size_t)(end_ - current_) < 2 || current_[0] != '\\' || current_[1] != 'u') return false;
++                        current_ += 2;
++                        unsigned low = 0;
++                        if (!hex4(&low) || low < 0xdc00 || low > 0xdfff) return false;
++                        codepoint = 0x10000 + ((codepoint - 0xd800) << 10) + (low - 0xdc00);
++                    } else if (codepoint >= 0xdc00 && codepoint <= 0xdfff) return false;
++                    appendUtf8(out, codepoint);
++                    break;
++                }
++                default: return false;
++            }
++        }
++        return false;
++    }
++
++    bool numeric(BubbleJsonValue *out) {
++        whitespace();
++        const char *start = current_;
++        if (current_ < end_ && *current_ == '-') ++current_;
++        if (current_ >= end_) return false;
++        if (*current_ == '0') ++current_;
++        else {
++            if (*current_ < '1' || *current_ > '9') return false;
++            while (current_ < end_ && *current_ >= '0' && *current_ <= '9') ++current_;
++        }
++        bool integral = true;
++        if (current_ < end_ && *current_ == '.') {
++            integral = false;
++            ++current_;
++            if (current_ >= end_ || *current_ < '0' || *current_ > '9') return false;
++            while (current_ < end_ && *current_ >= '0' && *current_ <= '9') ++current_;
++        }
++        if (current_ < end_ && (*current_ == 'e' || *current_ == 'E')) {
++            integral = false;
++            ++current_;
++            if (current_ < end_ && (*current_ == '+' || *current_ == '-')) ++current_;
++            if (current_ >= end_ || *current_ < '0' || *current_ > '9') return false;
++            while (current_ < end_ && *current_ >= '0' && *current_ <= '9') ++current_;
++        }
++        std::string token(start, current_);
++        char *after = nullptr;
++        out->number = strtod(token.c_str(), &after);
++        if (!after || *after != 0 || !std::isfinite(out->number)) return false;
++        out->kind = BubbleJsonValue::kNumber;
++        if (integral && token[0] != '-') {
++            char *integer_after = nullptr;
++            unsigned long long integer = strtoull(token.c_str(), &integer_after, 10);
++            if (integer_after && *integer_after == 0) {
++                out->integer = (uint64_t)integer;
++                out->integer_valid = true;
++            }
++        }
++        return true;
++    }
++
++    bool value(BubbleJsonValue *out, unsigned depth) {
++        if (depth > 20) return false;
++        whitespace();
++        if (current_ >= end_) return false;
++        if (*current_ == '"') {
++            out->kind = BubbleJsonValue::kString;
++            return text(&out->string);
++        }
++        if (*current_ == '{') {
++            out->kind = BubbleJsonValue::kObject;
++            if (!take('{')) return false;
++            whitespace();
++            if (current_ < end_ && *current_ == '}') { ++current_; return true; }
++            while (true) {
++                std::string key;
++                BubbleJsonValue child;
++                if (!text(&key) || !take(':') || !value(&child, depth + 1)) return false;
++                out->object.emplace(std::move(key), std::move(child));
++                whitespace();
++                if (current_ < end_ && *current_ == '}') { ++current_; return true; }
++                if (!take(',')) return false;
++            }
++        }
++        if (*current_ == '[') {
++            out->kind = BubbleJsonValue::kArray;
++            if (!take('[')) return false;
++            whitespace();
++            if (current_ < end_ && *current_ == ']') { ++current_; return true; }
++            while (true) {
++                BubbleJsonValue child;
++                if (!value(&child, depth + 1)) return false;
++                out->array.push_back(std::move(child));
++                whitespace();
++                if (current_ < end_ && *current_ == ']') { ++current_; return true; }
++                if (!take(',')) return false;
++            }
++        }
++        if (*current_ == 't' && literal("true")) { out->kind = BubbleJsonValue::kBool; out->boolean = true; return true; }
++        if (*current_ == 'f' && literal("false")) { out->kind = BubbleJsonValue::kBool; return true; }
++        if (*current_ == 'n' && literal("null")) { out->kind = BubbleJsonValue::kNull; return true; }
++        return numeric(out);
++    }
++};
++
++static const BubbleJsonValue *bubbleJsonMember(const BubbleJsonValue &object, const char *name) {
++    if (object.kind != BubbleJsonValue::kObject) return nullptr;
++    auto found = object.object.find(name);
++    return found == object.object.end() ? nullptr : &found->second;
++}
++
++static double bubbleJsonNumber(const BubbleJsonValue &object, const char *name, double fallback = 0) {
++    const BubbleJsonValue *value = bubbleJsonMember(object, name);
++    return value && value->kind == BubbleJsonValue::kNumber ? value->number : fallback;
++}
++
++static uint64_t bubbleJsonInteger(const BubbleJsonValue &object, const char *name, uint64_t fallback = 0) {
++    const BubbleJsonValue *value = bubbleJsonMember(object, name);
++    return value && value->kind == BubbleJsonValue::kNumber && value->integer_valid ? value->integer : fallback;
++}
++
++static bool bubbleJsonBool(const BubbleJsonValue &object, const char *name, bool fallback = false) {
++    const BubbleJsonValue *value = bubbleJsonMember(object, name);
++    return value && value->kind == BubbleJsonValue::kBool ? value->boolean : fallback;
++}
++
++static std::string bubbleJsonString(const BubbleJsonValue &object, const char *name) {
++    const BubbleJsonValue *value = bubbleJsonMember(object, name);
++    return value && value->kind == BubbleJsonValue::kString ? value->string : std::string();
++}
++
++static BubbleFrame bubbleJsonFrame(const BubbleJsonValue &object) {
++    BubbleFrame frame;
++    frame.x = (float)bubbleJsonNumber(object, "x");
++    frame.y = (float)bubbleJsonNumber(object, "y");
++    frame.w = (float)bubbleJsonNumber(object, "w");
++    frame.h = (float)bubbleJsonNumber(object, "h");
++    return frame;
++}
++
++static BubbleGlass bubbleJsonGlass(const BubbleJsonValue &object) {
++    BubbleGlass glass;
++    glass.identity = bubbleJsonInteger(object, "id");
++    glass.frame = bubbleJsonFrame(object);
++    glass.alpha = (float)bubbleJsonNumber(object, "alpha", 1);
++    glass.radius = (float)bubbleJsonNumber(object, "radius", 14);
++    glass.state = (int)bubbleJsonInteger(object, "state");
++    glass.interaction = (int)bubbleJsonInteger(object, "interaction");
++    glass.materialization = (int)bubbleJsonInteger(object, "materialization", 2);
++    glass.dark = bubbleJsonBool(object, "dark");
++    glass.high_contrast = bubbleJsonBool(object, "high_contrast");
++    return glass;
++}
++
++static std::vector<BubbleLine> bubbleJsonLines(const BubbleJsonValue *array) {
++    std::vector<BubbleLine> lines;
++    if (!array || array->kind != BubbleJsonValue::kArray) return lines;
++    for (const BubbleJsonValue &item : array->array) {
++        if (item.kind != BubbleJsonValue::kObject || lines.size() >= 3) continue;
++        BubbleLine line;
++        line.text = bubbleJsonString(item, "text");
++        const BubbleJsonValue *frame = bubbleJsonMember(item, "frame");
++        if (frame) line.frame = bubbleJsonFrame(*frame);
++        lines.push_back(std::move(line));
++    }
++    return lines;
++}
++
++static bool bubbleJsonCard(const BubbleJsonValue &object, BubbleCardPresentation *card) {
++    const BubbleJsonValue *glass = bubbleJsonMember(object, "glass");
++    if (!card || !glass || glass->kind != BubbleJsonValue::kObject) return false;
++    card->glass = bubbleJsonGlass(*glass);
++    card->content_alpha = (float)bubbleJsonNumber(object, "content_alpha", 1);
++    card->metadata_alpha = (float)bubbleJsonNumber(object, "metadata_alpha", 1);
++    card->nested_alpha = (float)bubbleJsonNumber(object, "nested_alpha");
++    card->agent = bubbleJsonString(object, "agent");
++    card->hostname = bubbleJsonString(object, "hostname");
++    card->project = bubbleJsonString(object, "project");
++    card->title = bubbleJsonString(object, "title");
++    card->accessibility_label = bubbleJsonString(object, "accessibility_label");
++    card->accessibility_value = bubbleJsonString(object, "accessibility_value");
++    card->accessibility_role = (int)bubbleJsonInteger(object, "accessibility_role");
++    card->action_available = bubbleJsonBool(object, "action_available");
++    card->messages = bubbleJsonLines(bubbleJsonMember(object, "messages"));
++    card->nested = bubbleJsonLines(bubbleJsonMember(object, "nested"));
++    const char *frame_names[] = { "metadata_frame", "metadata_left_frame", "metadata_right_frame", "title_frame", "status_frame" };
++    BubbleFrame *frames[] = { &card->metadata_frame, &card->metadata_left_frame, &card->metadata_right_frame, &card->title_frame, &card->status_frame };
++    for (size_t index = 0; index < 5; ++index) {
++        const BubbleJsonValue *frame = bubbleJsonMember(object, frame_names[index]);
++        if (frame) *frames[index] = bubbleJsonFrame(*frame);
++    }
++    card->action_fade_start = (float)bubbleJsonNumber(object, "action_fade_start");
++    card->action_fade_alpha = (float)bubbleJsonNumber(object, "action_fade_alpha");
++    card->metadata_font_size = (float)bubbleJsonNumber(object, "metadata_font_size", 10);
++    card->title_font_size = (float)bubbleJsonNumber(object, "title_font_size", 16);
++    card->message_font_size = (float)bubbleJsonNumber(object, "message_font_size", 12);
++    card->nested_font_size = (float)bubbleJsonNumber(object, "nested_font_size", 10);
++    card->busy = bubbleJsonBool(object, "busy");
++    card->reduce_motion = bubbleJsonBool(object, "reduce_motion");
++    card->shimmer_phase = (float)bubbleJsonNumber(object, "shimmer_phase");
++    return card->glass.identity != 0 && card->glass.frame.w > 0 && card->glass.frame.h > 0;
++}
++
++constexpr UINT_PTR kBubbleShimmerTimerId = 0x6b01;
++constexpr size_t kMaxBubblePresentationBytes = 64 * 1024;
++constexpr DWORD kDwmwaWindowCornerPreference = 33;
++constexpr DWORD kDwmwaSystemBackdropType = 38;
++constexpr int kDwmwcRound = 2;
++constexpr int kDwmsbtNone = 1;
++constexpr int kDwmsbtTransientWindow = 3;
++
++static LRESULT CALLBACK bubbleOverlayProc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
++
++static Window *bubbleWindowByLabel(Host *host, const char *label) {
++    if (!host) return nullptr;
++    for (auto &entry : host->windows) {
++        if (entry.second.label == label && entry.second.hwnd) return &entry.second;
++    }
++    return nullptr;
++}
++
++static BubbleOverlay *bubbleOverlayFromHwnd(HWND hwnd) {
++    return reinterpret_cast<BubbleOverlay *>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
++}
++
++static bool ensureBubbleGraphics(Host *host) {
++    if (!host) return false;
++    if (!host->bubble_d2d_factory) {
++        if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &host->bubble_d2d_factory))) return false;
++    }
++    if (!host->bubble_dwrite_factory) {
++        if (FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), reinterpret_cast<IUnknown **>(&host->bubble_dwrite_factory)))) return false;
++    }
++    /* DirectComposition is optional at runtime. D2D/DWrite remain the
++     * semantic fallback if policy, remote desktop, or an older compositor
++     * rejects it. A null rendering device requests the in-box compositor's
++     * default device and avoids adding a D3D dependency to the app. */
++    if (!host->bubble_dcomp_device) {
++        (void)DCompositionCreateDevice(nullptr, __uuidof(IDCompositionDevice), reinterpret_cast<void **>(&host->bubble_dcomp_device));
++    }
++    return true;
++}
++
++static void releaseBubbleOverlayGraphics(BubbleOverlay &overlay) {
++    if (overlay.render_target) { overlay.render_target->Release(); overlay.render_target = nullptr; }
++    if (overlay.shimmer_visual) { overlay.shimmer_visual->Release(); overlay.shimmer_visual = nullptr; }
++    if (overlay.root_visual) { overlay.root_visual->Release(); overlay.root_visual = nullptr; }
++    if (overlay.composition_target) { overlay.composition_target->Release(); overlay.composition_target = nullptr; }
++}
++
++static void applyBubbleAccessibilityName(BubbleOverlay &overlay, const std::wstring &name) {
++    overlay.accessibility_name = name;
++    if (!overlay.hwnd) return;
++    const std::string *value_utf8 = nullptr;
++    int semantic_role = 1;
++    bool enabled = true;
++    bool toggled = false;
++    bool action_available = true;
++    if (overlay.kind == kBubbleCardOverlay) {
++        value_utf8 = &overlay.card.accessibility_value;
++        semantic_role = overlay.card.accessibility_role;
++        action_available = overlay.card.action_available;
++    } else if (overlay.kind == kBubbleControlOverlay) {
++        value_utf8 = &overlay.control.accessibility_value;
++        semantic_role = overlay.control.accessibility_role;
++        enabled = overlay.control.enabled;
++        toggled = overlay.control.toggled;
++    } else {
++        value_utf8 = &overlay.disclosure.accessibility_value;
++        semantic_role = overlay.disclosure.accessibility_role;
++        enabled = overlay.disclosure.enabled;
++        toggled = overlay.disclosure.toggled;
++    }
++    IAccPropServices *services = nullptr;
++    if (SUCCEEDED(CoCreateInstance(CLSID_AccPropServices, nullptr, CLSCTX_SERVER, IID_IAccPropServices, reinterpret_cast<void **>(&services))) && services) {
++        services->SetHwndPropStr(overlay.hwnd, OBJID_CLIENT, CHILDID_SELF, PROPID_ACC_NAME, name.c_str());
++        const std::wstring value = value_utf8 ? widen(*value_utf8) : std::wstring();
++        services->SetHwndPropStr(overlay.hwnd, OBJID_CLIENT, CHILDID_SELF, PROPID_ACC_VALUE, value.c_str());
++        services->SetHwndPropStr(overlay.hwnd, OBJID_CLIENT, CHILDID_SELF, PROPID_ACC_DESCRIPTION,
++            overlay.kind == kBubbleCardOverlay ? L"Agent session. Press to open; drag to move Petdex." : L"Petdex session action");
++        services->SetHwndPropStr(overlay.hwnd, OBJID_CLIENT, CHILDID_SELF, PROPID_ACC_DEFAULTACTION, action_available && enabled ? L"Press" : L"");
++        VARIANT role;
++        VariantInit(&role);
++        role.vt = VT_I4;
++        role.lVal = semantic_role == 0 ? ROLE_SYSTEM_GROUPING : semantic_role == 2 ? ROLE_SYSTEM_CHECKBUTTON : ROLE_SYSTEM_PUSHBUTTON;
++        services->SetHwndProp(overlay.hwnd, OBJID_CLIENT, CHILDID_SELF, PROPID_ACC_ROLE, role);
++        VariantClear(&role);
++        VARIANT state;
++        VariantInit(&state);
++        state.vt = VT_I4;
++        state.lVal = (!enabled || !action_available ? STATE_SYSTEM_UNAVAILABLE : 0) | (toggled ? STATE_SYSTEM_CHECKED : 0);
++        services->SetHwndProp(overlay.hwnd, OBJID_CLIENT, CHILDID_SELF, PROPID_ACC_STATE, state);
++        VariantClear(&state);
++        services->Release();
++    }
++    SetWindowTextW(overlay.hwnd, name.c_str());
++}
++
++static bool bubbleSystemHighContrast() {
++    HIGHCONTRASTW contrast = {};
++    contrast.cbSize = sizeof(contrast);
++    return SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(contrast), &contrast, 0) && (contrast.dwFlags & HCF_HIGHCONTRASTON) != 0;
++}
++
++static bool bubbleAcrylicEligible(const BubbleOverlay &overlay) {
++    if (overlay.card.glass.high_contrast || overlay.disclosure.glass.high_contrast || bubbleSystemHighContrast()) return false;
++    BOOL composition = FALSE;
++    if (FAILED(DwmIsCompositionEnabled(&composition)) || !composition) return false;
++    if (GetSystemMetrics(SM_REMOTESESSION)) return false;
++    return true;
++}
++
++static void applyBubbleBackdrop(BubbleOverlay &overlay) {
++    if (!overlay.hwnd) return;
++    const BubbleGlass *glass = overlay.kind == kBubbleCardOverlay ? &overlay.card.glass :
++        overlay.kind == kBubbleDisclosureOverlay ? &overlay.disclosure.glass : nullptr;
++    const BOOL dark = glass && glass->dark ? TRUE : FALSE;
++    const int corner = kDwmwcRound;
++    /* A translucent full-client backdrop makes failed HWND clipping visible as
++     * square corners. Only enable it after the matching device-pixel region
++     * has been installed successfully. */
++    const int backdrop = overlay.rounded_region_active && bubbleAcrylicEligible(overlay) ? kDwmsbtTransientWindow : kDwmsbtNone;
++    const DwmApi &dwm = dwmApi();
++    if (dwm.set_window_attribute) {
++        (void)dwm.set_window_attribute(overlay.hwnd, kDwmwaUseImmersiveDarkMode, &dark, sizeof(dark));
++        (void)dwm.set_window_attribute(overlay.hwnd, kDwmwaWindowCornerPreference, &corner, sizeof(corner));
++        (void)dwm.set_window_attribute(overlay.hwnd, kDwmwaSystemBackdropType, &backdrop, sizeof(backdrop));
++    }
++    MARGINS margins = overlay.rounded_region_active ? MARGINS { -1, -1, -1, -1 } : MARGINS { 0, 0, 0, 0 };
++    (void)DwmExtendFrameIntoClientArea(overlay.hwnd, &margins);
++}
++
++static D2D1_COLOR_F bubbleColor(COLORREF color, float alpha = 1) {
++    return D2D1::ColorF(GetRValue(color) / 255.0f, GetGValue(color) / 255.0f, GetBValue(color) / 255.0f, alpha);
++}
++
++struct BubblePalette {
++    D2D1_COLOR_F surface;
++    D2D1_COLOR_F border;
++    D2D1_COLOR_F title;
++    D2D1_COLOR_F text;
++    D2D1_COLOR_F muted;
++    D2D1_COLOR_F accent;
++};
++
++static BubblePalette bubblePalette(bool dark, bool high_contrast, int state, float alpha) {
++    BubblePalette palette;
++    if (high_contrast || bubbleSystemHighContrast()) {
++        palette.surface = bubbleColor(GetSysColor(COLOR_WINDOW), alpha);
++        palette.border = bubbleColor(GetSysColor(COLOR_WINDOWTEXT), 1);
++        palette.title = bubbleColor(GetSysColor(COLOR_WINDOWTEXT), 1);
++        palette.text = palette.title;
++        palette.muted = palette.title;
++        palette.accent = bubbleColor(GetSysColor(COLOR_HIGHLIGHT), 1);
++        return palette;
++    }
++    palette.surface = dark ? D2D1::ColorF(0x171A20, 0.76f * alpha) : D2D1::ColorF(0xF5F7FB, 0.78f * alpha);
++    palette.border = dark ? D2D1::ColorF(0xFFFFFF, 0.17f * alpha) : D2D1::ColorF(0x465066, 0.22f * alpha);
++    palette.title = dark ? D2D1::ColorF(0xFFFFFF, alpha) : D2D1::ColorF(0x151922, alpha);
++    palette.text = dark ? D2D1::ColorF(0xE4E8F0, 0.92f * alpha) : D2D1::ColorF(0x303744, 0.92f * alpha);
++    palette.muted = dark ? D2D1::ColorF(0xB8C0CF, 0.78f * alpha) : D2D1::ColorF(0x667084, 0.82f * alpha);
++    switch (state) {
++        case 1: palette.accent = D2D1::ColorF(0x4B84FF, alpha); break;
++        case 2: palette.accent = D2D1::ColorF(0xFF9F0A, alpha); break;
++        case 3: palette.accent = D2D1::ColorF(0x34C759, alpha); break;
++        case 4: palette.accent = D2D1::ColorF(0xFF453A, alpha); break;
++        default: palette.accent = palette.muted; break;
++    }
++    return palette;
++}
++
++static ID2D1HwndRenderTarget *bubbleRenderTarget(BubbleOverlay &overlay) {
++    if (overlay.render_target) return overlay.render_target;
++    if (!overlay.host || !overlay.hwnd || !ensureBubbleGraphics(overlay.host)) return nullptr;
++    RECT client = {};
++    GetClientRect(overlay.hwnd, &client);
++    D2D1_RENDER_TARGET_PROPERTIES properties = D2D1::RenderTargetProperties(
++        D2D1_RENDER_TARGET_TYPE_DEFAULT,
++        D2D1::PixelFormat(DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_PREMULTIPLIED));
++    D2D1_HWND_RENDER_TARGET_PROPERTIES hwnd_properties = D2D1::HwndRenderTargetProperties(
++        overlay.hwnd, D2D1::SizeU((UINT32)std::max<LONG>(1, client.right), (UINT32)std::max<LONG>(1, client.bottom)));
++    if (FAILED(overlay.host->bubble_d2d_factory->CreateHwndRenderTarget(properties, hwnd_properties, &overlay.render_target))) return nullptr;
++    const FLOAT dpi = (FLOAT)dpiForWindow(overlay.hwnd);
++    overlay.render_target->SetDpi(dpi, dpi);
++    return overlay.render_target;
++}
++
++static void bubbleDrawText(BubbleOverlay &overlay, ID2D1RenderTarget *target, const std::string &utf8, BubbleFrame frame,
++                           float size, DWRITE_FONT_WEIGHT weight, D2D1_COLOR_F color, float opacity = 1) {
++    if (utf8.empty() || frame.w <= 0 || frame.h <= 0 || !overlay.host || !overlay.host->bubble_dwrite_factory) return;
++    IDWriteTextFormat *format = nullptr;
++    HRESULT hr = overlay.host->bubble_dwrite_factory->CreateTextFormat(
++        L"Segoe UI Variable Text", nullptr, weight, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
++        std::max(8.0f, size), L"", &format);
++    if (FAILED(hr)) hr = overlay.host->bubble_dwrite_factory->CreateTextFormat(
++        L"Segoe UI", nullptr, weight, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
++        std::max(8.0f, size), L"", &format);
++    if (FAILED(hr) || !format) return;
++    format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
++    format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
++    ID2D1SolidColorBrush *brush = nullptr;
++    color.a *= opacity;
++    if (SUCCEEDED(target->CreateSolidColorBrush(color, &brush)) && brush) {
++        std::wstring text = widen(utf8);
++        target->DrawText(text.c_str(), (UINT32)text.size(), format,
++            D2D1::RectF(frame.x, frame.y, frame.x + frame.w, frame.y + frame.h), brush,
++            D2D1_DRAW_TEXT_OPTIONS_CLIP, DWRITE_MEASURING_MODE_NATURAL);
++        brush->Release();
++    }
++    format->Release();
++}
++
++static void bubbleDrawShimmerText(BubbleOverlay &overlay, ID2D1RenderTarget *target, const BubbleLine &line,
++                                  float size, const BubblePalette &palette) {
++    if (!overlay.card.busy || overlay.card.reduce_motion || line.text.empty()) return;
++    const float phase = overlay.card.shimmer_phase - std::floor(overlay.card.shimmer_phase);
++    const float center = line.frame.x - line.frame.w * 0.35f + phase * line.frame.w * 1.7f;
++    D2D1_GRADIENT_STOP stops[] = {
++        { 0.0f, D2D1::ColorF(palette.text.r, palette.text.g, palette.text.b, 0.0f) },
++        { 0.5f, D2D1::ColorF(1, 1, 1, 0.75f) },
++        { 1.0f, D2D1::ColorF(palette.text.r, palette.text.g, palette.text.b, 0.0f) },
++    };
++    ID2D1GradientStopCollection *collection = nullptr;
++    ID2D1LinearGradientBrush *brush = nullptr;
++    if (FAILED(target->CreateGradientStopCollection(stops, 3, &collection)) || !collection) return;
++    if (SUCCEEDED(target->CreateLinearGradientBrush(
++            D2D1::LinearGradientBrushProperties(D2D1::Point2F(center - line.frame.w * 0.22f, 0), D2D1::Point2F(center + line.frame.w * 0.22f, 0)),
++            collection, &brush)) && brush) {
++        IDWriteTextFormat *format = nullptr;
++        if (SUCCEEDED(overlay.host->bubble_dwrite_factory->CreateTextFormat(
++                L"Segoe UI Variable Text", nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
++                DWRITE_FONT_STRETCH_NORMAL, std::max(8.0f, size), L"", &format)) && format) {
++            format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
++            std::wstring text = widen(line.text);
++            target->DrawText(text.c_str(), (UINT32)text.size(), format,
++                D2D1::RectF(line.frame.x, line.frame.y, line.frame.x + line.frame.w, line.frame.y + line.frame.h),
++                brush, D2D1_DRAW_TEXT_OPTIONS_CLIP, DWRITE_MEASURING_MODE_NATURAL);
++            format->Release();
++        }
++        brush->Release();
++    }
++    collection->Release();
++}
++
++static void paintBubbleOverlay(BubbleOverlay &overlay) {
++    ID2D1HwndRenderTarget *target = bubbleRenderTarget(overlay);
++    if (!target) return;
++    target->BeginDraw();
++    target->Clear(D2D1::ColorF(0, 0));
++
++    if (overlay.kind == kBubbleCardOverlay) {
++        const BubbleCardPresentation &card = overlay.card;
++        const BubblePalette palette = bubblePalette(card.glass.dark, card.glass.high_contrast, card.glass.state, card.glass.alpha);
++        ID2D1SolidColorBrush *surface = nullptr;
++        ID2D1SolidColorBrush *border = nullptr;
++        if (SUCCEEDED(target->CreateSolidColorBrush(palette.surface, &surface)) && surface) {
++            target->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(0, 0, card.glass.frame.w, card.glass.frame.h), card.glass.radius, card.glass.radius), surface);
++            surface->Release();
++        }
++        if (SUCCEEDED(target->CreateSolidColorBrush(palette.border, &border)) && border) {
++            target->DrawRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(0.5f, 0.5f, card.glass.frame.w - 0.5f, card.glass.frame.h - 0.5f), card.glass.radius, card.glass.radius), border, 1);
++            border->Release();
++        }
++        std::string metadata = card.agent;
++        if (!card.hostname.empty()) metadata += " · " + card.hostname;
++        if (!card.project.empty()) metadata += " · " + card.project;
++        bubbleDrawText(overlay, target, metadata, card.metadata_left_frame, card.metadata_font_size, DWRITE_FONT_WEIGHT_MEDIUM, palette.muted, card.metadata_alpha * card.content_alpha);
++        bubbleDrawText(overlay, target, card.title, card.title_frame, card.title_font_size, DWRITE_FONT_WEIGHT_SEMI_BOLD, palette.title, card.content_alpha);
++        for (const BubbleLine &line : card.messages) {
++            bubbleDrawText(overlay, target, line.text, line.frame, card.message_font_size, DWRITE_FONT_WEIGHT_NORMAL, palette.text, card.content_alpha);
++            bubbleDrawShimmerText(overlay, target, line, card.message_font_size, palette);
++        }
++        for (const BubbleLine &line : card.nested)
++            bubbleDrawText(overlay, target, line.text, line.frame, card.nested_font_size, DWRITE_FONT_WEIGHT_NORMAL, palette.muted, card.nested_alpha * card.content_alpha);
++        if (card.status_frame.w > 0 && card.status_frame.h > 0) {
++            ID2D1SolidColorBrush *status = nullptr;
++            if (SUCCEEDED(target->CreateSolidColorBrush(palette.accent, &status)) && status) {
++                const float radius = std::min(card.status_frame.w, card.status_frame.h) * 0.42f;
++                target->FillEllipse(D2D1::Ellipse(D2D1::Point2F(card.status_frame.x + card.status_frame.w / 2, card.status_frame.y + card.status_frame.h / 2), radius, radius), status);
++                status->Release();
++            }
++        }
++    } else if (overlay.kind == kBubbleDisclosureOverlay) {
++        const BubbleGlass &glass = overlay.disclosure.glass;
++        const BubblePalette palette = bubblePalette(glass.dark, glass.high_contrast, overlay.disclosure.state, overlay.disclosure.alpha);
++        ID2D1SolidColorBrush *surface = nullptr;
++        ID2D1SolidColorBrush *border = nullptr;
++        if (SUCCEEDED(target->CreateSolidColorBrush(palette.surface, &surface)) && surface) {
++            target->FillEllipse(D2D1::Ellipse(D2D1::Point2F(glass.frame.w / 2, glass.frame.h / 2), glass.frame.w / 2, glass.frame.h / 2), surface);
++            surface->Release();
++        }
++        if (SUCCEEDED(target->CreateSolidColorBrush(palette.border, &border)) && border) {
++            target->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(glass.frame.w / 2, glass.frame.h / 2), glass.frame.w / 2 - 0.5f, glass.frame.h / 2 - 0.5f), border, 1);
++            border->Release();
++        }
++    } else {
++        const BubbleControlPresentation &control = overlay.control;
++        const bool dark = bubbleSystemHighContrast() ? false : true;
++        const BubblePalette palette = bubblePalette(dark, bubbleSystemHighContrast(), control.state, control.alpha);
++        ID2D1SolidColorBrush *fill = nullptr;
++        D2D1_COLOR_F fill_color = control.selected ? palette.accent : D2D1::ColorF(palette.surface.r, palette.surface.g, palette.surface.b, control.overlay ? 0.58f : 0.76f);
++        if (SUCCEEDED(target->CreateSolidColorBrush(fill_color, &fill)) && fill) {
++            target->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(0, 0, control.frame.w, control.frame.h), control.frame.h / 2, control.frame.h / 2), fill);
++            fill->Release();
++        }
++        const wchar_t *glyph = L"\uE70D";
++        switch (control.action) {
++            case 1: glyph = L"\uE8A7"; break;
++            case 2: glyph = L"\uE718"; break;
++            case 3: glyph = L"\uE716"; break;
++            case 4: glyph = L"\uE711"; break;
++            default: glyph = control.points_up ? L"\uE70E" : L"\uE70D"; break;
++        }
++        IDWriteTextFormat *format = nullptr;
++        if (SUCCEEDED(overlay.host->bubble_dwrite_factory->CreateTextFormat(L"Segoe Fluent Icons", nullptr,
++                DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 13, L"", &format)) && format) {
++            format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
++            format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
++            ID2D1SolidColorBrush *brush = nullptr;
++            if (SUCCEEDED(target->CreateSolidColorBrush(palette.title, &brush)) && brush) {
++                target->DrawText(glyph, 1, format, D2D1::RectF(0, 0, control.frame.w, control.frame.h), brush);
++                brush->Release();
++            }
++            format->Release();
++        }
++        if (control.badge_count > 0) {
++            char count[8] = {};
++            snprintf(count, sizeof(count), "%d", control.badge_count);
++            bubbleDrawText(overlay, target, count, { 0, 4, control.frame.w, control.frame.h - 4 }, 11, DWRITE_FONT_WEIGHT_SEMI_BOLD, palette.title);
++        }
++    }
++
++    HRESULT result = target->EndDraw();
++    if (result == D2DERR_RECREATE_TARGET) {
++        overlay.render_target->Release();
++        overlay.render_target = nullptr;
++    }
++}
++
++static const wchar_t *bubbleControlAccessibilityName(const BubbleControlPresentation &control) {
++    switch (control.action) {
++        case 0:
++            if (control.mode == 0) return L"Show most recent active session only";
++            if (control.mode == 1) return L"Hide session cards";
++            return L"Show all active sessions";
++        case 1: return L"Open agent session";
++        case 2: return control.selected ? L"Unpin session" : L"Pin session to front";
++        case 3: return control.selected ? L"Collapse subagent messages" : L"Expand subagent messages";
++        case 4: return L"Dismiss ended session";
++        default: return L"Session action";
++    }
++}
++
++static ATOM registerBubbleOverlayClass(Host *host) {
++    WNDCLASSEXW wc = {};
++    wc.cbSize = sizeof(wc);
++    wc.lpfnWndProc = bubbleOverlayProc;
++    wc.hInstance = host->instance;
++    wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
++    wc.hbrBackground = nullptr;
++    wc.lpszClassName = L"NativeSdkPetdexBubbleOverlay";
++    ATOM atom = RegisterClassExW(&wc);
++    if (!atom && GetLastError() == ERROR_CLASS_ALREADY_EXISTS) return 1;
++    return atom;
++}
++
++static void initializeBubbleComposition(BubbleOverlay &overlay) {
++    if (!overlay.host || !overlay.hwnd || !ensureBubbleGraphics(overlay.host) || !overlay.host->bubble_dcomp_device) return;
++    if (FAILED(overlay.host->bubble_dcomp_device->CreateTargetForHwnd(overlay.hwnd, TRUE, &overlay.composition_target)) || !overlay.composition_target) return;
++    if (FAILED(overlay.host->bubble_dcomp_device->CreateVisual(&overlay.root_visual)) || !overlay.root_visual) return;
++    if (SUCCEEDED(overlay.host->bubble_dcomp_device->CreateVisual(&overlay.shimmer_visual)) && overlay.shimmer_visual) {
++        /* The shimmer has its own compositor visual. D2D refreshes only the
++         * glyph mask on the overlay timer; the app's retained canvas frame is
++         * never rebuilt to animate message text. */
++        overlay.root_visual->AddVisual(overlay.shimmer_visual, TRUE, nullptr);
++    }
++    overlay.composition_target->SetRoot(overlay.root_visual);
++    overlay.host->bubble_dcomp_device->Commit();
++}
++
++static BubbleOverlay *createBubbleOverlay(Host *host, uint64_t owner_window_id, const std::string &key, BubbleOverlayKind kind) {
++    auto existing = host->bubble_overlays.find(key);
++    if (existing != host->bubble_overlays.end()) return existing->second.get();
++    const Window *owner = windowForId(host, owner_window_id);
++    if (!owner || !owner->hwnd || !registerBubbleOverlayClass(host)) return nullptr;
++    std::unique_ptr<BubbleOverlay> created(new BubbleOverlay());
++    created->host = host;
++    created->owner_window_id = owner_window_id;
++    created->kind = kind;
++    created->hwnd = CreateWindowExW(
++        WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
++        L"NativeSdkPetdexBubbleOverlay", L"Petdex session", WS_POPUP,
++        0, 0, 1, 1, owner->hwnd, nullptr, host->instance, created.get());
++    if (!created->hwnd) return nullptr;
++    initializeBubbleComposition(*created);
++    applyBubbleBackdrop(*created);
++    BubbleOverlay *result = created.get();
++    host->bubble_overlays.emplace(key, std::move(created));
++    return result;
++}
++
++static void ensureBubbleTooltip(BubbleOverlay &overlay) {
++    if (!overlay.hwnd || overlay.tooltip || overlay.kind != kBubbleControlOverlay) return;
++    overlay.tooltip = CreateWindowExW(WS_EX_TOPMOST | WS_EX_NOACTIVATE, TOOLTIPS_CLASSW, nullptr,
++        WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
++        overlay.hwnd, nullptr, overlay.host->instance, nullptr);
++    if (!overlay.tooltip) return;
++    TOOLINFOW info = {};
++    info.cbSize = sizeof(info);
++    info.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
++    info.hwnd = overlay.hwnd;
++    info.uId = reinterpret_cast<UINT_PTR>(overlay.hwnd);
++    info.lpszText = const_cast<wchar_t *>(overlay.accessibility_name.c_str());
++    SendMessageW(overlay.tooltip, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&info));
++    SendMessageW(overlay.tooltip, TTM_SETMAXTIPWIDTH, 0, 320);
++}
++
++static void updateBubbleTooltip(BubbleOverlay &overlay) {
++    if (!overlay.tooltip || !overlay.hwnd) return;
++    TOOLINFOW info = {};
++    info.cbSize = sizeof(info);
++    info.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
++    info.hwnd = overlay.hwnd;
++    info.uId = reinterpret_cast<UINT_PTR>(overlay.hwnd);
++    info.lpszText = const_cast<wchar_t *>(overlay.accessibility_name.c_str());
++    SendMessageW(overlay.tooltip, TTM_UPDATETIPTEXTW, 0, reinterpret_cast<LPARAM>(&info));
++}
++
++static void resizeBubbleRenderTarget(BubbleOverlay &overlay) {
++    if (!overlay.render_target || !overlay.hwnd) return;
++    RECT client = {};
++    GetClientRect(overlay.hwnd, &client);
++    overlay.render_target->Resize(D2D1::SizeU((UINT32)std::max<LONG>(1, client.right), (UINT32)std::max<LONG>(1, client.bottom)));
++    const FLOAT dpi = (FLOAT)dpiForWindow(overlay.hwnd);
++    overlay.render_target->SetDpi(dpi, dpi);
++}
++
++static bool applyBubbleWindowRegion(BubbleOverlay &overlay, int width, int height, UINT dpi) {
++    overlay.rounded_region_active = false;
++    if (!overlay.hwnd) return false;
++    width = std::max(1, width);
++    height = std::max(1, height);
++    const double scale = (double)(dpi ? dpi : dpiForWindow(overlay.hwnd)) / 96.0;
++    const float logical_radius = overlay.kind == kBubbleCardOverlay ? overlay.card.glass.radius :
++        overlay.kind == kBubbleDisclosureOverlay ? overlay.disclosure.glass.radius :
++        std::min(overlay.control.frame.w, overlay.control.frame.h) * 0.5f;
++    const int diameter = std::max(1, nativeViewCoord(logical_radius * 2 * scale));
++    HRGN region = CreateRoundRectRgn(0, 0, width + 1, height + 1, diameter, diameter);
++    if (!region) {
++        SetWindowRgn(overlay.hwnd, nullptr, TRUE);
++        return false;
++    }
++    if (SetWindowRgn(overlay.hwnd, region, TRUE) == 0) {
++        DeleteObject(region);
++        SetWindowRgn(overlay.hwnd, nullptr, TRUE);
++        return false;
++    }
++    overlay.rounded_region_active = true;
++    return true;
++}
++
++static void placeBubbleOverlay(BubbleOverlay &overlay) {
++    const Window *owner = windowForId(overlay.host, overlay.owner_window_id);
++    if (!owner || !owner->hwnd || !overlay.hwnd) return;
++    POINT origin = { 0, 0 };
++    ClientToScreen(owner->hwnd, &origin);
++    const double scale = (double)dpiForWindow(owner->hwnd) / 96.0;
++    const int left = origin.x + nativeViewCoord(overlay.frame.x * scale);
++    const int top = origin.y + nativeViewCoord(overlay.frame.y * scale);
++    const int right = origin.x + nativeViewCoord((overlay.frame.x + overlay.frame.w) * scale);
++    const int bottom = origin.y + nativeViewCoord((overlay.frame.y + overlay.frame.h) * scale);
++    const int width = std::max(1, right - left);
++    const int height = std::max(1, bottom - top);
++    const bool was_visible = IsWindowVisible(overlay.hwnd) != FALSE;
++    /* SetWindowRgn owns the supplied region and applies it synchronously. Put
++     * the destination-sized region on the HWND before resizing a visible
++     * overlay, so DWM can never compose the new bounds with the stale region. */
++    applyBubbleWindowRegion(overlay, width, height, dpiForWindow(owner->hwnd));
++    applyBubbleBackdrop(overlay);
++    SetWindowPos(overlay.hwnd, owner->floating ? HWND_TOPMOST : HWND_TOP, left, top, width, height,
++        SWP_NOACTIVATE | SWP_NOOWNERZORDER);
++    /* Establish the render target and first paint before the compositor sees
++     * SWP_SHOWWINDOW, so a newly-created card never presents square. */
++    resizeBubbleRenderTarget(overlay);
++    InvalidateRect(overlay.hwnd, nullptr, FALSE);
++    RedrawWindow(overlay.hwnd, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW);
++    if (!was_visible) {
++        SetWindowPos(overlay.hwnd, nullptr, 0, 0, 0, 0,
++            SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER);
++    }
++}
++
++static void placeBubbleOverlaysForWindow(Host *host, uint64_t window_id) {
++    if (!host) return;
++    for (auto &entry : host->bubble_overlays) {
++        if (entry.second->owner_window_id == window_id) placeBubbleOverlay(*entry.second);
++    }
++}
++
++static void emitBubbleNativeCommand(BubbleOverlay &overlay, const char *kind, const char *action) {
++    if (!overlay.host || !overlay.host->callback) return;
++    char command[128] = {};
++    snprintf(command, sizeof(command), "petdex.bubble.%s.%s.%016llx", kind, action, (unsigned long long)overlay.identity);
++    const char *label = overlay.kind == kBubbleCardOverlay ? "bubble-card" : "bubble-control";
++    WindowsEvent event = {};
++    event.kind = kNativeCommand;
++    event.window_id = overlay.owner_window_id;
++    event.command_name = command;
++    event.command_name_len = strlen(command);
++    event.view_label = label;
++    event.view_label_len = strlen(label);
++    overlay.host->callback(overlay.host->callback_context, &event);
++}
++
++static void emitBubbleControlCommand(BubbleOverlay &overlay) {
++    if (!overlay.control.enabled) return;
++    const char *actions[] = { "toggle", "open", "pin", "subagents", "dismiss" };
++    const int action = overlay.control.action;
++    if (action < 0 || action >= (int)(sizeof(actions) / sizeof(actions[0]))) return;
++    emitBubbleNativeCommand(overlay, "control", actions[action]);
++}
++
++constexpr UINT kBubbleUiaInvokeMessage = WM_APP + 0x51;
++
++static constexpr int bubbleUiaKindRank(BubbleOverlayKind kind) {
++    return kind == kBubbleCardOverlay ? 0 : kind == kBubbleDisclosureOverlay ? 1 : 2;
++}
++static_assert(bubbleUiaKindRank(kBubbleCardOverlay) < bubbleUiaKindRank(kBubbleDisclosureOverlay));
++static_assert(bubbleUiaKindRank(kBubbleDisclosureOverlay) < bubbleUiaKindRank(kBubbleControlOverlay));
++
++static bool bubbleUiaIncluded(const BubbleOverlay &overlay) {
++    return overlay.hwnd && IsWindowVisible(overlay.hwnd) &&
++        !(overlay.kind == kBubbleControlOverlay && overlay.control.action == 0);
++}
++
++static std::vector<BubbleOverlay *> bubbleUiaOrderedChildren(Host *host, uint64_t owner_window_id) {
++    std::vector<BubbleOverlay *> children;
++    if (!host) return children;
++    for (auto &entry : host->bubble_overlays) {
++        BubbleOverlay *overlay = entry.second.get();
++        if (overlay && overlay->owner_window_id == owner_window_id && bubbleUiaIncluded(*overlay)) children.push_back(overlay);
++    }
++    std::stable_sort(children.begin(), children.end(), [](const BubbleOverlay *left, const BubbleOverlay *right) {
++        const int left_rank = bubbleUiaKindRank(left->kind);
++        const int right_rank = bubbleUiaKindRank(right->kind);
++        if (left_rank != right_rank) return left_rank < right_rank;
++        if (left->frame.y != right->frame.y) return left->frame.y < right->frame.y;
++        if (left->frame.x != right->frame.x) return left->frame.x < right->frame.x;
++        if (left->identity != right->identity) return left->identity < right->identity;
++        return left->action < right->action;
++    });
++    return children;
++}
++
++class BubbleUiaProvider;
++
++class BubbleUiaRootProvider final : public IRawElementProviderSimple, public IRawElementProviderFragment, public IRawElementProviderFragmentRoot {
++public:
++    BubbleUiaRootProvider(Host *host, uint64_t owner_window_id, HWND owner_hwnd)
++        : refs_(1), host_(host), owner_window_id_(owner_window_id), owner_hwnd_(owner_hwnd) {}
++    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void **out) override;
++    ULONG STDMETHODCALLTYPE AddRef() override { return ++refs_; }
++    ULONG STDMETHODCALLTYPE Release() override {
++        const ULONG remaining = --refs_;
++        if (!remaining) delete this;
++        return remaining;
++    }
++    HRESULT STDMETHODCALLTYPE get_ProviderOptions(ProviderOptions *options) override;
++    HRESULT STDMETHODCALLTYPE GetPatternProvider(PATTERNID, IUnknown **provider) override;
++    HRESULT STDMETHODCALLTYPE GetPropertyValue(PROPERTYID property, VARIANT *value) override;
++    HRESULT STDMETHODCALLTYPE get_HostRawElementProvider(IRawElementProviderSimple **provider) override;
++    HRESULT STDMETHODCALLTYPE Navigate(NavigateDirection direction, IRawElementProviderFragment **provider) override;
++    HRESULT STDMETHODCALLTYPE GetRuntimeId(SAFEARRAY **runtime_id) override;
++    HRESULT STDMETHODCALLTYPE get_BoundingRectangle(UiaRect *bounds) override;
++    HRESULT STDMETHODCALLTYPE GetEmbeddedFragmentRoots(SAFEARRAY **roots) override;
++    HRESULT STDMETHODCALLTYPE SetFocus() override;
++    HRESULT STDMETHODCALLTYPE get_FragmentRoot(IRawElementProviderFragmentRoot **root) override;
++    HRESULT STDMETHODCALLTYPE ElementProviderFromPoint(double x, double y, IRawElementProviderFragment **provider) override;
++    HRESULT STDMETHODCALLTYPE GetFocus(IRawElementProviderFragment **provider) override;
++
++private:
++    Host *currentHost() const {
++        if (!IsWindow(owner_hwnd_)) return nullptr;
++        Host *current = reinterpret_cast<Host *>(GetWindowLongPtrW(owner_hwnd_, GWLP_USERDATA));
++        return current == host_ ? current : nullptr;
++    }
++    std::atomic<ULONG> refs_;
++    Host *host_;
++    uint64_t owner_window_id_;
++    HWND owner_hwnd_;
++};
++
++class BubbleUiaProvider final : public IRawElementProviderSimple, public IRawElementProviderFragment, public IInvokeProvider, public IToggleProvider {
++public:
++    explicit BubbleUiaProvider(HWND hwnd) : refs_(1), hwnd_(hwnd) {
++        BubbleOverlay *overlay = bubbleOverlayFromHwnd(hwnd);
++        if (overlay) { identity_ = overlay->identity; kind_ = overlay->kind; action_ = overlay->action; }
++    }
++
++    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void **out) override {
++        if (!out) return E_INVALIDARG;
++        *out = nullptr;
++        if (iid == IID_IUnknown || iid == IID_IRawElementProviderSimple) *out = static_cast<IRawElementProviderSimple *>(this);
++        else if (iid == IID_IRawElementProviderFragment) *out = static_cast<IRawElementProviderFragment *>(this);
++        else if (iid == IID_IInvokeProvider) {
++            BubbleOverlay *overlay = currentOverlay();
++            if (!overlay || (overlay->kind == kBubbleCardOverlay && !overlay->card.action_available)) return E_NOINTERFACE;
++            *out = static_cast<IInvokeProvider *>(this);
++        }
++        else if (iid == IID_IToggleProvider) {
++            BubbleOverlay *overlay = currentOverlay();
++            if (!overlay || (overlay->kind != kBubbleDisclosureOverlay &&
++                (overlay->kind != kBubbleControlOverlay || overlay->control.accessibility_role != 2))) return E_NOINTERFACE;
++            *out = static_cast<IToggleProvider *>(this);
++        }
++        else return E_NOINTERFACE;
++        AddRef();
++        return S_OK;
++    }
++    ULONG STDMETHODCALLTYPE AddRef() override { return ++refs_; }
++    ULONG STDMETHODCALLTYPE Release() override {
++        const ULONG remaining = --refs_;
++        if (!remaining) delete this;
++        return remaining;
++    }
++    HRESULT STDMETHODCALLTYPE get_ProviderOptions(ProviderOptions *options) override {
++        if (!options) return E_INVALIDARG;
++        *options = ProviderOptions_ServerSideProvider;
++        return S_OK;
++    }
++    HRESULT STDMETHODCALLTYPE GetPatternProvider(PATTERNID pattern, IUnknown **provider) override {
++        if (!provider) return E_INVALIDARG;
++        *provider = nullptr;
++        BubbleOverlay *overlay = currentOverlay();
++        if (!overlay) return UIA_E_ELEMENTNOTAVAILABLE;
++        if (pattern == UIA_InvokePatternId && (overlay->kind == kBubbleDisclosureOverlay || overlay->kind == kBubbleControlOverlay || (overlay->kind == kBubbleCardOverlay && overlay->card.action_available)))
++            return QueryInterface(IID_IInvokeProvider, reinterpret_cast<void **>(provider));
++        if (pattern == UIA_TogglePatternId && (overlay->kind == kBubbleDisclosureOverlay || (overlay->kind == kBubbleControlOverlay && overlay->control.accessibility_role == 2)))
++            return QueryInterface(IID_IToggleProvider, reinterpret_cast<void **>(provider));
++        return S_OK;
++    }
++    HRESULT STDMETHODCALLTYPE GetPropertyValue(PROPERTYID property, VARIANT *value) override {
++        if (!value) return E_INVALIDARG;
++        VariantInit(value);
++        BubbleOverlay *overlay = currentOverlay();
++        if (!overlay) return UIA_E_ELEMENTNOTAVAILABLE;
++        if (property == UIA_NamePropertyId) {
++            value->vt = VT_BSTR;
++            value->bstrVal = SysAllocString(overlay->accessibility_name.c_str());
++            if (!value->bstrVal) { value->vt = VT_EMPTY; return E_OUTOFMEMORY; }
++        } else if (property == UIA_ControlTypePropertyId) {
++            value->vt = VT_I4;
++            value->lVal = overlay->kind == kBubbleCardOverlay && !overlay->card.action_available ? UIA_GroupControlTypeId :
++                overlay->kind == kBubbleDisclosureOverlay || (overlay->kind == kBubbleControlOverlay && overlay->control.accessibility_role == 2) ? UIA_CheckBoxControlTypeId : UIA_ButtonControlTypeId;
++        } else if (property == UIA_IsEnabledPropertyId) {
++            const bool enabled = overlay->kind == kBubbleCardOverlay ? overlay->card.action_available :
++                overlay->kind == kBubbleDisclosureOverlay ? overlay->disclosure.enabled : overlay->control.enabled;
++            value->vt = VT_BOOL;
++            value->boolVal = enabled ? VARIANT_TRUE : VARIANT_FALSE;
++        } else if (property == UIA_IsKeyboardFocusablePropertyId) {
++            value->vt = VT_BOOL;
++            value->boolVal = VARIANT_FALSE;
++        } else if (property == UIA_NativeWindowHandlePropertyId) {
++            value->vt = VT_I4;
++            value->lVal = (LONG)(LONG_PTR)hwnd_;
++        } else if (property == UIA_HelpTextPropertyId) {
++            const std::string &help = overlay->kind == kBubbleCardOverlay ? overlay->card.accessibility_value :
++                overlay->kind == kBubbleDisclosureOverlay ? overlay->disclosure.accessibility_value : overlay->control.accessibility_value;
++            value->vt = VT_BSTR;
++            value->bstrVal = SysAllocString(widen(help).c_str());
++            if (!value->bstrVal) { value->vt = VT_EMPTY; return E_OUTOFMEMORY; }
++        } else if (property == UIA_ToggleToggleStatePropertyId) {
++            const bool toggled = overlay->kind == kBubbleDisclosureOverlay ? overlay->disclosure.toggled : overlay->control.toggled;
++            value->vt = VT_I4;
++            value->lVal = toggled ? ToggleState_On : ToggleState_Off;
++        } else if (property == UIA_SelectionItemIsSelectedPropertyId) {
++            value->vt = VT_BOOL;
++            value->boolVal = overlay->kind == kBubbleControlOverlay && overlay->control.selected ? VARIANT_TRUE : VARIANT_FALSE;
++        }
++        return S_OK;
++    }
++    HRESULT STDMETHODCALLTYPE get_HostRawElementProvider(IRawElementProviderSimple **provider) override {
++        if (!provider) return E_INVALIDARG;
++        *provider = nullptr;
++        return currentOverlay() ? S_OK : UIA_E_ELEMENTNOTAVAILABLE;
++    }
++    HRESULT STDMETHODCALLTYPE Invoke() override {
++        BubbleOverlay *overlay = currentOverlay();
++        if (!overlay) return UIA_E_ELEMENTNOTAVAILABLE;
++        if ((overlay->kind == kBubbleCardOverlay && !overlay->card.action_available) ||
++            (overlay->kind == kBubbleDisclosureOverlay && !overlay->disclosure.enabled) ||
++            (overlay->kind == kBubbleControlOverlay && !overlay->control.enabled)) return UIA_E_ELEMENTNOTENABLED;
++        PostMessageW(hwnd_, kBubbleUiaInvokeMessage, 0, 0);
++        return S_OK;
++    }
++    HRESULT STDMETHODCALLTYPE Toggle() override { return Invoke(); }
++    HRESULT STDMETHODCALLTYPE get_ToggleState(ToggleState *state) override {
++        if (!state) return E_INVALIDARG;
++        BubbleOverlay *overlay = currentOverlay();
++        if (!overlay) return UIA_E_ELEMENTNOTAVAILABLE;
++        if (overlay->kind != kBubbleDisclosureOverlay && (overlay->kind != kBubbleControlOverlay || overlay->control.accessibility_role != 2)) return E_NOINTERFACE;
++        const bool toggled = overlay->kind == kBubbleDisclosureOverlay ? overlay->disclosure.toggled : overlay->control.toggled;
++        *state = toggled ? ToggleState_On : ToggleState_Off;
++        return S_OK;
++    }
++    HRESULT STDMETHODCALLTYPE Navigate(NavigateDirection direction, IRawElementProviderFragment **provider) override {
++        if (!provider) return E_INVALIDARG;
++        *provider = nullptr;
++        BubbleOverlay *overlay = currentOverlay();
++        if (!overlay) return UIA_E_ELEMENTNOTAVAILABLE;
++        if (direction == NavigateDirection_Parent) {
++            const Window *owner = windowForId(overlay->host, overlay->owner_window_id);
++            if (!owner || !owner->hwnd) return UIA_E_ELEMENTNOTAVAILABLE;
++            auto *root = new (std::nothrow) BubbleUiaRootProvider(overlay->host, overlay->owner_window_id, owner->hwnd);
++            if (!root) return E_OUTOFMEMORY;
++            const HRESULT result = root->QueryInterface(IID_IRawElementProviderFragment, reinterpret_cast<void **>(provider));
++            root->Release();
++            return result;
++        }
++        if (direction != NavigateDirection_NextSibling && direction != NavigateDirection_PreviousSibling) return S_OK;
++        const auto children = bubbleUiaOrderedChildren(overlay->host, overlay->owner_window_id);
++        for (size_t index = 0; index < children.size(); ++index) {
++            if (children[index]->hwnd != hwnd_) continue;
++            const size_t sibling_index = direction == NavigateDirection_NextSibling ? index + 1 : (index == 0 ? children.size() : index - 1);
++            if (sibling_index >= children.size()) return S_OK;
++            auto *sibling = new (std::nothrow) BubbleUiaProvider(children[sibling_index]->hwnd);
++            if (!sibling) return E_OUTOFMEMORY;
++            *provider = static_cast<IRawElementProviderFragment *>(sibling);
++            return S_OK;
++        }
++        return UIA_E_ELEMENTNOTAVAILABLE;
++    }
++    HRESULT STDMETHODCALLTYPE GetRuntimeId(SAFEARRAY **runtime_id) override {
++        if (!runtime_id) return E_INVALIDARG;
++        *runtime_id = nullptr;
++        BubbleOverlay *overlay = currentOverlay();
++        if (!overlay) return UIA_E_ELEMENTNOTAVAILABLE;
++        SAFEARRAY *ids = SafeArrayCreateVector(VT_I4, 0, 5);
++        if (!ids) return E_OUTOFMEMORY;
++        LONG *values = nullptr;
++        if (FAILED(SafeArrayAccessData(ids, reinterpret_cast<void **>(&values)))) { SafeArrayDestroy(ids); return E_FAIL; }
++        values[0] = UiaAppendRuntimeId;
++        values[1] = bubbleUiaKindRank(overlay->kind);
++        values[2] = static_cast<LONG>(overlay->identity & 0xffffffffu);
++        values[3] = static_cast<LONG>((overlay->identity >> 32) & 0xffffffffu);
++        values[4] = overlay->action;
++        SafeArrayUnaccessData(ids);
++        *runtime_id = ids;
++        return S_OK;
++    }
++    HRESULT STDMETHODCALLTYPE get_BoundingRectangle(UiaRect *bounds) override {
++        if (!bounds) return E_INVALIDARG;
++        BubbleOverlay *overlay = currentOverlay();
++        if (!overlay) return UIA_E_ELEMENTNOTAVAILABLE;
++        RECT rect = {};
++        if (!GetWindowRect(hwnd_, &rect)) return HRESULT_FROM_WIN32(GetLastError());
++        *bounds = { static_cast<double>(rect.left), static_cast<double>(rect.top),
++            static_cast<double>(rect.right - rect.left), static_cast<double>(rect.bottom - rect.top) };
++        return S_OK;
++    }
++    HRESULT STDMETHODCALLTYPE GetEmbeddedFragmentRoots(SAFEARRAY **roots) override {
++        if (!roots) return E_INVALIDARG;
++        *roots = nullptr;
++        return currentOverlay() ? S_OK : UIA_E_ELEMENTNOTAVAILABLE;
++    }
++    HRESULT STDMETHODCALLTYPE SetFocus() override { return currentOverlay() ? UIA_E_NOTSUPPORTED : UIA_E_ELEMENTNOTAVAILABLE; }
++    HRESULT STDMETHODCALLTYPE get_FragmentRoot(IRawElementProviderFragmentRoot **root) override {
++        if (!root) return E_INVALIDARG;
++        *root = nullptr;
++        BubbleOverlay *overlay = currentOverlay();
++        if (!overlay) return UIA_E_ELEMENTNOTAVAILABLE;
++        const Window *owner = windowForId(overlay->host, overlay->owner_window_id);
++        if (!owner || !owner->hwnd) return UIA_E_ELEMENTNOTAVAILABLE;
++        auto *result = new (std::nothrow) BubbleUiaRootProvider(overlay->host, overlay->owner_window_id, owner->hwnd);
++        if (!result) return E_OUTOFMEMORY;
++        *root = static_cast<IRawElementProviderFragmentRoot *>(result);
++        return S_OK;
++    }
++
++private:
++    BubbleOverlay *currentOverlay() const {
++        if (!IsWindow(hwnd_)) return nullptr;
++        BubbleOverlay *overlay = bubbleOverlayFromHwnd(hwnd_);
++        return overlay && overlay->identity == identity_ && overlay->kind == kind_ &&
++            (kind_ != kBubbleControlOverlay || overlay->action == action_) ? overlay : nullptr;
++    }
++    std::atomic<ULONG> refs_;
++    HWND hwnd_;
++    uint64_t identity_ = 0;
++    BubbleOverlayKind kind_ = kBubbleCardOverlay;
++    int action_ = 0;
++};
++
++static HRESULT bubbleUiaChildProvider(BubbleOverlay *overlay, IRawElementProviderFragment **provider) {
++    if (!provider) return E_INVALIDARG;
++    *provider = nullptr;
++    if (!overlay || !overlay->hwnd) return S_OK;
++    auto *child = new (std::nothrow) BubbleUiaProvider(overlay->hwnd);
++    if (!child) return E_OUTOFMEMORY;
++    *provider = static_cast<IRawElementProviderFragment *>(child);
++    return S_OK;
++}
++
++HRESULT BubbleUiaRootProvider::QueryInterface(REFIID iid, void **out) {
++    if (!out) return E_INVALIDARG;
++    *out = nullptr;
++    if (iid == IID_IUnknown || iid == IID_IRawElementProviderSimple) *out = static_cast<IRawElementProviderSimple *>(this);
++    else if (iid == IID_IRawElementProviderFragment) *out = static_cast<IRawElementProviderFragment *>(this);
++    else if (iid == IID_IRawElementProviderFragmentRoot) *out = static_cast<IRawElementProviderFragmentRoot *>(this);
++    else return E_NOINTERFACE;
++    AddRef();
++    return S_OK;
++}
++HRESULT BubbleUiaRootProvider::get_ProviderOptions(ProviderOptions *options) {
++    if (!options) return E_INVALIDARG;
++    *options = ProviderOptions_ServerSideProvider;
++    return S_OK;
++}
++HRESULT BubbleUiaRootProvider::GetPatternProvider(PATTERNID, IUnknown **provider) {
++    if (!provider) return E_INVALIDARG;
++    *provider = nullptr;
++    return currentHost() ? S_OK : UIA_E_ELEMENTNOTAVAILABLE;
++}
++HRESULT BubbleUiaRootProvider::GetPropertyValue(PROPERTYID property, VARIANT *value) {
++    if (!value) return E_INVALIDARG;
++    VariantInit(value);
++    if (!currentHost()) return UIA_E_ELEMENTNOTAVAILABLE;
++    if (property == UIA_NamePropertyId) {
++        value->vt = VT_BSTR;
++        value->bstrVal = SysAllocString(L"Petdex agent sessions");
++        if (!value->bstrVal) { value->vt = VT_EMPTY; return E_OUTOFMEMORY; }
++    } else if (property == UIA_ControlTypePropertyId) {
++        value->vt = VT_I4;
++        value->lVal = UIA_PaneControlTypeId;
++    } else if (property == UIA_IsEnabledPropertyId || property == UIA_IsControlElementPropertyId || property == UIA_IsContentElementPropertyId) {
++        value->vt = VT_BOOL;
++        value->boolVal = VARIANT_TRUE;
++    } else if (property == UIA_NativeWindowHandlePropertyId) {
++        value->vt = VT_I4;
++        value->lVal = static_cast<LONG>(reinterpret_cast<LONG_PTR>(owner_hwnd_));
++    }
++    return S_OK;
++}
++HRESULT BubbleUiaRootProvider::get_HostRawElementProvider(IRawElementProviderSimple **provider) {
++    if (!provider) return E_INVALIDARG;
++    if (!currentHost()) { *provider = nullptr; return UIA_E_ELEMENTNOTAVAILABLE; }
++    return UiaHostProviderFromHwnd(owner_hwnd_, provider);
++}
++HRESULT BubbleUiaRootProvider::Navigate(NavigateDirection direction, IRawElementProviderFragment **provider) {
++    if (!provider) return E_INVALIDARG;
++    *provider = nullptr;
++    Host *host = currentHost();
++    if (!host) return UIA_E_ELEMENTNOTAVAILABLE;
++    const auto children = bubbleUiaOrderedChildren(host, owner_window_id_);
++    if (children.empty()) return S_OK;
++    if (direction == NavigateDirection_FirstChild) return bubbleUiaChildProvider(children.front(), provider);
++    if (direction == NavigateDirection_LastChild) return bubbleUiaChildProvider(children.back(), provider);
++    return S_OK;
++}
++HRESULT BubbleUiaRootProvider::GetRuntimeId(SAFEARRAY **runtime_id) {
++    if (!runtime_id) return E_INVALIDARG;
++    *runtime_id = nullptr;
++    return currentHost() ? S_OK : UIA_E_ELEMENTNOTAVAILABLE;
++}
++HRESULT BubbleUiaRootProvider::get_BoundingRectangle(UiaRect *bounds) {
++    if (!bounds) return E_INVALIDARG;
++    Host *host = currentHost();
++    if (!host) return UIA_E_ELEMENTNOTAVAILABLE;
++    const auto children = bubbleUiaOrderedChildren(host, owner_window_id_);
++    RECT union_rect = {};
++    bool has_rect = false;
++    for (BubbleOverlay *child : children) {
++        RECT rect = {};
++        if (!GetWindowRect(child->hwnd, &rect)) continue;
++        if (!has_rect) { union_rect = rect; has_rect = true; }
++        else { union_rect.left = std::min(union_rect.left, rect.left); union_rect.top = std::min(union_rect.top, rect.top);
++            union_rect.right = std::max(union_rect.right, rect.right); union_rect.bottom = std::max(union_rect.bottom, rect.bottom); }
++    }
++    if (!has_rect && !GetWindowRect(owner_hwnd_, &union_rect)) return HRESULT_FROM_WIN32(GetLastError());
++    *bounds = { static_cast<double>(union_rect.left), static_cast<double>(union_rect.top),
++        static_cast<double>(union_rect.right - union_rect.left), static_cast<double>(union_rect.bottom - union_rect.top) };
++    return S_OK;
++}
++HRESULT BubbleUiaRootProvider::GetEmbeddedFragmentRoots(SAFEARRAY **roots) {
++    if (!roots) return E_INVALIDARG;
++    *roots = nullptr;
++    return currentHost() ? S_OK : UIA_E_ELEMENTNOTAVAILABLE;
++}
++HRESULT BubbleUiaRootProvider::SetFocus() { return currentHost() ? UIA_E_NOTSUPPORTED : UIA_E_ELEMENTNOTAVAILABLE; }
++HRESULT BubbleUiaRootProvider::get_FragmentRoot(IRawElementProviderFragmentRoot **root) {
++    if (!root) return E_INVALIDARG;
++    *root = nullptr;
++    if (!currentHost()) return UIA_E_ELEMENTNOTAVAILABLE;
++    *root = this;
++    AddRef();
++    return S_OK;
++}
++HRESULT BubbleUiaRootProvider::ElementProviderFromPoint(double x, double y, IRawElementProviderFragment **provider) {
++    if (!provider) return E_INVALIDARG;
++    *provider = nullptr;
++    Host *host = currentHost();
++    if (!host) return UIA_E_ELEMENTNOTAVAILABLE;
++    const auto children = bubbleUiaOrderedChildren(host, owner_window_id_);
++    for (auto iterator = children.rbegin(); iterator != children.rend(); ++iterator) {
++        RECT rect = {};
++        if (GetWindowRect((*iterator)->hwnd, &rect) && x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom)
++            return bubbleUiaChildProvider(*iterator, provider);
++    }
++    return S_OK;
++}
++HRESULT BubbleUiaRootProvider::GetFocus(IRawElementProviderFragment **provider) {
++    if (!provider) return E_INVALIDARG;
++    *provider = nullptr;
++    Host *host = currentHost();
++    if (!host) return UIA_E_ELEMENTNOTAVAILABLE;
++    /* These overlays are deliberately nonactivating and do not currently own
++     * keyboard/UIA focus. Pointer hover and press are presentation states, not
++     * focus; reporting either here makes assistive technology jump with the
++     * mouse. Keep the root focus empty until a genuine logical focus identity
++     * is introduced. */
++    return S_OK;
++}
++
++static BubbleOverlay *bubbleUiaCanonicalOverlay(BubbleOverlay *overlay) {
++    if (!overlay || overlay->kind != kBubbleControlOverlay || overlay->control.action != 0 || !overlay->host) return overlay;
++    for (auto &entry : overlay->host->bubble_overlays) {
++        BubbleOverlay *candidate = entry.second.get();
++        if (candidate && candidate->kind == kBubbleDisclosureOverlay && candidate->owner_window_id == overlay->owner_window_id)
++            return candidate;
++    }
++    return overlay;
++}
++
++static void forwardBubbleRightClick(BubbleOverlay &overlay, UINT message, WPARAM wparam) {
++    if (!overlay.host) return;
++    for (auto &entry : overlay.host->native_views) {
++        NativeView &view = entry.second;
++        if (view.window_id != overlay.owner_window_id || view.kind != kViewGpuSurface || !view.hwnd) continue;
++        POINT point = {};
++        GetCursorPos(&point);
++        ScreenToClient(view.hwnd, &point);
++        SendMessageW(view.hwnd, message, wparam, MAKELPARAM(point.x, point.y));
++        return;
++    }
++}
++
++static void moveBubbleDrag(BubbleOverlay &overlay, POINT cursor) {
++    Window *pet = bubbleWindowByLabel(overlay.host, "main");
++    const Window *owner = windowForId(overlay.host, overlay.owner_window_id);
++    if (!pet || !owner || !pet->hwnd || !owner->hwnd) return;
++    const int dx = cursor.x - overlay.press_screen.x;
++    const int dy = cursor.y - overlay.press_screen.y;
++    if (!overlay.dragging && std::abs(dx) + std::abs(dy) >= GetSystemMetrics(SM_CXDRAG)) {
++        overlay.dragging = true;
++        emitBubbleNativeCommand(overlay, "card", "drag-started");
++    }
++    if (!overlay.dragging) return;
++    SetWindowPos(pet->hwnd, nullptr, overlay.pet_start.left + dx, overlay.pet_start.top + dy, 0, 0,
++        SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
++    SetWindowPos(owner->hwnd, nullptr, overlay.owner_start.left + dx, overlay.owner_start.top + dy, 0, 0,
++        SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
++}
++
++static LRESULT CALLBACK bubbleOverlayProc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
++    if (message == WM_NCCREATE) {
++        auto *create = reinterpret_cast<CREATESTRUCTW *>(lparam);
++        SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(create->lpCreateParams));
++    }
++    BubbleOverlay *overlay = bubbleOverlayFromHwnd(hwnd);
++    switch (message) {
++        case WM_GETOBJECT:
++            if (overlay && lparam == UiaRootObjectId) {
++                BubbleOverlay *canonical = bubbleUiaCanonicalOverlay(overlay);
++                auto *provider = new (std::nothrow) BubbleUiaProvider(canonical->hwnd);
++                if (!provider) return 0;
++                const LRESULT result = UiaReturnRawElementProvider(hwnd, wparam, lparam, provider);
++                provider->Release();
++                return result;
++            }
++            break;
++        case kBubbleUiaInvokeMessage:
++            if (overlay) {
++                if (overlay->kind == kBubbleCardOverlay && overlay->card.action_available)
++                    emitBubbleNativeCommand(*overlay, "card", "activate");
++                else if (overlay->kind == kBubbleDisclosureOverlay && overlay->disclosure.enabled)
++                    emitBubbleNativeCommand(*overlay, "control", "toggle");
++                else if (overlay->kind == kBubbleControlOverlay && overlay->control.enabled)
++                    emitBubbleControlCommand(*overlay);
++            }
++            return 0;
++        case WM_MOUSEACTIVATE: return MA_NOACTIVATE;
++        case WM_NCDESTROY:
++            SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
++            break;
++        case WM_NCHITTEST: return HTCLIENT;
++        case WM_ERASEBKGND: return 1;
++        case WM_PAINT: {
++            PAINTSTRUCT paint = {};
++            BeginPaint(hwnd, &paint);
++            if (overlay) paintBubbleOverlay(*overlay);
++            EndPaint(hwnd, &paint);
++            return 0;
++        }
++        case WM_MOUSEMOVE:
++            if (overlay) {
++                if (!overlay->hovered) {
++                    overlay->hovered = true;
++                    TRACKMOUSEEVENT tracking = { sizeof(tracking), TME_LEAVE, hwnd, 0 };
++                    TrackMouseEvent(&tracking);
++                    InvalidateRect(hwnd, nullptr, FALSE);
++                }
++                if (overlay->pressed && overlay->kind == kBubbleCardOverlay) {
++                    POINT cursor = {};
++                    GetCursorPos(&cursor);
++                    moveBubbleDrag(*overlay, cursor);
++                }
++            }
++            return 0;
++        case WM_MOUSELEAVE:
++            if (overlay) { overlay->hovered = false; InvalidateRect(hwnd, nullptr, FALSE); }
++            return 0;
++        case WM_LBUTTONDOWN:
++            if (overlay) {
++                overlay->pressed = true;
++                overlay->dragging = false;
++                GetCursorPos(&overlay->press_screen);
++                Window *pet = bubbleWindowByLabel(overlay->host, "main");
++                const Window *owner = windowForId(overlay->host, overlay->owner_window_id);
++                if (pet && pet->hwnd) GetWindowRect(pet->hwnd, &overlay->pet_start);
++                if (owner && owner->hwnd) GetWindowRect(owner->hwnd, &overlay->owner_start);
++                SetCapture(hwnd);
++            }
++            return 0;
++        case WM_LBUTTONUP:
++            if (overlay && overlay->pressed) {
++                overlay->pressed = false;
++                ReleaseCapture();
++                if (overlay->dragging) {
++                    overlay->dragging = false;
++                    emitBubbleNativeCommand(*overlay, "card", "drag-ended");
++                } else if (overlay->kind == kBubbleCardOverlay) {
++                    if (overlay->card.action_available) emitBubbleNativeCommand(*overlay, "card", "activate");
++                } else if (overlay->kind == kBubbleControlOverlay) {
++                    emitBubbleControlCommand(*overlay);
++                }
++            }
++            return 0;
++        case WM_RBUTTONDOWN:
++        case WM_RBUTTONUP:
++            if (overlay) forwardBubbleRightClick(*overlay, message, wparam);
++            return 0;
++        case WM_KEYDOWN:
++            if (overlay && (wparam == VK_SPACE || wparam == VK_RETURN)) {
++                if (overlay->kind == kBubbleCardOverlay && overlay->card.action_available) emitBubbleNativeCommand(*overlay, "card", "activate");
++                else if (overlay->kind == kBubbleControlOverlay) emitBubbleControlCommand(*overlay);
++                return 0;
++            }
++            break;
++        case WM_TIMER:
++            if (overlay && wparam == kBubbleShimmerTimerId) {
++                if (overlay->kind == kBubbleCardOverlay && overlay->card.busy && !overlay->card.reduce_motion) {
++                    overlay->card.shimmer_phase += 0.025f;
++                    if (overlay->card.shimmer_phase >= 1) overlay->card.shimmer_phase -= 1;
++                    InvalidateRect(hwnd, nullptr, FALSE);
++                    if (overlay->host->bubble_dcomp_device) overlay->host->bubble_dcomp_device->Commit();
++                } else KillTimer(hwnd, kBubbleShimmerTimerId);
++                return 0;
++            }
++            break;
++        case WM_THEMECHANGED:
++        case WM_SETTINGCHANGE:
++        case WM_SYSCOLORCHANGE:
++        case WM_DWMCOLORIZATIONCOLORCHANGED:
++            if (overlay) { applyBubbleBackdrop(*overlay); InvalidateRect(hwnd, nullptr, FALSE); }
++            break;
++        case WM_DPICHANGED:
++            if (overlay) {
++                const RECT *suggested = reinterpret_cast<const RECT *>(lparam);
++                if (suggested) {
++                    applyBubbleWindowRegion(*overlay, suggested->right - suggested->left, suggested->bottom - suggested->top, HIWORD(wparam));
++                    SetWindowPos(hwnd, nullptr, suggested->left, suggested->top,
++                        suggested->right - suggested->left, suggested->bottom - suggested->top,
++                        SWP_NOZORDER | SWP_NOACTIVATE);
++                    applyBubbleBackdrop(*overlay);
++                }
++                if (overlay->render_target) { overlay->render_target->Release(); overlay->render_target = nullptr; }
++                InvalidateRect(hwnd, nullptr, FALSE);
++                return 0;
++            }
++            break;
++        case WM_DESTROY:
++            if (overlay) {
++                KillTimer(hwnd, kBubbleShimmerTimerId);
++                if (overlay->tooltip) { DestroyWindow(overlay->tooltip); overlay->tooltip = nullptr; }
++                releaseBubbleOverlayGraphics(*overlay);
++                overlay->hwnd = nullptr;
++            }
++            return 0;
++    }
++    return DefWindowProcW(hwnd, message, wparam, lparam);
++}
++
++static void destroyBubbleOverlaysForWindow(Host *host, uint64_t window_id) {
++    if (!host) return;
++    for (auto it = host->bubble_overlays.begin(); it != host->bubble_overlays.end();) {
++        BubbleOverlay &overlay = *it->second;
++        if (overlay.owner_window_id != window_id) { ++it; continue; }
++        if (overlay.hwnd) DestroyWindow(overlay.hwnd);
++        it = host->bubble_overlays.erase(it);
++    }
++    host->bubble_presentation_digest = 0;
++}
++
++static bool applyPetdexBubblePresentation(Host *host, uint64_t window_id, const char *bytes, size_t length) {
++    if (!host || !bytes || length == 0 || length > kMaxBubblePresentationBytes) return false;
++    BubbleJsonValue root;
++    BubbleJsonParser parser(bytes, length);
++    if (!parser.parse(&root) || root.kind != BubbleJsonValue::kObject) return false;
++    if (bubbleJsonInteger(root, "version") != 1) return false;
++    const uint64_t digest = bubbleJsonInteger(root, "digest");
++    if (digest != 0 && digest == host->bubble_presentation_digest) return true;
++    const Window *owner = windowForId(host, window_id);
++    if (!owner || !owner->hwnd) return false;
++
++    std::map<std::string, bool> live;
++    const BubbleJsonValue *cards = bubbleJsonMember(root, "cards");
++    if (cards && cards->kind == BubbleJsonValue::kArray) {
++        size_t count = 0;
++        for (const BubbleJsonValue &item : cards->array) {
++            if (count++ >= 8 || item.kind != BubbleJsonValue::kObject) break;
++            BubbleCardPresentation card;
++            if (!bubbleJsonCard(item, &card)) continue;
++            char key_bytes[64] = {};
++            snprintf(key_bytes, sizeof(key_bytes), "card:%016llx", (unsigned long long)card.glass.identity);
++            const std::string key(key_bytes);
++            BubbleOverlay *overlay = createBubbleOverlay(host, window_id, key, kBubbleCardOverlay);
++            if (!overlay) continue;
++            overlay->identity = card.glass.identity;
++            overlay->card = std::move(card);
++            overlay->frame = overlay->card.glass.frame;
++            applyBubbleAccessibilityName(*overlay, widen(overlay->card.accessibility_label));
++            applyBubbleBackdrop(*overlay);
++            if (overlay->card.busy && !overlay->card.reduce_motion &&
++                overlay->card.glass.materialization != 0 && overlay->card.glass.alpha > 0.001f)
++                SetTimer(overlay->hwnd, kBubbleShimmerTimerId, 33, nullptr);
++            else KillTimer(overlay->hwnd, kBubbleShimmerTimerId);
++            if (overlay->card.glass.materialization == 0 || overlay->card.glass.alpha <= 0.001f) ShowWindow(overlay->hwnd, SW_HIDE);
++            else placeBubbleOverlay(*overlay);
++            live[key] = true;
++        }
++    }
++
++    const BubbleJsonValue *disclosure = bubbleJsonMember(root, "disclosure");
++    if (disclosure && disclosure->kind == BubbleJsonValue::kObject && bubbleJsonBool(*disclosure, "visible")) {
++        const BubbleJsonValue *glass = bubbleJsonMember(*disclosure, "glass");
++        if (glass && glass->kind == BubbleJsonValue::kObject) {
++            BubbleOverlay *overlay = createBubbleOverlay(host, window_id, "disclosure", kBubbleDisclosureOverlay);
++            if (overlay) {
++                overlay->disclosure.glass = bubbleJsonGlass(*glass);
++                overlay->disclosure.visible = true;
++                overlay->disclosure.mode = (int)bubbleJsonInteger(*disclosure, "mode");
++                overlay->disclosure.state = (int)bubbleJsonInteger(*disclosure, "state");
++                overlay->disclosure.session_count = (int)bubbleJsonInteger(*disclosure, "session_count");
++                overlay->disclosure.show_status_icon = bubbleJsonBool(*disclosure, "show_status_icon");
++                overlay->disclosure.alpha = (float)bubbleJsonNumber(*disclosure, "alpha", 1);
++                overlay->disclosure.accessibility_label = bubbleJsonString(*disclosure, "accessibility_label");
++                overlay->disclosure.accessibility_value = bubbleJsonString(*disclosure, "accessibility_value");
++                overlay->disclosure.accessibility_role = (int)bubbleJsonInteger(*disclosure, "accessibility_role");
++                overlay->disclosure.enabled = bubbleJsonBool(*disclosure, "enabled");
++                overlay->disclosure.toggled = bubbleJsonBool(*disclosure, "toggled");
++                overlay->identity = overlay->disclosure.glass.identity;
++                overlay->frame = overlay->disclosure.glass.frame;
++                applyBubbleAccessibilityName(*overlay, widen(overlay->disclosure.accessibility_label));
++                applyBubbleBackdrop(*overlay);
++                placeBubbleOverlay(*overlay);
++                live["disclosure"] = true;
++            }
++        }
++    }
++
++    const BubbleJsonValue *controls = bubbleJsonMember(root, "controls");
++    if (controls && controls->kind == BubbleJsonValue::kArray) {
++        size_t count = 0;
++        for (const BubbleJsonValue &item : controls->array) {
++            if (count++ >= 40 || item.kind != BubbleJsonValue::kObject) break;
++            BubbleControlPresentation control;
++            control.identity = bubbleJsonInteger(item, "id");
++            control.action = (int)bubbleJsonInteger(item, "action");
++            control.frame = bubbleJsonFrame(item);
++            control.selected = bubbleJsonBool(item, "selected");
++            control.badge_count = (int)bubbleJsonInteger(item, "badge_count");
++            control.alpha = (float)bubbleJsonNumber(item, "alpha", 1);
++            control.activation_inset = (float)bubbleJsonNumber(item, "activation_inset");
++            control.overlay = bubbleJsonBool(item, "overlay");
++            control.points_up = bubbleJsonBool(item, "points_up");
++            control.mode = (int)bubbleJsonInteger(item, "mode");
++            control.state = (int)bubbleJsonInteger(item, "state");
++            control.show_status_icon = bubbleJsonBool(item, "show_status_icon");
++            control.accessibility_label = bubbleJsonString(item, "accessibility_label");
++            control.accessibility_value = bubbleJsonString(item, "accessibility_value");
++            control.accessibility_role = (int)bubbleJsonInteger(item, "accessibility_role");
++            control.enabled = bubbleJsonBool(item, "enabled");
++            control.toggled = bubbleJsonBool(item, "toggled");
++            if (control.identity == 0 || control.action < 0 || control.action > 4 || control.frame.w <= 0 || control.frame.h <= 0) continue;
++            char key_bytes[80] = {};
++            snprintf(key_bytes, sizeof(key_bytes), "control:%016llx:%d", (unsigned long long)control.identity, control.action);
++            const std::string key(key_bytes);
++            BubbleOverlay *overlay = createBubbleOverlay(host, window_id, key, kBubbleControlOverlay);
++            if (!overlay) continue;
++            overlay->identity = control.identity;
++            overlay->action = control.action;
++            overlay->control = control;
++            overlay->frame = control.frame;
++            applyBubbleAccessibilityName(*overlay, widen(control.accessibility_label));
++            ensureBubbleTooltip(*overlay);
++            updateBubbleTooltip(*overlay);
++            applyBubbleBackdrop(*overlay);
++            if (control.alpha <= 0.001f) ShowWindow(overlay->hwnd, SW_HIDE);
++            else placeBubbleOverlay(*overlay);
++            live[key] = true;
++        }
++    }
++
++    for (auto it = host->bubble_overlays.begin(); it != host->bubble_overlays.end();) {
++        if (it->second->owner_window_id != window_id || live.find(it->first) != live.end()) { ++it; continue; }
++        if (it->second->hwnd) DestroyWindow(it->second->hwnd);
++        it = host->bubble_overlays.erase(it);
++    }
++    host->bubble_presentation_digest = digest;
++    host->bubble_presentation_generation = bubbleJsonInteger(root, "placement_generation");
++    if (host->bubble_dcomp_device) host->bubble_dcomp_device->Commit();
++    return true;
++}
++
+ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
+     if (message == WM_NCCREATE) {
+         auto *create = reinterpret_cast<CREATESTRUCTW *>(lparam);
+@@ -4872,6 +6668,16 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wparam, LPARA
+         SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(host));
+     }
+     Host *host = hostFromWindow(hwnd);
++    if (message == WM_GETOBJECT && lparam == UiaRootObjectId && host) {
++        const Window *window = windowForHwnd(host, hwnd);
++        if (window && !bubbleUiaOrderedChildren(host, window->id).empty()) {
++            auto *provider = new (std::nothrow) BubbleUiaRootProvider(host, window->id, hwnd);
++            if (!provider) return 0;
++            const LRESULT result = UiaReturnRawElementProvider(hwnd, wparam, lparam, provider);
++            provider->Release();
++            return result;
++        }
++    }
+     /* Hidden-titlebar (custom frame) windows first: DwmDefWindowProc
+      * gets FIRST CLAIM on every message — it owns the DWM-drawn caption
+      * buttons over the extended frame (hit-test, hover wash, press), and
+@@ -5031,6 +6837,18 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wparam, LPARA
+         case kAudioSpectrumMessage:
+             if (host) audioHandleSpectrumMessage(host, wparam);
+             return 0;
++        case kContextMenuActionMessage:
++            if (host && host->callback) {
++                WindowsEvent action = {};
++                action.kind = kContextMenuAction;
++                action.window_id = host->context_menu_window_id;
++                action.view_label = host->context_menu_view_label.c_str();
++                action.view_label_len = host->context_menu_view_label.size();
++                action.context_menu_token = host->context_menu_token;
++                action.context_menu_item_id = host->context_menu_item_id;
++                host->callback(host->callback_context, &action);
++            }
++            return 0;
+         case kNotificationCallbackMessage:
+             if (host && host->tray_active) {
+                 UINT tray_event = LOWORD(lparam);
+@@ -5089,6 +6907,7 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wparam, LPARA
+             if (host) {
+                 for (auto &entry : host->windows) {
+                     if (entry.second.hwnd == hwnd) {
++                        recordWindowMoveSample(entry.second);
+ #if NATIVE_SDK_HAS_WEBVIEW2
+                         auto main = host->webviews.find(webViewKey(entry.first, "main"));
+                         if (main != host->webviews.end() && !main->second.frame_explicit) {
+@@ -5102,6 +6921,7 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wparam, LPARA
+                         }
+ #endif
+                         emit(host, entry.second, kResize);
++                        placeBubbleOverlaysForWindow(host, entry.first);
+                     }
+                 }
+                 /* Restore from minimize returns full cadence without
+@@ -5124,13 +6944,22 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wparam, LPARA
+             return 0;
+         case WM_SETFOCUS:
+         case WM_KILLFOCUS:
+-        case WM_MOVE:
+             if (host) {
+                 for (auto &entry : host->windows) {
+                     if (entry.second.hwnd == hwnd) emit(host, entry.second, kWindowFrame);
+                 }
+             }
+             return 0;
++        case WM_MOVE:
++            if (host) {
++                for (auto &entry : host->windows) {
++                    if (entry.second.hwnd != hwnd) continue;
++                    recordWindowMoveSample(entry.second);
++                    emit(host, entry.second, kWindowFrame);
++                    placeBubbleOverlaysForWindow(host, entry.first);
++                }
++            }
++            return 0;
+         case WM_DPICHANGED:
+             /* The window moved to a monitor with a different DPI (or the
+              * user changed display scaling). Adopt the system-suggested
+@@ -5149,7 +6978,11 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wparam, LPARA
+                     SetWindowPos(hwnd, nullptr, suggested->left, suggested->top, suggested->right - suggested->left, suggested->bottom - suggested->top, SWP_NOZORDER | SWP_NOACTIVATE);
+                 }
+                 for (auto &entry : host->windows) {
+-                    if (entry.second.hwnd == hwnd && windowUsesHiddenTitlebar(entry.second)) applyHiddenTitlebarFrame(entry.second);
++                    if (entry.second.hwnd != hwnd) continue;
++                    recordWindowMoveSample(entry.second);
++                    if (windowUsesHiddenTitlebar(entry.second)) applyHiddenTitlebarFrame(entry.second);
++                    emit(host, entry.second, kWindowFrame);
++                    placeBubbleOverlaysForWindow(host, entry.first);
+                 }
+                 for (auto &view_entry : host->native_views) {
+                     NativeView &view = view_entry.second;
+@@ -5227,7 +7060,21 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wparam, LPARA
+         case WM_SETTINGCHANGE:
+         case WM_THEMECHANGED:
+         case WM_SYSCOLORCHANGE:
+-            if (host) emitAppearanceIfChanged(host, false);
++        case WM_DWMCOLORIZATIONCOLORCHANGED:
++            if (host) {
++                emitAppearanceIfChanged(host, false);
++                for (auto &overlay : host->bubble_overlays) {
++                    applyBubbleBackdrop(*overlay.second);
++                    if (overlay.second->hwnd) InvalidateRect(overlay.second->hwnd, nullptr, FALSE);
++                }
++            }
++            break;
++        case WM_WINDOWPOSCHANGED:
++            if (host) {
++                for (auto &entry : host->windows) {
++                    if (entry.second.hwnd == hwnd) placeBubbleOverlaysForWindow(host, entry.first);
++                }
++            }
+             break;
+         case WM_CLOSE:
+             DestroyWindow(hwnd);
+@@ -5236,6 +7083,7 @@ static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wparam, LPARA
+             if (host) {
+                 for (auto &entry : host->windows) {
+                     if (entry.second.hwnd == hwnd) {
++                        destroyBubbleOverlaysForWindow(host, entry.first);
+                         destroyNativeViewsForWindow(host, entry.first);
+                         destroyChildWebViewsForWindow(host, entry.first);
+                         entry.second.hwnd = nullptr;
+@@ -5441,6 +7289,7 @@ static bool createNativeWindow(Host *host, Window &window) {
+     applyCompanionWindowChrome(window);
+     ShowWindow(hwnd, SW_SHOW);
+     UpdateWindow(hwnd);
++    recordWindowMoveSample(window);
+     SetTimer(hwnd, kFrameTimerId, 16, nullptr);
+     return true;
+ }
+@@ -5537,6 +7386,10 @@ void native_sdk_windows_destroy(Host *host) {
+     audioReleaseSession(host, true);
+     removeNotificationIcon(host);
+     destroyAllWindows(host);
++    host->bubble_overlays.clear();
++    if (host->bubble_dcomp_device) { host->bubble_dcomp_device->Release(); host->bubble_dcomp_device = nullptr; }
++    if (host->bubble_dwrite_factory) { host->bubble_dwrite_factory->Release(); host->bubble_dwrite_factory = nullptr; }
++    if (host->bubble_d2d_factory) { host->bubble_d2d_factory->Release(); host->bubble_d2d_factory = nullptr; }
+     /* Drop the single-instance claim last, and the window before the
+      * mutex: once the mutex is gone the next launch becomes primary,
+      * and it must not find this dying process's message window still
+@@ -5824,10 +7677,14 @@ void native_sdk_windows_bridge_respond_webview(Host *host, uint64_t window_id, c
+ }
+
+ void native_sdk_windows_emit_window_event(Host *host, uint64_t window_id, const char *name, size_t name_len, const char *detail_json, size_t detail_json_len) {
+-#if NATIVE_SDK_HAS_WEBVIEW2
+     if (!host) return;
+     std::string event_name = slice(name, name_len);
+     if (event_name.empty()) return;
++    if (event_name == "petdex.bubble.presentation.v1") {
++        (void)applyPetdexBubblePresentation(host, window_id, detail_json, detail_json_len);
++        return;
++    }
++#if NATIVE_SDK_HAS_WEBVIEW2
+     std::string detail = detail_json && detail_json_len > 0 ? slice(detail_json, detail_json_len) : std::string("null");
+     std::string script = "(function(){var name=" + jsonStringLiteral(event_name) + ";var detail=" + detail + ";if(window.zero&&window.zero._emit){window.zero._emit(name,detail);return;}window.dispatchEvent(new CustomEvent('native-sdk:'+name,{detail:detail}));})();";
+     std::wstring script_wide = widen(script);
+@@ -5837,10 +7694,7 @@ void native_sdk_windows_emit_window_event(Host *host, uint64_t window_id, const
+         webview.webview->ExecuteScript(script_wide.c_str(), nullptr);
+     }
+ #else
+-    (void)host;
+     (void)window_id;
+-    (void)name;
+-    (void)name_len;
+     (void)detail_json;
+     (void)detail_json_len;
+ #endif
+@@ -6003,6 +7857,82 @@ int native_sdk_windows_start_window_drag(Host *host, uint64_t window_id) {
+     return 1;
+ }
+
++int native_sdk_windows_move_window(Host *host, uint64_t window_id, double dx, double dy, int clamp, double *out_x, double *out_y, int *out_hit_x, int *out_hit_y, int *out_primary, double *out_vx, double *out_vy, int *out_released, double *out_cursor_x, double *out_cursor_y) {
++    if (!host || !out_x || !out_y || !out_hit_x || !out_hit_y || !out_primary || !out_vx || !out_vy || !out_released || !out_cursor_x || !out_cursor_y) return 0;
++    auto found = host->windows.find(window_id);
++    if (found == host->windows.end() || !found->second.hwnd) return 0;
++    Window &window = found->second;
++    RECT before = {};
++    if (!GetWindowRect(window.hwnd, &before)) return 0;
++    const double before_scale = (double)dpiForWindow(window.hwnd) / 96.0;
++
++    LONG wanted_x = before.left + physicalWindowDelta(dx, before_scale);
++    LONG wanted_y = before.top + physicalWindowDelta(dy, before_scale);
++    LONG applied_x = wanted_x;
++    LONG applied_y = wanted_y;
++    *out_hit_x = 0;
++    *out_hit_y = 0;
++    if (clamp != 0) {
++        RECT destination = { wanted_x, wanted_y, wanted_x + (before.right - before.left), wanted_y + (before.bottom - before.top) };
++        HMONITOR monitor = MonitorFromRect(&destination, MONITOR_DEFAULTTONEAREST);
++        MONITORINFO info = {};
++        info.cbSize = sizeof(info);
++        if (monitor && GetMonitorInfoW(monitor, &info)) {
++            const LONG width = before.right - before.left;
++            const LONG height = before.bottom - before.top;
++            const WindowClampResult constrained = clampWindowOrigin(wanted_x, wanted_y, width, height, info.rcWork);
++            applied_x = constrained.x;
++            applied_y = constrained.y;
++            *out_hit_x = constrained.hit_x ? 1 : 0;
++            *out_hit_y = constrained.hit_y ? 1 : 0;
++        }
++    }
++
++    if (applied_x != before.left || applied_y != before.top) {
++        SetWindowPos(window.hwnd, nullptr, applied_x, applied_y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
++    }
++    recordWindowMoveSample(window);
++    RECT after = {};
++    if (!GetWindowRect(window.hwnd, &after)) return 0;
++    *out_x = window.x;
++    *out_y = window.y;
++    recentWindowVelocity(window, out_vx, out_vy);
++
++    const bool primary = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
++    if (window.primary_state_known && window.primary_was_down && !primary) window.release_pending = true;
++    window.primary_state_known = true;
++    window.primary_was_down = primary;
++    *out_primary = primary ? 1 : 0;
++    *out_released = window.release_pending ? 1 : 0;
++    window.release_pending = false;
++    POINT cursor = {};
++    if (GetCursorPos(&cursor)) {
++        const double after_scale = (double)dpiForWindow(window.hwnd) / 96.0;
++        *out_cursor_x = (double)cursor.x / after_scale;
++        *out_cursor_y = (double)cursor.y / after_scale;
++    } else {
++        *out_cursor_x = *out_x;
++        *out_cursor_y = *out_y;
++    }
++    return 1;
++}
++
++int native_sdk_windows_resize_window(Host *host, uint64_t window_id, double width, double height, int bottom_center) {
++    if (!host || !std::isfinite(width) || !std::isfinite(height) || width <= 0 || height <= 0) return 0;
++    auto found = host->windows.find(window_id);
++    if (found == host->windows.end() || !found->second.hwnd) return 0;
++    Window &window = found->second;
++    RECT before = {};
++    if (!GetWindowRect(window.hwnd, &before)) return 0;
++    const SIZE outer = windowOuterSizeForContent(window, width, height);
++    const AnchoredWindowOrigin origin = resizedWindowOrigin(before, outer.cx, outer.cy, bottom_center != 0);
++    window.width = width;
++    window.height = height;
++    SetWindowPos(window.hwnd, nullptr, origin.x, origin.y, outer.cx, outer.cy, SWP_NOZORDER | SWP_NOACTIVATE);
++    recordWindowMoveSample(window);
++    return 1;
++}
++
+ /* Replace a canvas view's window-drag mirror (runtime push after layout
+  * installs whose regions changed). Rects arrive flat as x,y,w,h in the
+  * view's logical coordinates; exclusions mark the press-claiming
+@@ -6270,6 +8200,43 @@ int native_sdk_windows_note_gpu_surface_input(Host *host, uint64_t window_id, co
+     return 1;
+ }
+
++int native_sdk_windows_show_context_menu(Host *host, uint64_t window_id, const char *label, size_t label_len, double x, double y, uint64_t token, const uint32_t *item_ids, const char *const *item_labels, const size_t *item_label_lens, const int *enabled, const int *separators, size_t count) {
++    if (!host || label_len == 0 || count == 0) return 0;
++    const std::string view_label = slice(label, label_len);
++    auto found = host->native_views.find(nativeViewKey(window_id, view_label));
++    if (found == host->native_views.end() || found->second.kind != kViewGpuSurface || !found->second.hwnd) return 0;
++    auto window = host->windows.find(window_id);
++    if (window == host->windows.end() || !window->second.hwnd) return 0;
++
++    HMENU menu = CreatePopupMenu();
++    if (!menu) return 0;
++    for (size_t index = 0; index < count; ++index) {
++        if (separators[index]) {
++            AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
++            continue;
++        }
++        UINT flags = MF_STRING;
++        if (!enabled[index]) flags |= MF_GRAYED;
++        std::wstring item_label = widen(slice(item_labels[index], item_label_lens[index]));
++        AppendMenuW(menu, flags, item_ids[index], item_label.c_str());
++    }
++
++    const double scale = gpuSurfaceScale(found->second.hwnd);
++    POINT cursor = { (LONG)(x * scale), (LONG)(y * scale) };
++    ClientToScreen(found->second.hwnd, &cursor);
++    SetForegroundWindow(window->second.hwnd);
++    const UINT selected = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON, cursor.x, cursor.y, 0, window->second.hwnd, nullptr);
++    DestroyMenu(menu);
++
++    host->context_menu_window_id = window_id;
++    host->context_menu_token = token;
++    host->context_menu_item_id = selected;
++    host->context_menu_view_label = view_label;
++    PostMessageW(window->second.hwnd, kContextMenuActionMessage, 0, 0);
++    PostMessageW(window->second.hwnd, WM_NULL, 0, 0);
++    return 1;
++}
++
+ int native_sdk_windows_present_gpu_surface_pixels(Host *host, uint64_t window_id, const char *label, size_t label_len, size_t width, size_t height, double scale, int has_dirty_rect, double dirty_x, double dirty_y, double dirty_width, double dirty_height, const uint8_t *rgba8, size_t rgba8_len) {
+     (void)scale;
+     (void)has_dirty_rect;
