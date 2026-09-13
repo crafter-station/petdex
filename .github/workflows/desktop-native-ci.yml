@@ -229,6 +229,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 tests/remote_watchers_test.py
+          python3 tests/hermes_plugin_test.py
           sh -n src/assets/petdex-remote-hook.sh
           sh tests/remote_hook_test.sh
           sh tests/tunnel_supervisor_test.sh
