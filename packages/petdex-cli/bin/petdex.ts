@@ -1324,10 +1324,14 @@ function cmdTelemetry(args: string[]): void {
 }
 
 // ─── run ───────────────────────────────────────────────────────────────────
-// Last statement on purpose. main() dispatches synchronously up to a command's
-// first await, so every const it reads has to be initialized by now. Calling
-// it earlier left LICENSE_CHOICES in the temporal dead zone and broke `submit`.
-main().catch((err) => {
-  p.cancel(`petdex: ${(err as Error).message}`);
-  process.exit(1);
+// Last statement on purpose, wrapped in queueMicrotask so module evaluation
+// always completes first — even if a future bundler reorders the bundle.
+// main() dispatches synchronously up to a command's first await, so every
+// const it reads has to be initialized by now. Calling it earlier left
+// LICENSE_CHOICES in the temporal dead zone and broke `submit` (#778).
+queueMicrotask(() => {
+  main().catch((err) => {
+    p.cancel(`petdex: ${(err as Error).message}`);
+    process.exit(1);
+  });
 });
