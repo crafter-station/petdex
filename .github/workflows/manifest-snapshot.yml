@@ -30,6 +30,7 @@ concurrency:
 jobs:
   publish:
     name: Publish manifest snapshots
+    if: github.repository == 'crafter-station/petdex'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: manifest-snapshot
