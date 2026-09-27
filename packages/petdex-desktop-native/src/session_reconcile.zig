@@ -2829,7 +2829,9 @@ test "Claude recovery uses only the selected config and rejects invalid saved pa
     defer allocator.free(saved_root);
     const expected = try std.fs.path.join(allocator, &.{ home, "Claude Config", "projects" });
     defer allocator.free(expected);
-    try std.testing.expectEqualStrings(expected, saved_root);
+    const normalized_saved_root = try std.fs.path.resolve(allocator, &.{saved_root});
+    defer allocator.free(normalized_saved_root);
+    try std.testing.expectEqualStrings(expected, normalized_saved_root);
     try std.testing.expect(providerRootPath(allocator, home, adapters[0], 1) == null);
 
     try temp.dir.deleteFile(io, ".petdex/agent-paths.json");
@@ -2845,7 +2847,9 @@ test "Claude recovery uses only the selected config and rejects invalid saved pa
     defer allocator.free(default_root);
     const expected_default = try std.fs.path.join(allocator, &.{ home, ".claude", "projects" });
     defer allocator.free(expected_default);
-    try std.testing.expectEqualStrings(expected_default, default_root);
+    const normalized_default_root = try std.fs.path.resolve(allocator, &.{default_root});
+    defer allocator.free(normalized_default_root);
+    try std.testing.expectEqualStrings(expected_default, normalized_default_root);
 
     try temp.dir.writeFile(io, .{ .sub_path = ".petdex/agent-paths.json", .data = "{\"claude_config_dir\":\"relative/path\"}" });
     try std.testing.expectError(error.InvalidClaudeConfigDir, hooks.loadAgentPaths(allocator, home));
