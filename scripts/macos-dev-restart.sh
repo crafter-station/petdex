@@ -30,7 +30,7 @@ fi
 "$ROOT/scripts/patch-native-sdk.sh"
 
 echo "==> Build native desktop"
-(cd "$DESKTOP_DIR" && "$NATIVE_CLI" build -Dcpu=baseline)
+(cd "$DESKTOP_DIR" && "$NATIVE_CLI" build -Dcpu=baseline -Dtrace=off)
 
 echo "==> Ensure Petdex Dev.app"
 "$ROOT/scripts/macos-dev-app.sh" >/dev/null

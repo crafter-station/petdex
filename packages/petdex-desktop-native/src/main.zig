@@ -28,6 +28,7 @@ const remote_ssh = @import("remote_ssh.zig");
 const remote_writeback = @import("remote_writeback.zig");
 const remote_runtime = @import("remote_runtime.zig");
 const herdr_status = @import("herdr_status.zig");
+const sdk_log = @import("sdk_log.zig");
 pub const desktop_auth = @import("desktop_auth.zig");
 const flock_mod = @import("flock.zig");
 pub const updates = @import("updates.zig");
@@ -3159,6 +3160,7 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             // installed has no sheet, and that is precisely when a
             // `petdex://<slug>` link has work to do.
             drainPendingInstall(model, fx);
+            sdk_log.tick(fx.wallMs());
             if (!model.sheet_loaded) return;
             if (model.settings_open and thumbs_built < catalog_mod.catalog_len) buildNextThumb(fx);
             const now = fx.wallMs();
@@ -5053,6 +5055,7 @@ pub fn main(init: std.process.Init) !void {
             return;
         }
     }
+    sdk_log.init(init.environ_map);
     if (argv0) |a0| refreshHookEntry(a0);
     materializeTrayIcon();
     env_wanted_pet = init.environ_map.get("PETDEX_PET");
@@ -5473,6 +5476,7 @@ test {
     _ = remote_runtime;
     _ = remote_ssh;
     _ = remote_writeback;
+    _ = sdk_log;
     _ = settings_view;
 }
 
