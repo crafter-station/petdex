@@ -149,7 +149,12 @@ describe("takedownPet batch path", () => {
   it("submits the locks, then the cleanups, then the delete", async () => {
     rowsForMarkers = [{ marker: DELETE_MARKER, rows: [{ id: "pet_1" }] }];
 
-    await takedownPet({ pet: petFixture(), source: "owner", silent: true });
+    await takedownPet({
+      pet: petFixture(),
+      source: "owner",
+      actorId: "user_owner",
+      silent: true,
+    });
 
     expect(transactionOpened).toBe(false);
     const before = statementsBeforeDelete();
@@ -183,7 +188,12 @@ describe("takedownPet batch path", () => {
       { marker: DELETE_MARKER, rows: [{ id: "pet_1" }] },
     ];
 
-    await takedownPet({ pet: petFixture(), source: "owner", silent: true });
+    await takedownPet({
+      pet: petFixture(),
+      source: "owner",
+      actorId: "user_owner",
+      silent: true,
+    });
 
     expect(revalidatedTags).toEqual(["col-a", "col-b"]);
   });
@@ -196,6 +206,7 @@ describe("takedownPet batch path", () => {
     const result = await takedownPet({
       pet: petFixture({ ownerEmail: "owner@example.com" }),
       source: "owner",
+      actorId: "user_owner",
       silent: false,
     });
 
@@ -211,6 +222,7 @@ describe("takedownPet batch path", () => {
     const result = await takedownPet({
       pet: petFixture(),
       source: "owner",
+      actorId: "user_owner",
       silent: true,
     });
 
@@ -225,7 +237,12 @@ describe("takedownPet batch path", () => {
   it("notifies the owner when the takedown is not silenced", async () => {
     rowsForMarkers = [{ marker: DELETE_MARKER, rows: [{ id: "pet_1" }] }];
 
-    await takedownPet({ pet: petFixture(), source: "admin", silent: false });
+    await takedownPet({
+      pet: petFixture(),
+      source: "admin",
+      actorId: "user_admin",
+      silent: false,
+    });
 
     expect(notified).toEqual(["user_owner"]);
   });
@@ -236,7 +253,12 @@ describe("takedownPet transaction path", () => {
     mode = "transaction";
     rowsForMarkers = [{ marker: DELETE_MARKER, rows: [{ id: "pet_1" }] }];
 
-    await takedownPet({ pet: petFixture(), source: "owner", silent: true });
+    await takedownPet({
+      pet: petFixture(),
+      source: "owner",
+      actorId: "user_owner",
+      silent: true,
+    });
 
     expect(transactionOpened).toBe(true);
     const before = statementsBeforeDelete();
@@ -254,7 +276,12 @@ describe("takedownPet transaction path", () => {
       { marker: DELETE_MARKER, rows: [{ id: "pet_1" }] },
     ];
 
-    await takedownPet({ pet: petFixture(), source: "owner", silent: true });
+    await takedownPet({
+      pet: petFixture(),
+      source: "owner",
+      actorId: "user_owner",
+      silent: true,
+    });
 
     expect(revalidatedTags).toEqual(["col-x"]);
   });
@@ -266,6 +293,7 @@ describe("takedownPet transaction path", () => {
     const result = await takedownPet({
       pet: petFixture(),
       source: "owner",
+      actorId: "user_owner",
       silent: true,
     });
 

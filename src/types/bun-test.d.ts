@@ -15,6 +15,7 @@ declare module "bun:test" {
     toEqual(expected: unknown): void;
     toHaveLength(expected: number): void;
     toMatch(expected: RegExp): void;
+    toMatchObject(expected: unknown): void;
   };
 
   export const describe: (name: string, callback: TestCallback) => void;
