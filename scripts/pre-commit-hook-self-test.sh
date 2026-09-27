@@ -128,7 +128,6 @@ git -C "$installer_fixture/main" config user.name 'Petdex Hook Test'
 git -C "$installer_fixture/main" config user.email 'hook-test@petdex.invalid'
 git -C "$installer_fixture/main" commit --allow-empty -qm 'fixture baseline'
 git -C "$installer_fixture/main" worktree add -qb sibling "$installer_fixture/sibling"
-git -C "$installer_fixture/main" config --local core.hooksPath .githooks
 cp "$root/scripts/install-git-hooks.sh" "$installer_fixture/main/scripts/install-git-hooks.sh"
 sh "$installer_fixture/main/scripts/install-git-hooks.sh" >/dev/null
 test "$(git -C "$installer_fixture/main" config --worktree --get core.hooksPath)" = .githooks
@@ -136,5 +135,19 @@ if git -C "$installer_fixture/sibling" config --get core.hooksPath >/dev/null; t
     echo "pre-commit self-test: hook installer leaked into a sibling worktree" >&2
     exit 1
 fi
+
+for shared_path in .githooks /custom/shared-hooks; do
+    git -C "$installer_fixture/main" config --local core.hooksPath "$shared_path"
+    sh "$installer_fixture/main/scripts/install-git-hooks.sh" >/dev/null
+    test "$(git -C "$installer_fixture/main" config --worktree --get core.hooksPath)" = .githooks
+    if [ "$(git -C "$installer_fixture/sibling" config --get core.hooksPath || true)" != "$shared_path" ]; then
+        echo "pre-commit self-test: installer changed sibling shared hooks ($shared_path)" >&2
+        exit 1
+    fi
+done
+
+git -C "$installer_fixture/sibling" config --worktree core.hooksPath /custom/sibling-hooks
+sh "$installer_fixture/main/scripts/install-git-hooks.sh" >/dev/null
+test "$(git -C "$installer_fixture/sibling" config --get core.hooksPath)" = /custom/sibling-hooks
 
 echo "pre-commit hook self-test: PASS"
