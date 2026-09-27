@@ -1,7 +1,7 @@
 {
   "$schema": "./built-with.schema.json",
   "version": 1,
-  "lastUpdated": "2026-08-30",
+  "lastUpdated": "2026-09-27",
   "categories": {
     "desktop-companion": {
       "label": "Desktop companions",
@@ -568,6 +568,42 @@
         "url": "https://github.com/young1the/pets-driven#-petdex-integration"
       },
       "screenshot": "/built-with/pets-driven.png"
+    },
+    {
+      "slug": "aibo",
+      "name": "Aibo",
+      "tagline": "Native macOS companion that brings Petdex pets to your desktop, with speech bubbles for Cursor, Codex, and webhook events.",
+      "category": "desktop-companion",
+      "repo": "fenxer/agent-aibo",
+      "homepage": "https://aibo.fenx.work/",
+      "stars": 8,
+      "language": "Swift",
+      "platforms": ["macOS"],
+      "addedAt": "2026-09-27",
+      "evidence": {
+        "type": "code",
+        "quote": "Response from `GET https://petdex.dev/api/install-pet/{slug}`.",
+        "url": "https://github.com/fenxer/agent-aibo/blob/main/AiboKit/Sources/AiboCore/PetdexInstallAPI.swift"
+      },
+      "screenshot": "/built-with/aibo.png"
+    },
+    {
+      "slug": "sleepwing",
+      "name": "Sleepwing",
+      "tagline": "macOS desktop pet that turns AI coding time into break reminders and discovers pets installed from Petdex in ~/.codex/pets.",
+      "category": "desktop-companion",
+      "repo": "lttxzmj/sleepwing",
+      "homepage": "https://lttxzmj.github.io/sleepwing/",
+      "stars": 0,
+      "language": "Swift",
+      "platforms": ["macOS"],
+      "addedAt": "2026-09-27",
+      "evidence": {
+        "type": "readme",
+        "quote": "from the community [Petdex](https://petdex.dev) gallery (`npx petdex install`)",
+        "url": "https://github.com/lttxzmj/sleepwing/blob/main/README.md"
+      },
+      "screenshot": "/built-with/sleepwing.png"
     }
   ]
 }
