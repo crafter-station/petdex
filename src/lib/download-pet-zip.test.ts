@@ -28,7 +28,7 @@ describe("downloadPetZip", () => {
     }
   });
 
-  it("falls back to the raw zip url when the fetch never completes", async () => {
+  it("falls back to the raw zip url when the fetch rejects", async () => {
     const env = installBrowserEnv(async () => {
       throw new Error("blocked before the request left the browser");
     });
@@ -36,6 +36,60 @@ describe("downloadPetZip", () => {
     try {
       await downloadPetZip(ZIP_URL, "boba");
 
+      expect(env.clicks).toEqual([{ href: ZIP_URL, filename: "boba.zip" }]);
+      expect(env.revoked).toEqual([]);
+    } finally {
+      env.restore();
+    }
+  });
+
+  it("falls back when a stalled download reaches its deadline", async () => {
+    const original = Object.getOwnPropertyDescriptor(AbortSignal, "timeout");
+    const controller = new AbortController();
+    let requestedTimeout = 0;
+    Object.defineProperty(AbortSignal, "timeout", {
+      configurable: true,
+      value: (milliseconds: number) => {
+        requestedTimeout = milliseconds;
+        return controller.signal;
+      },
+    });
+    const env = installBrowserEnv(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            "abort",
+            () => reject(new Error("download deadline")),
+            { once: true },
+          );
+        }),
+    );
+    try {
+      const pending = downloadPetZip(ZIP_URL, "boba");
+      expect(requestedTimeout).toBe(30_000);
+      controller.abort();
+      await pending;
+      expect(env.clicks).toEqual([{ href: ZIP_URL, filename: "boba.zip" }]);
+      expect(env.revoked).toEqual([]);
+    } finally {
+      env.restore();
+      restoreProperty(AbortSignal, "timeout", original);
+    }
+  });
+
+  it("falls back when the response body fails partway through", async () => {
+    const env = installBrowserEnv(
+      async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.error(new Error("connection lost"));
+            },
+          }),
+        ),
+    );
+    try {
+      await downloadPetZip(ZIP_URL, "boba");
       expect(env.clicks).toEqual([{ href: ZIP_URL, filename: "boba.zip" }]);
       expect(env.revoked).toEqual([]);
     } finally {
@@ -67,7 +121,7 @@ type InstallEnv = {
 };
 
 function installBrowserEnv(
-  handler: (url: string) => Promise<Response>,
+  handler: (url: string, init?: RequestInit) => Promise<Response>,
 ): InstallEnv {
   const fetched: string[] = [];
   const clicks: Array<{ href: string; filename: string }> = [];
@@ -90,10 +144,11 @@ function installBrowserEnv(
   });
   const restoreFetch = installGlobal("fetch", (async (
     input: RequestInfo | URL,
+    init?: RequestInit,
   ) => {
     const url = String(input);
     fetched.push(url);
-    return handler(url);
+    return handler(url, init);
   }) as typeof globalThis.fetch);
   const restoreTimeout = installGlobal("setTimeout", ((
     callback: () => void,
@@ -119,8 +174,6 @@ function installBrowserEnv(
   };
 }
 
-// Object URLs are installed as properties on the real URL constructor so
-// everything else that uses `new URL()` keeps working during the test.
 function installObjectUrls(revoked: string[]): () => void {
   const originalCreate = Object.getOwnPropertyDescriptor(
     URL,
