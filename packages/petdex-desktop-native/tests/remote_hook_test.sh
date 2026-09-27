@@ -232,3 +232,56 @@ printf '%s' '{"session_id":"child","parent_session_id":"parent","last_assistant_
 | HOME="$fixture/home" PATH="$fixture/bin:$test_path" \
     PETDEX_CAPTURE="$fixture/capture" sh "$root/src/assets/petdex-remote-hook.sh" bubble assistant hermes
 test "$before" -lt "$(wc -l < "$fixture/capture")"
+
+python3 - "$root/src/assets/petdex-remote-hook.sh" "$fixture" "$test_path" <<'PY'
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+script, fixture, test_path = sys.argv[1:]
+fixture = Path(fixture)
+capture = fixture / "capture"
+cache = fixture / "home" / ".petdex" / "runtime" / "sessions"
+environment = {
+    **os.environ,
+    "HOME": str(fixture / "home"),
+    "PATH": str(fixture / "bin") + ":" + test_path,
+    "PETDEX_CAPTURE": str(capture),
+}
+prompt = "# Overview\n\nGenerate 0 to 3 hyperpersonalized suggestions for what this user can do with Codex in this Projectless task"
+
+def send(phase, payload):
+    before = len(capture.read_text().splitlines())
+    subprocess.run(
+        ["sh", script, "bubble", phase, "codex"],
+        input=json.dumps(payload), text=True, env=environment, check=True, timeout=5,
+    )
+    return len(capture.read_text().splitlines()) - before
+
+assert send("user-prompt", {"session_id": "hidden", "prompt": prompt}) == 0
+assert not (cache / "hidden.title").exists()
+marker = (cache / "hidden.codex-hidden.json").read_text()
+assert "prompt" not in marker and "Overview" not in marker
+assert send("pre", {"session_id": "hidden", "tool_name": "Read"}) == 0
+assert send("stop", {"session_id": "hidden", "last_assistant_message": "Internal answer"}) == 0
+assert send("user-prompt", {"session_id": "projectless", "cwd": "", "prompt": "Suggest work for me"}) > 0
+assert send("user-prompt", {"session_id": "workspace", "cwd": "/work", "prompt": "Fix the tests"}) > 0
+assert send("user-prompt", {"session_id": "hidden", "thread_source": "user", "prompt": prompt}) > 0
+assert not (cache / "hidden.codex-hidden.json").exists()
+assert send("user-prompt", {"session_id": "structured", "thread_source": "ambient_suggestions", "prompt": "Internal"}) == 0
+assert not (cache / "structured.title").exists()
+
+rollout = fixture / "home" / ".codex" / "sessions" / "2026" / "08" / "13" / "rollout-test-from-meta.jsonl"
+rollout.write_text(json.dumps({
+    "type": "session_meta",
+    "payload": {"id": "from-meta", "thread_source": "ambient_suggestions"},
+}) + "\n")
+assert send("pre", {"session_id": "from-meta", "tool_name": "Read"}) == 0
+
+(cache / "expired.codex-hidden.json").write_text('{"hidden":true,"at":1}')
+assert send("pre", {"session_id": "cleanup", "thread_source": "chatgpt_hidden", "tool_name": "Read"}) == 0
+assert not (cache / "expired.codex-hidden.json").exists()
+print("Hidden Codex hooks: PASS")
+PY

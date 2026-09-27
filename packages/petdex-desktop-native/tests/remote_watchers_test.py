@@ -27,6 +27,38 @@ def load(name: str, filename: str):
 
 
 class CodexWatcherTests(unittest.TestCase):
+    def test_hidden_tasks_never_emit_cards_or_keep_internal_prompt_titles(self) -> None:
+        watcher = load("petdex_codex_hidden_test", "petdex-codex-watch.py")
+        prompt = "# Overview\n\nGenerate 0 to 3 hyperpersonalized suggestions for what this user can do with Codex in this Projectless task"
+        scenarios = [
+            ({"thread_source": "ambient_suggestions"}, "Internal task", True),
+            ({"thread_source": "chatgpt_hidden"}, "Internal task", True),
+            ({"source": {"internal": "memory_consolidation"}}, "Internal task", True),
+            ({}, prompt, True),
+            ({"thread_source": "user", "cwd": ""}, prompt, False),
+            ({"cwd": "", "ephemeral": True}, "Suggest work for me", False),
+            ({"cwd": "/project"}, "Fix the tests", False),
+            ({"thread_source": {}}, "Fix the tests", False),
+        ]
+        for metadata, message, hidden in scenarios:
+            with self.subTest(metadata=metadata, hidden=hidden):
+                state = watcher.new_rollout_state()
+                rows = [
+                    {"type": "session_meta", "payload": metadata},
+                    {"type": "event_msg", "payload": {"type": "user_message", "message": message}},
+                    {"type": "event_msg", "payload": {"type": "task_started", "turn_id": "turn"}},
+                ]
+                watcher.apply_rollout_bytes(state, "".join(json.dumps(row) + "\n" for row in rows).encode())
+                event = watcher.event_from_state(Path("rollout-test.jsonl"), "", state)
+                self.assertEqual(hidden, event is None)
+                if hidden:
+                    self.assertEqual("", state["fallback_title"])
+                    watcher.apply_rollout_bytes(
+                        state,
+                        b'{"type":"event_msg","payload":{"type":"agent_reasoning","text":"Still working"}}\n',
+                    )
+                    self.assertIsNone(watcher.event_from_state(Path("rollout-test.jsonl"), "", state))
+
     def test_rollout_following_parses_only_appended_bytes(self) -> None:
         watcher = load("petdex_codex_watch_test", "petdex-codex-watch.py")
         with tempfile.TemporaryDirectory() as directory:

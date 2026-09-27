@@ -14,6 +14,7 @@
 const std = @import("std");
 const hook_server = @import("hook_server.zig");
 const plat = @import("plat.zig");
+const codex_visibility = @import("codex_visibility.zig");
 
 const jsonString = hook_server.jsonStringPub;
 
@@ -70,6 +71,7 @@ pub fn run(phase: []const u8, arg_agent: ?[]const u8, origin_app: plat.OriginApp
     // Session title: user-prompt seeds it, every event attaches it.
     var sessions_buf: [512]u8 = undefined;
     const sessions_dir = std.fmt.bufPrint(&sessions_buf, "{s}/.petdex/runtime/sessions", .{home}) catch return;
+    if (std.mem.eql(u8, agent, "codex") and ignoreHiddenCodex(payload, session_id, sessions_dir)) return;
     if (session_id) |sid| {
         if (isPromptPhase(phase)) {
             if (jsonString(payload, "prompt") orelse jsonString(payload, "user_message")) |prompt| rememberTitle(sessions_dir, sid, prompt);
@@ -503,6 +505,27 @@ fn payloadSessionId(payload: []const u8, hash_buf: *[64]u8) ?[]const u8 {
     return safeSessionId(jsonString(payload, "parent_session_id"));
 }
 
+fn ignoreHiddenCodex(payload: []const u8, session_id: ?[]const u8, dir: []const u8) bool {
+    const visibility = codex_visibility.classify(payload);
+    const sid = session_id orelse return visibility == .hidden;
+    var path_buf: [512]u8 = undefined;
+    const marker = std.fmt.bufPrint(&path_buf, "{s}/{s}.codex-hidden.json", .{ dir, sid }) catch return visibility == .hidden;
+    if (visibility == .visible) {
+        plat.deleteFile(marker);
+        return false;
+    }
+    var existing: [128]u8 = undefined;
+    const remembered = cReadFile(marker, &existing) != null;
+    if (visibility != .hidden and !remembered) return false;
+    var stamp_buf: [96]u8 = undefined;
+    const stamp = std.fmt.bufPrint(&stamp_buf, "{{\"hidden\":true,\"at\":{d}}}", .{plat.nowSeconds()}) catch return true;
+    cWriteFile(marker, stamp);
+    var title_path_buf: [512]u8 = undefined;
+    if (std.fmt.bufPrint(&title_path_buf, "{s}/{s}.json", .{ dir, sid })) |title_path| plat.deleteFile(title_path) else |_| {}
+    if (!remembered) pruneSessions(dir);
+    return true;
+}
+
 fn rememberTitle(dir: []const u8, session_id: []const u8, prompt: []const u8) void {
     plat.makeDir(dir);
     var title_buf: [256]u8 = undefined;
@@ -562,6 +585,29 @@ fn pruneSessions(dir: []const u8) void {
         const path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ dir, ctx.stale[i][0..ctx.stale_len[i]] }) catch continue;
         plat.deleteFile(path);
     }
+}
+
+test "hidden Codex hooks stay suppressed without a terminal hook or prompt cache" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    var temp = std.testing.tmpDir(.{});
+    defer temp.cleanup();
+    const dir = try temp.dir.realPathFileAlloc(io, ".", allocator);
+    defer allocator.free(dir);
+    rememberTitle(dir, "hidden-session", "Old internal prompt");
+    try std.testing.expect(ignoreHiddenCodex("{\"thread_source\":\"ambient_suggestions\"}", "hidden-session", dir));
+    try std.testing.expect(ignoreHiddenCodex("{\"tool_name\":\"Read\"}", "hidden-session", dir));
+    try std.testing.expect(!ignoreHiddenCodex("{\"cwd\":\"\",\"prompt\":\"Help me plan\"}", "user-session", dir));
+    var title_buf: [256]u8 = undefined;
+    try std.testing.expect(readTitle(dir, "hidden-session", &title_buf) == null);
+    const marker = try temp.dir.readFileAlloc(io, "hidden-session.codex-hidden.json", allocator, .limited(128));
+    defer allocator.free(marker);
+    try std.testing.expect(std.mem.indexOf(u8, marker, "prompt") == null);
+    try std.testing.expect(!ignoreHiddenCodex("{\"thread_source\":\"user\"}", "hidden-session", dir));
+    try std.testing.expect(!ignoreHiddenCodex("{}", "hidden-session", dir));
+    try temp.dir.writeFile(io, .{ .sub_path = "expired.codex-hidden.json", .data = "{\"hidden\":true,\"at\":1}" });
+    pruneSessions(dir);
+    try std.testing.expectError(error.FileNotFound, temp.dir.openFile(io, "expired.codex-hidden.json", .{}));
 }
 
 // --------------------------------------------------- transcript preview
