@@ -212,6 +212,7 @@ jobs:
             PYTHON=python
           fi
           "$PYTHON" tests/hook_stdin_test.py ./zig-out/bin/petdex-desktop-native
+          "$PYTHON" tests/hidden_codex_hook_test.py ./zig-out/bin/petdex-desktop-native
 
       - name: Run the test suite
         # The suite ran on nobody's machine until the root aggregator
