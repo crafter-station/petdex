@@ -37,6 +37,28 @@ CLI and SDK checkout used by the matching release workflow. The build scripts
 apply the Petdex-owned macOS Mach-O headerpad patch before compiling; they
 fail if the SDK source no longer matches the pinned patch.
 
+## Claude Code configuration directory
+
+For a custom Claude Code installation, create `~/.petdex/agent-paths.json` with:
+
+```json
+{
+  "claude_config_dir": "~/Claude Config"
+}
+```
+
+Use an absolute path or a path beginning with `~/`. On Windows, use a path
+such as `C:/Users/you/Claude Config`. Restart Petdex after editing the file.
+The saved path takes priority over `CLAUDE_CONFIG_DIR`, including when Petdex
+is launched from Finder. Without a saved path, Petdex uses the environment
+variable and then `~/.claude`. Remove the key or set it to an empty string to
+restore that fallback.
+
+Detection, startup hook migration, Connect and Disconnect all use this path.
+Petdex never rewrites this file when other desktop settings change. If the file
+is unreadable, invalid JSON, or contains an invalid path, Claude hook changes
+are disabled for that run. Correct the file and restart Petdex to try again.
+
 ## Herdr
 
 The local Herdr plugin mirrors agent attention from Herdr into Petdex and

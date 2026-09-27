@@ -5055,6 +5055,11 @@ pub fn main(init: std.process.Init) !void {
             return;
         }
     }
+    if (env_home) |home| {
+        agent_hooks.loadAgentPaths(boot_allocator, home) catch |err| {
+            std.debug.print("petdex: could not load ~/.petdex/agent-paths.json ({s}); Claude Code hook changes disabled until the file is fixed and Petdex restarts\n", .{@errorName(err)});
+        };
+    }
     sdk_log.init(init.environ_map);
     if (argv0) |a0| refreshHookEntry(a0);
     materializeTrayIcon();

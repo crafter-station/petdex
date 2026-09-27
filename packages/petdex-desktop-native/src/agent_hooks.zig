@@ -94,7 +94,46 @@ pub const agent_count = 10;
 /// global getenv.
 pub var env_claude_config_dir: ?[]const u8 = null;
 
+const ClaudePath = struct {
+    directory: [512 - "/settings.json".len]u8 = undefined,
+    len: usize = 0,
+    valid: bool = true,
+};
+var claude_path: ClaudePath = .{};
+
+pub fn loadAgentPaths(allocator: std.mem.Allocator, home: []const u8) !void {
+    claude_path = .{ .valid = false };
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}/.petdex/agent-paths.json", .{home});
+    var scope = plat.Scope.init();
+    defer scope.deinit();
+    const bytes = std.Io.Dir.cwd().readFileAlloc(scope.io(), path, allocator, .limited(16 * 1024)) catch |err| switch (err) {
+        error.FileNotFound => {
+            claude_path.valid = true;
+            return;
+        },
+        else => return err,
+    };
+    defer allocator.free(bytes);
+    const parsed = try std.json.parseFromSlice(struct { claude_config_dir: ?[]const u8 = null }, allocator, bytes, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+    if (nonEmpty(parsed.value.claude_config_dir)) |directory| {
+        if (std.mem.indexOfScalar(u8, directory, 0) != null) return error.InvalidClaudeConfigDir;
+        const expanded = if (std.mem.startsWith(u8, directory, "~/") or
+            (builtin.os.tag == .windows and std.mem.startsWith(u8, directory, "~\\")))
+            try std.fmt.bufPrint(&claude_path.directory, "{s}/{s}", .{ home, directory[2..] })
+        else if (std.fs.path.isAbsolute(directory))
+            try std.fmt.bufPrint(&claude_path.directory, "{s}", .{directory})
+        else
+            return error.InvalidClaudeConfigDir;
+        claude_path.len = expanded.len;
+    }
+    claude_path.valid = true;
+}
+
 fn claudeConfigDir(buf: []u8, home: []const u8) ?[]const u8 {
+    if (!claude_path.valid) return null;
+    if (claude_path.len > 0) return std.fmt.bufPrint(buf, "{s}", .{claude_path.directory[0..claude_path.len]}) catch null;
     if (env_claude_config_dir) |dir| {
         if (dir.len != 0) return std.fmt.bufPrint(buf, "{s}", .{dir}) catch null;
     }
@@ -102,10 +141,9 @@ fn claudeConfigDir(buf: []u8, home: []const u8) ?[]const u8 {
 }
 
 fn claudeSettingsPath(buf: []u8, home: []const u8) ?[]const u8 {
-    if (env_claude_config_dir) |dir| {
-        if (dir.len != 0) return std.fmt.bufPrint(buf, "{s}/settings.json", .{dir}) catch null;
-    }
-    return std.fmt.bufPrint(buf, "{s}/.claude/settings.json", .{home}) catch null;
+    var directory_buf: [512]u8 = undefined;
+    const directory = claudeConfigDir(&directory_buf, home) orelse return null;
+    return std.fmt.bufPrint(buf, "{s}/settings.json", .{directory}) catch null;
 }
 
 /// `*_CONFIG_DIR` is a complete root path, like CLAUDE_CONFIG_DIR; `*_CLI_HOME`
@@ -2300,6 +2338,106 @@ test "CLAUDE_CONFIG_DIR redirects install, scan and uninstall" {
     env_claude_config_dir = "";
     const blank = scan(t.allocator, home);
     try t.expectEqual(HookStatus.absent, blank[0].status);
+}
+
+test "saved Claude path redirects Finder startup migration, connect and disconnect" {
+    const saved_path = claude_path;
+    const saved_env = env_claude_config_dir;
+    defer claude_path = saved_path;
+    defer env_claude_config_dir = saved_env;
+    env_claude_config_dir = null;
+
+    const home = ".zig-cache/petdex-claude-saved-path";
+    const alternate = home ++ "/Claude Config";
+    const settings = alternate ++ "/settings.json";
+    plat.makeDir(home ++ "/.petdex");
+    plat.makeDir(home ++ "/.claude");
+    plat.makeDir(alternate);
+    try t.expect(writeFile(home ++ "/.petdex/agent-paths.json", "{\"claude_config_dir\":\"~/Claude Config\"}"));
+    const default_settings = "{\"keep\":\"default instance\"}";
+    try t.expect(writeFile(home ++ "/.claude/settings.json", default_settings));
+    const legacy =
+        \\{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"foreign-hook"},{"type":"command","command":"node $HOME/.petdex/bin/petdex.js bubble pre claude-code"}]}]}}
+    ;
+    try t.expect(writeFile(settings, legacy));
+
+    try loadAgentPaths(t.allocator, home);
+    const migration = migrateLegacyHooks(t.allocator, home);
+    try t.expectEqual(@as(usize, 1), migration.migrated);
+    try t.expectEqual(@as(usize, 0), migration.failed);
+    try t.expectEqual(HookStatus.current, scan(t.allocator, home)[0].status);
+    try t.expect(uninstall(t.allocator, home, .claude_code));
+    const removed = readFileAlloc(t.allocator, settings, 64 * 1024).?;
+    defer t.allocator.free(removed);
+    try t.expect(std.mem.indexOf(u8, removed, "petdex-hook") == null);
+    try t.expect(std.mem.indexOf(u8, removed, "foreign-hook") != null);
+    try t.expect(installClaude(t.allocator, home));
+    try t.expectEqual(HookStatus.current, scan(t.allocator, home)[0].status);
+    const untouched = readFileAlloc(t.allocator, home ++ "/.claude/settings.json", 64 * 1024).?;
+    defer t.allocator.free(untouched);
+    try t.expectEqualStrings(default_settings, untouched);
+}
+
+test "saved Claude path wins over environment and missing or empty settings restore fallback" {
+    const saved_path = claude_path;
+    const saved_env = env_claude_config_dir;
+    defer claude_path = saved_path;
+    defer env_claude_config_dir = saved_env;
+    env_claude_config_dir = ".zig-cache/claude-environment";
+    const home = ".zig-cache/petdex-claude-path-precedence";
+    const config = home ++ "/.petdex/agent-paths.json";
+    plat.makeDir(home ++ "/.petdex");
+    const absolute = if (builtin.os.tag == .windows) "C:/Claude Config" else "/tmp/Claude Config";
+    var json: [1024]u8 = undefined;
+    try t.expect(writeFile(config, try std.fmt.bufPrint(&json, "{{\"claude_config_dir\":\"{s}\"}}", .{absolute})));
+    try loadAgentPaths(t.allocator, home);
+    var resolved: [512]u8 = undefined;
+    try t.expectEqualStrings(absolute, claudeConfigDir(&resolved, home).?);
+
+    for ([_][]const u8{ "{}", "{\"claude_config_dir\":null}", "{\"claude_config_dir\":\"\"}" }) |empty| {
+        try t.expect(writeFile(config, empty));
+        try loadAgentPaths(t.allocator, home);
+        try t.expectEqualStrings(env_claude_config_dir.?, claudeConfigDir(&resolved, home).?);
+    }
+    plat.deleteFile(config);
+    try loadAgentPaths(t.allocator, home);
+    try t.expectEqualStrings(env_claude_config_dir.?, claudeConfigDir(&resolved, home).?);
+    env_claude_config_dir = null;
+    try t.expectEqualStrings(home ++ "/.claude", claudeConfigDir(&resolved, home).?);
+}
+
+test "invalid saved Claude paths cannot mutate the default or environment instance" {
+    const saved_path = claude_path;
+    const saved_env = env_claude_config_dir;
+    defer claude_path = saved_path;
+    defer env_claude_config_dir = saved_env;
+    const home = ".zig-cache/petdex-claude-path-invalid";
+    const alternate = home ++ "/environment";
+    env_claude_config_dir = alternate;
+    plat.makeDir(home ++ "/.petdex");
+    plat.makeDir(home ++ "/.claude");
+    plat.makeDir(alternate);
+    const sentinel = "{\"hooks\":{},\"keep\":true}";
+    try t.expect(writeFile(home ++ "/.claude/settings.json", sentinel));
+    try t.expect(writeFile(alternate ++ "/settings.json", sentinel));
+    for ([_][]const u8{ "{", "[]", "{\"claude_config_dir\":5}", "{\"claude_config_dir\":\"relative/path\"}", "{\"claude_config_dir\":\"/bad\\u0000path\"}" }) |invalid| {
+        try t.expect(writeFile(home ++ "/.petdex/agent-paths.json", invalid));
+        if (loadAgentPaths(t.allocator, home)) |_| return error.ExpectedInvalidConfig else |_| {}
+        try t.expect(!installClaude(t.allocator, home));
+        try t.expect(!uninstall(t.allocator, home, .claude_code));
+        try t.expectEqual(HookStatus.absent, scan(t.allocator, home)[0].status);
+    }
+    var oversized: [17 * 1024]u8 = @splat(' ');
+    @memcpy(oversized[0..2], "{}");
+    try t.expect(writeFile(home ++ "/.petdex/agent-paths.json", &oversized));
+    if (loadAgentPaths(t.allocator, home)) |_| return error.ExpectedOversizedConfig else |_| {}
+    try t.expect(!installClaude(t.allocator, home));
+    const default_after = readFileAlloc(t.allocator, home ++ "/.claude/settings.json", 64 * 1024).?;
+    defer t.allocator.free(default_after);
+    const env_after = readFileAlloc(t.allocator, alternate ++ "/settings.json", 64 * 1024).?;
+    defer t.allocator.free(env_after);
+    try t.expectEqualStrings(sentinel, default_after);
+    try t.expectEqualStrings(sentinel, env_after);
 }
 
 test "installQoder writes six events and stays out of the rest of the config" {
