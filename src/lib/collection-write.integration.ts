@@ -188,21 +188,21 @@ for (const [name, edit] of Object.entries(editors))
         updatedAt: after.collections[0].updatedAt,
       });
     });
-    for (const petSlugs of [
-      [],
-      null,
-      "mochi",
-      [null],
-      [""],
-      ["pending"],
-      ["foreign"],
-      ["mochi", "missing"],
-    ]) {
+    for (const [petSlugs, status] of [
+      [[], 400],
+      [null, 400],
+      ["mochi", 400],
+      [[null], 400],
+      [[""], 400],
+      [["pending"], 422],
+      [["foreign"], 422],
+      [["mochi", "missing"], 422],
+    ] as const) {
       test(`rejects invalid membership ${JSON.stringify(petSlugs)}`, async () => {
         await seedCollection();
         const before = await snapshot();
         expect((await edit({ title: "Would change", petSlugs })).status).toBe(
-          400,
+          status,
         );
         expect(await snapshot()).toEqual(before);
         expect(invalidations).toEqual([]);

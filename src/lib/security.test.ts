@@ -432,6 +432,57 @@ describe("isSafeExternalUrl", () => {
   it("rejects localhost", () => {
     expect(isSafeExternalUrl("https://localhost/foo")).toBe(false);
   });
+  it("rejects IPv6 literals and local network hostnames", () => {
+    expect(isSafeExternalUrl("https://[::1]/admin")).toBe(false);
+    expect(isSafeExternalUrl("https://[fd00::1]/service")).toBe(false);
+    expect(isSafeExternalUrl("https://printer.local/status")).toBe(false);
+    expect(isSafeExternalUrl("https://api.internal/health")).toBe(false);
+    expect(isSafeExternalUrl("https://router.home.arpa/")).toBe(false);
+  });
+  it("rejects repeated trailing dots on private hosts", () => {
+    // Stripping a single trailing dot leaves "localhost.." -> "localhost.",
+    // which matches none of the private-name checks and was accepted.
+    expect(isSafeExternalUrl("https://localhost../")).toBe(false);
+    expect(isSafeExternalUrl("https://127.0.0.1../")).toBe(false);
+    expect(isSafeExternalUrl("https://169.254.169.254../")).toBe(false);
+    expect(isSafeExternalUrl("https://api.internal../")).toBe(false);
+    expect(isSafeExternalUrl("https://printer.local../")).toBe(false);
+  });
+  it("still accepts a public host written with a trailing dot", () => {
+    // A single trailing dot is a valid fully-qualified name.
+    expect(isSafeExternalUrl("https://example.com./")).toBe(true);
+  });
+  it("rejects the bare private suffix, not only names under it", () => {
+    // The suffix test is `endsWith(".local")`, which `https://local/` does not
+    // match — the suffix itself has no leading dot to match. Each reserved name
+    // therefore has to be checked bare as well as dotted.
+    expect(isSafeExternalUrl("https://local/")).toBe(false);
+    expect(isSafeExternalUrl("https://internal/")).toBe(false);
+    expect(isSafeExternalUrl("https://lan/")).toBe(false);
+    expect(isSafeExternalUrl("https://home.arpa/")).toBe(false);
+    expect(isSafeExternalUrl("https://intranet/")).toBe(false);
+    // The dotted forms keep working, including under a subdomain.
+    expect(isSafeExternalUrl("https://printer.local/")).toBe(false);
+    expect(isSafeExternalUrl("https://a.b.internal/")).toBe(false);
+    expect(isSafeExternalUrl("https://x.home.arpa/")).toBe(false);
+  });
+  it("rejects a hostname that normalizes to nothing", () => {
+    // `https://./` and `https://../` parse with an empty hostname after the
+    // trailing-dot strip, and an empty name matches none of the checks above.
+    expect(isSafeExternalUrl("https://./")).toBe(false);
+    expect(isSafeExternalUrl("https://../")).toBe(false);
+  });
+  it("rejects credentials in the URL", () => {
+    // The host is the part after the `@`, so a public destination with a
+    // brand-looking username reads as the brand while pointing elsewhere.
+    expect(isSafeExternalUrl("https://petdex.dev@evil.com/")).toBe(false);
+    expect(isSafeExternalUrl("https://user:pass@evil.com/")).toBe(false);
+    expect(isSafeExternalUrl("https://petdex.dev@127.0.0.1/")).toBe(false);
+  });
+  it("still accepts an ordinary public URL", () => {
+    expect(isSafeExternalUrl("https://example.com/path?a=1")).toBe(true);
+    expect(isSafeExternalUrl("https://sub.example.com/")).toBe(true);
+  });
 });
 
 describe("JsonLd escape", () => {

@@ -1577,10 +1577,16 @@
     "deleteAria": "删除合集",
     "cancelAria": "取消",
     "namePlaceholder": "南方公园小队",
-    "petsSelected": "宠物（已选 {selected}/{total}）"
+    "petsSelected": "宠物（已选 {selected}/{total}）",
+    "petLimit": "每个合集最多包含 {max} 个宠物。请先移除成员，降到 {max} 个以下才能再添加。",
+    "petLimitHint": "你已批准的宠物超过单个合集的上限，最多可选择 {max} 个。",
+    "emptyPetSlugs": "这样会移除该合集中的全部宠物。请添加一个，或改为删除该合集。"
   },
   "collectionEditor": {
-    "selectPetsFirst": "请先选择宠物"
+    "selectPetsFirst": "请先选择宠物",
+    "petLimit": "每个合集最多包含 {max} 个宠物。请先移除成员，降到 {max} 个以下才能再添加。",
+    "petLimitHint": "你已批准的宠物超过单个合集的上限，最多可选择 {max} 个。",
+    "emptyPetSlugs": "这样会移除该合集中的全部宠物。请添加一个，或改为删除该合集。"
   },
   "onboarding": {
     "skip": "跳过引导"
@@ -1940,6 +1946,13 @@
         "submitZip": "<strong>单个 zip</strong>：<code>petdex submit ~/Downloads/boba.zip</code>",
         "submitBulk": "<strong>批量提交</strong>：<code>petdex submit ~/.codex/pets</code>，每个直接子文件夹都会作为一只宠物提交",
         "bulkNote": "批量模式会为每只宠物显示进度，并在最后汇总失败项。宠物名会自动去重，不会因为名称已存在而提交失败。",
+        "collectionSyntax": "petdex collection list|create|edit|delete [选项]",
+        "collectionBody": "使用 CLI 管理由已审核宠物组成的个人合集。请先登录；任何合集命令都可以加上 <code>--json</code> 获取机器可读输出。",
+        "collectionList": "<strong>列出</strong>：<code>petdex collection list</code>",
+        "collectionCreate": "<strong>创建</strong>：<code>petdex collection create --title \"My pets\" --pets boba,mochi</code>。只有在已审核宠物不超过 24 只时才能使用 <code>--all-approved</code>。",
+        "collectionEdit": "<strong>编辑</strong>：<code>petdex collection edit {collectionRef} --desc \"...\"</code>。更新选项可以只提供一部分，省略的字段会保持不变。",
+        "collectionDelete": "<strong>删除</strong>：<code>petdex collection delete {collectionRef} --yes</code>。",
+        "collectionLimits": "每个账号最多可有 10 个个人合集。24 个宠物的上限约束的是增长：已超过上限的合集仍可缩小或重命名，但不能扩大；当合集仍有成员时，空的成员列表会被拒绝，因为它会移除全部成员。<code>--pets</code> 接受逗号分隔的 slug，<code>--cover</code> 必须指向已选中的宠物，<code>--cover \"\"</code> 可清除封面，<code>--external-url</code> 必须是安全的 HTTPS 链接。",
         "authBody": "见上面的“登录”部分。",
         "installSyntax": "petdex install {petName}",
         "submitSyntax": "petdex submit {path}"

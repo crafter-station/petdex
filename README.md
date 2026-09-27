@@ -63,6 +63,13 @@ You should see `~/.petdex/pets/boba/` with `pet.json` and a spritesheet.
 The pet floats above your workspace and animates on every tool call your agent
 makes.
 
+Signed-in creators can also group approved pets into personal collections from
+the profile's **Collections** tab or the CLI:
+
+```sh
+npx petdex collection create --title "My pets" --pets boba,mochi
+```
+
 ## For users
 
 | You want to... | Do this |
@@ -73,9 +80,15 @@ makes.
 | Run the desktop floater | Download it from [petdex.dev/download](https://petdex.dev/download) |
 | Make a pet | Use the `hatch-pet` skill inside Codex, or build one with the [Petdex creator tools](https://petdex.dev/create) |
 | Submit a pet | `npx petdex submit ./my-pet/` or drop it through the web submitter |
+| Manage collections | `npx petdex collection list` or use the Collections tab on your profile |
 | Join the community | [Discord](https://discord.gg/byhubdyBTe) |
 
 Full CLI reference: [`packages/petdex-cli/README.md`](./packages/petdex-cli/README.md).
+
+Personal collections are limited to 10 per account. The 24-pet limit bounds
+growth rather than the stored row, so a collection created before it existed can
+still be renamed or shrunk, but not grown. The CLI supports listing, creating,
+editing, deleting, and JSON output for automation.
 
 ## For builders
 
@@ -92,12 +105,12 @@ If you want to build on top of Petdex (a desktop client, a wearable, an SDK, a D
 crafter-station/petdex
 ├── src/
 │   ├── app/[locale]/          Public site: gallery, /pets/<slug>, /collections, /built-with, /community, /create, /download, /submit, /u/<handle>, ...
-│   ├── app/api/cli/           CLI endpoints: OAuth config, submit (zip → presigned R2), dedup check, register
+│   ├── app/api/cli/           CLI endpoints: OAuth config, submit (zip → presigned R2), collection management, dedup check, register
 │   ├── app/api/manifest/      Public manifest: every approved pet with its spritesheet URL
 │   ├── app/api/admin/         Admin review surface for submissions, edits, collection requests
 │   └── lib/db/schema.ts       Drizzle schema (Postgres)
 ├── packages/
-│   ├── petdex-cli/            npm `petdex` catalog client (auth, list, install, submit)
+│   ├── petdex-cli/            npm `petdex` catalog client (auth, list, install, submit, edit, collection management)
 │   ├── petdex-desktop-native/ Native SDK floating mascot for macOS, Linux and Windows
 │   ├── petdex-desktop-windows/ Legacy Tauri Windows implementation (not the release path)
 │   └── discord-bot/           Discord.js bot for the Petdex server

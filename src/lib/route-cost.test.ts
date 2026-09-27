@@ -37,6 +37,15 @@ describe("route cost helpers", () => {
     expect(normalizeRouteCostPath("/api/cli/edit")).toBe("/api/cli/edit");
   });
 
+  it("keeps CLI collection routes in static and dynamic buckets", () => {
+    expect(normalizeRouteCostPath("/api/cli/collections")).toBe(
+      "/api/cli/collections",
+    );
+    expect(normalizeRouteCostPath("/api/cli/collections/col_abc123")).toBe(
+      "/api/cli/collections/[id]",
+    );
+  });
+
   it("keeps static API routes ahead of dynamic patterns", () => {
     expect(normalizeRouteCostPath("/en/collections/opengraph-image")).toBe(
       "/collections/opengraph-image",

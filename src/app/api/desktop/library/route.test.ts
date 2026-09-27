@@ -1,6 +1,8 @@
 import * as BunTest from "bun:test";
 import { beforeEach, describe, expect, it } from "bun:test";
 
+import * as realRatelimit from "@/lib/ratelimit";
+
 const testMock = (
   BunTest as typeof BunTest & {
     mock: { module: (specifier: string, factory: () => object) => void };
@@ -50,6 +52,10 @@ testMock.module("@/lib/desktop-library", () => ({
 }));
 
 testMock.module("@/lib/ratelimit", () => ({
+  // Spread the real module. Bun links every file that imports a mocked
+  // specifier against the mock's exports, so a partial mock is a
+  // SyntaxError in any suite that imports an export it omits.
+  ...realRatelimit,
   cliVerifyRatelimit: {
     limit: async () => ({ success: !limited }),
   },

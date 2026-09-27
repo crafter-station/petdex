@@ -1313,10 +1313,16 @@
     "deleteAria": "Delete collection",
     "cancelAria": "Cancel",
     "namePlaceholder": "South Park crew",
-    "petsSelected": "Pets ({selected} of {total} selected)"
+    "petsSelected": "Pets ({selected} of {total} selected)",
+    "petLimit": "Collections can include up to {max} pets. Remove members until you are below {max} to add another.",
+    "petLimitHint": "You have more approved pets than fit in one collection. Pick up to {max}.",
+    "emptyPetSlugs": "That would remove every pet from this collection. Add a pet, or delete the collection instead."
   },
   "collectionEditor": {
-    "selectPetsFirst": "Select pets first"
+    "selectPetsFirst": "Select pets first",
+    "petLimit": "Collections can include up to {max} pets. Remove members until you are below {max} to add another.",
+    "petLimitHint": "You have more approved pets than fit in one collection. Pick up to {max}.",
+    "emptyPetSlugs": "That would remove every pet from this collection. Add a pet, or delete the collection instead."
   },
   "onboarding": {
     "skip": "Skip tour"
@@ -1638,6 +1644,13 @@
         "submitZip": "<strong>Single zip</strong>: <code>petdex submit ~/Downloads/boba.zip</code>",
         "submitBulk": "<strong>Bulk</strong>: <code>petdex submit ~/.codex/pets</code>: every direct subfolder is treated as its own pet",
         "bulkNote": "Bulk mode shows a progress spinner per pet and a final summary of failures. Slugs auto-deduplicate so you will not hit a slug-taken bounce.",
+        "collectionSyntax": "petdex collection list|create|edit|delete [options]",
+        "collectionBody": "Manage personal collections of approved pets from the CLI. Sign in first, and add <code>--json</code> to any collection command for machine-readable output.",
+        "collectionList": "<strong>List</strong>: <code>petdex collection list</code>",
+        "collectionCreate": "<strong>Create</strong>: <code>petdex collection create --title \"My pets\" --pets boba,mochi</code>. Use <code>--all-approved</code> only when you have 24 or fewer approved pets.",
+        "collectionEdit": "<strong>Edit</strong>: <code>petdex collection edit {collectionRef} --desc \"...\"</code>. Update flags are optional and omitted fields stay unchanged.",
+        "collectionDelete": "<strong>Delete</strong>: <code>petdex collection delete {collectionRef} --yes</code>.",
+        "collectionLimits": "Each account can have up to 10 personal collections. The 24-pet limit bounds growth: a collection already over it can still be shrunk or renamed, but not enlarged, and an empty member list is refused when the collection still holds members, because it would remove them all. <code>--pets</code> takes comma-separated slugs, <code>--cover</code> must name a selected pet and <code>--cover \"\"</code> clears it, and <code>--external-url</code> must be a safe HTTPS link.",
         "authBody": "See the Authenticate section above.",
         "installSyntax": "petdex install {petName}",
         "submitSyntax": "petdex submit {path}"

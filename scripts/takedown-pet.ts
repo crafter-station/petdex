@@ -2,6 +2,11 @@
 // so we can resolve takedowns from the CLI when the prod admin UI is
 // not at hand.
 //
+// The cleanup is inline, NOT takedownPet(): that helper takes slug-scoped
+// advisory locks and gates every child write on the pet row it locked, and this
+// script does neither, so it also does not participate in the lock ordering the
+// live routes rely on. Keep the reference lists below in step with the helper.
+//
 // Usage:
 //   bun scripts/takedown-pet.ts --slug jane              # preview
 //   bun scripts/takedown-pet.ts --slug jane --apply      # do it

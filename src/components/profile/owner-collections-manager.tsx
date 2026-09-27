@@ -7,6 +7,11 @@ import { useState, useTransition } from "react";
 import { Loader2, Lock, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 
+import {
+  collectionPetLimitExceeded,
+  MAX_COLLECTION_PETS,
+} from "@/lib/collection-constants";
+
 type ApprovedPet = {
   slug: string;
   displayName: string;
@@ -241,6 +246,11 @@ function CollectionForm({
   const [, startTransition] = useTransition();
 
   function togglePet(slug: string) {
+    if (!selected.has(slug) && selected.size >= MAX_COLLECTION_PETS) {
+      setError(t("petLimit", { max: MAX_COLLECTION_PETS }));
+      return;
+    }
+    setError(null);
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(slug)) next.delete(slug);
@@ -251,6 +261,18 @@ function CollectionForm({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    // A stored collection that predates the cap may already hold more than
+    // MAX_COLLECTION_PETS. Blocking that here would make it uneditable — not
+    // even a title fix — so only growth past the cap is refused.
+    if (
+      collectionPetLimitExceeded(
+        [...selected],
+        mode === "edit" ? (collection?.petSlugs ?? null) : null,
+      )
+    ) {
+      setError(t("petLimit", { max: MAX_COLLECTION_PETS }));
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -278,7 +300,17 @@ function CollectionForm({
       });
       if (!res.ok) {
         const j = (await res.json().catch(() => ({}))) as { error?: string };
-        setError(j.error ?? `Save failed (${res.status})`);
+        // The server refuses an empty member list, because applying one would
+        // remove every member and then report a member list the collection does
+        // not have. This form cannot send one — save is disabled with nothing
+        // selected — so the branch is defensive here; the creator editor, which
+        // has no such guard, is the path that actually reaches it. Translated
+        // anyway, so a future change to either guard cannot surface the raw code.
+        setError(
+          j.error === "empty_pet_slugs"
+            ? t("emptyPetSlugs")
+            : (j.error ?? `Save failed (${res.status})`),
+        );
         return;
       }
       onSaved();
@@ -350,12 +382,15 @@ function CollectionForm({
         <div className="mt-2 grid max-h-72 grid-cols-2 gap-2 overflow-y-auto rounded-2xl border border-border-base bg-surface p-2 sm:grid-cols-3 md:grid-cols-4">
           {approvedPets.map((pet) => {
             const checked = selected.has(pet.slug);
+            const selectionFull =
+              !checked && selected.size >= MAX_COLLECTION_PETS;
             return (
               <button
                 key={pet.slug}
                 type="button"
                 onClick={() => togglePet(pet.slug)}
-                className={`relative flex flex-col items-center gap-1 rounded-xl border p-2 text-xs transition ${
+                disabled={selectionFull}
+                className={`relative flex flex-col items-center gap-1 rounded-xl border p-2 text-xs transition disabled:cursor-not-allowed disabled:opacity-45 ${
                   checked
                     ? "border-brand bg-brand/10 text-foreground"
                     : "border-border-base bg-transparent text-muted-2 hover:border-border-strong hover:text-foreground"
@@ -368,6 +403,11 @@ function CollectionForm({
             );
           })}
         </div>
+        {approvedPets.length > MAX_COLLECTION_PETS ? (
+          <p className="mt-2 text-xs text-muted-3">
+            {t("petLimitHint", { max: MAX_COLLECTION_PETS })}
+          </p>
+        ) : null}
       </fieldset>
 
       {error ? (

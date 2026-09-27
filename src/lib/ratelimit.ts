@@ -169,6 +169,16 @@ export const cliVerifyRatelimit = createRatelimit({
   prefix: "petdex:cli-verify",
 });
 
+// Collection mutations by user. The per-IP CLI bucket alone lets one account
+// spread writes across source IPs, and every collection mutation takes an
+// advisory lock and replaces the item list, so the account needs its own
+// ceiling. Mirrors the CLI submit path's per-user presign bucket.
+export const cliCollectionRatelimit = createNeonRatelimit({
+  requests: 60,
+  window: "1h",
+  prefix: "petdex:cli-collection",
+});
+
 // Owner edits to displayName/description/tags. Generous within the day so
 // the owner can iterate copy, but caps a malicious loop that floods the
 // admin queue with edit churn. Keyed by petId.

@@ -37,6 +37,11 @@ export const dynamic = "force-dynamic";
 
 const SITE_URL = "https://petdex.dev";
 
+// Preview slice for the visitor view, which renders a count and the leading
+// pets. Owners get the full member list because the collection editor
+// replaces the entire pet list with whatever it was given.
+const OWNER_COLLECTION_PREVIEW_PETS = 6;
+
 type PageProps = { params: Promise<{ handle: string; locale: string }> };
 
 export async function generateMetadata({ params }: PageProps) {
@@ -220,8 +225,15 @@ export default async function UserProfilePage({ params }: PageProps) {
           metrics: { installCount: 0, zipDownloadCount: 0, likeCount: 0 },
         }))
     : [];
+  // The owner editor rebuilds a collection's whole pet list from the slugs it
+  // receives, so the owner needs every member. A preview-sized slice would
+  // make an edit drop the members it never saw. Visitors only render petCount
+  // and the first few, so they keep the cheaper preview slice.
   const [ownerCollectionsList, likedPets] = await Promise.all([
-    getOwnerCollections(ownerId),
+    getOwnerCollections(
+      ownerId,
+      isOwner ? null : OWNER_COLLECTION_PREVIEW_PETS,
+    ),
     getLikedPetsForUser(ownerId),
   ]);
   // Pick the first one for the legacy "collection" prop (kept around

@@ -31,6 +31,8 @@ petdex submit ~/.petdex/pets/boba   # share a single pet
 petdex submit ~/.petdex/pets        # bulk submit every subfolder
 petdex whoami                      # confirm signed-in identity
 petdex logout                      # clear stored credentials
+petdex collection list             # list your collections
+petdex collection create --title "My pets" --pets boba,mochi
 ```
 
 After installing a pet, pick the active mascot in Petdex Desktop: hover the pet and
@@ -53,8 +55,45 @@ The `init`, `up`, `down`, `toggle`, `desktop`, `update`, `doctor`, and `hooks` c
 | `petdex install <slug>` | Install a pet into `~/.petdex/pets/<slug>/` and `~/.codex/pets/<slug>/`. |
 | `petdex submit <path>` | Submit a pet folder, zip, or parent of pets (bulk). |
 | `petdex edit <slug>` | Edit a pet you own (`--desc`, `--displayName`, `--sprite`, `--meta`, `--zip`). |
+| `petdex collection list` | List your collections (`--json` for machine output). |
+| `petdex collection create` | Create a personal collection (`--title`, `--desc`, `--pets`, `--cover`, `--external-url`, `--all-approved`). |
+| `petdex collection edit <id-or-slug>` | Partially update a personal collection. The reference can be the collection id or slug. |
+| `petdex collection delete <id-or-slug>` | Delete a personal collection; requires `--yes`. |
 | `petdex telemetry [on\|off\|status]` | Manage anonymous usage telemetry. |
 | `petdex --version` | Print the CLI version. |
+
+## Collection management
+
+Collections group approved pets on your profile. All collection commands
+require `petdex login` first, and all support `--json` for machine-readable
+output.
+
+```sh
+petdex collection list --json
+petdex collection create --title "My pets" --pets boba,mochi --cover boba
+petdex collection list                       # copy the slug from here
+petdex collection edit <slug> --desc "A small desk crew" --external-url https://example.com
+petdex collection edit <slug> --all-approved
+petdex collection delete <slug> --yes
+```
+
+`collection edit` and `collection delete` take either the collection id or its
+slug. New collections get a generated slug (`collection-<32 hex chars>`);
+there is no flag to set one, so read it from `petdex collection list` first.
+
+`--pets` takes a comma-separated list of pet slugs. `collection edit` accepts
+any subset of the update flags, so omitted fields are preserved. `--all-approved`
+selects every approved pet owned by you; on `create`, use it only when that set
+has 24 or fewer pets. If you pass both `--all-approved` and `--pets`, `--all-approved`
+wins and the explicit list is ignored. Each account can have up to 10 personal
+collections, and `--cover` must name a pet in the collection — with an explicit
+`--pets`, that means the cover has to appear in the list. Pass `--cover ""` to
+clear the cover; with no `--pets` the collection keeps its members and shows
+none as the cover. `--external-url`
+accepts safe HTTPS links only. The 24-pet limit bounds growth: a collection that
+already exceeds it — one created before the limit existed — can still be renamed
+or shrunk, but not grown. An empty member list is refused, because it would
+remove every member; delete the collection instead.
 
 ## How `submit` works
 

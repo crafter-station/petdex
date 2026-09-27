@@ -7,12 +7,14 @@
 //   bun scripts/takedown-by-keyword.ts --apply --pets-only
 //   bun scripts/takedown-by-keyword.ts --apply --requests-only
 //
-// Pets are removed via takedownPet() — that helper handles every
-// cross-table cleanup (likes, metrics, collection items, collection
-// requests, profile pins, fulfilled requests), drops R2 assets, and
-// emails the owner with the supplied reason. Pet requests are marked
-// dismissed and have their pending image rejected so they fall off the
-// public board.
+// Pets are swept by the inline cleanup below, NOT via takedownPet() — that
+// helper takes slug-scoped advisory locks and gates every child write on the
+// pet row it locked. This script reimplements the same cross-table deletions
+// (likes, metrics, collection items, collection requests), drops R2 assets, and
+// emails the owner with the supplied reason, so its takedowns do not take those
+// locks. Keep the two in step when the reference lists change.
+// Pet requests are marked dismissed and have their pending image rejected so
+// they fall off the public board.
 //
 // Loads .env.local automatically.
 

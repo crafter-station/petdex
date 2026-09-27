@@ -1313,10 +1313,16 @@
     "deleteAria": "Eliminar colección",
     "cancelAria": "Cancelar",
     "namePlaceholder": "Pandilla de South Park",
-    "petsSelected": "Mascotas ({selected} de {total} seleccionadas)"
+    "petsSelected": "Mascotas ({selected} de {total} seleccionadas)",
+    "petLimit": "Las colecciones pueden incluir hasta {max} mascotas. Quita miembros hasta quedar por debajo de {max} para añadir otra.",
+    "petLimitHint": "Tienes más mascotas aprobadas de las que caben en una colección. Elige hasta {max}.",
+    "emptyPetSlugs": "Eso quitaría todas las mascotas de esta colección. Añade una o elimina la colección."
   },
   "collectionEditor": {
-    "selectPetsFirst": "Selecciona mascotas primero"
+    "selectPetsFirst": "Selecciona mascotas primero",
+    "petLimit": "Las colecciones pueden incluir hasta {max} mascotas. Quita miembros hasta quedar por debajo de {max} para añadir otra.",
+    "petLimitHint": "Tienes más mascotas aprobadas de las que caben en una colección. Elige hasta {max}.",
+    "emptyPetSlugs": "Eso quitaría todas las mascotas de esta colección. Añade una o elimina la colección."
   },
   "onboarding": {
     "skip": "Saltar tour"
@@ -1638,6 +1644,13 @@
         "submitZip": "<strong>Single zip</strong>: <code>petdex submit ~/Downloads/boba.zip</code>",
         "submitBulk": "<strong>Bulk</strong>: <code>petdex submit ~/.codex/pets</code>: every direct subfolder is treated as its own pet",
         "bulkNote": "Bulk mode shows a progress spinner per pet and a final summary of failures. Slugs auto-deduplicate so you will not hit a slug-taken bounce.",
+        "collectionSyntax": "petdex collection list|create|edit|delete [opciones]",
+        "collectionBody": "Gestiona colecciones personales de mascotas aprobadas desde la CLI. Inicia sesión primero y añade <code>--json</code> a cualquier comando de colecciones para obtener una salida legible por máquinas.",
+        "collectionList": "<strong>Listar</strong>: <code>petdex collection list</code>",
+        "collectionCreate": "<strong>Crear</strong>: <code>petdex collection create --title \"My pets\" --pets boba,mochi</code>. Usa <code>--all-approved</code> solo si tienes 24 mascotas aprobadas o menos.",
+        "collectionEdit": "<strong>Editar</strong>: <code>petdex collection edit {collectionRef} --desc \"...\"</code>. Las opciones de actualización son opcionales y los campos omitidos no cambian.",
+        "collectionDelete": "<strong>Eliminar</strong>: <code>petdex collection delete {collectionRef} --yes</code>.",
+        "collectionLimits": "Cada cuenta puede tener hasta 10 colecciones personales. El límite de 24 mascotas acota el crecimiento: una colección que ya lo supera aún puede reducirse o renombrarse, pero no ampliarse, y se rechaza una lista de miembros vacía cuando la colección aún tiene miembros, porque los quitaría todos. <code>--pets</code> acepta slugs separados por comas, <code>--cover</code> debe nombrar una mascota seleccionada y <code>--cover \"\"</code> lo borra, y <code>--external-url</code> debe ser un enlace HTTPS seguro.",
         "authBody": "See the Authenticate section above.",
         "installSyntax": "petdex install {petName}",
         "submitSyntax": "petdex submit {path}"

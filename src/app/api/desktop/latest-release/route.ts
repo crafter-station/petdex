@@ -1,5 +1,12 @@
 import { type NextRequest, NextResponse } from "next/server";
 
+import {
+  buildJsonPayload,
+  type GhRelease,
+  pickAssetForPlatform,
+  releasePageUrl,
+} from "@/lib/desktop-release";
+
 export const runtime = "nodejs";
 // Cache the resolved desktop release URL for 5 minutes. Releases ship
 // rarely, the GitHub API has its own per-IP rate limit, and this
@@ -15,38 +22,6 @@ const RELEASES_PAGE_SIZE = 30;
 // and a runaway loop would burn the GitHub API rate limit if the
 // repo somehow lost every desktop tag.
 const RELEASES_MAX_PAGES = 5;
-const DESKTOP_TAG_PREFIX = "desktop-v";
-// Fallback when the GitHub API is unreachable or the repo has no
-// desktop release yet. The releases page itself isn't ideal (it can
-// show a non-desktop release at the top) but it's strictly better
-// than 5xx-ing the user.
-const RELEASES_PAGE = "https://github.com/crafter-station/petdex/releases";
-
-// Hard-pin every redirect target to the petdex repo on github.com.
-// The html_url / browser_download_url fields on the response are
-// technically attacker-controlled (a compromised GH response, an
-// MITM, or a future API shape change could surface a non-GH URL),
-// and forwarding them blindly turns this endpoint into an open
-// redirect. Anything that fails the prefix check falls back to the
-// static releases page, which is always safe.
-const SAFE_URL_PREFIX = "https://github.com/crafter-station/petdex/";
-
-function isTrustedUrl(url: string): boolean {
-  return url.startsWith(SAFE_URL_PREFIX);
-}
-
-type GhAsset = {
-  name?: string;
-  browser_download_url?: string;
-};
-
-type GhRelease = {
-  tag_name?: string;
-  html_url?: string;
-  draft?: boolean;
-  prerelease?: boolean;
-  assets?: GhAsset[];
-};
 
 async function findLatestDesktopRelease(): Promise<GhRelease | null> {
   // Walk pages newest-first until we hit a desktop-v* tag or
@@ -67,113 +42,12 @@ async function findLatestDesktopRelease(): Promise<GhRelease | null> {
         !r.draft &&
         !r.prerelease &&
         typeof r.tag_name === "string" &&
-        r.tag_name.startsWith(DESKTOP_TAG_PREFIX),
+        r.tag_name.startsWith("desktop-v"),
     );
     if (hit) return hit;
     if (data.length < RELEASES_PAGE_SIZE) return null;
   }
   return null;
-}
-
-// Map platform alias → asset filename matchers, in priority order.
-// First match wins. We prefer the .dmg because users expect "drag
-// to Applications" UX from a download click; the legacy asset name is
-// kept around for existing installers while the native bundle is rolled
-// out.
-const PLATFORM_ASSET_PATTERNS: Record<string, RegExp[]> = {
-  "darwin-arm64": [
-    /^Petdex-arm64\.dmg$/, // signed + notarized DMG, drag-to-Applications UX
-    /^petdex-desktop-darwin-arm64(\.zip)?$/, // legacy asset name
-    /^petdex-desktop-native-darwin-arm64\.zip$/, // native rewrite bundle
-  ],
-  "darwin-x64": [
-    /^Petdex-x64\.dmg$/,
-    /^petdex-desktop-darwin-x64(\.zip)?$/, // legacy asset name
-    /^petdex-desktop-native-darwin-x64\.zip$/, // native rewrite bundle
-  ],
-  // The native rewrite is the only build that produces a Linux binary:
-  // the WebView desktop never had a Linux release job.
-  "linux-x64": [
-    /^petdex-desktop-linux-x64(\.tar\.gz)?$/,
-    /^petdex-desktop-native-linux-x64$/,
-  ],
-  "linux-arm64": [/^petdex-desktop-linux-arm64(\.tar\.gz)?$/],
-  "win32-x64": [
-    /^petdex-desktop-win32-x64\.(exe|zip)$/,
-    /^petdex-desktop-native-win32-x64\.exe$/,
-  ],
-};
-
-function pickAssetForPlatform(
-  release: GhRelease,
-  platform: string,
-): GhAsset | null {
-  if (!Array.isArray(release.assets)) return null;
-  const patterns = PLATFORM_ASSET_PATTERNS[platform];
-  if (!patterns) return null;
-  for (const re of patterns) {
-    const hit = release.assets.find(
-      (a) =>
-        typeof a.name === "string" &&
-        re.test(a.name) &&
-        typeof a.browser_download_url === "string" &&
-        isTrustedUrl(a.browser_download_url),
-    );
-    if (hit) return hit;
-  }
-  return null;
-}
-
-function releasePageUrl(release: GhRelease | null): string {
-  if (!release) return RELEASES_PAGE;
-  if (release.html_url && isTrustedUrl(release.html_url))
-    return release.html_url;
-  if (release.tag_name)
-    return `${SAFE_URL_PREFIX}releases/tag/${release.tag_name}`;
-  return RELEASES_PAGE;
-}
-
-// `desktop-v0.6.0` → `0.6.0`. The tag is the only place the version
-// lives, so a tag that does not carry one yields null rather than a
-// guess: a client comparing against a made-up version is worse than a
-// client that learns nothing this poll.
-export function versionFromTag(tag: string | undefined): string | null {
-  if (typeof tag !== "string" || !tag.startsWith(DESKTOP_TAG_PREFIX)) {
-    return null;
-  }
-  const version = tag.slice(DESKTOP_TAG_PREFIX.length);
-  return /^\d+\.\d+\.\d+/.test(version) ? version : null;
-}
-
-export type LatestReleasePayload = {
-  version: string | null;
-  tag: string | null;
-  releaseUrl: string;
-  assets: Record<string, string>;
-};
-
-// The shape old clients keep calling forever, so it stays additive:
-// fields may be added, never removed or retyped. `version` is null when
-// GitHub is unreachable, which the client must read as "do not know"
-// rather than "up to date".
-export function buildJsonPayload(
-  release: GhRelease | null,
-): LatestReleasePayload {
-  const assets: Record<string, string> = {};
-  if (release) {
-    for (const platform of Object.keys(PLATFORM_ASSET_PATTERNS)) {
-      const hit = pickAssetForPlatform(release, platform);
-      if (hit?.browser_download_url) {
-        assets[platform] = hit.browser_download_url;
-      }
-    }
-  }
-  return {
-    version: versionFromTag(release?.tag_name),
-    tag: release?.tag_name ?? null,
-    releaseUrl: releasePageUrl(release),
-    assets,
-  };
 }
 
 /**

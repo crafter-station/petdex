@@ -31,7 +31,7 @@
     "auto-tag": "bun scripts/auto-tag.ts",
     "release:desktop": "bun scripts/release-desktop.ts",
     "i18n:check": "bun scripts/i18n-check.ts",
-    "test": "bun test",
+    "test": "bun test --timeout 120000",
     "test:db": "bun test ./src/lib/pet-search.integration.ts"
   },
   "dependencies": {

@@ -68,6 +68,7 @@ export default async function DocsPage({
   });
   const placeholder = {
     desktopAction: "<start | stop | status>",
+    collectionRef: "id-or-slug",
     path: t("placeholders.path"),
     petName: t("placeholders.petName"),
     yourPetName: t("placeholders.yourPetName"),
@@ -299,6 +300,18 @@ export default async function DocsPage({
               <li>{t.rich("sections.commands.submitBulk", rich)}</li>
             </ul>
             <p>{t("sections.commands.bulkNote")}</p>
+
+            <h3 className="mt-6 font-semibold">
+              <code>{t("sections.commands.collectionSyntax")}</code>
+            </h3>
+            <p>{t.rich("sections.commands.collectionBody", rich)}</p>
+            <ul className="ml-6 list-disc space-y-1 text-muted-2">
+              <li>{t.rich("sections.commands.collectionList", rich)}</li>
+              <li>{t.rich("sections.commands.collectionCreate", rich)}</li>
+              <li>{t.rich("sections.commands.collectionEdit", rich)}</li>
+              <li>{t.rich("sections.commands.collectionDelete", rich)}</li>
+            </ul>
+            <p>{t.rich("sections.commands.collectionLimits", rich)}</p>
 
             <h3 className="mt-6 font-semibold">
               <code>petdex login / logout / whoami</code>

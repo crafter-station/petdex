@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { Heart, Layers, PawPrint } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
+import { MAX_OWNER_COLLECTIONS } from "@/lib/collection-constants";
 import { petStates } from "@/lib/pet-states";
 import type { PetWithMetrics } from "@/lib/pets";
 import { cn } from "@/lib/utils";
@@ -508,7 +509,7 @@ function CollectionsPanel({
       <OwnerCollectionsManager
         collections={ownerCollections ?? []}
         approvedPets={collectionApprovedPets}
-        maxCollections={maxOwnerCollections ?? 10}
+        maxCollections={maxOwnerCollections ?? MAX_OWNER_COLLECTIONS}
         publicHandle={publicHandle}
       />
     );

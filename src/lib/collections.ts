@@ -277,9 +277,15 @@ async function hydrateCollectionListingRows(
 // Featured = true on an owner collection means an admin has promoted it
 // to /collections; that's a separate concern handled by the curation
 // workflow, not the owner editor.
+/**
+ * @param petsPerPreview How many leading pets to hydrate, or `null` for the
+ *   full member list. The owner collection editor rebuilds a collection's
+ *   whole pet list from the slugs it receives, so it must pass `null`:
+ *   anything less would silently drop the members it never saw on save.
+ */
 export async function getOwnerCollections(
   ownerId: string,
-  petsPerPreview = 6,
+  petsPerPreview: number | null = 6,
 ): Promise<(PetCollectionWithPets & { petCount: number })[]> {
   let rows: (PetCollection & { petCount: number })[];
   try {
@@ -310,7 +316,7 @@ export async function getOwnerCollections(
     throw error;
   }
 
-  const hydrated = await hydrateCollections(rows, petsPerPreview);
+  const hydrated = await hydrateCollections(rows, petsPerPreview ?? undefined);
   const countBySlug = new Map(rows.map((r) => [r.slug, r.petCount]));
   return hydrated.map((c) => ({
     ...c,

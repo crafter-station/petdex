@@ -11,6 +11,16 @@ import { isTrustedAssetUrl } from "../src/asset-hosts.js";
 import { resolveAuthConfig } from "../src/auth-config.js";
 import { ClerkCliAuth } from "../src/cli-auth/index.js";
 import {
+  collectionRequest,
+  confirmCollectionMutation,
+  hasBooleanFlag,
+  MAX_COLLECTION_PETS,
+  overCollectionPetLimit,
+  parseCollectionArgs,
+  readApprovedPetCount,
+  readCollectionList,
+} from "../src/collections.js";
+import {
   parseImageDims,
   readEditMetadataAsset,
   readEditSpriteAsset,
@@ -129,7 +139,9 @@ async function main() {
   // notice itself, so triggering it there creates a confusing UX. The
   // notice still fires on the first real command (install / submit).
   const META_COMMANDS = new Set(["version", "--version", "-v", "telemetry"]);
-  if (!META_COMMANDS.has(cmd)) {
+  const machineReadableCollection =
+    cmd === "collection" && hasBooleanFlag(args, "--json");
+  if (!META_COMMANDS.has(cmd) && !machineReadableCollection) {
     maybeShowFirstRunNotice();
   }
 
@@ -148,6 +160,9 @@ async function main() {
       break;
     case "edit":
       await cmdEdit(args.slice(1));
+      break;
+    case "collection":
+      await cmdCollection(args.slice(1));
       break;
     case "install":
       await cmdInstall(args.slice(1));
@@ -205,6 +220,7 @@ function printHelp() {
       `    ${pc.bold("whoami")}             Show signed-in user`,
       `    ${pc.bold("submit")} <path>      Submit a pet folder, zip, or parent of pets (bulk)`,
       `    ${pc.bold("edit")} <slug>        Edit a pet you own (--desc, --displayName, --sprite, --meta, --zip)`,
+      `    ${pc.bold("collection")} <cmd>  Manage collections (list/create/edit/delete; id or slug)`,
       `    ${pc.bold("telemetry")} [on|off|status]  Manage anonymous usage telemetry`,
       `    ${pc.bold("version")}            Print the CLI version`,
       "",
@@ -241,6 +257,168 @@ async function cmdLogin() {
   } catch (err) {
     s.stop(pc.red("× login failed"));
     throw new Error(translateLoginError((err as Error).message));
+  }
+}
+
+/**
+ * Report a collection command failure and exit. In --json mode the message
+ * goes to stderr so stdout stays parseable as JSON; clack writes to stdout,
+ * which would corrupt machine output.
+ */
+function failCollection(message: string, json: boolean): never {
+  if (json) process.stderr.write(`${message}\n`);
+  else p.cancel(message);
+  process.exit(1);
+}
+
+async function cmdCollection(args: string[]): Promise<void> {
+  let parsed: ReturnType<typeof parseCollectionArgs>;
+  try {
+    parsed = parseCollectionArgs(args);
+  } catch (error) {
+    const code = error instanceof Error ? error.message : "usage";
+    const message =
+      code === "missing_collection"
+        ? "Missing collection id or slug."
+        : code === "missing_title"
+          ? "Create requires --title."
+          : code === "nothing_to_update"
+            ? "Nothing to edit. Provide at least one flag."
+            : code === "empty_pets"
+              ? "Empty --pets list. Provide at least one slug, or omit --pets to keep the current members."
+              : code === "pet_slug"
+                ? "Invalid pet slug in --pets."
+                : code === "cover_pet_slug"
+                  ? "Invalid pet slug in --cover."
+                  : code === "cover_without_pets"
+                    ? "Create with --cover also needs --pets including the cover slug, or --all-approved."
+                    : code === "cover_not_in_pets"
+                      ? "The --cover slug must also appear in --pets."
+                      : code === "collection_pet_limit"
+                        ? // --all-approved is mutually exclusive with an
+                          // explicit --pets list, and this code is only raised
+                          // for one, so telling the caller to remove the flag
+                          // would point at something they cannot have set.
+                          `A create can hold at most ${MAX_COLLECTION_PETS} pets. Pass a subset with --pets.`
+                        : `Usage: petdex collection list|create|edit|delete`;
+    failCollection(message, hasBooleanFlag(args, "--json"));
+  }
+  const { action, ref, json } = parsed;
+  // Argument checks come before the network so a missing --yes is reported as
+  // itself rather than as a sign-in problem the caller cannot act on.
+  if (action === "delete" && !parsed.yes) {
+    failCollection("Deletion requires --yes.", json);
+  }
+  const notSignedIn = `Not signed in. Run ${json ? "petdex login" : pc.cyan("petdex login")}.`;
+  let token: string;
+  try {
+    const accessToken = await (await getAuth()).getAccessToken();
+    if (!accessToken) failCollection(notSignedIn, json);
+    token = accessToken;
+  } catch {
+    // An expired or revoked refresh token throws here; surface the same
+    // guidance submit/edit give instead of the raw Clerk error.
+    failCollection(notSignedIn, json);
+  }
+  // Every request below can throw (404, 429, a network failure). Letting it
+  // reach main().catch() would print through clack to stdout, which is the
+  // stream a --json caller is parsing. Route failures through failCollection.
+  try {
+    if (action === "list") {
+      const result = await collectionRequest(PETDEX_URL, token, "GET", null);
+      // The shape guard runs before the --json passthrough, not after it. A
+      // `--json` caller reads the exit code and the body together, and printing
+      // `{"collections":"nope"}` with exit 0 is the same false success the
+      // table path refuses — the two branches must not disagree about what a
+      // valid response is.
+      const collections = readCollectionList(result);
+      if (json) {
+        console.log(JSON.stringify(result));
+        return;
+      }
+      for (const c of collections) {
+        console.log(
+          `${c.slug}\t${c.title}\t${Array.isArray(c.petSlugs) ? c.petSlugs.length : 0} pets`,
+        );
+      }
+      return;
+    }
+    if (action === "delete") {
+      confirmCollectionMutation(
+        await collectionRequest(PETDEX_URL, token, "DELETE", ref),
+        "deleted",
+      );
+      if (json) console.log(JSON.stringify({ ok: true }));
+      else console.log(`${pc.green("✓")} Collection deleted`);
+      return;
+    }
+    if (parsed.allApproved) {
+      const approvedResult = (await collectionRequest(
+        PETDEX_URL,
+        token,
+        "GET",
+        null,
+        undefined,
+        "?includeApprovedPetCount=1",
+      )) as { approvedPetCount?: unknown };
+      const approved = readApprovedPetCount(approvedResult.approvedPetCount);
+      if (!approved.ok) {
+        if (approved.reason === "empty_approved_pets") {
+          failCollection(
+            "No approved pets to select. --all-approved would set an empty member list, so it was not sent. Approve a pet first, or set members with --pets.",
+            json,
+          );
+        }
+        throw new Error("invalid approved pets response");
+      }
+      // The cap bounds growth, so only a create can be judged from the
+      // approved count alone. An edit depends on what the collection already
+      // stores: a row that predates the cap, or one that already holds every
+      // approved pet, stays editable. Share the predicate with the argument
+      // parser so both gates agree.
+      // Only a create reaches this: overCollectionPetLimit returns false for an
+      // edit, which has to be judged against the stored members. So the message
+      // describes a create, and says "cannot be created with" rather than
+      // restating a flat cap the stored row may already exceed.
+      if (overCollectionPetLimit(action, approved.count)) {
+        failCollection(
+          // --all-approved wins over an explicit --pets list and replaces it
+          // server-side, so a caller who passed both has to drop the flag —
+          // telling them to "use --pets" points at one they may already have
+          // given, and which is being ignored.
+          `--all-approved found ${approved.count} approved pets, and a new collection can hold at most ${MAX_COLLECTION_PETS}. Drop --all-approved and pass a subset with --pets instead.`,
+          json,
+        );
+      }
+    }
+    const body: Record<string, unknown> = {};
+    if (parsed.title !== null) body.title = parsed.title;
+    if (parsed.description !== null) body.description = parsed.description;
+    if (parsed.petSlugs !== null) body.petSlugs = parsed.petSlugs;
+    if (parsed.coverPetSlug !== null) body.coverPetSlug = parsed.coverPetSlug;
+    if (parsed.externalUrl !== null) body.externalUrl = parsed.externalUrl;
+    if (parsed.allApproved) body.allApproved = true;
+    const result = await collectionRequest(
+      PETDEX_URL,
+      token,
+      action === "create" ? "POST" : "PATCH",
+      ref,
+      body,
+    );
+    confirmCollectionMutation(
+      result,
+      action === "create" ? "created" : "updated",
+    );
+    if (json) console.log(JSON.stringify(result));
+    else
+      console.log(
+        `${pc.green("✓")} Collection ${action === "create" ? "created" : "updated"}`,
+      );
+  } catch (error) {
+    failCollection(
+      error instanceof Error ? error.message : String(error),
+      json,
+    );
   }
 }
 

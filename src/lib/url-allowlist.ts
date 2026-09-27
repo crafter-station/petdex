@@ -112,9 +112,53 @@ export function isSafeExternalUrl(raw: string | null | undefined): boolean {
     return false;
   }
   if (url.protocol !== "https:") return false;
-  // Block bare IPs.
-  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(url.hostname)) return false;
-  // Block localhost / lan.
-  if (url.hostname === "localhost") return false;
+  // Refuse credentials in the URL. `https://petdex.dev@evil.com/` parses with
+  // the host `evil.com` and a username of `petdex.dev`, so the check below sees
+  // a public host and accepts it, while a reader skimming the link reads the
+  // brand and not the destination. The link is rendered as an href with a
+  // generic label, so the impersonation lands on the destination's own URL bar.
+  if (url.username !== "" || url.password !== "") return false;
+  // Strip every trailing dot, not just one: "localhost.." survives a single
+  // strip and then matches none of the private-name suffixes below.
+  const hostname = url.hostname.toLowerCase().replace(/\.+$/, "");
+  // Block IPv4/IPv6 literals. URL normalizes decimal, octal, and hexadecimal
+  // IPv4 forms to dotted-decimal hostnames before this check.
+  if (
+    /^\d{1,3}(\.\d{1,3}){3}$/.test(hostname) ||
+    (hostname.startsWith("[") && hostname.endsWith("]"))
+  ) {
+    return false;
+  }
+  // Block names reserved for local networks and service discovery. DNS
+  // resolution is intentionally not performed on this hot input path.
+  //
+  // The suffix and the bare name are separate cases. An earlier version tested
+  // only `endsWith(".local")`, which does not match `https://local/` — the
+  // suffix itself has no leading dot to match — so each bare name has to be
+  // listed as well as its suffix.
+  if (hostname === "") return false;
+  for (const reserved of RESERVED_PRIVATE_NAMES) {
+    if (hostname === reserved || hostname.endsWith(`.${reserved}`)) {
+      return false;
+    }
+  }
   return true;
 }
+
+/**
+ * Names that resolve to local networks or service discovery, and the suffixes
+ * that carry them. Both the bare name and the dotted suffix are refused:
+ * `local` and `printer.local` are equally private.
+ *
+ * `home.arpa` is the one entry with an internal dot, so the suffix test for it
+ * reads `.home.arpa` and the bare test `home.arpa` — both are spelled by the
+ * same entry.
+ */
+const RESERVED_PRIVATE_NAMES = [
+  "localhost",
+  "intranet",
+  "local",
+  "internal",
+  "lan",
+  "home.arpa",
+];
