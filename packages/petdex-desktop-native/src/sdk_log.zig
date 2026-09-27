@@ -86,7 +86,7 @@ test "retention reclaims legacy logs and repeated growth after each interval" {
     defer dir.cleanup();
     var buf: [256]u8 = undefined;
     const path = try std.fmt.bufPrint(&buf, ".zig-cache/tmp/{s}/native-sdk.jsonl", .{dir.sub_path});
-    try writeSizedFile(dir.dir, "native-sdk.jsonl", 33 * 1024 * 1024 * 1024);
+    try writeSizedFile(dir.dir, "native-sdk.jsonl", 33 * 1024 * 1024);
     var active = Retention.init(path, 1000);
     try t.expectError(error.FileNotFound, dir.dir.statFile(io, "native-sdk.jsonl", .{}));
     try writeSizedFile(dir.dir, "native-sdk.jsonl", max_bytes + 1);
