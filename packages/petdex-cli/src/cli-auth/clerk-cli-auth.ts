@@ -192,10 +192,12 @@ export class ClerkCliAuth {
 
   async logout(): Promise<void> {
     try {
-      await Promise.all([
+      const results = await Promise.allSettled([
         this.config.storage.delete("tokens"),
         this.config.storage.delete("user"),
       ]);
+      const failure = results.find((result) => result.status === "rejected");
+      if (failure) throw failure.reason;
     } catch (error) {
       throw storageError("clear stored credentials", error);
     }
