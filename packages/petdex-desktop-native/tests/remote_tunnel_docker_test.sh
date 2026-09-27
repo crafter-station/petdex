@@ -4,17 +4,22 @@ set -eu
 # Opt-in end-to-end transport test. It exercises the built desktop binary
 # against an isolated SSH host without consuming a hosted CI runner.
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-binary=${PETDEX_TEST_BINARY:-$root/zig-out/bin/petdex-desktop-native}
+binary=${PETDEX_TEST_BINARY:-${1:-$root/zig-out/bin/petdex-desktop-native}}
 pet=${PETDEX_TEST_PET:-$HOME/.petdex/pets/boba}
 fixture=$(mktemp -d)
 container=petdex-ssh-test-$$
 app_pid=
+xvfb_pid=
 launch_count=0
 
 cleanup() {
     if [ -n "$app_pid" ]; then
         kill "$app_pid" 2>/dev/null || true
         wait "$app_pid" 2>/dev/null || true
+    fi
+    if [ -n "$xvfb_pid" ]; then
+        kill "$xvfb_pid" 2>/dev/null || true
+        wait "$xvfb_pid" 2>/dev/null || true
     fi
     docker rm -f "$container" >/dev/null 2>&1 || true
     rm -rf "$fixture"
@@ -30,8 +35,33 @@ trap on_signal 1 2 15
 command -v docker >/dev/null
 command -v ssh >/dev/null
 command -v ssh-keygen >/dev/null
+command -v xdpyinfo >/dev/null
 test -x "$binary"
 test -r "$pet/pet.json"
+
+if [ -z "${DISPLAY:-}" ] || ! xdpyinfo -display "$DISPLAY" >/dev/null 2>&1; then
+    command -v Xvfb >/dev/null
+    display_file=$fixture/xvfb-display
+    Xvfb -displayfd 3 -screen 0 1280x800x24 -nolisten tcp 3>"$display_file" >"$fixture/xvfb.log" 2>&1 &
+    xvfb_pid=$!
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        test -s "$display_file" && break
+        kill -0 "$xvfb_pid" 2>/dev/null || break
+        sleep 1
+    done
+    if [ ! -s "$display_file" ]; then
+        cat "$fixture/xvfb.log" >&2
+        echo "Xvfb did not publish a display" >&2
+        exit 1
+    fi
+    DISPLAY=:$(sed -n '1p' "$display_file")
+    export DISPLAY
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        xdpyinfo -display "$DISPLAY" >/dev/null 2>&1 && break
+        sleep 1
+    done
+    xdpyinfo -display "$DISPLAY" >/dev/null 2>&1
+fi
 
 pet_name=$(basename "$pet")
 mkdir -p "$fixture/.petdex/pets" "$fixture/.ssh"
@@ -156,7 +186,7 @@ start_app
 wait_ready
 
 # shellcheck disable=SC2086
-$remote 'grep -q my-own-codex-hook ~/.codex/hooks.json && grep -q petdex-hook ~/.codex/hooks.json && grep -q foreign_feature ~/.codex/config.toml && grep -q my-own-hermes-hook ~/.hermes-ci/profiles/snoop/config.yaml && grep -q petdex-hook ~/.hermes-ci/profiles/snoop/config.yaml && grep -q my-own-hermes-hook ~/.hermes-ci/profiles/snoop/shell-hooks-allowlist.json && grep -q preserve-root ~/.hermes-ci/config.yaml && grep -qx "$HOME/.hermes-ci" ~/.petdex/runtime/hermes-home && kill -0 "$(cat ~/.petdex/runtime/unrelated.pid)"'
+$remote 'test "$(stat -c %a ~/.petdex)" = 700 && test "$(stat -c %a ~/.petdex/runtime)" = 700 && test "$(stat -c %a ~/.petdex/runtime/update-token)" = 600 && grep -q my-own-codex-hook ~/.codex/hooks.json && grep -q petdex-hook ~/.codex/hooks.json && grep -q foreign_feature ~/.codex/config.toml && grep -q my-own-hermes-hook ~/.hermes-ci/profiles/snoop/config.yaml && grep -q petdex-hook ~/.hermes-ci/profiles/snoop/config.yaml && grep -q my-own-hermes-hook ~/.hermes-ci/profiles/snoop/shell-hooks-allowlist.json && grep -q preserve-root ~/.hermes-ci/config.yaml && grep -qx "$HOME/.hermes-ci" ~/.petdex/runtime/hermes-home && kill -0 "$(cat ~/.petdex/runtime/unrelated.pid)"'
 # shellcheck disable=SC2086
 $remote 'curl -fsS --max-time 2 http://127.0.0.1:7777/health' | grep -q '"ok":true'
 printf '%s\n' '{"tool_name":"Bash","session_id":"docker-ci"}' | \

@@ -438,6 +438,13 @@ fn cloudLibrarySection(ui: *AppUi, model: *const Model, images: CloudImages) App
 }
 
 fn petsTop(ui: *AppUi, model: *const Model, filter: []const u8) AppUi.Node {
+    const heading = ui.row(.{ .cross = .center }, .{
+        ui.column(.{ .grow = 1 }, .{ui.text(.{ .size = .lg }, "Pets")}),
+        if (model.pet_source == .installed)
+            ui.button(.{ .size = .sm, .variant = .secondary, .disabled = model.install.busy(), .on_press = .refresh_pets }, "Refresh")
+        else
+            ui.el(.stack, .{}, .{}),
+    });
     const search = ui.el(.search_field, .{
         .height = 34,
         .text = filter,
@@ -453,14 +460,14 @@ fn petsTop(ui: *AppUi, model: *const Model, filter: []const u8) AppUi.Node {
     });
     if (model.install.busy() or model.install.error_len > 0) {
         return ui.column(.{ .gap = 8 }, .{
-            ui.text(.{ .size = .lg }, "Pets"),
+            heading,
             filters,
             installBanner(ui, model),
             search,
         });
     }
     return ui.column(.{ .gap = 8 }, .{
-        ui.text(.{ .size = .lg }, "Pets"),
+        heading,
         filters,
         search,
     });
@@ -748,11 +755,14 @@ pub fn settingsView(ui: *AppUi, model: *const Model, icons: IconAtlas, thumbs: T
         // of the scroll extent, so the last card needs explicit air.
         ui.el(.stack, .{ .height = 8 }, .{}),
     })});
-    var root = ui.column(.{ .grow = 1 }, .{
+    const content = ui.column(.{ .grow = 1 }, .{
         ui.el(.stack, .{ .height = companion_header_h, .window_drag = true }, .{}),
         page,
     });
+    var root = ui.panel(.{ .grow = 1 }, .{content});
     root.widget.style.background = settingsBackground(model);
+    root.widget.style.radius = 0;
+    root.widget.style.stroke_width = 0;
     return root;
 }
 

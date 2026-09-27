@@ -184,6 +184,7 @@ class KeychainCredentialStore implements CredentialStore {
   }
 
   async delete(key: string): Promise<void> {
+    let keychainError: ClerkCliAuthError | undefined;
     try {
       const keyring = await this.loadKeyring();
       if (keyring) {
@@ -191,9 +192,13 @@ class KeychainCredentialStore implements CredentialStore {
         entry.deletePassword();
       }
     } catch (error) {
-      this.warnFallback("delete", error);
+      keychainError = storageError(
+        "Failed to delete keychain credential",
+        error,
+      );
     }
     await this.fallback.delete(key);
+    if (keychainError) throw keychainError;
   }
 }
 

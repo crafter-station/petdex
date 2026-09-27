@@ -518,7 +518,7 @@ export default async function DocsPage({
             </h3>
             <p>{t("sections.agents.enableIntro")}</p>
             <CommandLine
-              command={`mkdir -p ~/.claude/skills/petdex && curl -sSf ${SKILL_URL.replace("/blob/", "/raw/")} -o ~/.claude/skills/petdex/SKILL.md`}
+              command={`mkdir -p ~/.claude/skills/petdex && curl -fsSL ${SKILL_URL.replace("/blob/", "/raw/")} -o ~/.claude/skills/petdex/SKILL.md`}
               source="docs-agents-install"
               className="w-full max-w-xl"
             />

@@ -85,7 +85,7 @@ describe("header state helpers", () => {
       signedIn: true,
       notifications: { unreadCount: 2 },
       feedback: { count: 1 },
-      profile: { handle: "byte-owner" },
+      profile: { handle: "byte-owner", displayName: "New profile name" },
       caught: ["byte"],
     };
     const raw = serializeHeaderState(state, 1_000);
@@ -108,7 +108,7 @@ describe("header state helpers", () => {
       signedIn: true,
       notifications: { unreadCount: 1 },
       feedback: { count: 2 },
-      profile: { handle: null },
+      profile: { handle: null, displayName: null },
       caught: ["byte"],
     });
   });
@@ -271,7 +271,7 @@ describe("header state helpers", () => {
   it("scopes cache keys by signed-in user", () => {
     expect(headerStateCacheKey(null)).toBeNull();
     expect(headerStateCacheKey("user_123")).toBe(
-      "petdex:header-state:v2:user_123",
+      "petdex:header-state:v3:user_123",
     );
   });
 

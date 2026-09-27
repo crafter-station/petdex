@@ -4,7 +4,7 @@ const builtin = @import("builtin");
 pub const endpoint = "https://petdex.crafter.run/api/desktop/latest-release?format=json";
 pub const release_page = "https://github.com/crafter-station/petdex/releases";
 pub const brew_command = "brew upgrade --cask petdex";
-pub const current_version = "0.9.1";
+pub const current_version = "0.9.2-rc.2";
 
 pub const Phase = enum { idle, checking, current, available, failed };
 pub const InstallSource = enum { unknown, checking, direct, homebrew };
@@ -18,7 +18,8 @@ fn manifestVersion(source: []const u8) ?[]const u8 {
     const start = (std.mem.indexOf(u8, source, prefix) orelse return null) + prefix.len;
     const end = std.mem.indexOfPos(u8, source, start, "\"") orelse return null;
     const value = source[start..end];
-    return if (parseVersion(value) == null) null else value;
+    _ = std.SemanticVersion.parse(value) catch return null;
+    return value;
 }
 
 pub fn parseLatest(allocator: std.mem.Allocator, body: []const u8) ?std.json.Parsed(Latest) {
@@ -54,10 +55,9 @@ pub fn isValidVersion(value: []const u8) bool {
 
 pub fn isNewer(latest: []const u8, current: []const u8) bool {
     const a = parseVersion(latest) orelse return false;
-    const b = parseVersion(current) orelse return false;
-    if (a.major != b.major) return a.major > b.major;
-    if (a.minor != b.minor) return a.minor > b.minor;
-    return a.patch > b.patch;
+    const b = std.SemanticVersion.parse(current) catch return false;
+    const stable: std.SemanticVersion = .{ .major = a.major, .minor = a.minor, .patch = a.patch };
+    return stable.order(b) == .gt;
 }
 
 pub fn downloadUrl() []const u8 {
@@ -89,6 +89,11 @@ test "semantic versions compare numerically" {
     try std.testing.expect(!isNewer("0.7.0", "0.7.0"));
     try std.testing.expect(!isNewer("0.6.9", "0.7.0"));
     try std.testing.expect(!isNewer("0.8.0-beta.1", "0.7.0"));
+    try std.testing.expect(isNewer("0.9.2", "0.9.2-rc.1"));
+    try std.testing.expect(isNewer("0.9.3", "0.9.2-rc.1"));
+    try std.testing.expect(!isNewer("0.9.1", "0.9.2-rc.1"));
+    try std.testing.expect(!isNewer("0.9.2-rc.2", "0.9.2-rc.1"));
+    try std.testing.expect(!isNewer("0.9.2", "invalid"));
     try std.testing.expect(parseVersion("v0.8.0") == null);
     try std.testing.expect(parseVersion("0.8.0.1") == null);
     try std.testing.expect(parseVersion("4294967296.0.0") == null);

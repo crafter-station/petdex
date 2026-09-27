@@ -6,6 +6,7 @@ fixture=$(mktemp -d)
 trap 'rm -rf "$fixture"' 0 1 2 15
 mkdir -p "$fixture/home/.petdex/runtime" "$fixture/bin"
 printf 'test-token\n' > "$fixture/home/.petdex/runtime/update-token"
+printf 'configured-alias\n' > "$fixture/home/.petdex/runtime/remote-host"
 python3_path=$(command -v python3 || true)
 if [ -n "$python3_path" ]; then
     test_path="$(dirname "$python3_path"):/usr/bin:/bin"
@@ -44,6 +45,7 @@ printf '%s' "$payload" | HOME="$fixture/home" PATH="$fixture/bin:$test_path" \
 grep -Eq '"session_id":"[0-9a-f]{64}"' "$fixture/capture"
 grep -q '"source_session_id":"raw-turn"' "$fixture/capture"
 grep -q '"session_kind":"primary"' "$fixture/capture"
+grep -q '"hostname":"configured-alias"' "$fixture/capture"
 
 # A host may keep the stdin write end open after the JSON is complete. The
 # remote hook must return within its bounded drain window instead of waiting
@@ -232,3 +234,73 @@ printf '%s' '{"session_id":"child","parent_session_id":"parent","last_assistant_
 | HOME="$fixture/home" PATH="$fixture/bin:$test_path" \
     PETDEX_CAPTURE="$fixture/capture" sh "$root/src/assets/petdex-remote-hook.sh" bubble assistant hermes
 test "$before" -lt "$(wc -l < "$fixture/capture")"
+
+python3 - "$root/src/assets/petdex-remote-hook.sh" "$fixture" "$test_path" <<'PY'
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+script, fixture, test_path = sys.argv[1:]
+fixture = Path(fixture)
+capture = fixture / "capture"
+cache = fixture / "home" / ".petdex" / "runtime" / "sessions"
+environment = {
+    **os.environ,
+    "HOME": str(fixture / "home"),
+    "PATH": str(fixture / "bin") + ":" + test_path,
+    "PETDEX_CAPTURE": str(capture),
+}
+prompt = "# Overview\n\nGenerate 0 to 3 hyperpersonalized suggestions for what this user can do with Codex in this Projectless task"
+
+def send(phase, payload):
+    before = len(capture.read_text().splitlines())
+    subprocess.run(
+        ["sh", script, "bubble", phase, "codex"],
+        input=json.dumps(payload), text=True, env=environment, check=True, timeout=5,
+    )
+    return len(capture.read_text().splitlines()) - before
+
+assert send("user-prompt", {"session_id": "hidden", "prompt": prompt}) == 0
+assert not (cache / "hidden.title").exists()
+marker = (cache / "hidden.codex-hidden.json").read_text()
+assert "prompt" not in marker and "Overview" not in marker
+assert send("pre", {"session_id": "hidden", "tool_name": "Read"}) == 0
+assert send("stop", {"session_id": "hidden", "last_assistant_message": "Internal answer"}) == 0
+assert send("user-prompt", {"session_id": "projectless", "cwd": "", "prompt": "Suggest work for me"}) > 0
+assert send("user-prompt", {"session_id": "workspace", "cwd": "/work", "prompt": "Fix the tests"}) > 0
+assert send("user-prompt", {"session_id": "hidden", "thread_source": "user", "prompt": prompt}) > 0
+assert not (cache / "hidden.codex-hidden.json").exists()
+assert send("user-prompt", {"session_id": "structured", "thread_source": "ambient_suggestions", "prompt": "Internal"}) == 0
+assert not (cache / "structured.title").exists()
+
+rollout = fixture / "home" / ".codex" / "sessions" / "2026" / "08" / "13" / "rollout-test-from-meta.jsonl"
+rollout.write_text(json.dumps({
+    "type": "session_meta",
+    "payload": {"id": "from-meta", "thread_source": "ambient_suggestions"},
+}) + "\n")
+assert send("pre", {"session_id": "from-meta", "tool_name": "Read"}) == 0
+
+(cache / "expired.codex-hidden.json").write_text('{"hidden":true,"at":1}')
+assert send("pre", {"session_id": "cleanup", "thread_source": "chatgpt_hidden", "tool_name": "Read"}) == 0
+assert not (cache / "expired.codex-hidden.json").exists()
+print("Hidden Codex hooks: PASS")
+PY
+
+# A failed tool is intermediate: keep the session busy/running while the
+# per-agent failed state drives only the temporary sprite.
+payload='{"session_id":"gemini-tool-failure","tool_name":"shell"}'
+printf '%s' "$payload" | HOME="$fixture/home" PATH="$fixture/bin:$test_path" \
+    PETDEX_CAPTURE="$fixture/capture" sh "$root/src/assets/petdex-remote-hook.sh" bubble tool-failure gemini
+failure_body=$(tail -n 1 "$fixture/capture")
+printf '%s\n' "$failure_body" | grep -q '"busy":true'
+printf '%s\n' "$failure_body" | grep -q '"status":"running"'
+printf '%s\n' "$failure_body" | grep -q '"agent_state":"failed"'
+
+# Gemini's final turn event names its assistant prose prompt_response.
+payload='{"session_id":"gemini-final","prompt_response":"Gemini answer"}'
+printf '%s' "$payload" | HOME="$fixture/home" PATH="$fixture/bin:$test_path" \
+    PETDEX_CAPTURE="$fixture/capture" sh "$root/src/assets/petdex-remote-hook.sh" bubble assistant gemini
+answer_body=$(tail -n 1 "$fixture/capture")
+printf '%s\n' "$answer_body" | grep -q '"text":"Gemini answer"'

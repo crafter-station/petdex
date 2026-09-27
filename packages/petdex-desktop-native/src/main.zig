@@ -19,6 +19,7 @@ extern "c" fn system(command: [*:0]const u8) c_int;
 const native_sdk = @import("native_sdk");
 const hook_server = @import("hook_server.zig");
 const hook_runner = @import("hook_runner.zig");
+const session_reconcile = @import("session_reconcile.zig");
 const agent_hooks = @import("agent_hooks.zig");
 const dsh_integration = @import("dsh_integration.zig");
 const plat = @import("plat.zig");
@@ -28,6 +29,7 @@ const remote_ssh = @import("remote_ssh.zig");
 const remote_writeback = @import("remote_writeback.zig");
 const remote_runtime = @import("remote_runtime.zig");
 const herdr_status = @import("herdr_status.zig");
+const sdk_log = @import("sdk_log.zig");
 pub const desktop_auth = @import("desktop_auth.zig");
 const flock_mod = @import("flock.zig");
 pub const updates = @import("updates.zig");
@@ -121,6 +123,7 @@ pub const Msg = union(enum) {
     dsh_install_done: native_sdk.EffectExit,
     dsh_remove_done: native_sdk.EffectExit,
     pet_filter: canvas.TextInputEvent,
+    refresh_pets,
     toggle_pets_expanded,
     toggle_flock_window,
     focus_flock_member: u32,
@@ -375,16 +378,10 @@ fn petdexThemeTokens(model: *const Model) canvas.DesignTokens {
     // preference remains available on the untouched Win/mac SDK too.
     tokens.typography.heading_size = model.bubble_text_px;
     if (custom_font_active) tokens.typography.font_id = custom_font_id;
-    // Linux's software presenter needs an alpha-zero clear all the way
-    // into GTK's ARGB surface. Win32 and AppKit retain their upstream
-    // platform-owned transparency paths and ordinary theme tokens.
-    if (builtin.target.os.tag == .linux) {
-        tokens.colors.background = canvas.Color.rgba8(0, 0, 0, 0);
-    }
     if (model.high_contrast) return tokens;
     const c = &tokens.colors;
     if (model.dark) {
-        if (builtin.target.os.tag != .linux) c.background = canvas.Color.rgb8(12, 12, 15);
+        c.background = canvas.Color.rgb8(12, 12, 15);
         c.surface = canvas.Color.rgb8(25, 25, 28);
         c.surface_subtle = canvas.Color.rgb8(45, 45, 48);
         c.surface_pressed = canvas.Color.rgb8(22, 27, 67);
@@ -393,7 +390,7 @@ fn petdexThemeTokens(model: *const Model) canvas.DesignTokens {
         c.accent = canvas.Color.rgb8(137, 163, 255);
         c.destructive = canvas.Color.rgb8(250, 105, 94);
     } else {
-        if (builtin.target.os.tag != .linux) c.background = canvas.Color.rgb8(247, 250, 255);
+        c.background = canvas.Color.rgb8(247, 250, 255);
         c.surface = canvas.Color.rgb8(255, 255, 255);
         c.surface_subtle = canvas.Color.rgb8(236, 238, 244);
         c.surface_pressed = canvas.Color.rgb8(233, 238, 251);
@@ -1216,8 +1213,6 @@ fn petNameOk(name: []const u8) bool {
     return true;
 }
 
-/// Scan both pet roots into the catalog (name + which root), sorted by
-/// scan order. Runs once in main() with the io handle.
 fn scanCatalog(io: std.Io, allocator: std.mem.Allocator) void {
     const home = env_home orelse return;
     const roots = [_][]const u8{ ".petdex/pets", ".codex/pets" };
@@ -1244,6 +1239,35 @@ fn scanCatalog(io: std.Io, allocator: std.mem.Allocator) void {
             catalog_mod.catalog_len += 1;
         }
     }
+}
+
+fn refreshCatalog(model: *Model) void {
+    if (env_home == null or model.install.busy()) return;
+    var scope = plat.Scope.init();
+    defer scope.deinit();
+    const io = scope.io();
+    const active_name = model.pet_name[0..model.pet_name_len];
+    catalog_mod.catalog_len = 0;
+    if (model.sheet_loaded and petNameOk(active_name)) {
+        for (installer.install_roots) |root| {
+            const path = std.fs.path.join(boot_allocator, &.{ env_home.?, root, active_name }) catch continue;
+            defer boot_allocator.free(path);
+            var dir = std.Io.Dir.openDirAbsolute(io, path, .{}) catch continue;
+            dir.close(io);
+            catalog[0] = .{};
+            @memcpy(catalog[0].name[0..active_name.len], active_name);
+            catalog[0].len = active_name.len;
+            @memcpy(catalog[0].root[0..root.len], root);
+            catalog[0].root_len = root.len;
+            catalog_mod.catalog_len = 1;
+            break;
+        }
+    }
+    scanCatalog(io, boot_allocator);
+    model.active_pet = @intCast(if (model.sheet_loaded) catalogIndexOf(active_name) orelse max_catalog else max_catalog);
+    pet_display_name = active_name;
+    thumbs_ready = @splat(false);
+    thumbs_built = 0;
 }
 
 var boot_allocator: std.mem.Allocator = std.heap.page_allocator;
@@ -1947,6 +1971,7 @@ fn registerFlockFrames(fx: *Effects) void {
 
 const poll_timer_key: u64 = 2;
 const poll_interval_ms: u32 = 100;
+const stale_running_grace_ms: i64 = 30_000;
 const min_dwell_ms: u32 = 250;
 
 /// Transient states whose duration is intrinsic to the animation;
@@ -2139,10 +2164,19 @@ pub fn boot(model: *Model, fx: *Effects) void {
         if (migration.failed > 0) {
             std.debug.print("petdex: {d} legacy hook configuration(s) could not be migrated; repair the config and update the affected agent in Settings\n", .{migration.failed});
         }
-        hook_server.start(boot_allocator, home) catch |err| {
+        var owns_hook_listener = false;
+        if (hook_server.start(boot_allocator, home)) |result| {
+            owns_hook_listener = result.ownsListener();
+        } else |err| {
             std.debug.print("petdex: hook server failed to start ({s})\n", .{@errorName(err)});
+        }
+        session_reconcile.start(boot_allocator, home) catch |err| {
+            std.debug.print("petdex: local session recovery failed to start ({s})\n", .{@errorName(err)});
         };
-        startRemotes(model, fx);
+        // Remote credentials live in the hook listener's process-local
+        // registry. A secondary desktop forwarding to the first process must
+        // not supervise tunnels with credentials that listener cannot know.
+        if (owns_hook_listener) startRemotes(model, fx);
     }
     loadAuthSession(model, fx);
     fx.startTimer(.{
@@ -2297,6 +2331,7 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             applyState(model, model.state.next(), 0, fx);
         },
         .toggle_pets_expanded => model.pets_expanded = !model.pets_expanded,
+        .refresh_pets => refreshCatalog(model),
         .focus_flock_member => |index| {
             // The pane id rode all the way from Herdr on the bubble this
             // body was built from, so reaching the session is the same
@@ -2734,11 +2769,11 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             // empty state, and nothing else flips this back.
             if (!model.sheet_loaded) {
                 model.sheet_loaded = true;
-                pet_display_name = catalog[index].slice();
-                const n = @min(pet_display_name.len, model.pet_name.len);
-                @memcpy(model.pet_name[0..n], pet_display_name[0..n]);
-                model.pet_name_len = n;
             }
+            pet_display_name = catalog[index].slice();
+            const n = @min(pet_display_name.len, model.pet_name.len);
+            @memcpy(model.pet_name[0..n], pet_display_name[0..n]);
+            model.pet_name_len = n;
             // A pick — manual or rotation, same Msg on purpose — is
             // today's pet: the daily rotation leaves it alone until
             // the next day.
@@ -3159,9 +3194,11 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             // installed has no sheet, and that is precisely when a
             // `petdex://<slug>` link has work to do.
             drainPendingInstall(model, fx);
+            sdk_log.tick(fx.wallMs());
             if (!model.sheet_loaded) return;
             if (model.settings_open and thumbs_built < catalog_mod.catalog_len) buildNextThumb(fx);
             const now = fx.wallMs();
+            _ = hook_server.mailbox.suppressStaleRunning(now, stale_running_grace_ms);
             var drained: [hook_server.max_bubbles]hook_server.Bubble = undefined;
             if (hook_server.mailbox.takeBubbles(&drained)) |raw_count| {
                 if (model.settings_open) {
@@ -4063,7 +4100,14 @@ fn expireBubbles(model: *Model, now_ms: i64) bool {
         if (bubbleLifetimeExpired(model.bubble_expires_at_ms[i], now_ms, model.state)) {
             // Tell the server too: a slot the app stopped drawing must
             // not keep a session alive against the eviction policy.
-            hook_server.mailbox.dropBubble(model.bubbles[i].sessionSlice());
+            const expired = &model.bubbles[i];
+            hook_server.mailbox.dropBubbleIdentity(
+                expired.sessionSlice(),
+                expired.agent[0..expired.agent_len],
+                expired.hostnameSlice(),
+                expired.remote,
+                true,
+            );
             dropped = true;
             continue;
         }
@@ -4089,7 +4133,7 @@ fn syncBubbleDeadlines(model: *Model, previous: []const hook_server.Bubble, prev
         const fresh = bubbleExpiryMs(now_ms, model.bubble_lifetime_secs, model.bubbles[i].busy);
         model.bubble_expires_at_ms[i] = fresh;
         for (previous, previous_deadlines) |old, deadline| {
-            if (!std.mem.eql(u8, old.sessionSlice(), model.bubbles[i].sessionSlice())) continue;
+            if (!old.sameIdentity(&model.bubbles[i])) continue;
             if (old.counter == model.bubbles[i].counter) model.bubble_expires_at_ms[i] = deadline;
             break;
         }
@@ -5036,6 +5080,15 @@ pub fn main(init: std.process.Init) !void {
     agent_hooks.env_qoder_cn_cli_home = init.environ_map.get("QODERCN_CLI_HOME");
     agent_hooks.env_hermes_home = init.environ_map.get("HERMES_HOME");
     dsh_integration.env_dsh_home = init.environ_map.get("DSH_HOME");
+    session_reconcile.env_kimi_code_home = init.environ_map.get("KIMI_CODE_HOME");
+    session_reconcile.env_kimi_share_dir = init.environ_map.get("KIMI_SHARE_DIR");
+    session_reconcile.env_pi_coding_agent_dir = init.environ_map.get("PI_CODING_AGENT_DIR");
+    session_reconcile.env_xdg_data_home = init.environ_map.get("XDG_DATA_HOME");
+    session_reconcile.env_qoder_config_dir = init.environ_map.get("QODER_CONFIG_DIR");
+    session_reconcile.env_qoder_cn_config_dir = init.environ_map.get("QODERCN_CONFIG_DIR");
+    session_reconcile.env_qoder_cli_home = init.environ_map.get("QODER_CLI_HOME");
+    session_reconcile.env_qoder_cn_cli_home = init.environ_map.get("QODERCN_CLI_HOME");
+    session_reconcile.env_hermes_home = init.environ_map.get("HERMES_HOME");
     // Hook hot path: `<binary> bubble <phase> [agent]` runs the
     // in-binary runner and exits before any UI machinery spins up.
     // initAllocator, not init: on Windows the command line arrives as
@@ -5053,6 +5106,12 @@ pub fn main(init: std.process.Init) !void {
             return;
         }
     }
+    if (env_home) |home| {
+        agent_hooks.loadAgentPaths(boot_allocator, home) catch |err| {
+            std.debug.print("petdex: could not load ~/.petdex/agent-paths.json ({s}); Claude Code hook changes disabled until the file is fixed and Petdex restarts\n", .{@errorName(err)});
+        };
+    }
+    sdk_log.init(init.environ_map);
     if (argv0) |a0| refreshHookEntry(a0);
     materializeTrayIcon();
     env_wanted_pet = init.environ_map.get("PETDEX_PET");
@@ -5162,21 +5221,118 @@ test "transparent surfaces clear independently from settings" {
     try std.testing.expectEqualStrings("premultiplied", @tagName(shell_views[0].gpu_alpha_mode.?));
     try std.testing.expect(shell_windows[0].transparent);
 
-    // The settings window paints an opaque page background of its own on
-    // AppKit and Win32. Linux presents every surface through one
-    // alpha-zero GTK clear, so there the settings background is
-    // transparent too and the pet-vs-settings split does not apply.
-    const settings_alpha: f32 = if (builtin.target.os.tag == .linux) 0 else 1;
-
     var model: Model = .{};
     const pet_background = petdexTokens(&model).colors.background;
     const settings_background = settingsBackground(&model);
     try std.testing.expectEqual(@as(f32, 0), pet_background.a);
-    try std.testing.expectEqual(settings_alpha, settings_background.a);
+    try std.testing.expectEqual(@as(f32, 1), settings_background.a);
 
     model.dark = false;
     try std.testing.expectEqual(@as(f32, 0), petdexTokens(&model).colors.background.a);
-    try std.testing.expectEqual(settings_alpha, settingsBackground(&model).a);
+    try std.testing.expectEqual(@as(f32, 1), settingsBackground(&model).a);
+}
+
+test "refresh discovers local changes and preserves the active pet without restarting" {
+    const old_home = env_home;
+    const old_catalog = catalog.*;
+    const old_len = catalog_mod.catalog_len;
+    const old_name = pet_display_name;
+    const old_ready = thumbs_ready;
+    const old_built = thumbs_built;
+    defer {
+        env_home = old_home;
+        catalog.* = old_catalog;
+        catalog_mod.catalog_len = old_len;
+        pet_display_name = old_name;
+        thumbs_ready = old_ready;
+        thumbs_built = old_built;
+    }
+    const io = std.testing.io;
+    var temp = std.testing.tmpDir(.{});
+    defer temp.cleanup();
+    const home = try temp.dir.realPathFileAlloc(io, ".", std.testing.allocator);
+    defer std.testing.allocator.free(home);
+    env_home = home;
+    try temp.dir.createDirPath(io, ".petdex/pets/alpha");
+    try temp.dir.createDirPath(io, ".codex/pets/alpha");
+    try temp.dir.createDirPath(io, ".codex/pets/old-pet");
+    try temp.dir.createDirPath(io, ".petdex/pets/invalid name");
+    var model: Model = .{ .sheet_loaded = true, .frame_index = 3 };
+    @memcpy(model.pet_name[0..5], "alpha");
+    model.pet_name_len = 5;
+    thumbs_ready = @splat(true);
+    thumbs_built = max_catalog;
+    refreshCatalog(&model);
+    try std.testing.expectEqual(@as(usize, 2), catalog_mod.catalog_len);
+    try std.testing.expectEqualStrings("alpha", catalog[model.active_pet].slice());
+    try std.testing.expectEqualStrings(".petdex/pets", catalog[model.active_pet].rootSlice());
+    try std.testing.expectEqual(@as(usize, 0), thumbs_built);
+    for (thumbs_ready) |ready| try std.testing.expect(!ready);
+
+    try temp.dir.createDirPath(io, ".petdex/pets/new-pet");
+    try temp.dir.deleteTree(io, ".codex/pets/old-pet");
+    refreshCatalog(&model);
+    refreshCatalog(&model);
+    try std.testing.expectEqual(@as(usize, 2), catalog_mod.catalog_len);
+    try std.testing.expect(catalogIndexOf("new-pet") != null);
+    try std.testing.expect(catalogIndexOf("old-pet") == null);
+    try std.testing.expectEqualStrings("alpha", catalog[model.active_pet].slice());
+    try std.testing.expect(model.sheet_loaded);
+    try std.testing.expectEqual(@as(usize, 3), model.frame_index);
+
+    try temp.dir.deleteTree(io, ".petdex/pets/alpha");
+    try temp.dir.deleteTree(io, ".codex/pets/alpha");
+    refreshCatalog(&model);
+    try std.testing.expectEqual(@as(u32, max_catalog), model.active_pet);
+    try std.testing.expectEqualStrings("alpha", pet_display_name);
+    try std.testing.expect(catalogIndexOf("alpha") == null);
+    try std.testing.expect(model.sheet_loaded);
+
+    try temp.dir.createDirPath(io, ".codex/pets/alpha");
+    for (0..max_catalog + 1) |i| {
+        var path: [64]u8 = undefined;
+        try temp.dir.createDirPath(io, try std.fmt.bufPrint(&path, ".petdex/pets/pet-{d}", .{i}));
+    }
+    refreshCatalog(&model);
+    try std.testing.expectEqual(max_catalog, catalog_mod.catalog_len);
+    try std.testing.expectEqualStrings("alpha", catalog[model.active_pet].slice());
+    try std.testing.expectEqualStrings(".codex/pets", catalog[model.active_pet].rootSlice());
+
+    const before_install = catalog.*;
+    model.install.phase = .manifest;
+    try temp.dir.deleteTree(io, ".codex/pets/alpha");
+    refreshCatalog(&model);
+    try std.testing.expectEqualDeep(before_install, catalog.*);
+}
+
+test "settings paints an opaque page in both themes" {
+    for ([_]bool{ false, true }) |dark| {
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        var ui = AppUi.init(arena.allocator());
+        const model: Model = .{ .dark = dark };
+        const tokens = petdexTokens(&model);
+        var tree = try ui.finalizeWithTokens(petdexWindowView(&ui, &model, settings_window_label), tokens);
+        tree.root.frame = geometry.RectF.init(0, 0, 420, 680);
+        var commands: [4096]canvas.CanvasCommand = undefined;
+        var builder = canvas.Builder.init(&commands);
+        try canvas.emitWidgetTree(&builder, tree.root, tokens);
+        var painted_page = false;
+        for (builder.displayList().commands) |command| {
+            switch (command) {
+                .fill_rounded_rect => |fill| {
+                    if (fill.rect.width == 420 and fill.rect.height == 680) {
+                        try std.testing.expectEqualDeep(settingsBackground(&model), fill.fill.color);
+                        try std.testing.expectEqual(@as(f32, 1), fill.fill.color.a);
+                        painted_page = true;
+                    }
+                },
+                else => {},
+            }
+        }
+        try std.testing.expect(painted_page);
+        try std.testing.expectEqual(@as(f32, 0), tokens.colors.background.a);
+    }
 }
 
 test "a flock body reserves more than its badge is tall" {
@@ -5467,12 +5623,14 @@ test {
     _ = agent_hooks;
     _ = hook_runner;
     _ = hook_server;
+    _ = session_reconcile;
     _ = installer;
     _ = plat;
     _ = remote_agents;
     _ = remote_runtime;
     _ = remote_ssh;
     _ = remote_writeback;
+    _ = sdk_log;
     _ = settings_view;
 }
 
@@ -6634,6 +6792,31 @@ test "expiry drops only the bubbles past their deadline" {
     try std.testing.expect(!expireBubbles(&model, 6000));
 }
 
+test "expiry drops only the matching agent and remote host" {
+    hook_server.mailbox.clearBubbles();
+    defer hook_server.mailbox.clearBubbles();
+    _ = hook_server.mailbox.setBubbleWithContext("shared", "Host A", "codex", "", .none, "", "", "host-a", "", true, false);
+    _ = hook_server.mailbox.setBubbleWithContext("shared", "Host B", "codex", "", .none, "", "", "host-b", "", true, false);
+    // Updating A leaves it in the first mailbox slot but makes B the oldest
+    // rendered card after the consumer's counter sort.
+    _ = hook_server.mailbox.setBubbleWithContext("shared", "Host A newest", "codex", "", .none, "", "", "host-a", "", true, false);
+
+    var drained: [hook_server.max_bubbles]hook_server.Bubble = @splat(.{});
+    const count = hook_server.mailbox.takeBubbles(&drained).?;
+    try std.testing.expectEqual(@as(usize, 2), count);
+    sortBubblesByCounter(drained[0..count]);
+    try std.testing.expectEqualStrings("host-b", drained[0].hostnameSlice());
+
+    var model: Model = .{};
+    @memcpy(model.bubbles[0..count], drained[0..count]);
+    model.bubbles_len = count;
+    model.bubble_expires_at_ms[0] = 5_000;
+    model.bubble_expires_at_ms[1] = 9_000;
+    try std.testing.expect(expireBubbles(&model, 6_000));
+    try std.testing.expectEqual(@as(usize, 1), hook_server.mailbox.bubbles_len);
+    try std.testing.expectEqualStrings("host-a", hook_server.mailbox.bubbles[0].hostnameSlice());
+}
+
 test "an unchanged bubble keeps its deadline when another one updates" {
     var model: Model = .{};
     model.bubble_lifetime_secs = 5;
@@ -6647,4 +6830,36 @@ test "an unchanged bubble keeps its deadline when another one updates" {
     syncBubbleDeadlines(&model, previous[0..2], previous_deadlines[0..2], 10_000);
     try std.testing.expectEqual(@as(i64, 4000), model.bubble_expires_at_ms[0]);
     try std.testing.expectEqual(@as(i64, 15_000), model.bubble_expires_at_ms[1]);
+}
+
+test "deadline reconciliation matches the full bubble identity" {
+    var model: Model = .{};
+    model.bubble_lifetime_secs = 5;
+    testPushBubble(&model, "shared", "Host A", false, 4_000);
+    testPushBubble(&model, "shared", "Host B", false, 5_000);
+    testPushBubble(&model, "shared", "Hermes A", false, 6_000);
+    const identities = [_]struct { agent: []const u8, hostname: []const u8 }{
+        .{ .agent = "codex", .hostname = "host-a" },
+        .{ .agent = "codex", .hostname = "host-b" },
+        .{ .agent = "hermes", .hostname = "host-a" },
+    };
+    for (identities, 0..) |identity, i| {
+        model.bubbles[i].agent_len = identity.agent.len;
+        @memcpy(model.bubbles[i].agent[0..identity.agent.len], identity.agent);
+        model.bubbles[i].hostname_len = identity.hostname.len;
+        @memcpy(model.bubbles[i].hostname[0..identity.hostname.len], identity.hostname);
+        model.bubbles[i].remote = true;
+    }
+    const previous = model.bubbles;
+    const previous_deadlines = model.bubble_expires_at_ms;
+
+    // A fresh mailbox drain may arrive in a different order from the prior
+    // rendered stack. Each unchanged sibling must retain its own lease.
+    model.bubbles[0] = previous[2];
+    model.bubbles[1] = previous[1];
+    model.bubbles[2] = previous[0];
+    syncBubbleDeadlines(&model, previous[0..3], previous_deadlines[0..3], 10_000);
+    try std.testing.expectEqual(@as(i64, 6_000), model.bubble_expires_at_ms[0]);
+    try std.testing.expectEqual(@as(i64, 5_000), model.bubble_expires_at_ms[1]);
+    try std.testing.expectEqual(@as(i64, 4_000), model.bubble_expires_at_ms[2]);
 }

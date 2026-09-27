@@ -5,6 +5,7 @@ import { memo, useCallback, useEffect, useState } from "react";
 import { Download, Heart, Share2, TerminalSquare } from "lucide-react";
 import { useLocale } from "next-intl";
 
+import { downloadPetZip } from "@/lib/download-pet-zip";
 import { formatLocalizedNumber } from "@/lib/format-number";
 import { cn } from "@/lib/utils";
 
@@ -70,13 +71,7 @@ function PetCardFooterImpl({
       e.preventDefault();
       e.stopPropagation();
       if (!zipUrl) return;
-      const a = document.createElement("a");
-      a.href = zipUrl;
-      a.download = `${slug}.zip`;
-      a.rel = "noopener";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
+      void downloadPetZip(zipUrl, slug);
     },
     [slug, zipUrl],
   );

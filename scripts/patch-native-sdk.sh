@@ -8,6 +8,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PATCHES=(
   "$ROOT/patches/native-sdk-macos-headerpad.patch"
+  "$ROOT/patches/native-sdk-macos-activation.patch"
   "$ROOT/patches/native-sdk-windows-pet-input.patch"
 )
 SDK="${NATIVE_SDK_PATH:-}"

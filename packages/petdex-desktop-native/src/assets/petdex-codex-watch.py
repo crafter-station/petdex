@@ -12,7 +12,6 @@ import fcntl
 import hashlib
 import json
 import os
-import socket
 import sys
 import time
 import urllib.request
@@ -24,6 +23,7 @@ HOME = Path.home()
 CODEX = HOME / ".codex"
 RUNTIME = HOME / ".petdex" / "runtime"
 TOKEN = RUNTIME / "update-token"
+REMOTE_HOST = RUNTIME / "remote-host"
 LEASE = RUNTIME / "tunnel-lease"
 LOCK = RUNTIME / "codex-watch.lock"
 PID = RUNTIME / "codex-watch.pid"
@@ -81,6 +81,13 @@ def session_meta_prefix(path: Path) -> bytes:
 
 def compact(value: Any, limit: int) -> str:
     return " ".join(str(value or "").split())[:limit]
+
+
+def remote_hostname() -> str:
+    try:
+        return compact(REMOTE_HOST.read_text(encoding="utf-8"), 64)
+    except OSError:
+        return ""
 
 
 def lease_alive() -> bool:
@@ -196,10 +203,31 @@ def new_rollout_state() -> dict[str, Any]:
         "resolved_request_id": "",
         "fallback_title": "",
         "session_kind": "primary",
+        "visibility": "unknown",
         "parent_session_id": "",
         "subagent_label": "",
         "partial": b"",
     }
+
+
+def codex_visibility(metadata: dict[str, Any]) -> str:
+    source = metadata.get("source")
+    if isinstance(source, dict) and source.get("internal") in ("guardian", "memory_consolidation"):
+        return "hidden"
+    thread_source = metadata.get("thread_source")
+    if isinstance(thread_source, str) and thread_source in {"ambient_suggestions", "chatgpt_hidden", "guardian_review", "memory_consolidation"}:
+        return "hidden"
+    return "visible" if thread_source in ("user", "ambient_suggestion_task") else "unknown"
+
+
+def is_suggestion_prompt(message: Any) -> bool:
+    if not isinstance(message, str):
+        return False
+    prefix = "# Overview\n\nGenerate 0 to 3 hyperpersonalized suggestions for what this user can do with Codex in "
+    message = message.lstrip()
+    if not message.startswith(prefix):
+        return False
+    return message[len(prefix):].startswith(("this Projectless task", "this local project: "))
 
 
 def is_subagent_metadata(payload: dict[str, Any]) -> bool:
@@ -257,12 +285,19 @@ def apply_rollout_bytes(state: dict[str, Any], raw: bytes) -> None:
 
         if outer == "session_meta":
             state["cwd"] = compact(payload.get("cwd"), 512)
+            visibility = codex_visibility(payload)
+            if visibility != "unknown":
+                state["visibility"] = visibility
             if is_subagent_metadata(payload):
                 state["session_kind"] = "subagent"
                 state["parent_session_id"] = compact(payload.get("parent_thread_id"), 96)
                 state["subagent_label"] = compact(payload.get("agent_nickname"), 64)
             continue
         if event_type == "user_message" and not state["fallback_title"]:
+            if state["visibility"] == "unknown" and is_suggestion_prompt(payload.get("message")):
+                state["visibility"] = "hidden"
+            if state["visibility"] == "hidden":
+                continue
             state["fallback_title"] = compact(payload.get("message"), 256)
             continue
         if event_type == "task_started":
@@ -283,6 +318,13 @@ def apply_rollout_bytes(state: dict[str, Any], raw: bytes) -> None:
             if final:
                 state["text"] = final
                 state["message_kind"] = "assistant"
+            elif state["message_kind"] != "assistant" or not str(state["text"]).strip():
+                # Codex can finish without repeating the final response.
+                # Preserve actual assistant prose, but clear a transient
+                # prompt, reasoning, or “Thinking…” cue from the terminal
+                # card.
+                state["text"] = "Done."
+                state["message_kind"] = "status"
             continue
         if event_type in {"turn_aborted", "task_failed"}:
             state["lifecycle"] = True
@@ -341,7 +383,7 @@ def event_from_state(path: Path, title: str, state: dict[str, Any]) -> dict[str,
     # The upstream card model has no nested-child hierarchy. Suppress Codex
     # workers at the source just like Hermes workers instead of letting their
     # tool progress evict top-level conversations from the bounded card stack.
-    if state.get("session_kind") == "subagent":
+    if state.get("session_kind") == "subagent" or state.get("visibility") == "hidden":
         return None
     pending: dict[str, str] = state["pending"]
     status = state["status"]
@@ -374,7 +416,7 @@ def event_from_state(path: Path, title: str, state: dict[str, Any]) -> dict[str,
         "source_session_id": path.stem[-36:],
         "session_id": path.stem[-36:],
         "session_kind": "primary",
-        "hostname": compact(socket.gethostname(), 64),
+        "hostname": remote_hostname(),
         "remote": True,
         "source_cwd": state["cwd"],
         "turn_id": state["turn_id"],

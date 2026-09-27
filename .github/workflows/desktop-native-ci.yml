@@ -172,6 +172,10 @@ jobs:
         shell: bash
         run: scripts/patch-native-sdk.sh
 
+      - name: Verify macOS activation compatibility
+        if: matrix.platform == 'macos'
+        run: python3 packages/petdex-desktop-native/tests/macos_activation_test.py
+
       - name: Install Zig 0.16.0
         uses: mlugg/setup-zig@v2
         with:
@@ -208,6 +212,7 @@ jobs:
             PYTHON=python
           fi
           "$PYTHON" tests/hook_stdin_test.py ./zig-out/bin/petdex-desktop-native
+          "$PYTHON" tests/hidden_codex_hook_test.py ./zig-out/bin/petdex-desktop-native
 
       - name: Run the test suite
         # The suite ran on nobody's machine until the root aggregator
@@ -221,6 +226,11 @@ jobs:
         shell: bash
         run: |
           "$NATIVE_CLI" test .
+
+      - name: Test journal rotation across processes
+        working-directory: packages/petdex-desktop-native
+        shell: bash
+        run: bun tests/journal_process_check.mjs
 
       - name: Test remote helper runtimes
         if: matrix.platform != 'windows'
@@ -839,6 +849,7 @@ jobs:
             sleep 1
           done
           "${REMOTE[@]}" true
+          "${REMOTE[@]}" 'mkdir -p ~/.petdex/runtime && chmod 777 ~/.petdex ~/.petdex/runtime'
 
           # The config the app reads at boot. opencode + codex cover both
           # writeback shapes; Hermes also exercises a custom remote home and
@@ -880,6 +891,7 @@ jobs:
           done
           kill -0 "$APP_PID" || { echo "app died during remote sync"; cat remote.log; exit 1; }
           echo "=== app log ==="; cat remote.log
+          "${REMOTE[@]}" 'test "$(stat -c %a ~/.petdex)" = 700 && test "$(stat -c %a ~/.petdex/runtime)" = 700 && test "$(stat -c %a ~/.petdex/runtime/update-token)" = 600'
 
           # The pushed opencode plugin is byte-identical to the asset: it
           # POSTs directly and needs no remote-side helper.

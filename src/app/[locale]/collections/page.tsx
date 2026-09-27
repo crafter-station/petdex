@@ -23,7 +23,6 @@ export const revalidate = 86400;
 
 const SITE_URL = "https://petdex.dev";
 const MIN_PETS = 4;
-const INITIAL_PREVIEW_COUNT = 24;
 
 export async function generateMetadata({
   params,
@@ -61,13 +60,14 @@ export default async function CollectionsPage({
   });
   const collections = await getCollectionListingMetadata(MIN_PETS);
   const defaultVisibleOrder = sortCollectionListingItems(collections, "size");
-  const initialPreviewCollections = await getCollectionListingPreviewsBySlugs(
-    defaultVisibleOrder.slice(0, INITIAL_PREVIEW_COUNT).map((c) => c.slug),
+  // Every card is server-rendered; there is no client loader for later previews.
+  const previewCollections = await getCollectionListingPreviewsBySlugs(
+    defaultVisibleOrder.map((c) => c.slug),
     MIN_PETS,
     6,
   );
   const previewPetsBySlug = new Map(
-    initialPreviewCollections.map((c) => [c.slug, c.pets]),
+    previewCollections.map((c) => [c.slug, c.pets]),
   );
 
   const ownerIds = collections

@@ -16,6 +16,7 @@ type HeaderStateRow = {
   notification_count: number | string;
   feedback_count: number | string;
   profile_handle: string | null;
+  profile_display_name: string | null;
   caught_slugs: unknown;
 };
 
@@ -92,7 +93,13 @@ export async function GET(req: Request): Promise<Response> {
         FROM user_profiles
         WHERE user_id = ${userId}
         LIMIT 1
-      ) AS profile_handle
+      ) AS profile_handle,
+      (
+        SELECT display_name
+        FROM user_profiles
+        WHERE user_id = ${userId}
+        LIMIT 1
+      ) AS profile_display_name
     FROM notification_state, caught_state, feedback_state
   `)) as unknown as { rows: HeaderStateRow[] };
   const row = result.rows[0];
@@ -106,6 +113,7 @@ export async function GET(req: Request): Promise<Response> {
       },
       profile: {
         handle: row?.profile_handle ?? null,
+        displayName: row?.profile_display_name ?? null,
       },
       caught: toStringArray(row?.caught_slugs),
     },

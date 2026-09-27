@@ -116,7 +116,7 @@ keys = (
     "petdex_conversation_key", "parent_session_id", "petdex_parent_session_id", "child_session_id",
     "petdex_session_kind", "petdex_subagent_label", "child_role", "prompt", "user_message", "userPrompt",
     "petdex_session_title", "notification_type", "notification_kind", "tool_name", "question", "description",
-    "command", "file_path", "path", "pattern", "query", "last_assistant_message", "assistant_response",
+    "command", "file_path", "path", "pattern", "query", "last_assistant_message", "assistant_response", "prompt_response",
     "message", "child_summary", "cwd", "turn_id", "message_id", "event_id", "call_id", "request_id",
     "tool_use_id",
 )
@@ -234,11 +234,17 @@ sessions="$runtime/sessions"
 # without waiting for a reinstall or a new conversation.
 provider_context() {
     command -v python3 >/dev/null 2>&1 || return
-    python3 -c '
-import hashlib, json, os, re, sqlite3, sys
+    printf '%s' "$payload" | python3 -c '
+import hashlib, json, os, re, sqlite3, sys, time
 from pathlib import Path
 
 agent, sid, force_parent, force_subagent, explicit_label = sys.argv[1:6]
+try:
+    hook = json.load(sys.stdin)
+    if not isinstance(hook, dict):
+        hook = {}
+except (ValueError, OSError):
+    hook = {}
 title = ""
 conversation = sid
 parent = ""
@@ -300,6 +306,54 @@ try:
             parent = str(meta.get("parent_thread_id") or force_parent or "")
             conversation = parent or sid
             label = explicit_label or str(meta.get("agent_nickname") or "")
+
+        def visibility(value):
+            source = value.get("source")
+            if isinstance(source, dict) and source.get("internal") in ("guardian", "memory_consolidation"):
+                return "hidden"
+            thread_source = value.get("thread_source")
+            if isinstance(thread_source, str):
+                if thread_source in {"ambient_suggestions", "chatgpt_hidden", "guardian_review", "memory_consolidation"}:
+                    return "hidden"
+                if thread_source in {"user", "ambient_suggestion_task"}:
+                    return "visible"
+            return "unknown"
+
+        decision = visibility(hook)
+        if decision == "unknown" and meta.get("id") == sid:
+            decision = visibility(meta)
+        prompt = hook.get("prompt") or hook.get("user_message") or ""
+        prefix = "# Overview\n\nGenerate 0 to 3 hyperpersonalized suggestions for what this user can do with Codex in "
+        if decision == "unknown" and isinstance(prompt, str):
+            prompt = prompt.lstrip()
+            if prompt.startswith(prefix) and prompt[len(prefix):].startswith(("this Projectless task", "this local project: ")):
+                decision = "hidden"
+        cache = Path.home() / ".petdex" / "runtime" / "sessions"
+        marker = cache / f"{sid}.codex-hidden.json" if sid else None
+        remembered = marker is not None and marker.is_file()
+        if decision == "visible":
+            if marker is not None:
+                marker.unlink(missing_ok=True)
+        elif decision == "hidden" or remembered:
+            kind = "hidden"
+            if marker is not None:
+                cache.mkdir(parents=True, exist_ok=True)
+                now = time.time()
+                scratch = marker.with_name(marker.name + f".tmp.{os.getpid()}")
+                scratch.write_text(json.dumps({"hidden": True, "at": now}), encoding="utf-8")
+                scratch.replace(marker)
+                (cache / f"{sid}.title").unlink(missing_ok=True)
+                if not remembered:
+                    removed = 0
+                    for stale in cache.glob("*.codex-hidden.json"):
+                        try:
+                            if now - json.loads(stale.read_text(encoding="utf-8"))["at"] > 86400:
+                                stale.unlink()
+                                removed += 1
+                                if removed == 64:
+                                    break
+                        except (OSError, ValueError, KeyError, TypeError):
+                            pass
 
         path = Path.home() / ".codex" / "session_index.jsonl"
         with path.open("rb") as handle:
@@ -396,9 +450,14 @@ for value, limit in ((title, 256), (conversation, 64), (parent, 96), (kind, 16),
 ' "$agent" "$session_id" "$parent_session_hint" "$subagent_lifecycle" "$child_role" 2>/dev/null
 }
 
-# The first prompt is a cross-agent fallback for harnesses without a generated
-# title API. It is written only once; an authoritative provider title below
-# always wins and is refreshed on every lifecycle update.
+context=$(provider_context)
+provider_title=$(printf '%s\n' "$context" | sed -n '1p')
+conversation_key=$(printf '%s\n' "$context" | sed -n '2p')
+parent_session_id=$(printf '%s\n' "$context" | sed -n '3p')
+session_kind=$(printf '%s\n' "$context" | sed -n '4p')
+subagent_label=$(printf '%s\n' "$context" | sed -n '5p')
+[ "$session_kind" = hidden ] && exit 0
+
 if [ "$phase" = "user-prompt" ] && [ -n "$session_id" ]; then
     prompt_title=$(text_field prompt 60)
     [ -n "$prompt_title" ] || prompt_title=$(text_field user_message 60)
@@ -416,12 +475,6 @@ if [ "$phase" = "user-prompt" ] && [ -n "$session_id" ]; then
     fi
 fi
 
-context=$(provider_context)
-provider_title=$(printf '%s\n' "$context" | sed -n '1p')
-conversation_key=$(printf '%s\n' "$context" | sed -n '2p')
-parent_session_id=$(printf '%s\n' "$context" | sed -n '3p')
-session_kind=$(printf '%s\n' "$context" | sed -n '4p')
-subagent_label=$(printf '%s\n' "$context" | sed -n '5p')
 [ -n "$conversation_key" ] || conversation_key=$session_id
 [ -n "$session_kind" ] || session_kind=primary
 [ -n "$canonical_hint" ] && conversation_key=$canonical_hint
@@ -482,6 +535,7 @@ busy=false
 text=
 session_status=idle
 message_kind=status
+agent_state=
 post_bubble=true
 notification_kind=$(id_field notification_type)
 [ -n "$notification_kind" ] || notification_kind=$(id_field notification_kind)
@@ -558,8 +612,10 @@ case "$phase" in
         ;;
     tool-failure)
         state=failed
-        session_status=failed
+        busy=true
+        session_status=running
         message_kind=tool
+        agent_state=failed
         text="Tool failed"
         [ "$agent" = "codex" ] && post_bubble=false
         ;;
@@ -590,6 +646,7 @@ case "$phase" in
         message_kind=assistant
         text=$(text_field assistant_response 960)
         [ -n "$text" ] || text=$(text_field last_assistant_message 960)
+        [ -n "$text" ] || text=$(text_field prompt_response 960)
         [ -n "$text" ] || text=$(text_field message 960)
         [ -n "$text" ] || text="Done."
         ;;
@@ -653,6 +710,13 @@ case "$phase" in
         ;;
 esac
 
+# Every visible bubble replaces the prior per-conversation Flock state. A
+# tool failure is intermediate; later progress and terminal events must carry
+# their current state instead of leaving the previous `failed` value sticky.
+if [ -n "$text" ] && $post_bubble; then
+    agent_state=$state
+fi
+
 post() {
     # -m 2: the tunnel adds latency the local 300ms budget never sees,
     # but a wedged tunnel still must not stall the agent.
@@ -684,10 +748,11 @@ if [ -n "$text" ] && $post_bubble; then
     [ -n "$subagent_label" ] && metadata="$metadata,\"subagent_label\":\"$subagent_label\""
     [ -n "$title" ] && metadata="$metadata,\"title\":\"$title\""
     metadata="$metadata,\"title_source\":\"$title_source\",\"feed_source\":\"hook\",\"event_kind\":\"$phase\",\"message_kind\":\"$message_kind\",\"status\":\"$session_status\""
+    [ -n "$agent_state" ] && metadata="$metadata,\"agent_state\":\"$agent_state\""
     [ -n "$notification_kind" ] && metadata="$metadata,\"notification_kind\":\"$notification_kind\""
     source_cwd=$(text_field cwd 240)
     [ -n "$source_cwd" ] && metadata="$metadata,\"source_cwd\":\"$source_cwd\""
-    hostname=$(hostname 2>/dev/null | head -n 1 | tr -cd 'A-Za-z0-9._-')
+    hostname=$(sed -n '1p' "$HOME/.petdex/runtime/remote-host" 2>/dev/null | tr -cd 'A-Za-z0-9_-')
     [ -n "$hostname" ] && metadata="$metadata,\"hostname\":\"$hostname\""
     turn_id=$(id_field turn_id)
     [ -n "$turn_id" ] && metadata="$metadata,\"turn_id\":\"$turn_id\""

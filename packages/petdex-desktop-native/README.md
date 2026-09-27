@@ -19,17 +19,61 @@ Runtime-loaded pet animating its real atlas in a chromeless window:
 ## Build & run
 
 ```bash
-native build -Dautomation
+native build -Dautomation -Dtrace=off
 PETDEX_PET=boba ./zig-out/bin/petdex-desktop-native
 native automate screenshot pet-canvas
 ```
 
+Keep tracing off for normal use. To debug, explicitly enable tracing and set
+`NATIVE_SDK_LOG_DIR` to a directory you manage. Petdex removes its default
+`native-sdk.jsonl` when it exceeds 32 MiB, at startup and every ten minutes.
+The file can exceed that threshold between checks. Custom log directories,
+symlinks and `last-panic.txt` are left untouched.
+
 Requires the `@native-sdk/cli` global (`bun add -g @native-sdk/cli`).
+
+## Durable session recovery
+
+Installed hooks remain the low-latency path for every supported agent. Local,
+read-only durable recovery is enabled only for formats backed by
+provider-owned artifacts and adapter-specific fixture/test evidence: Codex
+rollouts, Claude transcripts, Gemini chats, OMP session logs, and Hermes
+`state.db`. OpenCode, Qoder, Kimi Code, and CodeBuddy remain hook-supported,
+but their stores have no stable evidenced contract here; durable recovery
+fails closed instead of guessing a session from unrelated data.
+
+Recovery scans are bounded and remain the source of truth. Native directory
+notifications are coalesced hints, with a periodic polling sweep covering
+dropped events and backend failure. Only relevant durable roots are watched,
+including configured `CLAUDE_CONFIG_DIR`, `PI_CODING_AGENT_DIR`, and
+`HERMES_HOME` locations.
 
 For the pinned desktop build, set `NATIVE_CLI` and `NATIVE_SDK_PATH` to the
 CLI and SDK checkout used by the matching release workflow. The build scripts
 apply the Petdex-owned macOS Mach-O headerpad patch before compiling; they
 fail if the SDK source no longer matches the pinned patch.
+
+## Claude Code configuration directory
+
+For a custom Claude Code installation, create `~/.petdex/agent-paths.json` with:
+
+```json
+{
+  "claude_config_dir": "~/Claude Config"
+}
+```
+
+Use an absolute path or a path beginning with `~/`. On Windows, use a path
+such as `C:/Users/you/Claude Config`. Restart Petdex after editing the file.
+The saved path takes priority over `CLAUDE_CONFIG_DIR`, including when Petdex
+is launched from Finder. Without a saved path, Petdex uses the environment
+variable and then `~/.claude`. Remove the key or set it to an empty string to
+restore that fallback.
+
+Detection, startup hook migration, Connect and Disconnect all use this path.
+Petdex never rewrites this file when other desktop settings change. If the file
+is unreadable, invalid JSON, or contains an invalid path, Claude hook changes
+are disabled for that run. Correct the file and restart Petdex to try again.
 
 ## Herdr
 
@@ -93,7 +137,9 @@ mirrors the desktop hook runner's contract: stdin drain, killswitch
 never fails outward. The opencode plugin POSTs directly and works unchanged.
 
 Notes:
-- SSH only; there is no API fallback transport. Windows remotes are out of scope.
+- SSH only; there is no API fallback transport. Windows desktops use the
+  installed OpenSSH client, but remote target accounts must still be POSIX;
+  Windows remote targets are out of scope.
 - Remote accounts need a POSIX shell and `ps`; Codex/Hermes reconciliation
   additionally needs `python3`, and their shell hooks need `curl`. Startup
   stays gated and reports a retrying state when a required dependency is absent.

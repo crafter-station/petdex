@@ -15,6 +15,7 @@ const agent_hooks = @import("agent_hooks.zig");
 const remote_agents = @import("remote_agents.zig");
 const remote_ssh = @import("remote_ssh.zig");
 const remote_writeback = @import("remote_writeback.zig");
+const hook_server = @import("hook_server.zig");
 const plat = @import("plat.zig");
 
 const AgentKind = agent_hooks.AgentKind;
@@ -274,6 +275,7 @@ fn probeAction(slot: *Slot) Action {
 }
 
 fn quiesceAction(slot: *Slot) Action {
+    hook_server.revokeRemoteCredential(slot.nameSlice());
     slot.op = .quiesce;
     slot.tunnel_ready = false;
     slot.sync_complete = false;
@@ -301,11 +303,11 @@ fn fetchAction(slot: *Slot) Action {
 fn tokenAction(slot: *Slot, slot_idx: usize, home: []const u8) Action {
     var path_buf: [512]u8 = undefined;
     const token_path = std.fmt.bufPrint(&path_buf, "{s}/.petdex/runtime/update-token", .{home}) catch return retry(slot, true);
-    const bytes = plat.readFile(token_path, &token_bufs[slot_idx]) orelse return retry(slot, true);
-    if (bytes.len > max_token_len) return retry(slot, true);
-    const trimmed = std.mem.trim(u8, bytes, " \t\r\n");
-    token_lens[slot_idx] = trimmed.len;
-    if (trimmed.len == 0) return retry(slot, true);
+    var probe: [max_token_len + 1]u8 = undefined;
+    const bytes = plat.readFile(token_path, &probe) orelse return retry(slot, true);
+    if (bytes.len > max_token_len or std.mem.trim(u8, bytes, " \t\r\n").len == 0) return retry(slot, true);
+    const scoped = hook_server.issueRemoteCredential(slot.nameSlice(), &token_bufs[slot_idx]) orelse return retry(slot, true);
+    token_lens[slot_idx] = scoped.len;
     slot.op = .token;
     return .{ .spawn = .{ .op = .token, .path = remote_ssh.remote_token_file, .stdin = token_bufs[slot_idx][0..token_lens[slot_idx]] } };
 }
@@ -542,6 +544,7 @@ pub fn onSpawnExitDetailed(slot: *Slot, slot_idx: usize, op: Op, code: i32, outp
         },
         .token => {
             if (code != 0) {
+                hook_server.revokeRemoteCredential(slot.nameSlice());
                 std.debug.print("petdex: remote '{s}': token gate open failed (ssh exit {d}); retrying\n", .{ slot.nameSlice(), code });
                 return retry(slot, true);
             }
@@ -555,6 +558,7 @@ pub fn onSpawnExitDetailed(slot: *Slot, slot_idx: usize, op: Op, code: i32, outp
             return tokenAction(slot, slot_idx, home);
         },
         .tunnel => {
+            hook_server.revokeRemoteCredential(slot.nameSlice());
             // Any tunnel exit is a reconnect: ssh only exits when the
             // connection dropped (ExitOnForwardFailure makes a taken
             // port a fast exit too).
@@ -860,7 +864,8 @@ test "driver gates feed until tunnel-ready patch pass completes" {
     try t.expect(act == .spawn and act.spawn.op == .watcher);
     act = onSpawnExit(&slot, idx, .watcher, 0, "", home);
     try t.expect(act == .spawn and act.spawn.op == .token);
-    try t.expectEqualStrings("tok-abc", act.spawn.stdin);
+    try t.expect(std.mem.startsWith(u8, act.spawn.stdin, "remote:rogue:"));
+    try t.expectEqual(@as(usize, "remote:rogue:".len + 64), act.spawn.stdin.len);
     act = onSpawnExit(&slot, idx, .token, 0, "", home);
     try t.expect(act == .none);
     try t.expect(slot.tunnel_ready);

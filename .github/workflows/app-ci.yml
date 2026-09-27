@@ -39,9 +39,29 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
+
+      - name: Reject whitespace errors in the change
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BASE_SHA: ${{ github.event.before }}
+          PUSH_HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ -n "$PR_BASE_SHA" ]; then
+            git diff --check "$PR_BASE_SHA...HEAD"
+          elif [ -n "$PUSH_BASE_SHA" ] && [ "$PUSH_BASE_SHA" != "0000000000000000000000000000000000000000" ]; then
+            git diff --check "$PUSH_BASE_SHA...$PUSH_HEAD_SHA"
+          else
+            git show --check --format= HEAD
+          fi
+
+      - name: Test the repository pre-commit hook
+        run: bun run hooks:test
 
       - name: Install with frozen lockfile
         run: bun install --frozen-lockfile

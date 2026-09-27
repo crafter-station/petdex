@@ -1,3 +1,4 @@
+import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
 
 import { auth, clerkClient } from "@clerk/nextjs/server";
@@ -255,6 +256,10 @@ export async function PATCH(req: Request): Promise<Response> {
         (err as Error).message,
       );
     }
+  }
+
+  if (patch.displayName !== undefined || patch.handle !== undefined) {
+    revalidatePath("/[locale]/requests", "page");
   }
 
   return NextResponse.json({

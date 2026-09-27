@@ -207,8 +207,14 @@ const nextConfig: NextConfig = {
         source: "/version.json",
         headers: versionJsonHeaders,
       },
+      // The client router fetches these same URLs with an `RSC: 1` header
+      // and gets the React flight payload back. Cloudflare keys the cache on
+      // the URL alone and ignores `Vary: rsc`, so an edge-cacheable flight
+      // response gets served to the next browser as the page body. Only the
+      // HTML document may carry the CDN cache header.
       ...publicHtmlCacheSources.map((source) => ({
         source,
+        missing: [{ type: "header" as const, key: "rsc" }],
         headers: publicHtmlCacheHeaders,
       })),
       {
