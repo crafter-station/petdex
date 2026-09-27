@@ -124,7 +124,10 @@ function UserDropdown({ compact = false }: { compact?: boolean }) {
       : user.id.slice(-8).toLowerCase());
   const avatarUrl = user.imageUrl;
   const displayName =
-    user.fullName || user.username || user.primaryEmailAddress?.emailAddress;
+    headerState.profile.displayName ||
+    user.fullName ||
+    user.username ||
+    user.primaryEmailAddress?.emailAddress;
   const email = user.primaryEmailAddress?.emailAddress ?? null;
 
   return (

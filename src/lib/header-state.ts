@@ -2,7 +2,7 @@ export type HeaderState = {
   signedIn: boolean;
   notifications: { unreadCount: number };
   feedback: { count: number };
-  profile: { handle: string | null };
+  profile: { handle: string | null; displayName: string | null };
   caught: string[];
 };
 
@@ -10,7 +10,7 @@ export const INITIAL_HEADER_STATE: HeaderState = {
   signedIn: false,
   notifications: { unreadCount: 0 },
   feedback: { count: 0 },
-  profile: { handle: null },
+  profile: { handle: null, displayName: null },
   caught: [],
 };
 
@@ -26,7 +26,7 @@ export type CachedHeaderState = {
 };
 
 export function headerStateCacheKey(userId: string | null | undefined) {
-  return userId ? `petdex:header-state:v2:${userId}` : null;
+  return userId ? `petdex:header-state:v3:${userId}` : null;
 }
 
 export function shouldRequestHeaderState(input: {
@@ -159,6 +159,8 @@ export function normalizeHeaderState(value: unknown): HeaderState {
     },
     profile: {
       handle: typeof profile.handle === "string" ? profile.handle : null,
+      displayName:
+        typeof profile.displayName === "string" ? profile.displayName : null,
     },
     caught: Array.isArray(input.caught) ? input.caught.filter(isString) : [],
   };

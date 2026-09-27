@@ -124,6 +124,28 @@ export default async function RequestsPage() {
     }
   }
 
+  if (userIdSet.size > 0) {
+    const profiles = await db
+      .select({
+        userId: schema.userProfiles.userId,
+        handle: schema.userProfiles.handle,
+        displayName: schema.userProfiles.displayName,
+      })
+      .from(schema.userProfiles)
+      .where(inArray(schema.userProfiles.userId, [...userIdSet]));
+    for (const profile of profiles) {
+      const fallback = clerkInfo.get(profile.userId);
+      clerkInfo.set(profile.userId, {
+        handle:
+          profile.handle ??
+          fallback?.handle ??
+          profile.userId.slice(-8).toLowerCase(),
+        displayName: profile.displayName ?? fallback?.displayName ?? null,
+        imageUrl: fallback?.imageUrl ?? null,
+      });
+    }
+  }
+
   // Fulfilled pet thumbnails.
   const fulfilledSlugs = rows
     .filter(
