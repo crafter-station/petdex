@@ -13,7 +13,7 @@ fn string(value: std.json.Value, key: []const u8) ?[]const u8 {
     return if (item == .string) item.string else null;
 }
 
-fn metadata(value: std.json.Value) Visibility {
+pub fn metadata(value: std.json.Value) Visibility {
     if (field(value, "source")) |source| {
         if (string(source, "internal")) |internal| {
             if (std.mem.eql(u8, internal, "guardian") or std.mem.eql(u8, internal, "memory_consolidation")) return .hidden;
@@ -26,7 +26,7 @@ fn metadata(value: std.json.Value) Visibility {
     return if (std.mem.eql(u8, source, "user") or std.mem.eql(u8, source, "ambient_suggestion_task")) .visible else .unknown;
 }
 
-fn suggestionPrompt(prompt: []const u8) bool {
+pub fn suggestionPrompt(prompt: []const u8) bool {
     const prefix = "# Overview\n\nGenerate 0 to 3 hyperpersonalized suggestions for what this user can do with Codex in ";
     const trimmed = std.mem.trimStart(u8, prompt, " \t\r\n");
     if (!std.mem.startsWith(u8, trimmed, prefix)) return false;

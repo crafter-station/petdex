@@ -1,7 +1,7 @@
 //! Flock model: one body per live agent instead of one pet for all of them.
 //!
-//! The mailbox already keeps a bubble per conversation, keyed by session id
-//! and carrying the Herdr pane that produced it. Until now the app folded
+//! The mailbox already keeps a bubble per canonical conversation identity
+//! and carries the Herdr pane that produced it. Until now the app folded
 //! that set into a single `model.state`, so eight agents shared one mascot
 //! and one aggregate state. This module keeps the set intact and gives each
 //! member a body, a slot, and a state of its own.
@@ -20,8 +20,13 @@ pub const max_members = hook_server.max_bubbles;
 /// mailbox reuses its slots: a member has to survive the next drain that
 /// compacts the array underneath it.
 pub const Member = struct {
-    session: [64]u8 = @splat(0),
+    session: [hook_server.bubble_session_capacity]u8 = @splat(0),
     session_len: usize = 0,
+    agent: [24]u8 = @splat(0),
+    agent_len: usize = 0,
+    hostname: [64]u8 = @splat(0),
+    hostname_len: usize = 0,
+    remote: bool = false,
     label: [24]u8 = @splat(0),
     label_len: usize = 0,
     herdr_pane: [64]u8 = @splat(0),
@@ -31,6 +36,20 @@ pub const Member = struct {
 
     pub fn sessionSlice(self: *const Member) []const u8 {
         return self.session[0..self.session_len];
+    }
+    pub fn agentSlice(self: *const Member) []const u8 {
+        return self.agent[0..self.agent_len];
+    }
+    pub fn hostnameSlice(self: *const Member) []const u8 {
+        return self.hostname[0..self.hostname_len];
+    }
+    pub fn identity(self: *const Member) hook_server.BubbleIdentity {
+        return .{
+            .conversation_key = self.sessionSlice(),
+            .agent = self.agentSlice(),
+            .hostname = self.hostnameSlice(),
+            .remote = self.remote,
+        };
     }
     pub fn labelSlice(self: *const Member) []const u8 {
         return self.label[0..self.label_len];
@@ -96,12 +115,11 @@ pub fn reconcile(model: *Model, bubbles: []const hook_server.Bubble) void {
     var taken: [max_members]bool = @splat(false);
     var next_len: usize = 0;
 
-    // First pass: sessions we already had keep their existing slot.
+    // First pass: canonical identities we already had keep their slot.
     for (bubbles) |*bubble| {
-        const session = bubble.sessionSlice();
         for (model.members[0..model.len], 0..) |*existing, slot| {
             if (existing.session_len == 0) continue;
-            if (!std.mem.eql(u8, existing.sessionSlice(), session)) continue;
+            if (!existing.identity().matches(bubble.identity())) continue;
             if (slot >= max_members or taken[slot]) break;
             next[slot] = existing.*;
             next[slot].state = stateForBubble(bubble);
@@ -114,13 +132,12 @@ pub fn reconcile(model: *Model, bubbles: []const hook_server.Bubble) void {
         }
     }
 
-    // Second pass: new sessions fill the lowest free slot.
+    // Second pass: new canonical identities fill the lowest free slot.
     for (bubbles) |*bubble| {
-        const session = bubble.sessionSlice();
         var seen = false;
         for (next[0..], 0..) |*member, slot| {
             if (!taken[slot]) continue;
-            if (std.mem.eql(u8, member.sessionSlice(), session)) {
+            if (member.identity().matches(bubble.identity())) {
                 seen = true;
                 break;
             }
@@ -130,7 +147,10 @@ pub fn reconcile(model: *Model, bubbles: []const hook_server.Bubble) void {
         while (slot < max_members and taken[slot]) slot += 1;
         if (slot == max_members) break;
         var member: Member = .{};
-        copyInto(&member.session, &member.session_len, session);
+        copyInto(&member.session, &member.session_len, bubble.sessionSlice());
+        copyInto(&member.agent, &member.agent_len, bubble.agent[0..bubble.agent_len]);
+        copyInto(&member.hostname, &member.hostname_len, bubble.hostnameSlice());
+        member.remote = bubble.remote;
         copyInto(&member.label, &member.label_len, bubble.agent[0..bubble.agent_len]);
         copyInto(&member.herdr_pane, &member.herdr_pane_len, bubble.herdrPaneSlice());
         member.state = stateForBubble(bubble);
@@ -223,6 +243,13 @@ fn testBubble(session: []const u8, agent: []const u8, pane: []const u8, busy: bo
     return bubble;
 }
 
+fn testRemoteBubble(session: []const u8, agent: []const u8, hostname: []const u8, busy: bool) hook_server.Bubble {
+    var bubble = testBubble(session, agent, "", busy);
+    copyInto(&bubble.hostname, &bubble.hostname_len, hostname);
+    bubble.remote = true;
+    return bubble;
+}
+
 test "each live session gets its own body" {
     var model: Model = .{};
     const bubbles = [_]hook_server.Bubble{
@@ -233,6 +260,29 @@ test "each live session gets its own body" {
     try std.testing.expectEqual(@as(usize, 2), model.len);
     try std.testing.expectEqualStrings("s1", model.members[0].sessionSlice());
     try std.testing.expectEqualStrings("s2", model.members[1].sessionSlice());
+}
+
+test "shared conversation keys keep distinct agent and remote-host bodies" {
+    var model: Model = .{};
+    reconcile(&model, &[_]hook_server.Bubble{
+        testRemoteBubble("shared", "codex", "host-a", true),
+        testRemoteBubble("shared", "codex", "host-b", false),
+        testRemoteBubble("shared", "hermes", "host-a", true),
+    });
+    try std.testing.expectEqual(@as(usize, 3), model.len);
+    try std.testing.expectEqualStrings("host-a", model.members[0].hostnameSlice());
+    try std.testing.expectEqualStrings("host-b", model.members[1].hostnameSlice());
+    try std.testing.expectEqualStrings("hermes", model.members[2].agentSlice());
+
+    // A reordered drain updates the right member without moving its siblings.
+    reconcile(&model, &[_]hook_server.Bubble{
+        testRemoteBubble("shared", "hermes", "host-a", false),
+        testRemoteBubble("shared", "codex", "host-b", true),
+        testRemoteBubble("shared", "codex", "host-a", false),
+    });
+    try std.testing.expectEqual(sprite.State.idle, model.members[0].state);
+    try std.testing.expectEqual(sprite.State.running, model.members[1].state);
+    try std.testing.expectEqual(sprite.State.idle, model.members[2].state);
 }
 
 test "a busy agent runs while an idle one does not" {

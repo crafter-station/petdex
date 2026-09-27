@@ -1,0 +1,5 @@
+{"_fixture":{"schema":"pi-session-jsonl","version":3,"provider":"omp","sanitized":true,"source":"provider-owned session file"}}
+{"type":"session","version":3,"id":"omp-child-source-id","timestamp":"2026-08-14T00:00:00.000Z","cwd":"C:/fixture/project","parentSession":"C:/fixture/sessions/omp-parent.jsonl"}
+{"type":"session_info","id":"omp-info-1","parentId":null,"timestamp":"2026-08-14T00:00:00.010Z","name":"OMP authoritative title"}
+{"type":"message","id":"omp-user-1","parentId":"omp-info-1","timestamp":"2026-08-14T00:00:00.100Z","message":{"role":"user","content":"Review popup behavior","timestamp":1786665600100}}
+{"type":"message","id":"omp-assistant-1","parentId":"omp-user-1","timestamp":"2026-08-14T00:00:01.000Z","message":{"role":"assistant","content":[{"type":"text","text":"OMP review complete"}],"timestamp":1786665601000,"provider":"fixture","model":"fixture"}}

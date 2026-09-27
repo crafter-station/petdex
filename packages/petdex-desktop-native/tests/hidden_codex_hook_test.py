@@ -57,6 +57,13 @@ try:
             )
             return requests[before:]
 
+        def journal_events():
+            return [
+                json.loads(line)["event"]
+                for path in (runtime / "session-journal").glob("*.jsonl*")
+                for line in path.read_text().splitlines()
+            ]
+
         prompt = "# Overview\n\nGenerate 0 to 3 hyperpersonalized suggestions for what this user can do with Codex in this Projectless task"
         assert not send("user-prompt", {"session_id": "hidden", "prompt": prompt})
         assert not send("pre", {"session_id": "hidden", "tool_name": "Read"})
@@ -64,15 +71,26 @@ try:
         assert not (runtime / "sessions" / "hidden.json").exists()
         assert "prompt" not in (runtime / "sessions" / "hidden.codex-hidden.json").read_text()
 
+        assert not journal_events()
+
         for session, cwd in (("projectless", ""), ("workspace", "/project")):
             events = send("user-prompt", {"session_id": session, "cwd": cwd, "prompt": "Help me plan"})
             assert any(path == "/bubble" and body["session_id"] == session for path, body in events)
             assert (runtime / "sessions" / f"{session}.json").is_file()
 
         assert not send("user-prompt", {"session_id": "internal", "thread_source": "ambient_suggestions", "prompt": "Internal"})
+        assert {event["session_id"] for event in journal_events()} == {"projectless", "workspace"}
         assert send("user-prompt", {"session_id": "hidden", "thread_source": "user", "prompt": "My visible task"})
         assert not (runtime / "sessions" / "hidden.codex-hidden.json").exists()
-        print("PASS: compiled hook binary suppresses hidden posts and titles; visible sessions still publish")
+        (runtime / "update-token").unlink()
+        before = journal_events()
+        assert not send("user-prompt", {"session_id": "offline-hidden", "prompt": prompt})
+        assert not send("pre", {"session_id": "offline-hidden", "tool_name": "Read"})
+        assert journal_events() == before
+        assert not (runtime / "sessions" / "offline-hidden.json").exists()
+        assert not send("user-prompt", {"session_id": "offline-visible", "prompt": "Resume after restart"})
+        assert any(event["session_id"] == "offline-visible" for event in journal_events())
+        print("PASS: hidden hooks produce no posts, titles or journals; visible hooks journal while offline")
 finally:
     server.shutdown()
     server.server_close()

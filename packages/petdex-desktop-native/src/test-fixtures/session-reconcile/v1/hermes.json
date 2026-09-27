@@ -1,0 +1,20 @@
+{
+  "_fixture": {
+    "schema": "petdex-hermes-row",
+    "version": 1,
+    "provider": "hermes",
+    "sanitized": true
+  },
+  "enriched_schema": true,
+  "id": "hermes-child",
+  "session_key": "",
+  "title": "Hermes authoritative title",
+  "source": "worker",
+  "model_config": "{}",
+  "parent_session_id": "hermes-parent",
+  "started_ms": 1700000000000,
+  "activity_ms": 1700000001000,
+  "description": "Hermes review complete",
+  "ended": true,
+  "end_reason": "complete"
+}

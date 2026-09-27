@@ -2,16 +2,42 @@
 // Forwards OpenCode lifecycle events to the petdex desktop mascot via HTTP.
 // Edit STATE_MAP below to customize which state each event triggers.
 
-import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 const HOOK_SERVER_URL = "http://127.0.0.1:7777/state";
 const HOOK_SERVER_BUBBLE_URL = "http://127.0.0.1:7777/bubble";
+const HOOK_SERVER_TITLE_URL = "http://127.0.0.1:7777/bubble/title";
 const RUNTIME_DIR = join(homedir(), ".petdex", "runtime");
 const TOKEN_PATH = join(RUNTIME_DIR, "update-token");
 const KILLSWITCH_PATH = join(RUNTIME_DIR, "hooks-disabled");
+const REMOTE_HOST_PATH = join(RUNTIME_DIR, "remote-host");
+const JOURNAL_DIR = join(RUNTIME_DIR, "session-journal");
+const JOURNAL_LIMIT = 4 * 1024 * 1024;
+
+export function journalStem(value, fallback) {
+  return createHash("sha256").update(String(value || fallback), "utf8").digest("hex");
+}
+
+function appendJournal(body) {
+  if (!body?.text || !body?.conversation_key) return;
+  try {
+    mkdirSync(JOURNAL_DIR, { recursive: true, mode: 0o700 });
+    const path = join(JOURNAL_DIR, `${journalStem(body.agent_source, "agent")}-${journalStem(body.conversation_key, "unkeyed")}.jsonl`);
+    const record = JSON.stringify({ journal_version: 1, event: body }) + "\n";
+    if (existsSync(path) && statSync(path).size + Buffer.byteLength(record) > JOURNAL_LIMIT) {
+      const previous = path + ".1";
+      try { unlinkSync(previous); } catch {}
+      renameSync(path, previous);
+    }
+    appendFileSync(path, record, { encoding: "utf8", mode: 0o600 });
+  } catch {
+    // Recovery is best-effort and must never stain the agent process.
+  }
+}
 
 async function readToken() {
   try {
@@ -38,11 +64,15 @@ function clip(text, max = 40) {
 
 function originMetadata() {
   const sourceApp = process.env.TERM_PROGRAM;
-  if (sourceApp !== "Apple_Terminal" && sourceApp !== "vscode") return {};
-  return {
-    source_app: sourceApp,
-    source_cwd: process.cwd(),
-  };
+  const metadata =
+    sourceApp === "Apple_Terminal" || sourceApp === "vscode"
+      ? { source_app: sourceApp, source_cwd: process.cwd() }
+      : { source_cwd: process.cwd() };
+  try {
+    const hostname = readFileSync(REMOTE_HOST_PATH, "utf8").trim().slice(0, 64);
+    if (hostname) return { ...metadata, hostname, remote: true };
+  } catch {}
+  return metadata;
 }
 
 function canonicalToolKind(toolName) {
@@ -128,17 +158,12 @@ async function postJson(url, body, token) {
   }
 }
 
-async function notify({ state, duration, text, title, busy, sessionId }) {
+async function notify({ state, duration, text, title, busy, sessionId, status, messageKind = "tool" }) {
   // Killswitch: users toggle this with /petdex inside their agent
   // (or 'petdex hooks toggle' from a shell). Bail before the token
   // read so the disabled state has zero filesystem cost beyond the
   // existsSync.
   if (existsSync(KILLSWITCH_PATH)) return;
-  // Token gate defends against drive-by no-cors POSTs from any site
-  // the user visits. The token rotates per desktop session and lives
-  // at mode 0600, so only this user can read it.
-  const token = await readToken();
-  if (!token) return; // Hook server offline or missing; silently no-op.
   // Stamp agent_source so the hook server can route per-pet when we
   // ship multi-mascot. Today the field is recorded for telemetry
   // but doesn't affect routing.
@@ -152,9 +177,23 @@ async function notify({ state, duration, text, title, busy, sessionId }) {
   if (sessionId) {
     stateBody.session_id = sessionId;
     bubbleBody.session_id = sessionId;
+    bubbleBody.conversation_key = sessionId;
+    bubbleBody.source_session_id = sessionId;
+    bubbleBody.session_kind = "primary";
   }
-  if (title) bubbleBody.title = title;
+  if (title) {
+    bubbleBody.title = title;
+    bubbleBody.title_source = "server";
+  }
   if (busy !== undefined) bubbleBody.busy = busy;
+  if (status) bubbleBody.status = status;
+  bubbleBody.message_kind = messageKind;
+  bubbleBody.feed_source = "hook";
+  appendJournal(bubbleBody);
+  // Journal first: an event remains recoverable when the desktop is closed.
+  // The rotating token still gates all loopback HTTP writes.
+  const token = await readToken();
+  if (!token) return;
   await Promise.all([
     postJson(HOOK_SERVER_URL, stateBody, token),
     text ? postJson(HOOK_SERVER_BUBBLE_URL, bubbleBody, token) : Promise.resolve(),
@@ -166,18 +205,35 @@ async function notify({ state, duration, text, title, busy, sessionId }) {
 // us opencode's own LLM-generated session titles for the bubble.
 const PetdexPlugin = async ({ client }) => {
   const titleCache = new Map();
+  const clippedTitle = (title) =>
+    typeof title === "string" && title.trim().length > 0
+      ? (title.trim().length > 60 ? title.trim().slice(0, 59) + "\u2026" : title.trim())
+      : null;
   async function sessionTitle(sessionID) {
     if (!sessionID || !client) return titleCache.get(sessionID) || null;
     try {
       const res = await client.session.get({ path: { id: sessionID } });
-      const title = res?.data?.title;
-      if (typeof title === "string" && title.length > 0) {
-        titleCache.set(sessionID, title.length > 60 ? title.slice(0, 59) + "\u2026" : title);
-      }
+      const title = clippedTitle(res?.data?.title);
+      if (title) titleCache.set(sessionID, title);
     } catch {
       // Hook-server silence: a missing title never stains the agent.
     }
     return titleCache.get(sessionID) || null;
+  }
+  async function syncServerTitle(sessionID, rawTitle) {
+    const title = clippedTitle(rawTitle);
+    if (!sessionID || !title) return;
+    titleCache.set(sessionID, title);
+    if (existsSync(KILLSWITCH_PATH)) return;
+    const token = await readToken();
+    if (!token) return;
+    await postJson(HOOK_SERVER_TITLE_URL, {
+      session_id: sessionID,
+      conversation_key: sessionID,
+      title,
+      agent_source: "opencode",
+      ...originMetadata(),
+    }, token);
   }
   return {
     "tool.execute.before": async (input, output) => notify({
@@ -186,6 +242,8 @@ const PetdexPlugin = async ({ client }) => {
       title: await sessionTitle(input.sessionID),
       busy: true,
       sessionId: input.sessionID,
+      status: "running",
+      messageKind: "tool",
     }),
     "tool.execute.after": async (input) => notify({
       state: "idle",
@@ -193,11 +251,16 @@ const PetdexPlugin = async ({ client }) => {
       title: await sessionTitle(input.sessionID),
       busy: true,
       sessionId: input.sessionID,
+      status: "running",
+      messageKind: "tool",
     }),
     event: async ({ event }) => {
-      const sessionId = event?.properties?.sessionID;
+      const info = event?.properties?.info;
+      const sessionId = event?.properties?.sessionID ?? info?.id;
       if (typeof sessionId !== "string" || sessionId.length === 0) return;
-      if (event.type === "session.idle") {
+      if (event.type === "session.updated" || event.type === "session.created") {
+        await syncServerTitle(sessionId, info?.title);
+      } else if (event.type === "session.idle") {
         await notify({
           state: "waving",
           duration: 1500,
@@ -205,6 +268,8 @@ const PetdexPlugin = async ({ client }) => {
           title: await sessionTitle(sessionId),
           busy: false,
           sessionId,
+          status: "completed",
+          messageKind: "lifecycle",
         });
       } else if (event.type === "session.error") {
         await notify({
@@ -214,6 +279,8 @@ const PetdexPlugin = async ({ client }) => {
           title: await sessionTitle(sessionId),
           busy: false,
           sessionId,
+          status: "failed",
+          messageKind: "lifecycle",
         });
       }
     },
