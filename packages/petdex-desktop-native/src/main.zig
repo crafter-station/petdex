@@ -122,6 +122,7 @@ pub const Msg = union(enum) {
     dsh_install_done: native_sdk.EffectExit,
     dsh_remove_done: native_sdk.EffectExit,
     pet_filter: canvas.TextInputEvent,
+    refresh_pets,
     toggle_pets_expanded,
     toggle_flock_window,
     focus_flock_member: u32,
@@ -376,16 +377,10 @@ fn petdexThemeTokens(model: *const Model) canvas.DesignTokens {
     // preference remains available on the untouched Win/mac SDK too.
     tokens.typography.heading_size = model.bubble_text_px;
     if (custom_font_active) tokens.typography.font_id = custom_font_id;
-    // Linux's software presenter needs an alpha-zero clear all the way
-    // into GTK's ARGB surface. Win32 and AppKit retain their upstream
-    // platform-owned transparency paths and ordinary theme tokens.
-    if (builtin.target.os.tag == .linux) {
-        tokens.colors.background = canvas.Color.rgba8(0, 0, 0, 0);
-    }
     if (model.high_contrast) return tokens;
     const c = &tokens.colors;
     if (model.dark) {
-        if (builtin.target.os.tag != .linux) c.background = canvas.Color.rgb8(12, 12, 15);
+        c.background = canvas.Color.rgb8(12, 12, 15);
         c.surface = canvas.Color.rgb8(25, 25, 28);
         c.surface_subtle = canvas.Color.rgb8(45, 45, 48);
         c.surface_pressed = canvas.Color.rgb8(22, 27, 67);
@@ -394,7 +389,7 @@ fn petdexThemeTokens(model: *const Model) canvas.DesignTokens {
         c.accent = canvas.Color.rgb8(137, 163, 255);
         c.destructive = canvas.Color.rgb8(250, 105, 94);
     } else {
-        if (builtin.target.os.tag != .linux) c.background = canvas.Color.rgb8(247, 250, 255);
+        c.background = canvas.Color.rgb8(247, 250, 255);
         c.surface = canvas.Color.rgb8(255, 255, 255);
         c.surface_subtle = canvas.Color.rgb8(236, 238, 244);
         c.surface_pressed = canvas.Color.rgb8(233, 238, 251);
@@ -1217,8 +1212,6 @@ fn petNameOk(name: []const u8) bool {
     return true;
 }
 
-/// Scan both pet roots into the catalog (name + which root), sorted by
-/// scan order. Runs once in main() with the io handle.
 fn scanCatalog(io: std.Io, allocator: std.mem.Allocator) void {
     const home = env_home orelse return;
     const roots = [_][]const u8{ ".petdex/pets", ".codex/pets" };
@@ -1245,6 +1238,35 @@ fn scanCatalog(io: std.Io, allocator: std.mem.Allocator) void {
             catalog_mod.catalog_len += 1;
         }
     }
+}
+
+fn refreshCatalog(model: *Model) void {
+    if (env_home == null or model.install.busy()) return;
+    var scope = plat.Scope.init();
+    defer scope.deinit();
+    const io = scope.io();
+    const active_name = model.pet_name[0..model.pet_name_len];
+    catalog_mod.catalog_len = 0;
+    if (model.sheet_loaded and petNameOk(active_name)) {
+        for (installer.install_roots) |root| {
+            const path = std.fs.path.join(boot_allocator, &.{ env_home.?, root, active_name }) catch continue;
+            defer boot_allocator.free(path);
+            var dir = std.Io.Dir.openDirAbsolute(io, path, .{}) catch continue;
+            dir.close(io);
+            catalog[0] = .{};
+            @memcpy(catalog[0].name[0..active_name.len], active_name);
+            catalog[0].len = active_name.len;
+            @memcpy(catalog[0].root[0..root.len], root);
+            catalog[0].root_len = root.len;
+            catalog_mod.catalog_len = 1;
+            break;
+        }
+    }
+    scanCatalog(io, boot_allocator);
+    model.active_pet = @intCast(if (model.sheet_loaded) catalogIndexOf(active_name) orelse max_catalog else max_catalog);
+    pet_display_name = active_name;
+    thumbs_ready = @splat(false);
+    thumbs_built = 0;
 }
 
 var boot_allocator: std.mem.Allocator = std.heap.page_allocator;
@@ -2298,6 +2320,7 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             applyState(model, model.state.next(), 0, fx);
         },
         .toggle_pets_expanded => model.pets_expanded = !model.pets_expanded,
+        .refresh_pets => refreshCatalog(model),
         .focus_flock_member => |index| {
             // The pane id rode all the way from Herdr on the bubble this
             // body was built from, so reaching the session is the same
@@ -2735,11 +2758,11 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             // empty state, and nothing else flips this back.
             if (!model.sheet_loaded) {
                 model.sheet_loaded = true;
-                pet_display_name = catalog[index].slice();
-                const n = @min(pet_display_name.len, model.pet_name.len);
-                @memcpy(model.pet_name[0..n], pet_display_name[0..n]);
-                model.pet_name_len = n;
             }
+            pet_display_name = catalog[index].slice();
+            const n = @min(pet_display_name.len, model.pet_name.len);
+            @memcpy(model.pet_name[0..n], pet_display_name[0..n]);
+            model.pet_name_len = n;
             // A pick — manual or rotation, same Msg on purpose — is
             // today's pet: the daily rotation leaves it alone until
             // the next day.
@@ -5170,21 +5193,118 @@ test "transparent surfaces clear independently from settings" {
     try std.testing.expectEqualStrings("premultiplied", @tagName(shell_views[0].gpu_alpha_mode.?));
     try std.testing.expect(shell_windows[0].transparent);
 
-    // The settings window paints an opaque page background of its own on
-    // AppKit and Win32. Linux presents every surface through one
-    // alpha-zero GTK clear, so there the settings background is
-    // transparent too and the pet-vs-settings split does not apply.
-    const settings_alpha: f32 = if (builtin.target.os.tag == .linux) 0 else 1;
-
     var model: Model = .{};
     const pet_background = petdexTokens(&model).colors.background;
     const settings_background = settingsBackground(&model);
     try std.testing.expectEqual(@as(f32, 0), pet_background.a);
-    try std.testing.expectEqual(settings_alpha, settings_background.a);
+    try std.testing.expectEqual(@as(f32, 1), settings_background.a);
 
     model.dark = false;
     try std.testing.expectEqual(@as(f32, 0), petdexTokens(&model).colors.background.a);
-    try std.testing.expectEqual(settings_alpha, settingsBackground(&model).a);
+    try std.testing.expectEqual(@as(f32, 1), settingsBackground(&model).a);
+}
+
+test "refresh discovers local changes and preserves the active pet without restarting" {
+    const old_home = env_home;
+    const old_catalog = catalog.*;
+    const old_len = catalog_mod.catalog_len;
+    const old_name = pet_display_name;
+    const old_ready = thumbs_ready;
+    const old_built = thumbs_built;
+    defer {
+        env_home = old_home;
+        catalog.* = old_catalog;
+        catalog_mod.catalog_len = old_len;
+        pet_display_name = old_name;
+        thumbs_ready = old_ready;
+        thumbs_built = old_built;
+    }
+    const io = std.testing.io;
+    var temp = std.testing.tmpDir(.{});
+    defer temp.cleanup();
+    const home = try temp.dir.realPathFileAlloc(io, ".", std.testing.allocator);
+    defer std.testing.allocator.free(home);
+    env_home = home;
+    try temp.dir.createDirPath(io, ".petdex/pets/alpha");
+    try temp.dir.createDirPath(io, ".codex/pets/alpha");
+    try temp.dir.createDirPath(io, ".codex/pets/old-pet");
+    try temp.dir.createDirPath(io, ".petdex/pets/invalid name");
+    var model: Model = .{ .sheet_loaded = true, .frame_index = 3 };
+    @memcpy(model.pet_name[0..5], "alpha");
+    model.pet_name_len = 5;
+    thumbs_ready = @splat(true);
+    thumbs_built = max_catalog;
+    refreshCatalog(&model);
+    try std.testing.expectEqual(@as(usize, 2), catalog_mod.catalog_len);
+    try std.testing.expectEqualStrings("alpha", catalog[model.active_pet].slice());
+    try std.testing.expectEqualStrings(".petdex/pets", catalog[model.active_pet].rootSlice());
+    try std.testing.expectEqual(@as(usize, 0), thumbs_built);
+    for (thumbs_ready) |ready| try std.testing.expect(!ready);
+
+    try temp.dir.createDirPath(io, ".petdex/pets/new-pet");
+    try temp.dir.deleteTree(io, ".codex/pets/old-pet");
+    refreshCatalog(&model);
+    refreshCatalog(&model);
+    try std.testing.expectEqual(@as(usize, 2), catalog_mod.catalog_len);
+    try std.testing.expect(catalogIndexOf("new-pet") != null);
+    try std.testing.expect(catalogIndexOf("old-pet") == null);
+    try std.testing.expectEqualStrings("alpha", catalog[model.active_pet].slice());
+    try std.testing.expect(model.sheet_loaded);
+    try std.testing.expectEqual(@as(usize, 3), model.frame_index);
+
+    try temp.dir.deleteTree(io, ".petdex/pets/alpha");
+    try temp.dir.deleteTree(io, ".codex/pets/alpha");
+    refreshCatalog(&model);
+    try std.testing.expectEqual(@as(u32, max_catalog), model.active_pet);
+    try std.testing.expectEqualStrings("alpha", pet_display_name);
+    try std.testing.expect(catalogIndexOf("alpha") == null);
+    try std.testing.expect(model.sheet_loaded);
+
+    try temp.dir.createDirPath(io, ".codex/pets/alpha");
+    for (0..max_catalog + 1) |i| {
+        var path: [64]u8 = undefined;
+        try temp.dir.createDirPath(io, try std.fmt.bufPrint(&path, ".petdex/pets/pet-{d}", .{i}));
+    }
+    refreshCatalog(&model);
+    try std.testing.expectEqual(max_catalog, catalog_mod.catalog_len);
+    try std.testing.expectEqualStrings("alpha", catalog[model.active_pet].slice());
+    try std.testing.expectEqualStrings(".codex/pets", catalog[model.active_pet].rootSlice());
+
+    const before_install = catalog.*;
+    model.install.phase = .manifest;
+    try temp.dir.deleteTree(io, ".codex/pets/alpha");
+    refreshCatalog(&model);
+    try std.testing.expectEqualDeep(before_install, catalog.*);
+}
+
+test "settings paints an opaque page in both themes" {
+    for ([_]bool{ false, true }) |dark| {
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        var ui = AppUi.init(arena.allocator());
+        const model: Model = .{ .dark = dark };
+        const tokens = petdexTokens(&model);
+        var tree = try ui.finalizeWithTokens(petdexWindowView(&ui, &model, settings_window_label), tokens);
+        tree.root.frame = geometry.RectF.init(0, 0, 420, 680);
+        var commands: [4096]canvas.CanvasCommand = undefined;
+        var builder = canvas.Builder.init(&commands);
+        try canvas.emitWidgetTree(&builder, tree.root, tokens);
+        var painted_page = false;
+        for (builder.displayList().commands) |command| {
+            switch (command) {
+                .fill_rounded_rect => |fill| {
+                    if (fill.rect.width == 420 and fill.rect.height == 680) {
+                        try std.testing.expectEqualDeep(settingsBackground(&model), fill.fill.color);
+                        try std.testing.expectEqual(@as(f32, 1), fill.fill.color.a);
+                        painted_page = true;
+                    }
+                },
+                else => {},
+            }
+        }
+        try std.testing.expect(painted_page);
+        try std.testing.expectEqual(@as(f32, 0), tokens.colors.background.a);
+    }
 }
 
 test "a flock body reserves more than its badge is tall" {
