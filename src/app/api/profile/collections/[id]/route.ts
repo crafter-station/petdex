@@ -1,28 +1,21 @@
 import { NextResponse } from "next/server";
 
 import { auth } from "@clerk/nextjs/server";
-import { and, eq } from "drizzle-orm";
+import { and, eq, type SQLWrapper } from "drizzle-orm";
 
 import { canManageCreatorCollections } from "@/lib/collection-access";
+import {
+  normalizeCollectionPatch,
+  resolveCollectionCover,
+} from "@/lib/collection-input";
 import { revalidateCollectionTags } from "@/lib/db/cached-aggregates";
-import { db, schema } from "@/lib/db/client";
+import { db, executeAtomic, schema } from "@/lib/db/client";
 import { requireSameOrigin } from "@/lib/same-origin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const MAX_TITLE = 80;
-const MAX_DESCRIPTION = 280;
-
 type Params = { id: string };
-
-type PatchBody = {
-  title?: string;
-  description?: string;
-  externalUrl?: string | null;
-  coverPetSlug?: string | null;
-  petSlugs?: string[];
-};
 
 // Edit one of the caller's personal collections. Featured/admin
 // collections are NOT editable here even if owner_id matches — those
@@ -57,43 +50,20 @@ export async function PATCH(
     );
   }
 
-  let body: PatchBody;
+  let input: unknown;
   try {
-    body = (await req.json()) as PatchBody;
+    input = await req.json();
   } catch {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
+  const parsed = normalizeCollectionPatch(input);
+  if ("error" in parsed)
+    return NextResponse.json({ error: parsed.error }, { status: 400 });
+  const body = parsed.value;
+  const { petSlugs, ...patch } = body;
+  const membershipWrites: SQLWrapper[] = [];
 
-  const patch: Partial<typeof schema.petCollections.$inferInsert> = {};
-
-  if (body.title !== undefined) {
-    const t = body.title.trim();
-    if (t.length < 2 || t.length > MAX_TITLE) {
-      return NextResponse.json({ error: "title_length" }, { status: 400 });
-    }
-    patch.title = t;
-  }
-
-  if (body.description !== undefined) {
-    const d = body.description.trim();
-    if (d.length > MAX_DESCRIPTION) {
-      return NextResponse.json(
-        { error: "description_length" },
-        { status: 400 },
-      );
-    }
-    patch.description = d;
-  }
-
-  if (body.externalUrl !== undefined) {
-    const u = normalizeExternalUrl(body.externalUrl);
-    if (u === false) {
-      return NextResponse.json({ error: "invalid_url" }, { status: 400 });
-    }
-    patch.externalUrl = u;
-  }
-
-  if (body.petSlugs !== undefined) {
+  if (petSlugs !== undefined) {
     const approvedPets = await db
       .select({ slug: schema.submittedPets.slug })
       .from(schema.submittedPets)
@@ -104,26 +74,38 @@ export async function PATCH(
         ),
       );
     const allowedSlugs = new Set(approvedPets.map((p) => p.slug));
-    const petSlugs = unique(body.petSlugs).filter((s) => allowedSlugs.has(s));
-
-    await db
-      .delete(schema.petCollectionItems)
-      .where(eq(schema.petCollectionItems.collectionId, id));
-    if (petSlugs.length > 0) {
-      await db.insert(schema.petCollectionItems).values(
-        petSlugs.map((petSlug, index) => ({
-          collectionId: id,
-          petSlug,
-          position: index + 1,
-        })),
+    if (petSlugs.some((slug) => !allowedSlugs.has(slug))) {
+      return NextResponse.json({ error: "invalid_pet_slugs" }, { status: 400 });
+    }
+    if (body.coverPetSlug && !petSlugs.includes(body.coverPetSlug)) {
+      return NextResponse.json(
+        { error: "cover_not_in_collection" },
+        { status: 400 },
       );
     }
 
-    const cover =
-      body.coverPetSlug && petSlugs.includes(body.coverPetSlug)
-        ? body.coverPetSlug
-        : (petSlugs[0] ?? null);
-    patch.coverPetSlug = cover;
+    membershipWrites.push(
+      db
+        .delete(schema.petCollectionItems)
+        .where(eq(schema.petCollectionItems.collectionId, id)),
+    );
+    if (petSlugs.length > 0) {
+      membershipWrites.push(
+        db.insert(schema.petCollectionItems).values(
+          petSlugs.map((petSlug, index) => ({
+            collectionId: id,
+            petSlug,
+            position: index + 1,
+          })),
+        ),
+      );
+    }
+
+    patch.coverPetSlug = resolveCollectionCover(
+      petSlugs,
+      body.coverPetSlug,
+      collection.coverPetSlug,
+    );
   } else if (body.coverPetSlug !== undefined) {
     // Cover-only update — verify the slug is currently in the collection.
     const items = await db
@@ -144,11 +126,13 @@ export async function PATCH(
     return NextResponse.json({ error: "nothing_to_update" }, { status: 400 });
   }
 
-  patch.updatedAt = new Date();
-  await db
-    .update(schema.petCollections)
-    .set(patch)
-    .where(eq(schema.petCollections.id, id));
+  await executeAtomic([
+    db
+      .update(schema.petCollections)
+      .set({ ...patch, updatedAt: new Date() })
+      .where(eq(schema.petCollections.id, id)),
+    ...membershipWrites,
+  ]);
 
   await revalidateCollectionTags(collection.slug);
 
@@ -189,31 +173,4 @@ export async function DELETE(
   await revalidateCollectionTags(collection.slug);
 
   return NextResponse.json({ ok: true });
-}
-
-function unique(values: string[]): string[] {
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const value of values) {
-    const slug = value.trim().toLowerCase();
-    if (!slug || seen.has(slug)) continue;
-    seen.add(slug);
-    out.push(slug);
-  }
-  return out;
-}
-
-function normalizeExternalUrl(
-  value: string | null | undefined,
-): string | null | false {
-  const raw = (value ?? "").trim();
-  if (!raw) return null;
-  if (raw.length > 300) return false;
-  try {
-    const url = new URL(raw);
-    if (url.protocol !== "https:" && url.protocol !== "http:") return false;
-    return url.toString();
-  } catch {
-    return false;
-  }
 }

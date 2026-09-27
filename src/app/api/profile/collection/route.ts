@@ -1,14 +1,18 @@
 import { NextResponse } from "next/server";
 
 import { auth } from "@clerk/nextjs/server";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq, type SQLWrapper } from "drizzle-orm";
 
 import { canManageCreatorCollections } from "@/lib/collection-access";
+import {
+  normalizeCollectionPatch,
+  resolveCollectionCover,
+} from "@/lib/collection-input";
 import {
   invalidateCollectionBacklinks,
   revalidateCollectionTags,
 } from "@/lib/db/cached-aggregates";
-import { db, schema } from "@/lib/db/client";
+import { db, executeAtomic, schema } from "@/lib/db/client";
 import { validateProfileHandle } from "@/lib/profiles";
 import { requireSameOrigin } from "@/lib/same-origin";
 
@@ -16,187 +20,140 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const MAX_PETS = 24;
-const MAX_TITLE = 80;
-const MAX_DESCRIPTION = 280;
-
-type PatchBody = {
-  title?: string;
-  description?: string;
-  externalUrl?: string | null;
-  coverPetSlug?: string | null;
-  petSlugs?: string[];
-};
 
 export async function PATCH(req: Request): Promise<Response> {
   const csrf = requireSameOrigin(req);
   if (csrf) return csrf;
-
   const { userId } = await auth();
-  if (!userId) {
+  if (!userId)
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
-  if (!(await canManageCreatorCollections(userId))) {
+  if (!(await canManageCreatorCollections(userId)))
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
-  }
 
-  let body: PatchBody;
+  let input: unknown;
   try {
-    body = (await req.json()) as PatchBody;
+    input = await req.json();
   } catch {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
+  const parsed = normalizeCollectionPatch(input);
+  if ("error" in parsed)
+    return NextResponse.json({ error: parsed.error }, { status: 400 });
+  const { petSlugs, ...patch } = parsed.value;
+  if (Object.keys(parsed.value).length === 0)
+    return NextResponse.json({ error: "nothing_to_update" }, { status: 400 });
 
-  const title = (body.title ?? "").trim();
-  if (title.length < 2 || title.length > MAX_TITLE) {
-    return NextResponse.json({ error: "title_length" }, { status: 400 });
-  }
-
-  const description = (body.description ?? "").trim();
-  if (description.length > MAX_DESCRIPTION) {
-    return NextResponse.json({ error: "description_length" }, { status: 400 });
-  }
-
-  const externalUrl = normalizeExternalUrl(body.externalUrl);
-  if (externalUrl === false) {
-    return NextResponse.json({ error: "invalid_url" }, { status: 400 });
-  }
-
-  const approvedPets = await db
-    .select({ slug: schema.submittedPets.slug })
-    .from(schema.submittedPets)
-    .where(
-      and(
-        eq(schema.submittedPets.ownerId, userId),
-        eq(schema.submittedPets.status, "approved"),
-      ),
-    );
-  const allowedSlugs = new Set(approvedPets.map((pet) => pet.slug));
-  const petSlugs = unique(body.petSlugs ?? [])
-    .filter((slug) => allowedSlugs.has(slug))
-    .slice(0, MAX_PETS);
-  const coverPetSlug =
-    body.coverPetSlug && petSlugs.includes(body.coverPetSlug)
-      ? body.coverPetSlug
-      : (petSlugs[0] ?? null);
-
-  let [collection] = await db
+  const [collection] = await db
     .select()
     .from(schema.petCollections)
     .where(eq(schema.petCollections.ownerId, userId))
     .limit(1);
+  const oldItems = collection
+    ? await db
+        .select({ slug: schema.petCollectionItems.petSlug })
+        .from(schema.petCollectionItems)
+        .where(eq(schema.petCollectionItems.collectionId, collection.id))
+        .orderBy(asc(schema.petCollectionItems.position))
+    : [];
+  const oldSlugs = oldItems.map((row) => row.slug);
+  if (!collection && (!patch.title || !petSlugs))
+    return NextResponse.json(
+      { error: !patch.title ? "title_length" : "empty_pet_list" },
+      { status: 400 },
+    );
 
-  let oldFeaturedPetSlugs: string[] = [];
-  let shouldInvalidateCollectionBacklinks = false;
+  if (petSlugs !== undefined) {
+    const approvedPets = await db
+      .select({ slug: schema.submittedPets.slug })
+      .from(schema.submittedPets)
+      .where(
+        and(
+          eq(schema.submittedPets.ownerId, userId),
+          eq(schema.submittedPets.status, "approved"),
+        ),
+      );
+    const allowed = new Set(approvedPets.map((pet) => pet.slug));
+    if (petSlugs.some((slug) => !allowed.has(slug)))
+      return NextResponse.json({ error: "invalid_pet_slugs" }, { status: 400 });
+    if (
+      petSlugs.length > MAX_PETS &&
+      petSlugs.some((slug) => !oldSlugs.includes(slug))
+    )
+      return NextResponse.json(
+        { error: "collection_pet_limit" },
+        { status: 400 },
+      );
+    patch.coverPetSlug = resolveCollectionCover(
+      petSlugs,
+      patch.coverPetSlug,
+      collection?.coverPetSlug,
+    );
+  }
+  const members = petSlugs ?? oldSlugs;
+  if (patch.coverPetSlug && !members.includes(patch.coverPetSlug))
+    return NextResponse.json(
+      { error: "cover_not_in_collection" },
+      { status: 400 },
+    );
 
-  if (!collection) {
+  let saved: typeof schema.petCollections.$inferInsert;
+  let parentWrite: SQLWrapper;
+  if (collection) {
+    saved = { ...collection, ...patch, updatedAt: new Date() };
+    parentWrite = db
+      .update(schema.petCollections)
+      .set({ ...patch, updatedAt: saved.updatedAt })
+      .where(eq(schema.petCollections.id, collection.id));
+  } else {
     const profile = await db.query.userProfiles.findFirst({
       where: eq(schema.userProfiles.userId, userId),
     });
-    const slug = await collectionSlugForOwner(profile?.handle ?? title, userId);
-    const id = `col_${crypto.randomUUID().replace(/-/g, "").slice(0, 18)}`;
-    await db.insert(schema.petCollections).values({
-      id,
-      slug,
+    const title = patch.title ?? "";
+    saved = {
+      id: `col_${crypto.randomUUID().replace(/-/g, "").slice(0, 18)}`,
+      slug: await collectionSlugForOwner(profile?.handle ?? title, userId),
       title,
-      description,
+      description: patch.description ?? "",
+      externalUrl: patch.externalUrl ?? null,
+      coverPetSlug: patch.coverPetSlug ?? null,
       ownerId: userId,
-      externalUrl,
-      coverPetSlug,
       featured: false,
-    });
-    collection = {
-      id,
-      slug,
-      title,
-      description,
-      ownerId: userId,
-      externalUrl,
-      coverPetSlug,
-      featured: false,
-      createdAt: new Date(),
-      updatedAt: new Date(),
     };
-  } else {
-    if (collection.featured) {
-      const rows = await db
-        .select({ slug: schema.petCollectionItems.petSlug })
-        .from(schema.petCollectionItems)
-        .where(eq(schema.petCollectionItems.collectionId, collection.id));
-      oldFeaturedPetSlugs = rows.map((row) => row.slug);
-      shouldInvalidateCollectionBacklinks = true;
-    }
-
-    await db
-      .update(schema.petCollections)
-      .set({
-        title,
-        description,
-        externalUrl,
-        coverPetSlug,
-        updatedAt: new Date(),
-      })
-      .where(eq(schema.petCollections.id, collection.id));
+    parentWrite = db.insert(schema.petCollections).values(saved);
   }
-
-  await db
-    .delete(schema.petCollectionItems)
-    .where(eq(schema.petCollectionItems.collectionId, collection.id));
-
-  if (petSlugs.length > 0) {
-    await db.insert(schema.petCollectionItems).values(
-      petSlugs.map((petSlug, index) => ({
-        collectionId: collection.id,
-        petSlug,
-        position: index + 1,
-      })),
+  const writes: [SQLWrapper, ...SQLWrapper[]] = [parentWrite];
+  if (petSlugs !== undefined) {
+    writes.push(
+      db
+        .delete(schema.petCollectionItems)
+        .where(eq(schema.petCollectionItems.collectionId, saved.id)),
+    );
+    writes.push(
+      db.insert(schema.petCollectionItems).values(
+        petSlugs.map((petSlug, index) => ({
+          collectionId: saved.id,
+          petSlug,
+          position: index + 1,
+        })),
+      ),
     );
   }
-
-  if (shouldInvalidateCollectionBacklinks) {
-    await invalidateCollectionBacklinks(...oldFeaturedPetSlugs, ...petSlugs);
-  }
-
-  await revalidateCollectionTags(collection.slug);
-
+  await executeAtomic(writes);
+  if (collection?.featured)
+    await invalidateCollectionBacklinks(...oldSlugs, ...members);
+  await revalidateCollectionTags(saved.slug);
   return NextResponse.json({
     ok: true,
     collection: {
-      id: collection.id,
-      slug: collection.slug,
-      title,
-      description,
-      externalUrl,
-      coverPetSlug,
-      petSlugs,
+      id: saved.id,
+      slug: saved.slug,
+      title: saved.title,
+      description: saved.description,
+      externalUrl: saved.externalUrl,
+      coverPetSlug: saved.coverPetSlug,
+      petSlugs: members,
     },
   });
-}
-
-function unique(values: string[]): string[] {
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const value of values) {
-    const slug = value.trim().toLowerCase();
-    if (!slug || seen.has(slug)) continue;
-    seen.add(slug);
-    out.push(slug);
-  }
-  return out;
-}
-
-function normalizeExternalUrl(
-  value: string | null | undefined,
-): string | null | false {
-  const raw = (value ?? "").trim();
-  if (!raw) return null;
-  if (raw.length > 300) return false;
-  try {
-    const url = new URL(raw);
-    if (url.protocol !== "https:" && url.protocol !== "http:") return false;
-    return url.toString();
-  } catch {
-    return false;
-  }
 }
 
 async function collectionSlugForOwner(

@@ -5,6 +5,7 @@
 import "server-only";
 
 import { neon } from "@neondatabase/serverless";
+import type { SQLWrapper } from "drizzle-orm";
 import { drizzle as drizzleNeon } from "drizzle-orm/neon-http";
 import { drizzle as drizzlePostgres } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
@@ -74,3 +75,19 @@ if (IS_MOCK) {
 
 export const db = buildClient();
 export { schema };
+
+export async function executeAtomic(
+  queries: [SQLWrapper, ...SQLWrapper[]],
+): Promise<void> {
+  if (typeof db.batch === "function") {
+    const [first, ...rest] = queries;
+    await db.batch([
+      db.execute(first.getSQL()),
+      ...rest.map((query) => db.execute(query.getSQL())),
+    ]);
+    return;
+  }
+  await db.transaction(async (tx) => {
+    for (const query of queries) await tx.execute(query.getSQL());
+  });
+}
