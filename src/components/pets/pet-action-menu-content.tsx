@@ -20,6 +20,8 @@ import {
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 
+import { downloadPetZip } from "@/lib/download-pet-zip";
+
 import { CodexLogo } from "@/components/download/codex-logo";
 import {
   DropdownMenuItem,
@@ -139,12 +141,13 @@ export function PetActionMenuContent({
     }
   }, [pet.displayName, pageUrl, onOpenChange]);
 
-  const onZipClick = useCallback(() => {
+  const onZipDownload = useCallback(() => {
     void fetch(`/api/pets/${pet.slug}/track-zip`, { method: "POST" }).catch(
       () => {},
     );
     onOpenChange(false);
-  }, [pet.slug, onOpenChange]);
+    if (pet.zipUrl) void downloadPetZip(pet.zipUrl, pet.slug);
+  }, [pet.slug, pet.zipUrl, onOpenChange]);
 
   const onDelete = useCallback(async () => {
     if (deleting) return;
@@ -319,19 +322,7 @@ export function PetActionMenuContent({
         {pet.zipUrl ? (
           <>
             <DropdownMenuSeparator />
-            <DropdownMenuItem
-              render={
-                // biome-ignore lint/a11y/useAnchorContent: content is provided via DropdownMenuItem children (Base UI render prop pattern)
-                <a
-                  href={pet.zipUrl}
-                  download
-                  target="_blank"
-                  rel="noreferrer"
-                />
-              }
-              onClick={onZipClick}
-              className="gap-2.5"
-            >
+            <DropdownMenuItem onClick={onZipDownload} className="gap-2.5">
               <Download className="size-4" />
               <span className="flex-1">{t("downloadZip")}</span>
             </DropdownMenuItem>
