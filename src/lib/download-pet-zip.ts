@@ -19,6 +19,7 @@ export async function downloadPetZip(
 async function fetchZipObjectUrl(zipUrl: string): Promise<string | null> {
   try {
     const response = await fetch(zipUrl, {
+      cache: "reload",
       signal: AbortSignal.timeout(30_000),
     });
     if (!response.ok) return null;
