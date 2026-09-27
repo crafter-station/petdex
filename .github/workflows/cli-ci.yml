@@ -63,7 +63,9 @@ jobs:
           Write-Host "This Windows job still verifies build, typecheck, npm pack, and npx.cmd execution for the packaged CLI."
 
       - name: Verify built binary
-        run: node dist/petdex.js --version
+        run: |
+          node dist/petdex.js --version
+          node scripts/submit-smoke.mjs
 
       - name: Verify npm package contents
         run: npm pack --silent
