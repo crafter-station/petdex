@@ -1,0 +1,25 @@
+diff --git a/src/platform/macos/appkit_host.m b/src/platform/macos/appkit_host.m
+index d33f1f9..c43f3bc 100644
+--- a/src/platform/macos/appkit_host.m
++++ b/src/platform/macos/appkit_host.m
+@@ -75,0 +76,8 @@
++static void NativeSdkActivateApplication(void) {
++    if (@available(macOS 14.0, *)) {
++        [NSApp activate];
++    } else {
++        [NSApp activateIgnoringOtherApps:YES];
++    }
++}
++
+@@ -6703 +6711 @@ - (BOOL)createWindowWithId:(uint64_t)windowId title:(NSString *)title label:(NSS
+-            [NSApp activate];
++            NativeSdkActivateApplication();
+@@ -6727 +6735 @@ - (void)showDeferredWindowIfPending:(uint64_t)windowId reason:(const char *)reas
+-        [NSApp activate];
++        NativeSdkActivateApplication();
+@@ -6823 +6831 @@ - (void)focusWindowWithId:(uint64_t)windowId {
+-    [NSApp activate];
++    NativeSdkActivateApplication();
+@@ -8434 +8442 @@ - (void)runWithCallback:(native_sdk_appkit_event_callback_t)callback context:(vo
+-        [NSApp activate];
++        NativeSdkActivateApplication();

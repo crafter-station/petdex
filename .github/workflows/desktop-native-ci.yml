@@ -172,6 +172,10 @@ jobs:
         shell: bash
         run: scripts/patch-native-sdk.sh
 
+      - name: Verify macOS activation compatibility
+        if: matrix.platform == 'macos'
+        run: python3 packages/petdex-desktop-native/tests/macos_activation_test.py
+
       - name: Install Zig 0.16.0
         uses: mlugg/setup-zig@v2
         with:
