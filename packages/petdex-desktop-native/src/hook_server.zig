@@ -1184,6 +1184,21 @@ pub const Mailbox = struct {
         }
     }
 
+    pub fn dropBubbleIfCurrent(self: *Mailbox, focused: *const Bubble) bool {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        for (self.bubbles[0..self.bubbles_len], 0..) |*bubble, i| {
+            if (!bubble.sameIdentity(focused)) continue;
+            if (bubble.counter != focused.counter) return false;
+            const last = self.bubbles_len - 1;
+            if (i != last) self.bubbles[i] = self.bubbles[last];
+            self.bubbles[last] = .{};
+            self.bubbles_len = last;
+            return true;
+        }
+        return true;
+    }
+
     pub fn clearBubbles(self: *Mailbox) void {
         self.mutex.lock();
         defer self.mutex.unlock();

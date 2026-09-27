@@ -3125,10 +3125,7 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
                 // canned (#557's "pet" interaction).
                 if (isTap(now - model.press_ms, release_x - model.press_x, release_y - model.press_y)) {
                     model.sample_len = 0;
-                    if (newestBubble(model)) |bubble| {
-                        const focused = if (env_home) |home| plat.activateHerdrPane(home, bubble.herdrPaneSlice()) else false;
-                        if (!focused) _ = plat.activateOriginApplication(bubble.origin_app, bubble.ttySlice(), bubble.cwdSlice());
-                    }
+                    if (focusNewestBubble(model, activateBubbleOrigin)) syncBubbleWindow(model, fx);
                     model.pat_flip = !model.pat_flip;
                     applyState(model, if (model.pat_flip) .jumping else .waving, pat_react_ms, fx);
                     return;
@@ -3997,6 +3994,35 @@ fn updateBubbleStack(model: *Model, cursor_x: f64, cursor_y: f64, now_ms: i64, f
 fn newestBubble(model: *const Model) ?*const hook_server.Bubble {
     if (model.bubbles_len == 0) return null;
     return &model.bubbles[newestOf(model.bubbles[0..model.bubbles_len])];
+}
+
+fn activateBubbleOrigin(bubble: *const hook_server.Bubble) bool {
+    if (env_home) |home| {
+        if (plat.activateHerdrPane(home, bubble.herdrPaneSlice())) return true;
+    }
+    return plat.activateOriginApplication(bubble.origin_app, bubble.ttySlice(), bubble.cwdSlice());
+}
+
+fn focusNewestBubble(model: *Model, activate: *const fn (*const hook_server.Bubble) bool) bool {
+    const bubble = (newestBubble(model) orelse return false).*;
+    if (!activate(&bubble)) return false;
+    if (!hook_server.mailbox.dropBubbleIfCurrent(&bubble)) return false;
+    for (model.bubbles[0..model.bubbles_len], 0..) |*current, slot| {
+        if (!current.sameIdentity(&bubble) or current.counter != bubble.counter) continue;
+        for (slot..model.bubbles_len - 1) |i| {
+            model.bubbles[i] = model.bubbles[i + 1];
+            model.bubble_expires_at_ms[i] = model.bubble_expires_at_ms[i + 1];
+        }
+        model.bubbles_len -= 1;
+        model.bubbles[model.bubbles_len] = .{};
+        model.bubble_expires_at_ms[model.bubbles_len] = -1;
+        model.bubble_hover_since_ms = -1;
+        model.bubble_expansion = 0;
+        model.bubble_expansion_target = 0;
+        model.bubble_above_blocked = false;
+        return true;
+    }
+    return false;
 }
 
 fn clearBubble(model: *Model) void {
@@ -6862,4 +6888,101 @@ test "deadline reconciliation matches the full bubble identity" {
     try std.testing.expectEqual(@as(i64, 6_000), model.bubble_expires_at_ms[0]);
     try std.testing.expectEqual(@as(i64, 5_000), model.bubble_expires_at_ms[1]);
     try std.testing.expectEqual(@as(i64, 4_000), model.bubble_expires_at_ms[2]);
+}
+
+test "successful focus clears only the newest exact conversation" {
+    hook_server.mailbox.clearBubbles();
+    defer hook_server.mailbox.clearBubbles();
+    _ = hook_server.mailbox.setBubbleWithContext("same", "local", "claude-code", "", .terminal, "", "", "", "", false, true);
+    _ = hook_server.mailbox.setBubbleWithContext("same", "remote", "claude-code", "", .terminal, "", "", "server", "", true, true);
+    _ = hook_server.mailbox.setBubbleWithContext("same", "other agent", "codex", "", .terminal, "", "", "", "", false, false);
+    _ = hook_server.mailbox.setBubbleWithContext("same", "newest local", "claude-code", "", .terminal, "", "", "", "", false, true);
+    var model: Model = .{};
+    model.bubbles_len = hook_server.mailbox.takeBubbles(&model.bubbles).?;
+    model.bubble_expires_at_ms[0..3].* = .{ -1, 2000, 3000 };
+    const Focus = struct {
+        fn activate(bubble: *const hook_server.Bubble) bool {
+            return std.mem.eql(u8, bubble.text[0..bubble.text_len], "newest local");
+        }
+    };
+    try std.testing.expect(focusNewestBubble(&model, Focus.activate));
+    try std.testing.expectEqual(@as(usize, 2), model.bubbles_len);
+    try std.testing.expectEqualStrings("remote", model.bubbles[0].text[0..model.bubbles[0].text_len]);
+    try std.testing.expectEqualStrings("other agent", model.bubbles[1].text[0..model.bubbles[1].text_len]);
+    try std.testing.expectEqualSlices(i64, &.{ 2000, 3000, -1 }, model.bubble_expires_at_ms[0..3]);
+    try std.testing.expectEqual(@as(usize, 2), hook_server.mailbox.bubbles_len);
+    _ = hook_server.mailbox.setBubble("third", "next", "codex", "", false);
+    var drained: [hook_server.max_bubbles]hook_server.Bubble = undefined;
+    const count = hook_server.mailbox.takeBubbles(&drained).?;
+    for (drained[0..count]) |*bubble| {
+        try std.testing.expect(!std.mem.eql(u8, bubble.text[0..bubble.text_len], "newest local"));
+    }
+}
+
+test "failed focus preserves the bubble and its deadline" {
+    hook_server.mailbox.clearBubbles();
+    defer hook_server.mailbox.clearBubbles();
+    _ = hook_server.mailbox.setBubble("retry", "keep", "codex", "", false);
+    var model: Model = .{};
+    model.bubbles_len = hook_server.mailbox.takeBubbles(&model.bubbles).?;
+    model.bubble_expires_at_ms[0] = 1234;
+    const Focus = struct {
+        fn activate(_: *const hook_server.Bubble) bool {
+            return false;
+        }
+    };
+    try std.testing.expect(!focusNewestBubble(&model, Focus.activate));
+    try std.testing.expectEqual(@as(usize, 1), model.bubbles_len);
+    try std.testing.expectEqualStrings("keep", model.bubbles[0].text[0..model.bubbles[0].text_len]);
+    try std.testing.expectEqual(@as(i64, 1234), model.bubble_expires_at_ms[0]);
+    try std.testing.expectEqual(@as(usize, 1), hook_server.mailbox.bubbles_len);
+}
+
+test "successful focus of the last bubble makes its window inactive" {
+    hook_server.mailbox.clearBubbles();
+    defer hook_server.mailbox.clearBubbles();
+    _ = hook_server.mailbox.setBubble("only", "done", "codex", "", false);
+    var model: Model = .{};
+    model.bubbles_len = hook_server.mailbox.takeBubbles(&model.bubbles).?;
+    model.bubble_expires_at_ms[0] = 1234;
+    model.bubble_expansion = 1;
+    const Focus = struct {
+        fn activate(_: *const hook_server.Bubble) bool {
+            return true;
+        }
+    };
+    try std.testing.expect(focusNewestBubble(&model, Focus.activate));
+    try std.testing.expect(!bubbleActive(&model));
+    try std.testing.expectEqual(@as(i64, -1), model.bubble_expires_at_ms[0]);
+    try std.testing.expectEqual(@as(f32, 0), model.bubble_expansion);
+    try std.testing.expectEqual(@as(usize, 0), hook_server.mailbox.bubbles_len);
+}
+
+test "activity arriving during focus survives dismissal" {
+    hook_server.mailbox.clearBubbles();
+    defer hook_server.mailbox.clearBubbles();
+    _ = hook_server.mailbox.setBubble("live", "old", "codex", "", false);
+    var model: Model = .{};
+    model.bubbles_len = hook_server.mailbox.takeBubbles(&model.bubbles).?;
+    const Focus = struct {
+        fn activate(_: *const hook_server.Bubble) bool {
+            _ = hook_server.mailbox.setBubble("live", "new activity", "codex", "", true);
+            return true;
+        }
+    };
+    try std.testing.expect(!focusNewestBubble(&model, Focus.activate));
+    try std.testing.expectEqual(@as(usize, 1), model.bubbles_len);
+    model.bubbles_len = hook_server.mailbox.takeBubbles(&model.bubbles).?;
+    try std.testing.expectEqual(@as(usize, 1), model.bubbles_len);
+    try std.testing.expectEqualStrings("new activity", model.bubbles[0].text[0..model.bubbles[0].text_len]);
+}
+
+test "empty stack does not activate an application" {
+    var model: Model = .{};
+    const Focus = struct {
+        fn activate(_: *const hook_server.Bubble) bool {
+            unreachable;
+        }
+    };
+    try std.testing.expect(!focusNewestBubble(&model, Focus.activate));
 }
