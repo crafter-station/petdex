@@ -367,7 +367,7 @@ pub fn writeArgv(
         "test -f \"$tmp\" && cat >> \"$tmp\"";
     const finish = if (last_chunk)
         (if (executable)
-            "chmod 755 \"$tmp\" && mv -f \"$tmp\" \"$target\""
+            "test ! -d \"$target\" && chmod 755 \"$tmp\" && mv -f \"$tmp\" \"$target\""
         else
             "chmod 600 \"$tmp\" && mv -f \"$tmp\" \"$target\"")
     else
@@ -726,4 +726,35 @@ test "chunkCount splits at the stdin budget" {
     // The opencode plugin must stay chunkable: the whole reason the
     // append form exists.
     try t.expectEqual(@as(usize, 3), chunkCount(8301));
+}
+
+test "writeback preserves unrelated executable targets and relocated configs" {
+    if (builtin.os.tag == .windows or detect() == null) return;
+    const fixture = ".zig-cache/remote-writeback-symlinks";
+    defer _ = plat.deleteTree(fixture);
+    const cases = .{
+        .{ true, "printf keep > \"$fixture/original\"; ln -s original \"$fixture/helper\"", "test ! -L \"$fixture/helper\"; test \"$(cat \"$fixture/original\")\" = keep; test \"$(cat \"$fixture/helper\")\" = replacement", false },
+        .{ false, "printf keep > \"$fixture/original\"; ln -s original \"$fixture/helper\"", "test -L \"$fixture/helper\"; test \"$(cat \"$fixture/original\")\" = replacement", false },
+        .{ true, "mkdir -p \"$fixture/original\"; ln -s original \"$fixture/helper\"", "test -L \"$fixture/helper\"; test -z \"$(ls -A \"$fixture/original\")\"; test ! -e \"$fixture/helper.petdex-tmp-rogue\"", true },
+    };
+    var scope = plat.Scope.init();
+    defer scope.deinit();
+    inline for (cases) |case| {
+        _ = plat.deleteTree(fixture);
+        var buf: [max_argv][]const u8 = undefined;
+        var scratch: Scratch = .{};
+        const argv = writeArgv(&buf, &scratch, &test_remote, fixture ++ "/helper", true, true, case[0]).?;
+        const script = "set -eu; fixture=$1; mkdir -p \"$fixture\"; " ++ case[1] ++ "; " ++
+            (if (case[3]) "if printf replacement | /bin/sh -c \"$2\"; then exit 1; fi; " else "printf replacement | /bin/sh -c \"$2\"; ") ++ case[2];
+        const result = try std.process.run(t.allocator, scope.io(), .{
+            .argv = &.{ "/bin/sh", "-c", script, "petdex-writeback-test", fixture, argv[argv.len - 1] },
+            .stdout_limit = .limited(4096),
+            .stderr_limit = .limited(4096),
+        });
+        defer t.allocator.free(result.stdout);
+        defer t.allocator.free(result.stderr);
+        try t.expect(result.term == .exited);
+        if (result.term.exited != 0) std.debug.print("writeback fixture failed: {s}\n{s}", .{ case[1], result.stderr });
+        try t.expectEqual(@as(u8, 0), result.term.exited);
+    }
 }

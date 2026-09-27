@@ -839,6 +839,7 @@ jobs:
             sleep 1
           done
           "${REMOTE[@]}" true
+          "${REMOTE[@]}" 'mkdir -p ~/.petdex/runtime && chmod 777 ~/.petdex ~/.petdex/runtime'
 
           # The config the app reads at boot. opencode + codex cover both
           # writeback shapes; Hermes also exercises a custom remote home and
@@ -880,6 +881,7 @@ jobs:
           done
           kill -0 "$APP_PID" || { echo "app died during remote sync"; cat remote.log; exit 1; }
           echo "=== app log ==="; cat remote.log
+          "${REMOTE[@]}" 'test "$(stat -c %a ~/.petdex)" = 700 && test "$(stat -c %a ~/.petdex/runtime)" = 700 && test "$(stat -c %a ~/.petdex/runtime/update-token)" = 600'
 
           # The pushed opencode plugin is byte-identical to the asset: it
           # POSTs directly and needs no remote-side helper.
