@@ -15,7 +15,9 @@ describe("downloadPetZip", () => {
       await downloadPetZip(ZIP_URL, "roxy-2");
 
       expect(env.fetched).toEqual([ZIP_URL]);
-      expect(env.clicks).toEqual([{ href: OBJECT_URL, filename: "roxy-2.zip" }]);
+      expect(env.clicks).toEqual([
+        { href: OBJECT_URL, filename: "roxy-2.zip" },
+      ]);
       expect(env.revoked).toEqual([]);
 
       env.runPendingTimers();
@@ -86,21 +88,19 @@ function installBrowserEnv(
     createElement: () => anchor,
     body: { appendChild: () => {} },
   });
-  const restoreFetch = installGlobal(
-    "fetch",
-    (async (input: RequestInfo | URL) => {
-      const url = String(input);
-      fetched.push(url);
-      return handler(url);
-    }) as typeof globalThis.fetch,
-  );
-  const restoreTimeout = installGlobal(
-    "setTimeout",
-    ((callback: () => void) => {
-      timers.push(callback);
-      return 0;
-    }) as unknown as typeof setTimeout,
-  );
+  const restoreFetch = installGlobal("fetch", (async (
+    input: RequestInfo | URL,
+  ) => {
+    const url = String(input);
+    fetched.push(url);
+    return handler(url);
+  }) as typeof globalThis.fetch);
+  const restoreTimeout = installGlobal("setTimeout", ((
+    callback: () => void,
+  ) => {
+    timers.push(callback);
+    return 0;
+  }) as unknown as typeof setTimeout);
   const restoreObjectUrls = installObjectUrls(revoked);
 
   return {
