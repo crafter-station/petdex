@@ -15,6 +15,8 @@ import path from "node:path";
 import OpenAI from "openai";
 import sharp from "sharp";
 
+import { generateMiniMaxReferenceImageFromEnv } from "./minimax-image-generation";
+
 const OUTPUT_PATH = path.join(
   process.cwd(),
   "public",
@@ -35,6 +37,23 @@ Mood: collect-them-all energy. Like a Pokémon Red box art reimagined for cute p
 Aspect ratio 16:9. Sharp pixel detail. Empty top-left corner area for overlay text.`;
 
 async function main() {
+  const miniMaxBuffer = await generateMiniMaxReferenceImageFromEnv(
+    PROMPT,
+    "16:9",
+  );
+  if (miniMaxBuffer) {
+    console.log(
+      `[banner] received ${miniMaxBuffer.length} bytes from MiniMax, transcoding to webp...`,
+    );
+    const webp = await sharp(miniMaxBuffer)
+      .resize(1280, 720, { fit: "cover", kernel: sharp.kernel.lanczos3 })
+      .webp({ quality: 88 })
+      .toBuffer();
+    await writeFile(OUTPUT_PATH, webp);
+    console.log(`[banner] wrote ${OUTPUT_PATH} (${webp.length} bytes)`);
+    return;
+  }
+
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     throw new Error("OPENAI_API_KEY is not set");
