@@ -5076,6 +5076,7 @@ const app_menus = [_]native_sdk.platform.Menu{.{
 const PetdexApp = native_sdk.UiApp(Model, Msg);
 
 pub fn main(init: std.process.Init) !void {
+    plat.process_environ = init.minimal.environ;
     // Windows has no HOME. Everything the app keeps per-user hangs off
     // this one lookup (the pet catalog, ~/.petdex/runtime, the settings
     // file), so reading only HOME made a Windows build behave like a
