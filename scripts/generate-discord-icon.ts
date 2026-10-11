@@ -11,6 +11,8 @@ import path from "node:path";
 import OpenAI from "openai";
 import sharp from "sharp";
 
+import { generateMiniMaxReferenceImageFromEnv } from "./minimax-image-generation";
+
 const OUTPUT_PATH = path.join(
   process.cwd(),
   "public",
@@ -29,6 +31,20 @@ Style: 16-bit chibi pixel art, clean outlines, friendly mascot energy, modern fl
 No text, no letters, no watermarks, no UI chrome.`;
 
 async function main() {
+  const miniMaxBuffer = await generateMiniMaxReferenceImageFromEnv(
+    PROMPT,
+    "1:1",
+  );
+  if (miniMaxBuffer) {
+    console.log(
+      `[icon] received ${miniMaxBuffer.length} bytes from MiniMax, normalizing to PNG...`,
+    );
+    const png = await sharp(miniMaxBuffer).resize(1024, 1024).png().toBuffer();
+    await writeFile(OUTPUT_PATH, png);
+    console.log(`[icon] wrote ${OUTPUT_PATH} (${png.length} bytes)`);
+    return;
+  }
+
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error("OPENAI_API_KEY is not set");
 
