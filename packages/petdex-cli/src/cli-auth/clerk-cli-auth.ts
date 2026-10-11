@@ -145,7 +145,26 @@ export class ClerkCliAuth {
       });
       await this.setJson("user", user);
 
+      // Last, and only once every step that can still fail has succeeded.
+      // The browser is holding its connection open until this call, so
+      // answering earlier would report success for a login that then failed
+      // to save its credentials — the same mismatch this deferral exists to
+      // remove, just moved one step later.
+      server.respond({ kind: "success" });
       return { tokens, user };
+    } catch (error) {
+      // Also reached when the opener rejects after the browser has already
+      // delivered its callback, which is the case where only this call can
+      // tell the reader anything. A no-op if the response was already sent.
+      const reason = (error as { code?: unknown }).code;
+      server.respond({
+        kind: "error",
+        reason:
+          reason === "userinfo" || reason === "storage"
+            ? (`${reason}_failed` as const)
+            : "token_exchange_failed",
+      });
+      throw error;
     } finally {
       server.close();
     }
@@ -176,8 +195,18 @@ export class ClerkCliAuth {
   }
 
   async whoami(): Promise<UserInfo | null> {
+    // The cached profile is not evidence of a usable session: `logout` clears
+    // both records through Promise.allSettled, so a half-cleared store can
+    // leave the profile behind with no tokens next to it. Reporting that as
+    // "signed in" hides the problem until some later command 401s, which is
+    // the one place the user cannot act on it. Confirming the credential
+    // first turns a confusing failure into a prompt to sign in again.
     const cachedUser = await this.getJson<UserInfo>("user");
-    if (cachedUser) return cachedUser;
+    if (cachedUser) {
+      const accessToken = await this.getAccessToken();
+      if (!accessToken) return null;
+      return cachedUser;
+    }
 
     const accessToken = await this.getAccessToken();
     if (!accessToken) return null;

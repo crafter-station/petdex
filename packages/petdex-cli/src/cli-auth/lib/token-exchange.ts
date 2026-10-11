@@ -1,3 +1,4 @@
+import { authMessages } from "../../i18n/auth-messages.js";
 import type { TokenSet, UserInfo } from "../types.js";
 import { ClerkCliAuthError } from "../types.js";
 
@@ -29,6 +30,16 @@ interface OAuthTokenResponse {
   scope?: unknown;
   token_type?: unknown;
 }
+
+/**
+ * How long either network call may take before it is abandoned.
+ *
+ * Without this, a stalled connection leaves `login()` waiting forever: the
+ * callback server's own timeout answers the browser, but nothing breaks the
+ * request the CLI is sitting on. The smoke script in `scripts/` already
+ * bounded its authorize probe this way.
+ */
+const REQUEST_TIMEOUT_MS = 15_000;
 
 function endpoint(issuer: string, path: string): string {
   return `${issuer.replace(/\/+$/, "")}${path}`;
@@ -88,11 +99,12 @@ async function requestTokens(
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: body.toString(),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch (error) {
     throw new ClerkCliAuthError(
       "token_exchange",
-      `Token request failed: ${(error as Error).message}`,
+      authMessages().tokenRequestFailed((error as Error).message),
     );
   }
 
@@ -108,10 +120,7 @@ async function requestTokens(
   if (!response.ok) {
     throw new ClerkCliAuthError(
       "token_exchange",
-      messageFromBody(
-        parsed,
-        `Token request failed with HTTP ${response.status}.`,
-      ),
+      messageFromBody(parsed, authMessages().tokenRequestHttp(response.status)),
     );
   }
 
@@ -158,11 +167,12 @@ export async function fetchUserInfo(params: UserInfoParams): Promise<UserInfo> {
   try {
     response = await fetch(endpoint(params.issuer, "/oauth/userinfo"), {
       headers: { Authorization: `Bearer ${params.accessToken}` },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch (error) {
     throw new ClerkCliAuthError(
       "userinfo",
-      `Userinfo request failed: ${(error as Error).message}`,
+      authMessages().userinfoRequestFailed((error as Error).message),
     );
   }
 
@@ -180,7 +190,7 @@ export async function fetchUserInfo(params: UserInfoParams): Promise<UserInfo> {
       "userinfo",
       messageFromBody(
         parsed,
-        `Userinfo request failed with HTTP ${response.status}.`,
+        authMessages().userinfoRequestHttp(response.status),
       ),
     );
   }
