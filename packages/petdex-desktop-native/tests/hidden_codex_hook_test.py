@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 
 binary = Path(sys.argv[1]).resolve()
 if not binary.is_file():
@@ -55,6 +56,11 @@ try:
                 input=json.dumps(payload), text=True, env=environment,
                 cwd=directory, check=True, timeout=5, capture_output=True,
             )
+            # The runner exits once the request is written, without reading
+            # a response, so the handler thread may append after it returns.
+            deadline = time.monotonic() + 2
+            while len(requests) == before and time.monotonic() < deadline:
+                time.sleep(0.02)
             return requests[before:]
 
         def journal_events():
