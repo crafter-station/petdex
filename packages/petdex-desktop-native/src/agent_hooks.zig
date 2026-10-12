@@ -3372,6 +3372,17 @@ test "opencode plugin carries session ids for tools and lifecycle events" {
     try t.expect(std.mem.indexOf(u8, opencode_plugin, "const titleCache = new Map") != null);
 }
 
+test "opencode plugin exports both the V1 server() and V2 setup() entrypoints" {
+    // opencode 2.x only loads a default export shaped { id, setup }; the
+    // V1 function export is ignored and the pet never hears from opencode.
+    try t.expect(std.mem.indexOf(u8, opencode_plugin, "id: \"petdex\"") != null);
+    try t.expect(std.mem.indexOf(u8, opencode_plugin, "server: PetdexPlugin") != null);
+    try t.expect(std.mem.indexOf(u8, opencode_plugin, "ctx.tool.hook(\"execute.before\"") != null);
+    try t.expect(std.mem.indexOf(u8, opencode_plugin, "ctx.tool.hook(\"execute.after\"") != null);
+    try t.expect(std.mem.indexOf(u8, opencode_plugin, "ctx.event.subscribe(") != null);
+    try t.expect(std.mem.indexOf(u8, opencode_plugin, "event.sessionID") != null);
+}
+
 test "hermesEventKey names only supported Hermes events" {
     try t.expectEqualStrings("pre_tool_call", hermesEventKey("  pre_tool_call:").?);
     try t.expectEqualStrings("pre_llm_call", hermesEventKey("  pre_llm_call:").?);

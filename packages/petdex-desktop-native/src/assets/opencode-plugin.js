@@ -200,20 +200,18 @@ async function notify({ state, duration, text, title, busy, sessionId, status, m
   ]);
 }
 
-// opencode's plugin API: the export IS an async function receiving
-// the plugin context and returning the hooks object. The client gives
-// us opencode's own LLM-generated session titles for the bubble.
-const PetdexPlugin = async ({ client }) => {
+// Session titles: both plugin APIs cache opencode's own LLM-generated
+// titles for the bubble, they only differ in how a title is fetched.
+function titleTracker(fetchTitle) {
   const titleCache = new Map();
   const clippedTitle = (title) =>
     typeof title === "string" && title.trim().length > 0
       ? (title.trim().length > 60 ? title.trim().slice(0, 59) + "\u2026" : title.trim())
       : null;
   async function sessionTitle(sessionID) {
-    if (!sessionID || !client) return titleCache.get(sessionID) || null;
+    if (!sessionID || !fetchTitle) return titleCache.get(sessionID) || null;
     try {
-      const res = await client.session.get({ path: { id: sessionID } });
-      const title = clippedTitle(res?.data?.title);
+      const title = clippedTitle(await fetchTitle(sessionID));
       if (title) titleCache.set(sessionID, title);
     } catch {
       // Hook-server silence: a missing title never stains the agent.
@@ -235,6 +233,50 @@ const PetdexPlugin = async ({ client }) => {
       ...originMetadata(),
     }, token);
   }
+  return { sessionTitle, syncServerTitle };
+}
+
+async function handleLifecycleEvent(event, { sessionTitle, syncServerTitle }) {
+  const info = event?.properties?.info;
+  const sessionId = event?.properties?.sessionID ?? info?.id;
+  if (typeof sessionId !== "string" || sessionId.length === 0) return;
+  if (event.type === "session.updated" || event.type === "session.created") {
+    await syncServerTitle(sessionId, info?.title);
+  } else if (event.type === "session.idle") {
+    await notify({
+      state: "waving",
+      duration: 1500,
+      text: "Done.",
+      title: await sessionTitle(sessionId),
+      busy: false,
+      sessionId,
+      status: "completed",
+      messageKind: "lifecycle",
+    });
+  } else if (event.type === "session.error") {
+    await notify({
+      state: "failed",
+      duration: 2500,
+      text: "OpenCode hit an error.",
+      title: await sessionTitle(sessionId),
+      busy: false,
+      sessionId,
+      status: "failed",
+      messageKind: "lifecycle",
+    });
+  }
+}
+
+// opencode V1 plugin API: an async function receiving the plugin context
+// and returning the hooks object. The client gives us opencode's own
+// LLM-generated session titles for the bubble.
+const PetdexPlugin = async ({ client }) => {
+  const titles = titleTracker(async (sessionID) => {
+    if (!client) return null;
+    const res = await client.session.get({ path: { id: sessionID } });
+    return res?.data?.title;
+  });
+  const { sessionTitle } = titles;
   return {
     "tool.execute.before": async (input, output) => notify({
       state: "running",
@@ -254,38 +296,63 @@ const PetdexPlugin = async ({ client }) => {
       status: "running",
       messageKind: "tool",
     }),
-    event: async ({ event }) => {
-      const info = event?.properties?.info;
-      const sessionId = event?.properties?.sessionID ?? info?.id;
-      if (typeof sessionId !== "string" || sessionId.length === 0) return;
-      if (event.type === "session.updated" || event.type === "session.created") {
-        await syncServerTitle(sessionId, info?.title);
-      } else if (event.type === "session.idle") {
-        await notify({
-          state: "waving",
-          duration: 1500,
-          text: "Done.",
-          title: await sessionTitle(sessionId),
-          busy: false,
-          sessionId,
-          status: "completed",
-          messageKind: "lifecycle",
-        });
-      } else if (event.type === "session.error") {
-        await notify({
-          state: "failed",
-          duration: 2500,
-          text: "OpenCode hit an error.",
-          title: await sessionTitle(sessionId),
-          busy: false,
-          sessionId,
-          status: "failed",
-          messageKind: "lifecycle",
-        });
-      }
-    },
+    event: async ({ event }) => handleLifecycleEvent(event, titles),
   };
 };
 
-export default PetdexPlugin;
-export { PetdexPlugin };
+// opencode V2 plugin API: the default export is a definition object with
+// an `id` and a `setup(ctx)` that registers hooks and event subscriptions
+// through the context. Tool hooks receive one event ({ tool, input,
+// sessionID, ... }); lifecycle events arrive via ctx.event.subscribe().
+const setup = async (ctx) => {
+  const titles = titleTracker(async (sessionID) => {
+    const res = await ctx.session.get({ sessionID });
+    return res?.title ?? res?.data?.title;
+  });
+  const { sessionTitle } = titles;
+  await ctx.tool.hook("execute.before", async (event) => notify({
+    state: "running",
+    text: formatTool(event.tool, event.input, "running"),
+    title: await sessionTitle(event.sessionID),
+    busy: true,
+    sessionId: event.sessionID,
+    status: "running",
+    messageKind: "tool",
+  }));
+  await ctx.tool.hook("execute.after", async (event) => notify({
+    state: "idle",
+    text: formatTool(event.tool, event.input, "done"),
+    title: await sessionTitle(event.sessionID),
+    busy: true,
+    sessionId: event.sessionID,
+    status: "running",
+    messageKind: "tool",
+  }));
+  const controller = new AbortController();
+  void (async () => {
+    try {
+      for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
+        try {
+          await handleLifecycleEvent(event, titles);
+        } catch {
+          // A single bad event must never stop the subscription.
+        }
+      }
+    } catch {
+      // Subscription ended (abort or server shutdown): nothing to do.
+    }
+  })();
+  return () => controller.abort();
+};
+
+// V1 (1.18.29+) calls server(); V2 reads id + setup() and ignores server().
+// Each implementation stays on its own API; the shared helpers above do
+// the forwarding so the two never drift apart.
+const definition = {
+  id: "petdex",
+  server: PetdexPlugin,
+  setup,
+};
+
+export default definition;
+export { PetdexPlugin, setup };
