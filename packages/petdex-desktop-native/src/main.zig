@@ -407,6 +407,11 @@ fn petdexTokens(model: *const Model) canvas.DesignTokens {
     // Transparent pet and bubble windows must clear to zero alpha. The
     // settings window paints its own opaque page background below.
     tokens.colors.background = canvas.Color.rgba8(0, 0, 0, 0);
+    // GTK and Win32 feed the engine 40pt per wheel notch, and its default
+    // fling (velocity = delta x 60, decaying 14%/s) glides one notch ~16k
+    // points: straight to the bottom of settings. A notch is a step, not a
+    // fling. macOS scrolls through native drivers and keeps its physics.
+    if (builtin.target.os.tag != .macos) tokens.scroll.wheel_velocity_scale = 0;
     return tokens;
 }
 
@@ -2960,6 +2965,9 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
             fx.cancelTimer(native_drag_watchdog_key);
             if (model.state == .@"running-left" or model.state == .@"running-right")
                 applyState(model, .waving, 1200, fx);
+            // The host has already settled the drop (clamped, moved to the
+            // output under the pet), so this read is where the pet rests.
+            if (readLinuxPetOrigin(model, fx)) saveSettings(model);
         },
         .native_drag_watchdog => |timer| {
             if (timer.outcome != .fired) return;
@@ -3174,6 +3182,7 @@ pub fn update(model: *Model, msg: Msg, fx: *Effects) void {
         },
         .poll_tick => |timer| {
             if (timer.outcome != .fired) return;
+            if (builtin.target.os.tag == .linux and !model.pos_restored) restoreLinuxPetOrigin(model, fx);
             if (hook_server.auth_mailbox.take()) |callback| {
                 if (model.auth.phase == .authorizing) {
                     if (!std.mem.eql(u8, callback.stateSlice(), model.auth.oauthState())) {
@@ -4167,6 +4176,33 @@ fn syncBubbleDeadlines(model: *Model, previous: []const hook_server.Bubble, prev
     for (model.bubbles_len..hook_server.max_bubbles) |i| model.bubble_expires_at_ms[i] = -1;
 }
 
+/// Linux knows the pet's origin only when the host placed it as a
+/// layer-shell surface (wlr-layer-shell compositors); a plain Wayland
+/// toplevel's position is the compositor's and moveWindow answers null.
+/// With an origin, the pet persists its position like on mac/Windows and
+/// the bubble flips from a real screen y instead of zero.
+fn readLinuxPetOrigin(model: *Model, fx: *Effects) bool {
+    if (builtin.target.os.tag != .linux) return false;
+    const read = fx.moveWindow("main", 0, 0, false) orelse return false;
+    model.pet_x = read.x;
+    model.pet_y = read.y;
+    // Unlocks the position keys in saveSettings; Linux never runs the
+    // frame-clock fit that sets this elsewhere.
+    model.window_fitted = true;
+    return true;
+}
+
+fn restoreLinuxPetOrigin(model: *Model, fx: *Effects) void {
+    model.pos_restored = true;
+    if (!readLinuxPetOrigin(model, fx)) return;
+    const x = initial_pet_x orelse return;
+    const y = initial_pet_y orelse return;
+    // Clamped: the saved spot may be on a monitor that is gone.
+    const moved = fx.moveWindow("main", x - model.pet_x, y - model.pet_y, true) orelse return;
+    model.pet_x = moved.x;
+    model.pet_y = moved.y;
+}
+
 /// The window tracks exactly what is drawn: the sprite, plus a band
 /// above it while a bubble is showing (kept at least bubble-wide so
 /// the text can wrap like the old 190px-capped tooltip).
@@ -4927,7 +4963,14 @@ fn petdexWindows(model: *const Model, scratch: *PetdexApp.WindowsScratch) []cons
             .title = "Petdex Settings",
             .width = 420,
             .height = 680,
-            .resizable = false,
+            // Tiling compositors (Hyprland, Sway) size windows themselves
+            // and float only fixed-size ones, so a fixed settings window is
+            // stuck at 420x680 there. The content scrolls, so any height
+            // above the floor works; the width floor is what it is laid
+            // out for.
+            .resizable = builtin.target.os.tag == .linux,
+            .min_width = 420,
+            .min_height = 360,
             .titlebar = .hidden_inset,
             .on_close = .settings_closed,
         };
@@ -5257,6 +5300,17 @@ test "transparent surfaces clear independently from settings" {
     model.dark = false;
     try std.testing.expectEqual(@as(f32, 0), petdexTokens(&model).colors.background.a);
     try std.testing.expectEqual(@as(f32, 1), settingsBackground(&model).a);
+}
+
+test "one wheel notch scrolls one step, not to the end of settings" {
+    if (builtin.target.os.tag == .macos) return error.SkipZigTest;
+    const model: Model = .{};
+    const physics = petdexTokens(&model).scroll;
+    // The settings page shape: ~2000pt of content in a 600pt viewport.
+    var state: canvas.ScrollState = .{ .viewport_extent = 600, .content_extent = 2000 };
+    state = state.applyWheel(40, physics);
+    for (0..120) |_| state = state.stepKinetic(16, physics);
+    try std.testing.expectEqual(@as(f32, 40), state.offset);
 }
 
 test "refresh discovers local changes and preserves the active pet without restarting" {

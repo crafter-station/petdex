@@ -10,6 +10,7 @@ PATCHES=(
   "$ROOT/patches/native-sdk-macos-headerpad.patch"
   "$ROOT/patches/native-sdk-macos-activation.patch"
   "$ROOT/patches/native-sdk-windows-pet-input.patch"
+  "$ROOT/patches/native-sdk-linux-wayland.patch"
 )
 SDK="${NATIVE_SDK_PATH:-}"
 

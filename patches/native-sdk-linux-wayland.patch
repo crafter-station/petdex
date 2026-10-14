@@ -1,0 +1,699 @@
+diff --git a/build/app.zig b/build/app.zig
+index 80dd7d8..4f1753a 100644
+--- a/build/app.zig
++++ b/build/app.zig
+@@ -862,6 +862,20 @@ fn externalModule(b: *std.Build, dep: *std.Build.Dependency, target: std.Build.R
+ // Reproduced with a 10-line `zig cc` program against both the 14.5 and
+ // 26.0 SDKs. Release builds never hit it (no UBSan), which is why only
+ // Debug-built examples (standardOptimizeOption default) crashed.
++/// Floating windows become wlr-layer-shell overlays when the host links
++/// gtk4-layer-shell: the only way a Wayland client can keep a companion
++/// above other windows, on every workspace, at a position it chooses.
++/// Linking it makes the library a runtime dependency, so it is opt-in by
++/// presence (pkg-config) and `-Dlayer-shell=false` keeps a build free of
++/// it. Compositors without the protocol (GNOME) and X11 sessions fall
++/// back to a normal toplevel at runtime either way.
++fn linuxLayerShell(b: *std.Build) bool {
++    if (b.option(bool, "layer-shell", "Link gtk4-layer-shell for Wayland overlay companion windows (default: when pkg-config finds it)")) |forced| return forced;
++    var code: u8 = 0;
++    _ = b.runAllowFail(&.{ "pkg-config", "--exists", "gtk4-layer-shell-0" }, &code, .ignore) catch return false;
++    return code == 0;
++}
++
+ fn linkPlatform(b: *std.Build, dep: *std.Build.Dependency, target: std.Build.ResolvedTarget, app_mod: *std.Build.Module, exe: *std.Build.Step.Compile, platform: PlatformOption, web_engine: WebEngineOption, web_layer: bool, cef_dir: []const u8, cef_auto_install: bool) void {
+     if (platform == .macos) {
+         switch (web_engine) {
+@@ -914,7 +928,12 @@ fn linkPlatform(b: *std.Build, dep: *std.Build.Dependency, target: std.Build.Res
+     } else if (platform == .linux) {
+         switch (web_engine) {
+             .system => if (web_layer) {
+-                app_mod.addCSourceFile(.{ .file = dep.path("src/platform/linux/gtk_host.c"), .flags = &.{} });
++                const layer_shell = linuxLayerShell(b);
++                app_mod.addCSourceFile(.{ .file = dep.path("src/platform/linux/gtk_host.c"), .flags = if (layer_shell) &.{"-DNATIVE_SDK_HAS_LAYER_SHELL=1"} else &.{} });
++                if (layer_shell) {
++                    app_mod.linkSystemLibrary("gtk4-layer-shell-0", .{});
++                    app_mod.linkSystemLibrary("wayland-client", .{});
++                }
+                 app_mod.linkSystemLibrary("gtk4", .{});
+                 app_mod.linkSystemLibrary("webkitgtk-6.0", .{});
+                 // Xlib directly, for the one thing GTK4 stopped
+@@ -934,7 +953,16 @@ fn linkPlatform(b: *std.Build, dep: *std.Build.Dependency, target: std.Build.Res
+                 // development package is installed — libwebkitgtk is
+                 // neither linked nor required at runtime, and the
+                 // executable carries no WebKit reference at all.
+-                app_mod.addCSourceFile(.{ .file = dep.path("src/platform/linux/gtk_host.c"), .flags = &.{"-DNATIVE_SDK_ALLOW_WEBKITGTK_STUB"} });
++                const layer_shell = linuxLayerShell(b);
++                app_mod.addCSourceFile(.{ .file = dep.path("src/platform/linux/gtk_host.c"), .flags = if (layer_shell) &.{ "-DNATIVE_SDK_ALLOW_WEBKITGTK_STUB", "-DNATIVE_SDK_HAS_LAYER_SHELL=1" } else &.{"-DNATIVE_SDK_ALLOW_WEBKITGTK_STUB"} });
++                // Ahead of gtk4 on purpose: gtk4-layer-shell interposes
++                // libwayland-client symbols and only wins when it is
++                // linked before the library gtk4 pulls libwayland in for.
++                if (layer_shell) {
++                    app_mod.linkSystemLibrary("gtk4-layer-shell-0", .{});
++                    // The host binds relative-pointer for layer drags.
++                    app_mod.linkSystemLibrary("wayland-client", .{});
++                }
+                 app_mod.linkSystemLibrary("gtk4", .{});
+                 // See the web-layer branch above: the floating flag
+                 // reaches the window manager through Xlib, so X11 has to
+diff --git a/src/platform/linux/gtk_host.c b/src/platform/linux/gtk_host.c
+index 45eac2a..7311cfd 100644
+--- a/src/platform/linux/gtk_host.c
++++ b/src/platform/linux/gtk_host.c
+@@ -75,6 +75,20 @@ typedef struct native_sdk_absent_content_manager WebKitUserContentManager;
+ #pragma message("gdk/x11/gdkx.h not found: building the GTK host without the X11 backend (the floating window flag becomes a no-op)")
+ #endif
+ 
++/* The Wayland half of floating: wlr-layer-shell, through gtk4-layer-shell,
++ * which the build links only when it is installed (build/app.zig). An
++ * overlay layer surface is what Wayland offers instead of keep-above: it
++ * stays over normal windows on every workspace, gets no compositor
++ * border or shadow, and sits where the client puts it (margins), so the
++ * host can drag it and restore it. */
++#if defined(NATIVE_SDK_HAS_LAYER_SHELL)
++#include <gtk4-layer-shell.h>
++#include <gdk/wayland/gdkwayland.h>
++#include <wayland-client.h>
++#else
++#define NATIVE_SDK_HAS_LAYER_SHELL 0
++#endif
++
+ /* Companion-window chrome flags, the SAME bitmask the AppKit host
+  * applies in native_sdk_appkit_create (bit 0 floating, bit 1
+  * transparent, bit 2 click-through). The two hosts are meant to be read
+@@ -85,6 +99,7 @@ typedef struct native_sdk_absent_content_manager WebKitUserContentManager;
+ #define NATIVE_SDK_WINDOW_FLAG_FLOATING (1 << 0)
+ #define NATIVE_SDK_WINDOW_FLAG_TRANSPARENT (1 << 1)
+ #define NATIVE_SDK_WINDOW_FLAG_CLICK_THROUGH (1 << 2)
++#define NATIVE_SDK_WINDOW_FLAG_FULLSCREEN_OVERLAY (1 << 3)
+ 
+ #define NATIVE_SDK_MAX_WINDOWS 16
+ #define NATIVE_SDK_MAX_WEBVIEWS 16
+@@ -364,6 +379,26 @@ typedef struct native_sdk_gtk_window {
+     int last_press_button;
+     double last_press_x;
+     double last_press_y;
++    /* Layer-shell placement (floating windows where the compositor offers
++     * wlr-layer-shell). Positions are the surface's top-left in the
++     * compositor's global logical space. `layer_applied_*` is where the
++     * compositor has the surface — the space pointer events are local to —
++     * and trails `layer_*` by one commit: a margin change lands with GTK's
++     * next frame (gtk4-layer-shell forces it through a configure). Until
++     * `layer_placed` the surface is unanchored, which layer-shell centers
++     * on its output. */
++    int layer_shell;
++    int layer_placed;
++    int layer_dragging;
++    double layer_x, layer_y;
++    double layer_applied_x, layer_applied_y;
++    double layer_grab_x, layer_grab_y;
++    /* Relative-pointer drags: origin at drag start plus the pointer's
++     * travel since the press. */
++    double layer_drag_start_x, layer_drag_start_y;
++    double layer_drag_dx, layer_drag_dy;
++    /* Weak: the clock whose after-paint advances the applied origin. */
++    GdkFrameClock *layer_clock;
+     native_sdk_gtk_webview_t webviews[NATIVE_SDK_MAX_WEBVIEWS];
+     int webview_count;
+     native_sdk_gtk_native_view_t native_views[NATIVE_SDK_MAX_NATIVE_VIEWS];
+@@ -975,6 +1010,25 @@ static double native_sdk_gpu_surface_height(native_sdk_gtk_native_view_t *view)
+     return 0;
+ }
+ 
++/* The density GTK actually renders the widget's surface at. With
++ * wp_fractional_scale (GTK >= 4.12) that is fractional, e.g. 1.333, while
++ * gtk_widget_get_scale_factor rounds UP to 2: a canvas rendered at the
++ * integer and composited at 1.333 is downsampled, which reads as fuzzy
++ * text. Rendering at the surface's own scale keeps one buffer pixel per
++ * device pixel. */
++static double native_sdk_gpu_widget_scale(GtkWidget *widget) {
++    if (!widget) return 1.0;
++#if GTK_CHECK_VERSION(4, 12, 0)
++    GtkNative *native = gtk_widget_get_native(widget);
++    GdkSurface *surface = native ? gtk_native_get_surface(native) : NULL;
++    if (surface) {
++        const double scale = gdk_surface_get_scale(surface);
++        if (scale > 0) return scale;
++    }
++#endif
++    return (double)gtk_widget_get_scale_factor(widget);
++}
++
+ /* Emit a gpu_surface_resize when the widget's logical size or device scale
+  * differ from the last emitted values. Returns 1 when an event was sent. */
+ static int native_sdk_gpu_surface_sync_geometry(native_sdk_gtk_native_view_t *view, double width, double height, double scale) {
+@@ -1010,7 +1064,7 @@ static void native_sdk_gpu_surface_scale_changed(GObject *object, GParamSpec *ps
+     const double width = native_sdk_gpu_surface_width(view);
+     const double height = native_sdk_gpu_surface_height(view);
+     if (width <= 0 || height <= 0) return;
+-    const double scale = (double)gtk_widget_get_scale_factor(view->widget);
++    const double scale = native_sdk_gpu_widget_scale(view->widget);
+     if (native_sdk_gpu_surface_sync_geometry(view, width, height, scale)) {
+         gtk_widget_queue_draw(view->widget);
+     }
+@@ -1050,7 +1104,7 @@ static void native_sdk_gpu_surface_emit_frame(native_sdk_gtk_native_view_t *view
+ 
+     const double width = native_sdk_gpu_surface_width(view);
+     const double height = native_sdk_gpu_surface_height(view);
+-    const double scale = (double)gtk_widget_get_scale_factor(view->widget);
++    const double scale = native_sdk_gpu_widget_scale(view->widget);
+     if (width <= 0 || height <= 0) return;
+ 
+     (void)native_sdk_gpu_surface_sync_geometry(view, width, height, scale);
+@@ -1160,7 +1214,7 @@ static void native_sdk_gpu_surface_resized(GtkDrawingArea *area, int width, int
+     const double logical_width = native_sdk_gpu_surface_width(view);
+     const double logical_height = native_sdk_gpu_surface_height(view);
+     if (logical_width <= 0 || logical_height <= 0) return;
+-    const double scale = (double)gtk_widget_get_scale_factor(view->widget);
++    const double scale = native_sdk_gpu_widget_scale(view->widget);
+     if (native_sdk_gpu_surface_sync_geometry(view, logical_width, logical_height, scale)) {
+         gtk_widget_queue_draw(view->widget);
+     }
+@@ -1185,8 +1239,15 @@ static void native_sdk_gpu_surface_draw(GtkDrawingArea *area, cairo_t *cr, int w
+         const double device_scale_x = (double)view->gpu_buf_width / (double)width;
+         const double device_scale_y = (double)view->gpu_buf_height / (double)height;
+         cairo_surface_set_device_scale(surface, device_scale_x, device_scale_y);
+-        const double widget_scale = (double)gtk_widget_get_scale_factor(GTK_WIDGET(area));
+-        const int exact = device_scale_x == widget_scale && device_scale_y == widget_scale;
++        const double widget_scale = native_sdk_gpu_widget_scale(GTK_WIDGET(area));
++        /* Buffers are whole pixels, so at a fractional scale the ratio
++         * lands within a pixel of the scale rather than on it. */
++        const int exact = fabs(device_scale_x - widget_scale) * width < 1.0 &&
++                          fabs(device_scale_y - widget_scale) * height < 1.0;
++        /* A fractional rescale (a monitor change, a scale tweak) raises
++         * no notify::scale-factor when the rounded integer is unchanged;
++         * the redraw it forces is the reliable signal, so re-sync here. */
++        if (widget_scale != view->gpu_emitted_scale) native_sdk_gpu_surface_schedule_frame_emission(view);
+         cairo_set_source_surface(cr, surface, 0, 0);
+         cairo_pattern_set_filter(cairo_get_source(cr), exact ? CAIRO_FILTER_NEAREST : CAIRO_FILTER_BILINEAR);
+     } else {
+@@ -1198,12 +1259,355 @@ static void native_sdk_gpu_surface_draw(GtkDrawingArea *area, cairo_t *cr, int w
+     cairo_surface_destroy(surface);
+ }
+ 
++#if NATIVE_SDK_HAS_LAYER_SHELL
++static void native_sdk_layer_size(native_sdk_gtk_window_t *win, double *w, double *h) {
++    int width = gtk_widget_get_width(GTK_WIDGET(win->gtk_window));
++    int height = gtk_widget_get_height(GTK_WIDGET(win->gtk_window));
++    if (width <= 0 || height <= 0) gtk_window_get_default_size(win->gtk_window, &width, &height);
++    *w = width > 0 ? width : 0;
++    *h = height > 0 ? height : 0;
++}
++
++/* The output the surface is on: the one it was placed on, else the one
++ * the compositor mapped it to, else the first. Borrowed from the
++ * display's monitor list, which outlives every window. */
++static GdkMonitor *native_sdk_layer_monitor(native_sdk_gtk_window_t *win) {
++    GdkMonitor *monitor = gtk_layer_get_monitor(win->gtk_window);
++    /* An unplugged output stays set but invalid; the compositor has
++     * moved the surface elsewhere. */
++    if (monitor && gdk_monitor_is_valid(monitor)) return monitor;
++    GdkDisplay *display = gtk_widget_get_display(GTK_WIDGET(win->gtk_window));
++    GdkSurface *surface = gtk_native_get_surface(GTK_NATIVE(win->gtk_window));
++    if (surface && gtk_widget_get_mapped(GTK_WIDGET(win->gtk_window))) {
++        monitor = gdk_display_get_monitor_at_surface(display, surface);
++        if (monitor) return monitor;
++    }
++    monitor = g_list_model_get_item(gdk_display_get_monitors(display), 0);
++    if (monitor) g_object_unref(monitor);
++    return monitor;
++}
++
++static GdkMonitor *native_sdk_monitor_at(GdkDisplay *display, double x, double y) {
++    GListModel *monitors = gdk_display_get_monitors(display);
++    const guint count = g_list_model_get_n_items(monitors);
++    GdkMonitor *found = NULL;
++    for (guint i = 0; i < count && !found; i++) {
++        GdkMonitor *monitor = g_list_model_get_item(monitors, i);
++        GdkRectangle r;
++        gdk_monitor_get_geometry(monitor, &r);
++        if (x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height) found = monitor;
++        g_object_unref(monitor);
++    }
++    return found;
++}
++
++/* Read the origin back from what the compositor places by: an unplaced
++ * surface is unanchored, which layer-shell centers on its output; a
++ * placed one sits at its margins from its output's current geometry, so
++ * an output that moved or went away moves the origin with it. Mid-drag
++ * the cached origin is the in-flight one and is kept. */
++static int native_sdk_layer_sync(native_sdk_gtk_window_t *win) {
++    GdkMonitor *monitor = native_sdk_layer_monitor(win);
++    if (!monitor) return 0;
++    GdkRectangle r;
++    gdk_monitor_get_geometry(monitor, &r);
++    if (win->layer_placed) {
++        if (win->layer_dragging) return 1;
++        win->layer_x = win->layer_applied_x = r.x + gtk_layer_get_margin(win->gtk_window, GTK_LAYER_SHELL_EDGE_LEFT);
++        win->layer_y = win->layer_applied_y = r.y + gtk_layer_get_margin(win->gtk_window, GTK_LAYER_SHELL_EDGE_TOP);
++        return 1;
++    }
++    double w, h;
++    native_sdk_layer_size(win, &w, &h);
++    win->layer_x = win->layer_applied_x = round(r.x + (r.width - w) / 2.0);
++    win->layer_y = win->layer_applied_y = round(r.y + (r.height - h) / 2.0);
++    return 1;
++}
++
++/* Move the surface by (dx, dy) in global logical points. `rehome` lets it
++ * change outputs to the one under its center, which gtk4-layer-shell does
++ * by remapping: never mid-drag, where the remap would end the pointer
++ * grab. `clamp` keeps it whole on its output; without it the surface may
++ * hang off by half its size, enough for its center to cross onto a
++ * neighbor so the release can rehome it there. */
++static int native_sdk_layer_move(native_sdk_gtk_window_t *win, double dx, double dy, int clamp, int rehome, int *hit_x, int *hit_y) {
++    if (!native_sdk_layer_sync(win)) return 0;
++    GdkMonitor *current = native_sdk_layer_monitor(win);
++    double w, h;
++    native_sdk_layer_size(win, &w, &h);
++    double x = win->layer_x + dx;
++    double y = win->layer_y + dy;
++    GdkMonitor *monitor = current;
++    if (rehome) {
++        GdkMonitor *under = native_sdk_monitor_at(gtk_widget_get_display(GTK_WIDGET(win->gtk_window)), x + w / 2.0, y + h / 2.0);
++        if (under) monitor = under;
++    }
++    GdkRectangle r;
++    gdk_monitor_get_geometry(monitor, &r);
++    const double slack_x = clamp ? 0 : w / 2.0 + 1;
++    const double slack_y = clamp ? 0 : h / 2.0 + 1;
++    const double min_x = r.x - slack_x, max_x = r.x + r.width - w + slack_x;
++    const double min_y = r.y - slack_y, max_y = r.y + r.height - h + slack_y;
++    int hx = 0, hy = 0;
++    if (x < min_x) { x = min_x; hx = 1; } else if (x > max_x) { x = max_x; hx = 1; }
++    if (y < min_y) { y = min_y; hy = 1; } else if (y > max_y) { y = max_y; hy = 1; }
++    if (hit_x) *hit_x = hx;
++    if (hit_y) *hit_y = hy;
++
++    if (monitor != current) gtk_layer_set_monitor(win->gtk_window, monitor);
++    if (!win->layer_placed) {
++        gtk_layer_set_anchor(win->gtk_window, GTK_LAYER_SHELL_EDGE_LEFT, TRUE);
++        gtk_layer_set_anchor(win->gtk_window, GTK_LAYER_SHELL_EDGE_TOP, TRUE);
++        win->layer_placed = 1;
++    }
++    win->layer_x = round(x);
++    win->layer_y = round(y);
++    gtk_layer_set_margin(win->gtk_window, GTK_LAYER_SHELL_EDGE_LEFT, (int)(win->layer_x - r.x));
++    gtk_layer_set_margin(win->gtk_window, GTK_LAYER_SHELL_EDGE_TOP, (int)(win->layer_y - r.y));
++    /* An unmapped surface or a remap takes the new origin at once. */
++    if (monitor != current || !gtk_widget_get_mapped(GTK_WIDGET(win->gtk_window))) {
++        win->layer_applied_x = win->layer_x;
++        win->layer_applied_y = win->layer_y;
++    }
++    return 1;
++}
++
++static void native_sdk_layer_after_paint(GdkFrameClock *clock, gpointer data) {
++    (void)clock;
++    native_sdk_gtk_window_t *win = data;
++    win->layer_applied_x = win->layer_x;
++    win->layer_applied_y = win->layer_y;
++}
++
++static void native_sdk_layer_realized(GtkWidget *widget, gpointer data) {
++    native_sdk_gtk_window_t *win = data;
++    GdkSurface *surface = gtk_native_get_surface(GTK_NATIVE(widget));
++    GdkFrameClock *clock = surface ? gdk_surface_get_frame_clock(surface) : NULL;
++    if (!clock || win->layer_clock) return;
++    win->layer_clock = clock;
++    g_object_add_weak_pointer(G_OBJECT(clock), (gpointer *)&win->layer_clock);
++    g_signal_connect(clock, "after-paint", G_CALLBACK(native_sdk_layer_after_paint), win);
++}
++
++/* Wayland has no interactive move for layer surfaces, so the host drags
++ * them, keeping the grab point under the pointer. The pointer's position
++ * is only known relative to the surface being moved, and compositors that
++ * animate layer moves (Hyprland, by default) report it against the
++ * mid-animation origin, which a client cannot know: deriving the drag
++ * from it overshoots the pointer. relative-pointer-unstable-v1 reports the
++ * pointer's travel itself, independent of the surface, so where the
++ * compositor offers it the drag is origin-at-start plus travel. The
++ * protocol tables below are what wayland-scanner's private-code emits for
++ * the two requests and one event used. */
++static const struct wl_interface native_sdk_relative_pointer_interface;
++static const struct wl_interface *native_sdk_relative_pointer_types[] = {
++    NULL, NULL, NULL, NULL, NULL, NULL,
++    &native_sdk_relative_pointer_interface, &wl_pointer_interface,
++};
++static const struct wl_message native_sdk_relative_pointer_manager_requests[] = {
++    { "destroy", "", native_sdk_relative_pointer_types + 0 },
++    { "get_relative_pointer", "no", native_sdk_relative_pointer_types + 6 },
++};
++static const struct wl_interface native_sdk_relative_pointer_manager_interface = {
++    "zwp_relative_pointer_manager_v1", 1, 2, native_sdk_relative_pointer_manager_requests, 0, NULL,
++};
++static const struct wl_message native_sdk_relative_pointer_requests[] = {
++    { "destroy", "", native_sdk_relative_pointer_types + 0 },
++};
++static const struct wl_message native_sdk_relative_pointer_events[] = {
++    { "relative_motion", "uuffff", native_sdk_relative_pointer_types + 0 },
++};
++static const struct wl_interface native_sdk_relative_pointer_interface = {
++    "zwp_relative_pointer_v1", 1, 1, native_sdk_relative_pointer_requests, 1, native_sdk_relative_pointer_events,
++};
++
++static int native_sdk_relative_probed;
++static struct wl_proxy *native_sdk_relative_manager;
++static struct wl_proxy *native_sdk_relative_pointer;
++static native_sdk_gtk_window_t *native_sdk_relative_drag_window;
++
++static void native_sdk_relative_global(void *data, struct wl_registry *registry, uint32_t name, const char *interface, uint32_t version) {
++    (void)data;
++    (void)version;
++    if (strcmp(interface, native_sdk_relative_pointer_manager_interface.name) != 0) return;
++    native_sdk_relative_manager = wl_registry_bind(registry, name, &native_sdk_relative_pointer_manager_interface, 1);
++}
++
++static void native_sdk_relative_global_remove(void *data, struct wl_registry *registry, uint32_t name) {
++    (void)data;
++    (void)registry;
++    (void)name;
++}
++
++static const struct wl_registry_listener native_sdk_relative_registry_listener = {
++    native_sdk_relative_global,
++    native_sdk_relative_global_remove,
++};
++
++/* Bind the manager once, on a private queue: a roundtrip on GDK's own
++ * queue would re-enter GDK's event dispatch. */
++static void native_sdk_relative_probe(GdkDisplay *display) {
++    if (native_sdk_relative_probed || !GDK_IS_WAYLAND_DISPLAY(display)) return;
++    native_sdk_relative_probed = 1;
++    struct wl_display *wl_display = gdk_wayland_display_get_wl_display(display);
++    struct wl_event_queue *queue = wl_display_create_queue(wl_display);
++    struct wl_display *wrapper = wl_proxy_create_wrapper(wl_display);
++    wl_proxy_set_queue((struct wl_proxy *)wrapper, queue);
++    struct wl_registry *registry = wl_display_get_registry(wrapper);
++    wl_registry_add_listener(registry, &native_sdk_relative_registry_listener, NULL);
++    wl_display_roundtrip_queue(wl_display, queue);
++    wl_registry_destroy(registry);
++    wl_proxy_wrapper_destroy(wrapper);
++    if (native_sdk_relative_manager) wl_proxy_set_queue(native_sdk_relative_manager, NULL);
++    wl_event_queue_destroy(queue);
++}
++
++/* Add pointer travel to the drag. Relative motion is unclipped, while the
++ * real cursor stops at the edge of the desktop: a step that would take the
++ * implied cursor off every output is clipped to the output it is on, the
++ * way the compositor clips the cursor, so reversing at an edge follows at
++ * once instead of first unwinding travel the cursor never made. */
++static void native_sdk_layer_drag_offset(native_sdk_gtk_window_t *win, double dx, double dy) {
++    GdkDisplay *display = gtk_widget_get_display(GTK_WIDGET(win->gtk_window));
++    const double cx = win->layer_drag_start_x + win->layer_grab_x + win->layer_drag_dx;
++    const double cy = win->layer_drag_start_y + win->layer_grab_y + win->layer_drag_dy;
++    if (!native_sdk_monitor_at(display, cx + dx, cy + dy)) {
++        GdkMonitor *monitor = native_sdk_monitor_at(display, cx, cy);
++        if (monitor) {
++            GdkRectangle r;
++            gdk_monitor_get_geometry(monitor, &r);
++            dx = CLAMP(cx + dx, r.x, r.x + r.width - 1) - cx;
++            dy = CLAMP(cy + dy, r.y, r.y + r.height - 1) - cy;
++        }
++    }
++    win->layer_drag_dx += dx;
++    win->layer_drag_dy += dy;
++    const double want_x = win->layer_drag_start_x + win->layer_drag_dx;
++    const double want_y = win->layer_drag_start_y + win->layer_drag_dy;
++    (void)native_sdk_layer_move(win, want_x - win->layer_x, want_y - win->layer_y, 0, 0, NULL, NULL);
++}
++
++static void native_sdk_relative_motion(void *data, struct wl_proxy *pointer, uint32_t utime_hi, uint32_t utime_lo, wl_fixed_t dx, wl_fixed_t dy, wl_fixed_t dx_unaccel, wl_fixed_t dy_unaccel) {
++    (void)data;
++    (void)pointer;
++    (void)utime_hi;
++    (void)utime_lo;
++    (void)dx_unaccel;
++    (void)dy_unaccel;
++    native_sdk_gtk_window_t *win = native_sdk_relative_drag_window;
++    if (!win || !win->layer_dragging) return;
++    native_sdk_layer_drag_offset(win, wl_fixed_to_double(dx), wl_fixed_to_double(dy));
++}
++
++static const struct {
++    void (*relative_motion)(void *, struct wl_proxy *, uint32_t, uint32_t, wl_fixed_t, wl_fixed_t, wl_fixed_t, wl_fixed_t);
++} native_sdk_relative_pointer_listener = { native_sdk_relative_motion };
++
++/* One relative pointer for the seat's pointer, created on the first drag
++ * and kept: it only reports while this client has pointer focus. */
++static int native_sdk_relative_ready(native_sdk_gtk_window_t *win) {
++    if (native_sdk_relative_pointer) return 1;
++    if (!native_sdk_relative_manager) return 0;
++    GdkDevice *device = win->last_press_device;
++    if (!device || !GDK_IS_WAYLAND_DEVICE(device)) return 0;
++    struct wl_pointer *wl_pointer = gdk_wayland_device_get_wl_pointer(device);
++    if (!wl_pointer) return 0;
++    native_sdk_relative_pointer = wl_proxy_marshal_flags(
++        native_sdk_relative_manager, 1, &native_sdk_relative_pointer_interface,
++        wl_proxy_get_version(native_sdk_relative_manager), 0, NULL, wl_pointer);
++    if (!native_sdk_relative_pointer) return 0;
++    wl_proxy_add_listener(native_sdk_relative_pointer, (void (**)(void))&native_sdk_relative_pointer_listener, NULL);
++    return 1;
++}
++
++/* Coordinates are window-local. The press-to-threshold travel is measured
++ * against a surface that has not moved yet, so the caller seeds it as the
++ * first offset (native_sdk_layer_drag_offset). */
++static void native_sdk_layer_drag_begin(native_sdk_gtk_window_t *win, double x, double y) {
++    if (!native_sdk_layer_sync(win)) return;
++    win->layer_dragging = 1;
++    win->layer_grab_x = x;
++    win->layer_grab_y = y;
++    win->layer_drag_start_x = win->layer_x;
++    win->layer_drag_start_y = win->layer_y;
++    win->layer_drag_dx = 0;
++    win->layer_drag_dy = 0;
++    native_sdk_relative_drag_window = native_sdk_relative_ready(win) ? win : NULL;
++}
++
++/* Fallback without relative-pointer: pointer events are local to where
++ * the compositor HAS the surface, so the global pointer is the applied
++ * origin plus the local point (the pending origin would count every
++ * uncommitted step twice). Exact on compositors that move layers
++ * instantly; lags behind ones that animate the move. */
++static void native_sdk_layer_drag_motion(native_sdk_gtk_window_t *win, double x, double y) {
++    if (native_sdk_relative_drag_window == win) return;
++    const double want_x = win->layer_applied_x + x - win->layer_grab_x;
++    const double want_y = win->layer_applied_y + y - win->layer_grab_y;
++    (void)native_sdk_layer_move(win, want_x - win->layer_x, want_y - win->layer_y, 0, 0, NULL, NULL);
++}
++
++static void native_sdk_layer_drag_end(native_sdk_gtk_window_t *win) {
++    win->layer_dragging = 0;
++    double dx = 0, dy = 0;
++    if (native_sdk_relative_drag_window == win) {
++        /* Mid-drag the surface stops at its output's edge (a remap would
++         * end the grab), but the travel says where the pointer took it:
++         * drop it there, on whichever output that is. */
++        native_sdk_relative_drag_window = NULL;
++        dx = win->layer_drag_start_x + win->layer_drag_dx - win->layer_x;
++        dy = win->layer_drag_start_y + win->layer_drag_dy - win->layer_y;
++    }
++    (void)native_sdk_layer_move(win, dx, dy, 1, 1, NULL, NULL);
++}
++
++/* The window's slot is about to be zeroed or freed: nothing static or
++ * signal-borne may keep pointing at it. */
++static void native_sdk_layer_forget(native_sdk_gtk_window_t *win) {
++    if (native_sdk_relative_drag_window == win) native_sdk_relative_drag_window = NULL;
++    if (win->layer_clock) {
++        g_signal_handlers_disconnect_by_data(win->layer_clock, win);
++        g_object_remove_weak_pointer(G_OBJECT(win->layer_clock), (gpointer *)&win->layer_clock);
++        win->layer_clock = NULL;
++    }
++}
++
++static int native_sdk_layer_wanted(void) {
++    const char *env = getenv("NATIVE_SDK_LAYER_SHELL");
++    if (env && strcmp(env, "0") == 0) return 0;
++    return gtk_layer_is_supported();
++}
++
++static void native_sdk_window_init_layer(native_sdk_gtk_window_t *win, int fullscreen_overlay) {
++    GtkWindow *window = win->gtk_window;
++    gtk_layer_init_for_window(window);
++    const char *bundle_id = win->host && win->host->bundle_id ? win->host->bundle_id : "";
++    gtk_layer_set_namespace(window, bundle_id[0] ? bundle_id : win->label);
++    /* OVERLAY also clears fullscreen windows, which is what the
++     * fullscreen_overlay flag asks for on macOS. */
++    gtk_layer_set_layer(window, fullscreen_overlay ? GTK_LAYER_SHELL_LAYER_OVERLAY : GTK_LAYER_SHELL_LAYER_TOP);
++    gtk_layer_set_keyboard_mode(window, GTK_LAYER_SHELL_KEYBOARD_MODE_ON_DEMAND);
++    /* Margins measured from the output's own edges, not from inside
++     * panels' exclusive zones, so they map onto monitor geometry. */
++    gtk_layer_set_exclusive_zone(window, -1);
++    native_sdk_relative_probe(gtk_widget_get_display(GTK_WIDGET(window)));
++    win->layer_shell = 1;
++    g_signal_connect(window, "realize", G_CALLBACK(native_sdk_layer_realized), win);
++}
++#endif /* NATIVE_SDK_HAS_LAYER_SHELL */
++
+ /* Begin the windowing system's interactive move from the window's last
+  * recorded pointer press. Shared by the runtime `window_drag` channel
+  * (native_sdk_gtk_start_window_drag) and the press-time drag-mirror
+  * claim below. */
+ static void native_sdk_window_begin_interactive_move(native_sdk_gtk_window_t *win) {
+     if (!win || !win->gtk_window) return;
++#if NATIVE_SDK_HAS_LAYER_SHELL
++    if (win->layer_shell) {
++        native_sdk_layer_drag_begin(win, win->last_press_x, win->last_press_y);
++        return;
++    }
++#endif
+     if (!win->last_press_device || win->last_press_time == 0) return;
+     GdkSurface *surface = gtk_native_get_surface(GTK_NATIVE(win->gtk_window));
+     if (!surface || !GDK_IS_TOPLEVEL(surface)) return;
+@@ -1312,6 +1716,11 @@ static void native_sdk_gpu_pointer_released(GtkGestureClick *gesture, int n_pres
+     (void)n_press;
+     native_sdk_gtk_native_view_t *view = data;
+     if (!view) return;
++#if NATIVE_SDK_HAS_LAYER_SHELL
++    /* Settle (clamp, rehome) before the drag-end command goes out, so the
++     * app reads the final origin when it hears the drag ended. */
++    if (view->window && view->window->layer_dragging) native_sdk_layer_drag_end(view->window);
++#endif
+     view->gpu_pointer_down = 0;
+     view->gpu_pointer_x = x;
+     view->gpu_pointer_y = y;
+@@ -1335,6 +1744,15 @@ static void native_sdk_gpu_pointer_released(GtkGestureClick *gesture, int n_pres
+ static void native_sdk_gpu_pointer_motion(GtkEventControllerMotion *controller, double x, double y, gpointer data) {
+     native_sdk_gtk_native_view_t *view = data;
+     if (!view) return;
++#if NATIVE_SDK_HAS_LAYER_SHELL
++    if (view->window && view->window->layer_dragging) {
++        graphene_point_t point = { (float)x, (float)y };
++        graphene_point_t translated;
++        if (gtk_widget_compute_point(view->widget, GTK_WIDGET(view->window->gtk_window), &point, &translated)) point = translated;
++        native_sdk_layer_drag_motion(view->window, point.x, point.y);
++        return;
++    }
++#endif
+     if (view->gpu_native_drag_pending) {
+         const double dx = x - view->gpu_native_drag_press_x;
+         const double dy = y - view->gpu_native_drag_press_y;
+@@ -1343,6 +1761,9 @@ static void native_sdk_gpu_pointer_motion(GtkEventControllerMotion *controller,
+             view->gpu_native_drag_active = 1;
+             native_sdk_emit_window_drag_command(view, 1, dx > 0 ? 1 : dx < 0 ? -1 : 0);
+             native_sdk_window_begin_interactive_move(view->window);
++#if NATIVE_SDK_HAS_LAYER_SHELL
++            if (view->window && view->window->layer_dragging) native_sdk_layer_drag_offset(view->window, dx, dy);
++#endif
+         }
+         return;
+     }
+@@ -1756,6 +2177,9 @@ static void native_sdk_clear_window(native_sdk_gtk_window_t *win) {
+     }
+     free(win->label);
+     free(win->title);
++#if NATIVE_SDK_HAS_LAYER_SHELL
++    native_sdk_layer_forget(win);
++#endif
+     memset(win, 0, sizeof(*win));
+ }
+ 
+@@ -3221,6 +3645,13 @@ static void native_sdk_window_apply_flags(native_sdk_gtk_window_t *win, int wind
+     GtkWidget *widget = GTK_WIDGET(win->gtk_window);
+ 
+     if (window_flags & NATIVE_SDK_WINDOW_FLAG_FLOATING) {
++#if NATIVE_SDK_HAS_LAYER_SHELL
++        /* False on X11 and on compositors without the protocol (GNOME),
++         * which keep the toplevel and the X11 keep-above below. */
++        if (native_sdk_layer_wanted()) {
++            native_sdk_window_init_layer(win, (window_flags & NATIVE_SDK_WINDOW_FLAG_FULLSCREEN_OVERLAY) != 0);
++        }
++#endif
+ #if NATIVE_SDK_HAS_X11
+         g_signal_connect(widget, "realize", G_CALLBACK(native_sdk_window_apply_x11_above), NULL);
+ #endif
+@@ -4294,6 +4725,38 @@ int native_sdk_gtk_start_window_drag(native_sdk_gtk_host_t *host, uint64_t windo
+     return 1;
+ }
+ 
++/* moveWindow for layer-shell windows, the only Wayland surfaces whose
++ * origin a client knows. Answers 0 for every other window: a toplevel's
++ * position belongs to the compositor, and the runtime reports that as an
++ * unsupported move rather than a fabricated origin. A zero, unclamped
++ * move is a pure read and leaves an unplaced surface where it is. */
++int native_sdk_gtk_move_window(native_sdk_gtk_host_t *host, uint64_t window_id, double dx, double dy, int clamp, double *out_x, double *out_y, int *out_hit_x, int *out_hit_y, int *out_primary, double *out_cursor_x, double *out_cursor_y) {
++#if NATIVE_SDK_HAS_LAYER_SHELL
++    native_sdk_gtk_window_t *win = native_sdk_find_window(host, window_id);
++    if (!win || !win->gtk_window || !win->layer_shell) return 0;
++    int hit_x = 0, hit_y = 0;
++    if (dx != 0 || dy != 0 || clamp) {
++        if (!native_sdk_layer_move(win, dx, dy, clamp, !win->layer_dragging, &hit_x, &hit_y)) return 0;
++    } else if (!native_sdk_layer_sync(win)) {
++        return 0;
++    }
++    *out_x = win->layer_x;
++    *out_y = win->layer_y;
++    *out_hit_x = hit_x;
++    *out_hit_y = hit_y;
++    *out_primary = win->layer_dragging;
++    /* Wayland never tells a client where the pointer is outside its own
++     * surfaces; report the origin rather than a guess. */
++    *out_cursor_x = win->layer_x;
++    *out_cursor_y = win->layer_y;
++    return 1;
++#else
++    (void)host; (void)window_id; (void)dx; (void)dy; (void)clamp;
++    (void)out_x; (void)out_y; (void)out_hit_x; (void)out_hit_y; (void)out_primary; (void)out_cursor_x; (void)out_cursor_y;
++    return 0;
++#endif
++}
++
+ int native_sdk_gtk_set_window_drag_regions(native_sdk_gtk_host_t *host, uint64_t window_id, const char *label, size_t label_len, const double *rects, const int *exclusions, size_t count) {
+     if (!host || !label || label_len == 0) return 0;
+     native_sdk_gtk_window_t *win = native_sdk_find_window(host, window_id);
+diff --git a/src/platform/linux/gtk_host.h b/src/platform/linux/gtk_host.h
+index 8154002..5de7ab3 100644
+--- a/src/platform/linux/gtk_host.h
++++ b/src/platform/linux/gtk_host.h
+@@ -200,6 +200,7 @@ int native_sdk_gtk_update_popup_window(native_sdk_gtk_host_t *host, uint64_t win
+  * pointer press (the widget `window_drag` channel). Returns 0 when the
+  * window is unknown or no press has been recorded yet. */
+ int native_sdk_gtk_start_window_drag(native_sdk_gtk_host_t *host, uint64_t window_id);
++int native_sdk_gtk_move_window(native_sdk_gtk_host_t *host, uint64_t window_id, double dx, double dy, int clamp, double *out_x, double *out_y, int *out_hit_x, int *out_hit_y, int *out_primary, double *out_cursor_x, double *out_cursor_y);
+ /* Replace a gpu_surface view's window-drag region mirror (the runtime
+  * pushes it after every layout install whose regions changed). Rects
+  * arrive flat as x,y,w,h in the view's logical coordinates; exclusions
+diff --git a/src/platform/linux/root.zig b/src/platform/linux/root.zig
+index d0acea6..aea4541 100644
+--- a/src/platform/linux/root.zig
++++ b/src/platform/linux/root.zig
+@@ -142,6 +142,7 @@ extern fn native_sdk_gtk_set_shortcuts(host: *GtkHost, ids: [*]const [*]const u8
+ extern fn native_sdk_gtk_create_window(host: *GtkHost, window_id: u64, window_title: [*]const u8, window_title_len: usize, window_label: [*]const u8, window_label_len: usize, x: f64, y: f64, width: f64, height: f64, restore_frame: c_int, resizable: c_int, titlebar_style: c_int, window_flags: c_int, min_width: f64, min_height: f64, popup_parent_id: u64) c_int;
+ extern fn native_sdk_gtk_update_popup_window(host: *GtkHost, window_id: u64, width: f64, height: f64, anchor_x: f64, anchor_y: f64) c_int;
+ extern fn native_sdk_gtk_start_window_drag(host: *GtkHost, window_id: u64) c_int;
++extern fn native_sdk_gtk_move_window(host: *GtkHost, window_id: u64, dx: f64, dy: f64, clamp: c_int, out_x: *f64, out_y: *f64, out_hit_x: *c_int, out_hit_y: *c_int, out_primary: *c_int, out_cursor_x: *f64, out_cursor_y: *f64) c_int;
+ extern fn native_sdk_gtk_set_window_drag_regions(host: *GtkHost, window_id: u64, label: [*]const u8, label_len: usize, rects: [*]const f64, exclusions: [*]const c_int, count: usize) c_int;
+ extern fn native_sdk_gtk_show_context_menu(host: *GtkHost, window_id: u64, label: [*]const u8, label_len: usize, x: f64, y: f64, token: u64, items: [*]const GtkContextMenuItem, count: usize) c_int;
+ extern fn native_sdk_gtk_window_chrome(host: *GtkHost, window_id: u64, top: *f64, left: *f64, bottom: *f64, right: *f64, buttons_x: *f64, buttons_y: *f64, buttons_width: *f64, buttons_height: *f64) c_int;
+@@ -294,6 +295,7 @@ pub const LinuxPlatform = struct {
+                 .update_popup_window_fn = updatePopupWindow,
+                 .minimize_window_fn = minimizeWindow,
+                 .start_window_drag_fn = startWindowDrag,
++                .move_window_fn = moveWindow,
+                 .set_window_drag_regions_fn = setWindowDragRegions,
+                 .window_chrome_fn = windowChrome,
+                 .create_view_fn = createView,
+@@ -795,6 +797,21 @@ fn startWindowDrag(context: ?*anyopaque, window_id: platform_mod.WindowId) anyer
+     if (native_sdk_gtk_start_window_drag(self.host, window_id) == 0) return error.WindowNotFound;
+ }
+ 
++/// Layer-shell windows only (see native_sdk_gtk_move_window); a toplevel's
++/// origin is the compositor's, so every other window is unsupported.
++fn moveWindow(context: ?*anyopaque, window_id: platform_mod.WindowId, dx: f64, dy: f64, clamp: bool) anyerror!platform_mod.MoveWindowResult {
++    const self: *LinuxPlatform = @ptrCast(@alignCast(context.?));
++    var x: f64 = 0;
++    var y: f64 = 0;
++    var hit_x: c_int = 0;
++    var hit_y: c_int = 0;
++    var primary: c_int = 0;
++    var cursor_x: f64 = 0;
++    var cursor_y: f64 = 0;
++    if (native_sdk_gtk_move_window(self.host, window_id, dx, dy, if (clamp) 1 else 0, &x, &y, &hit_x, &hit_y, &primary, &cursor_x, &cursor_y) == 0) return error.UnsupportedService;
++    return .{ .x = x, .y = y, .hit_x = hit_x != 0, .hit_y = hit_y != 0, .primary_down = primary != 0, .cursor_x = cursor_x, .cursor_y = cursor_y };
++}
++
+ /// Drag-region mirror capacity per push: the runtime's own per-view cap
+ /// (`max_canvas_widget_window_drag_regions_per_view` = 32) bounds it in
+ /// practice; the flat buffers below are sized for that with headroom.

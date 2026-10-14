@@ -32,6 +32,27 @@ symlinks and `last-panic.txt` are left untouched.
 
 Requires the `@native-sdk/cli` global (`bun add -g @native-sdk/cli`).
 
+## Linux (Wayland, Hyprland)
+
+Wayland gives a normal window no way to stay on top or pick its position,
+so on Hyprland, Sway, KDE, niri and other wlr-layer-shell compositors the
+pet becomes an overlay layer surface when the build links
+[gtk4-layer-shell](https://github.com/wmww/gtk4-layer-shell)
+(`pacman -S gtk4-layer-shell`, `apt install libgtk4-layer-shell-dev` on
+Ubuntu 25.10+). The pet then stays above other windows and fullscreen apps
+on every workspace, gets no compositor border or shadow, can be dragged
+between monitors and keeps its position across restarts.
+
+The build links the library whenever pkg-config finds it. Pass
+`-Dlayer-shell=false` to build without it: the binary then has no runtime
+dependency on it and the pet is a normal floating window, which is what
+the published Linux release is. GNOME and X11 sessions also get a normal
+window at runtime, as does any session with `NATIVE_SDK_LAYER_SHELL=0` in
+the environment.
+
+The layer namespace is `dev.petdex.desktop-native`, for compositor layer
+rules.
+
 ## Durable session recovery
 
 Installed hooks remain the low-latency path for every supported agent. Local,
