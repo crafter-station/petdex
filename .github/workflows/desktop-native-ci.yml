@@ -232,6 +232,11 @@ jobs:
         shell: bash
         run: bun tests/journal_process_check.mjs
 
+      - name: Test opencode plugin on V1 and V2 APIs
+        working-directory: packages/petdex-desktop-native
+        shell: bash
+        run: bun tests/opencode_plugin_check.mjs
+
       - name: Test remote helper runtimes
         if: matrix.platform != 'windows'
         working-directory: packages/petdex-desktop-native
