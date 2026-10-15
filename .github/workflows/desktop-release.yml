@@ -10,6 +10,13 @@ on:
         description: "Tag to release (e.g. desktop-v0.1.0)"
         required: true
 
+# build-native compiles and runs tag/SDK code with no need for a write
+# token; the release job below overrides this with contents: write for
+# publishing. Declared explicitly rather than inherited: on same-repo
+# branches the inherited default can be read/write.
+permissions:
+  contents: read
+
 jobs:
   build-native:
     name: build native ${{ matrix.target }}

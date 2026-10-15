@@ -62,7 +62,10 @@ export async function POST(req: Request): Promise<Response> {
     // render leaves a full-route 404 entry that isn't linked to the
     // pet's cache tags, so it survives revalidateTag for the page's
     // whole 24h ISR window. Purge the route cache entries directly.
-    await revalidatePetPaths(slugs);
+    const { revalidatePetPagePaths } = await import(
+      "@/lib/pet-page-revalidate"
+    );
+    await revalidatePetPagePaths(...slugs);
     // Cloudflare sits in front of Vercel with a cache-everything rule
     // that also caches 404/500 HTML at the edge for ~1h, so a fixed
     // origin can keep serving the broken page until the edge TTL
@@ -76,22 +79,6 @@ export async function POST(req: Request): Promise<Response> {
   return NextResponse.json({
     revalidated: { slugs: slugs ?? [], tags: tags ?? [] },
   });
-}
-
-async function revalidatePetPaths(slugs: string[]): Promise<void> {
-  try {
-    const { revalidatePath } = await import("next/cache");
-    for (const slug of slugs) {
-      // localePrefix="as-needed": the default locale serves at /pets/x
-      // while the rest serve prefixed. Purge every public shape.
-      revalidatePath(`/pets/${slug}`);
-      for (const locale of locales) {
-        revalidatePath(`/${locale}/pets/${slug}`);
-      }
-    }
-  } catch {
-    /* next/cache unavailable in some runtime contexts (tests, scripts) */
-  }
 }
 
 async function purgeCloudflarePetUrls(slugs: string[]): Promise<void> {

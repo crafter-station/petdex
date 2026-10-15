@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { useTranslations } from "next-intl";
 import { createPortal } from "react-dom";
 
 import type { PetStateId } from "@/lib/pet-states";
@@ -80,6 +81,7 @@ export function PetFloater({
   size: SPRITE_SIZE_PX = DEFAULT_SPRITE_SIZE_PX,
   initialFraction = { x: 0.55, y: 0.4 },
 }: PetFloaterProps) {
+  const t = useTranslations("pet.floater");
   const anchorRef = useRef<HTMLSpanElement | null>(null);
 
   const [enabled, setEnabled] = useState(false);
@@ -528,8 +530,8 @@ export function PetFloater({
     return createPortal(
       <button
         type="button"
-        aria-label={`${petName}: drag, click, or just watch`}
-        title={`${petName}: drag me, click me`}
+        aria-label={t("aria", { name: petName })}
+        title={t("title", { name: petName })}
         onPointerDown={onPointerDown}
         className={`absolute z-30 select-none rounded-3xl p-2 transition-transform ${
           dragging
@@ -559,7 +561,7 @@ export function PetFloater({
           src={src}
           state={state}
           scale={(SPRITE_SIZE_PX / DEFAULT_SPRITE_SIZE_PX) * 0.55}
-          label={`${petName} interactive sprite`}
+          label={t("spriteLabel", { name: petName })}
         />
       </button>,
       document.body,

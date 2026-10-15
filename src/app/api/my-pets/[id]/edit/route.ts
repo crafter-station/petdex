@@ -31,6 +31,11 @@ export async function PATCH(
   } catch {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
+  // A literal `null` parses fine and would otherwise reach `applyPetEdit`'s
+  // property reads — after the rate limit and a DB read were already spent.
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    return NextResponse.json({ error: "invalid_json" }, { status: 400 });
+  }
 
   const { id } = await ctx.params;
   return applyPetEdit({ id, userId, body });
@@ -60,6 +65,9 @@ export async function DELETE(
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
+  // The owner check above reads outside this write: a concurrent claim can
+  // move ownerId in between (claim rewrites ownership), so the WHERE repeats
+  // the owner condition instead of trusting the earlier read.
   await db
     .update(schema.submittedPets)
     .set({
@@ -77,7 +85,12 @@ export async function DELETE(
       pendingDhash: null,
       pendingReviewId: null,
     })
-    .where(eq(schema.submittedPets.id, id));
+    .where(
+      and(
+        eq(schema.submittedPets.id, id),
+        eq(schema.submittedPets.ownerId, userId),
+      ),
+    );
 
   return NextResponse.json({ ok: true });
 }

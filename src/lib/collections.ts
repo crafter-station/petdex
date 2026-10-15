@@ -1,3 +1,5 @@
+import { cache } from "react";
+
 import {
   and,
   asc,
@@ -211,31 +213,34 @@ export async function getCollectionListingPreviewsBySlugs(
   return hydrateCollectionListingRows(rows, petsPerPreview);
 }
 
-export async function getCollection(
-  slug: string,
-): Promise<PetCollectionWithPets | null> {
-  return withNextDataCache(
-    async () => {
-      let row: PetCollection | undefined;
-      try {
-        row = await db.query.petCollections.findFirst({
-          where: eq(schema.petCollections.slug, slug.toLowerCase()),
-        });
-      } catch (error) {
-        if (isMissingCollectionTableError(error)) return null;
-        throw error;
-      }
-      if (!row) return null;
-      const [collection] = await hydrateCollections([row]);
-      return collection ?? null;
-    },
-    ["petdex-collection", slug],
-    {
-      tags: [`collection:${slug}`, "collection:list"],
-      revalidate: 86400,
-    },
-  )();
-}
+// Wrapped in React cache() so the metadata pass and the page body share one
+// hydrate; `withNextDataCache` alone memoizes per call, and each call builds a
+// fresh wrapper. Same shape as getPet in pets.ts.
+export const getCollection = cache(
+  async (slug: string): Promise<PetCollectionWithPets | null> => {
+    return withNextDataCache(
+      async () => {
+        let row: PetCollection | undefined;
+        try {
+          row = await db.query.petCollections.findFirst({
+            where: eq(schema.petCollections.slug, slug.toLowerCase()),
+          });
+        } catch (error) {
+          if (isMissingCollectionTableError(error)) return null;
+          throw error;
+        }
+        if (!row) return null;
+        const [collection] = await hydrateCollections([row]);
+        return collection ?? null;
+      },
+      ["petdex-collection", slug],
+      {
+        tags: [`collection:${slug}`, "collection:list"],
+        revalidate: 86400,
+      },
+    )();
+  },
+);
 
 export async function getOwnerCollection(
   ownerId: string,

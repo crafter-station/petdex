@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, mock, spyOn, test } from "bun:test";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -77,6 +77,19 @@ test("provider read and write failures preserve the file fallback", async () => 
   expect(await store.get("tokens")).toBe("file-token");
   expect(native.size).toBe(0);
   expect(warning).toHaveBeenCalledTimes(2);
+  if (process.platform !== "win32") {
+    expect((await stat(filePath)).mode & 0o777).toBe(0o600);
+  }
+});
+
+test("a corrupt credential file reads empty and is rewritten on the next write", async () => {
+  await writeFile(filePath, "{ half-written", "utf8");
+  // Used to reject, which left every later get/set/delete — login
+  // included — failing with no CLI path back to a usable store.
+  expect(await fallback.get("tokens")).toBeNull();
+  expect(warning).toHaveBeenCalled();
+  await fallback.set("tokens", "fresh-token");
+  expect(await fallback.get("tokens")).toBe("fresh-token");
   if (process.platform !== "win32") {
     expect((await stat(filePath)).mode & 0o777).toBe(0o600);
   }

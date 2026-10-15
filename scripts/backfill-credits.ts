@@ -46,6 +46,8 @@ type ClerkUser = {
 async function fetchClerkUser(userId: string): Promise<ClerkUser | null> {
   const res = await fetch(`https://api.clerk.com/v1/users/${userId}`, {
     headers: { Authorization: `Bearer ${CLERK_SECRET}` },
+    // A stalled Clerk API would otherwise hang the backfill indefinitely.
+    signal: AbortSignal.timeout(30_000),
   });
   if (!res.ok) {
     console.warn(

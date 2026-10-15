@@ -70,12 +70,27 @@ export async function POST(req: Request) {
     }
   }
 
+  // owner_email is an identity column: /my-pets/claim matches it against
+  // the claimer's own *verified* primary address, and it is the recipient
+  // of approval/rejection mail. Taking `emailAddresses[0]` unchecked let an
+  // account write an address it has not proven control of into both roles —
+  // the sibling `getClaimIdentity` requires `verification.status ===
+  // "verified"` for exactly this reason. Prefer the verified primary, fall
+  // back to the first verified address, and store null rather than an
+  // unverified one.
+  const verifiedEmail =
+    user?.emailAddresses?.find(
+      (e) =>
+        e.id === user.primaryEmailAddressId &&
+        e.verification?.status === "verified",
+    )?.emailAddress ??
+    user?.emailAddresses?.find((e) => e.verification?.status === "verified")
+      ?.emailAddress ??
+    null;
+
   const principal: SubmissionPrincipal = {
     userId,
-    email:
-      user?.emailAddresses?.[0]?.emailAddress ??
-      user?.primaryEmailAddress?.emailAddress ??
-      null,
+    email: verifiedEmail,
     username: user?.username ?? null,
     imageUrl: user?.imageUrl ?? null,
     firstName: user?.firstName ?? null,

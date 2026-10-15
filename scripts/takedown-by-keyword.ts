@@ -21,7 +21,7 @@
 import { eq, or, sql } from "drizzle-orm";
 import { Resend } from "resend";
 
-import { db, schema } from "@/lib/db/client";
+import { db, executeAtomicReturning, schema } from "@/lib/db/client";
 import { renderSubmissionTakedownEmail } from "@/lib/email-templates/submission-takedown";
 import {
   BLOCKED_CHINESE_PHRASES,
@@ -33,6 +33,8 @@ import { createNotification } from "@/lib/notifications";
 import { petPublicArtifactKeys } from "@/lib/pet-public-artifact-keys";
 import { deleteR2Objects, keyFromR2Url } from "@/lib/r2";
 import { getPreferredLocaleForUser } from "@/lib/user-locale";
+
+import { emailEnv, sendEmail } from "../src/lib/email-send";
 
 type Pet = typeof schema.submittedPets.$inferSelect;
 
@@ -84,10 +86,17 @@ function buildIlikeOr(
 
 async function findMatchingPets() {
   const patterns = [...BLOCKED_LATIN_TOKENS, ...BLOCKED_CHINESE_PHRASES];
+  // `tags` is a jsonb array; cast to text so ILIKE can see it. Tags are an
+  // AI-written field — the classifier reads creator text and can be steered
+  // by a prompt-injection into emitting a blocklisted token — and they are
+  // rendered on the pet page and indexed for search, so a keyword sweep that
+  // skipped them left such a word live with nothing to catch it.
+  const tagsText = sql`${schema.submittedPets.tags}::text`;
   const condition = or(
     buildIlikeOr(sql`${schema.submittedPets.displayName}`, patterns) as never,
     buildIlikeOr(sql`${schema.submittedPets.description}`, patterns) as never,
     buildIlikeOr(sql`${schema.submittedPets.slug}`, patterns) as never,
+    buildIlikeOr(tagsText, patterns) as never,
   );
   if (!condition) return [];
   const rows = await db.select().from(schema.submittedPets).where(condition);
@@ -95,7 +104,13 @@ async function findMatchingPets() {
   // ILIKE picked something up that the latin word-boundary rule would
   // not actually trigger (e.g., "skunk").
   return rows.filter(
-    (r) => findBlockedKeyword(r.displayName, r.description, r.slug) !== null,
+    (r) =>
+      findBlockedKeyword(
+        r.displayName,
+        r.description,
+        r.slug,
+        ...((r.tags as string[] | null) ?? []),
+      ) !== null,
   );
 }
 
@@ -127,34 +142,65 @@ async function findMatchingCollections() {
 async function takedownOne(pet: Pet, reason: string) {
   const slug = pet.slug;
 
-  await db.delete(schema.petLikes).where(eq(schema.petLikes.petSlug, slug));
-  await db.delete(schema.petMetrics).where(eq(schema.petMetrics.petSlug, slug));
-  await db
-    .delete(schema.petCollectionItems)
-    .where(eq(schema.petCollectionItems.petSlug, slug));
-  await db
-    .delete(schema.petCollectionRequests)
-    .where(eq(schema.petCollectionRequests.petSlug, slug));
-  await db
-    .update(schema.petCollections)
-    .set({ coverPetSlug: null })
-    .where(eq(schema.petCollections.coverPetSlug, slug));
-  await db
-    .update(schema.petRequests)
-    .set({ fulfilledPetSlug: null, status: "open" })
-    .where(eq(schema.petRequests.fulfilledPetSlug, slug));
-  await db.execute(sql`
-    UPDATE user_profiles
-    SET featured_pet_slugs = (
-      SELECT COALESCE(jsonb_agg(elem), '[]'::jsonb)
-      FROM jsonb_array_elements(featured_pet_slugs) AS elem
-      WHERE elem <> to_jsonb(${slug}::text)
-    )
-    WHERE featured_pet_slugs @> to_jsonb(${slug}::text)
-  `);
-  await db
-    .delete(schema.submittedPets)
-    .where(eq(schema.submittedPets.id, pet.id));
+  // Every cleanup below is keyed off the pet row, so a mid-sequence failure
+  // used to leave the pet half-removed — likes gone, candidates deleted, but
+  // the pet row still live. One transaction makes it all-or-nothing. This list
+  // mirrors `takedownPet` in scripts/takedown-pet.ts; the statements stay
+  // separate for the reason `runAtomicReturning` documents (a single CTE would
+  // share one snapshot and could not see the row it just wrote).
+  await executeAtomicReturning([
+    db
+      .delete(schema.petLikes)
+      .where(eq(schema.petLikes.petSlug, slug))
+      .getSQL(),
+    db
+      .delete(schema.petMetrics)
+      .where(eq(schema.petMetrics.petSlug, slug))
+      .getSQL(),
+    db
+      .delete(schema.petCollectionItems)
+      .where(eq(schema.petCollectionItems.petSlug, slug))
+      .getSQL(),
+    db
+      .delete(schema.petCollectionRequests)
+      .where(eq(schema.petCollectionRequests.petSlug, slug))
+      .getSQL(),
+    // Keyed by pet_id, not slug, and no FK cascades it — see takedown.ts.
+    db
+      .delete(schema.petRequestCandidates)
+      .where(eq(schema.petRequestCandidates.petId, pet.id))
+      .getSQL(),
+    // Reviews hang off the pet by id as well, and the FK that would cascade
+    // them is absent from push-built databases (see the schema declaration),
+    // so nothing may delete a pet without taking the reviews.
+    db
+      .delete(schema.submissionReviews)
+      .where(eq(schema.submissionReviews.submittedPetId, pet.id))
+      .getSQL(),
+    db
+      .update(schema.petCollections)
+      .set({ coverPetSlug: null })
+      .where(eq(schema.petCollections.coverPetSlug, slug))
+      .getSQL(),
+    db
+      .update(schema.petRequests)
+      .set({ fulfilledPetSlug: null, status: "open" })
+      .where(eq(schema.petRequests.fulfilledPetSlug, slug))
+      .getSQL(),
+    sql`
+      UPDATE user_profiles
+      SET featured_pet_slugs = (
+        SELECT COALESCE(jsonb_agg(elem), '[]'::jsonb)
+        FROM jsonb_array_elements(featured_pet_slugs) AS elem
+        WHERE elem <> to_jsonb(${slug}::text)
+      )
+      WHERE featured_pet_slugs @> to_jsonb(${slug}::text)
+    `,
+    db
+      .delete(schema.submittedPets)
+      .where(eq(schema.submittedPets.id, pet.id))
+      .getSQL(),
+  ]);
 
   const keys = [
     keyFromR2Url(pet.spritesheetUrl),
@@ -163,10 +209,16 @@ async function takedownOne(pet: Pet, reason: string) {
     keyFromR2Url(pet.soundUrl),
     ...petPublicArtifactKeys(slug),
   ].filter((k): k is string => Boolean(k));
+  // Recorded, not thrown here: the owner still has to be told, and throwing
+  // mid-function would skip the notification and email below. The caller
+  // counts it as a failure and exits non-zero — swallowing it entirely meant
+  // the DB row came down while the public assets stayed in the bucket, and
+  // the run still reported success.
+  let r2Error: unknown = null;
   try {
     await deleteR2Objects(keys);
   } catch (err) {
-    console.warn(`    r2 cleanup failed for ${slug}:`, err);
+    r2Error = err;
   }
 
   await createNotification({
@@ -184,24 +236,34 @@ async function takedownOne(pet: Pet, reason: string) {
   if (pet.ownerEmail && process.env.RESEND_API_KEY) {
     try {
       const resend = new Resend(process.env.RESEND_API_KEY);
-      const from =
-        process.env.RESEND_FROM ?? "Petdex <petdex@updates.railly.dev>";
+      const from = emailEnv(
+        "RESEND_FROM",
+        "Petdex <petdex@updates.railly.dev>",
+      );
       const locale = await getPreferredLocaleForUser(pet.ownerId);
       const email = renderSubmissionTakedownEmail(locale, {
         petName: pet.displayName,
         reason,
       });
-      await resend.emails.send({
-        from,
-        to: pet.ownerEmail,
-        subject: email.subject,
-        html: email.html,
-        text: email.text,
-      });
+      // Resend resolves 4xx/5xx with an `error` rather than throwing, so the
+      // bare call here dropped the failure silently; sendEmail logs it.
+      await sendEmail(
+        resend,
+        {
+          from,
+          to: pet.ownerEmail,
+          subject: email.subject,
+          html: email.html,
+          text: email.text,
+        },
+        `takedown ${slug}`,
+      );
     } catch (e) {
       console.warn(`    email failed for ${slug}:`, e);
     }
   }
+
+  if (r2Error) throw r2Error;
 }
 
 async function main() {
@@ -255,6 +317,11 @@ async function main() {
 
   console.log("\nExecuting takedowns…");
 
+  // A per-item failure used to only warn, so a run where every removal
+  // failed still printed "Done." and exited 0 — a takedown that reported
+  // success while nothing came down. Count them and fail the process.
+  let failures = 0;
+
   // 1. Pets — inline takedown (mirrors src/lib/takedown.ts but avoids
   //    the `import "server-only"` boundary so this runs as a CLI).
   for (const p of pets) {
@@ -262,6 +329,7 @@ async function main() {
       await takedownOne(p, args.reason);
       console.log(`  pet ${p.slug}: removed`);
     } catch (err) {
+      failures++;
       console.warn(`  pet ${p.slug}: FAILED`, err);
     }
   }
@@ -284,6 +352,7 @@ async function main() {
         .where(eq(schema.petRequests.id, r.id));
       console.log(`  request ${r.id}: dismissed`);
     } catch (err) {
+      failures++;
       console.warn(`  request ${r.id}: FAILED`, err);
     }
   }
@@ -298,10 +367,15 @@ async function main() {
         .where(eq(schema.petCollections.id, c.id));
       console.log(`  collection ${c.slug}: deleted`);
     } catch (err) {
+      failures++;
       console.warn(`  collection ${c.slug}: FAILED`, err);
     }
   }
 
+  if (failures > 0) {
+    console.error(`\nDone with ${failures} failure(s).`);
+    process.exit(1);
+  }
   console.log("\nDone.");
 }
 

@@ -1,0 +1,50 @@
+name: discord-bot-ci
+
+# `packages/discord-bot` carries its own `test` and `typecheck` scripts, but
+# nothing ran them: a regression in the bot or its webhook only surfaced by
+# hand. The package is not a root workspace, so the root suite does not cover
+# its typecheck either. This runs both on any change to the package.
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/discord-bot-ci.yml"
+      - "packages/discord-bot/**"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/discord-bot-ci.yml"
+      - "packages/discord-bot/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Discord bot package
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: packages/discord-bot
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Run tests
+        # `bun run test`, not a bare `bun test`: the per-test timeout lives in
+        # the package script, and the spawn-based webhook specs outrun Bun's 5s
+        # default on a loaded runner.
+        run: bun run test

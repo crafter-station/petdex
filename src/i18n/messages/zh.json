@@ -7,7 +7,9 @@
     "browseGallery": "浏览图库",
     "browseGallery__fixme": true,
     "github": "GitHub",
-    "petdexHome": "Petdex 首页"
+    "petdexHome": "Petdex 首页",
+    "close": "关闭",
+    "skipToContent": "跳到主要内容"
   },
   "metadata": {
     "root": {
@@ -39,6 +41,12 @@
         "aiCodingMascot": "AI 编程吉祥物"
       }
     }
+  },
+  "ogImage": {
+    "featuredPet": "精选 Codex 宠物",
+    "codexPet": "Codex 宠物",
+    "featuredCollectionsLabel": "精选合集",
+    "creatorLabel": "Petdex 创作者"
   },
   "header": {
     "gallery": "图库",
@@ -92,7 +100,8 @@
     "manageAccount": "管理账号",
     "signOut": "退出登录",
     "more": "更多",
-    "explore": "探索"
+    "explore": "探索",
+    "userAvatar": "用户头像"
   },
   "stickers": {
     "eyebrow": "反应实验室",
@@ -107,6 +116,7 @@
     "copy": "复制贴纸",
     "openExplorer": "反应贴纸",
     "copied": "贴纸已复制",
+    "copyFailed": "复制失败——请手动复制。",
     "download": "下载 WebP",
     "downloadWhatsApp": "WhatsApp WebP · 512px",
     "whatsappNote": "符合 WhatsApp 媒体限制的动态 WebP。此操作仅下载单个反应，不会安装贴纸包。",
@@ -129,7 +139,8 @@
       "waiting": "等待",
       "running": "运行中",
       "review": "审核中"
-    }
+    },
+    "remove": "从组合中移除"
   },
   "theme": {
     "toggle": "切换主题",
@@ -190,14 +201,16 @@
       "eyebrow": "精选合集",
       "title": "值得安装的精选合集",
       "viewAll": "查看全部",
-      "petsCount": "{count} 个宠物"
+      "petsCount": "{count} 个宠物",
+      "coverEmpty": "合集",
+      "spriteAnimated": "{name} 动画"
     },
     "worksWith": "支持",
     "__fixme": true
   },
   "community": {
     "metadata": {
-      "title": "Petdex 中文社区",
+      "title": "中文社区",
       "description": "加入 Petdex 中文社区，和创作者、收藏者、维护者一起交流宠物创作、提交反馈和每周更新。"
     },
     "eyebrow": "Petdex 中文社区",
@@ -213,7 +226,7 @@
       },
       "channels": {
         "title": "围绕创作和发布交流",
-        "body": "可以分享进行中的精灵图Sprite、反馈 CLI 问题、提出新想法，也可以参与周末的 Ship or Sink 创作活动。"
+        "body": "可以分享进行中的精灵图、反馈 CLI 问题、提出新想法，也可以参与周末的 Ship or Sink 创作活动。"
       },
       "roles": {
         "title": "积极参与，赢得荣誉头衔",
@@ -246,14 +259,81 @@
     "clearAll": "全部清除",
     "matches": "{count, plural, =1 {1 个匹配} other {# 个匹配}}",
     "sortAria": "排序宠物",
+    "openPet": "打开 {name}",
+    "spriteAnimated": "{name} 动画",
+    "spriteStill": "{name} 精灵图",
     "filtersTitle": "筛选",
     "caughtTitle": "已捕获",
-    "featuredTitle": "精选"
+    "featuredTitle": "精选",
+    "discovered": "已发现",
+    "discoveredTitle": "代表原作者添加，尚未认领。",
+    "filtersButton": "筛选",
+    "clear": "清除",
+    "sortLabel": "排序：",
+    "loadingMore": "加载中",
+    "loadMore": "加载更多",
+    "endOfGallery": "已到图库末尾 · 共 {total} 只",
+    "seeAllRequests": "查看所有心愿",
+    "clearFilters": "清除筛选",
+    "batchLabel": "{month} 批次",
+    "errQueryLength": "请使用 4-200 个字符。",
+    "errQueryInvalidCharacters": "请使用纯文本。",
+    "errQueryNotSearchable": "请使用文字，不要用符号。",
+    "errUrlInField": "不允许包含链接或邮箱地址。",
+    "errBlockedContent": "该内容涉及我们无法接受的内容。",
+    "errInvalidQuery": "该请求无效。",
+    "errInvalidImageUrl": "该图片链接无效。",
+    "filterType": "类型",
+    "filterVersion": "版本",
+    "filterVibe": "风格",
+    "filterColor": "颜色",
+    "filterEra": "世代",
+    "vibeMatch": "正在显示与「{query}」风格相符的宠物。越靠前匹配度越高。",
+    "likePet": "赞 {name}",
+    "unlikePet": "取消赞 {name}",
+    "copyInstallFor": "复制 {name} 的安装命令",
+    "downloadPet": "下载 {name}",
+    "sharePet": "分享 {name}",
+    "playSoundFor": "播放 {name} 的声音",
+    "noMatchQuery": "没有匹配「{query}」的宠物。",
+    "noMatchView": "此视图没有匹配的宠物。",
+    "requestPrompt": "想要一只匹配「{query}」的宠物吗？提交心愿，其他人可以为你点赞。",
+    "requestButton": "提交这个心愿",
+    "sendingButton": "提交中…",
+    "requestCreated": "已提交。我们会优先处理热门的请求。",
+    "requestUpvoted": "已点赞。{count} 位用户想要这只宠物。",
+    "errorSignIn": "请登录后提交心愿。",
+    "errorRequestFailed": "提交失败（{status}）。",
+    "errorNetwork": "网络出错，请重试。",
+    "sortCurated": "精选",
+    "sortRecent": "最新",
+    "sortPopular": "点赞最多",
+    "sortInstalled": "安装最多",
+    "sortAlpha": "按字母",
+    "byAuthor": "作者 {name}",
+    "dexNumber": "编号 {number}"
   },
   "suggestCollection": {
     "cta": "推荐到合集",
     "closeAria": "关闭",
-    "notePlaceholder": "可选：告诉管理员为什么这只宠物适合该合集"
+    "notePlaceholder": "可选：告诉管理员为什么这只宠物适合该合集",
+    "heading": "推荐 {name} 加入……",
+    "pendingSuffix": " · 待处理",
+    "sending": "发送中……",
+    "sendForReview": "提交审核",
+    "footer": "每个请求都会由管理员审核。通过后你就能在合集里看到这只宠物。",
+    "errors": {
+      "unauthorized": "请先登录再推荐宠物。",
+      "rateLimited": "推荐过于频繁，请过几分钟再试。",
+      "invalidPetSlug": "找不到这只宠物。",
+      "urlInField": "这里不能填写链接。",
+      "blockedContent": "该备注包含我们不能接受的用语。",
+      "collectionNotFound": "该合集已不存在。",
+      "petNotOwned": "这只宠物不属于你。",
+      "petNotApproved": "这只宠物需要先通过审核。",
+      "alreadyInCollection": "这只宠物已在合集中。",
+      "failed": "推荐发送失败：{code}"
+    }
   },
   "feedback": {
     "trigger": "反馈",
@@ -267,7 +347,7 @@
     "openIssue": "去 GitHub 提交 issue →",
     "kinds": {
       "suggestion": "建议",
-      "bug": "Bug",
+      "bug": "问题反馈",
       "praise": "表扬",
       "other": "其他"
     },
@@ -284,12 +364,16 @@
     "errors": {
       "moreDetail": "请再多说一点（至少 4 个字符）。",
       "submitFailed": "提交失败（{status}）。",
-      "network": "网络错误。请重试。"
+      "network": "网络错误。请重试。",
+      "rateLimited": "消息过于频繁，请一小时后再试。",
+      "tooLong": "这条消息太长了。",
+      "invalidEmail": "该邮箱地址无效。",
+      "generic": "出错了，请重试。"
     }
   },
   "submit": {
     "metadata": {
-      "title": "提交宠物 | Petdex",
+      "title": "提交宠物",
       "description": "为 Petdex 上传并校验宠物包。",
       "description__fixme": true
     },
@@ -307,7 +391,7 @@
       "drop": {
         "title": "上传宠物包",
         "instructions": "拖入包含 <petJson>pet.json</petJson> 和 <spritesheet>精灵图集文件 spritesheet.webp</spritesheet>（或 .png）的文件夹或 ZIP。支持 {classicWidth}×{classicHeight}（8×9）或 {v2Width}×{v2Height}（v2 8×11）帧网格。",
-        "short": "拖入包含 pet.json 和精灵图集 Spritesheet 的文件夹或 ZIP。",
+        "short": "拖入包含 pet.json 和精灵图集的文件夹或 ZIP。",
         "ariaLabel": "宠物包拖放区域",
         "pickFolder": "选择文件夹",
         "pickZip": "选择 .zip",
@@ -320,7 +404,7 @@
         "title": "提交检查",
         "reading": "正在读取包...",
         "ready": "可以提交了。",
-        "empty": "在你确认前，包会一直保留在本地。Petdex 会在上传前检查 manifest 和精灵图Sprite 尺寸。"
+        "empty": "在你确认前，包会一直保留在本地。Petdex 会在上传前检查 manifest 和精灵图尺寸。"
       },
       "edit": {
         "displayNameLabel": "宠物名称",
@@ -368,7 +452,7 @@
           "duplicate": "原因：它似乎与现有宠物重复。{summary}",
           "duplicateFallback": "提交的资源与现有宠物包匹配。",
           "policy": "原因：自动审核发现可能的政策问题，需要管理员审核后才能上线。",
-          "assets": "原因：自动审核发现包文件或精灵图集 Spritesheet 存在问题。",
+          "assets": "原因：自动审核发现包文件或精灵图集存在问题。",
           "timeout": "原因：自动审核耗时过长，所以我们改为人工审核，避免做出有风险的决定。",
           "reviewFailed": "原因：自动审核失败，所以我们改为人工审核，避免做出有风险的决定。",
           "rejectedGeneric": "原因：自动审核发现这个提交存在高置信度问题。",
@@ -388,11 +472,13 @@
       },
       "errors": {
         "uploadFailed": "上传失败：{reason}",
+        "uploadFailedGeneric": "上传失败。请检查文件后重试。",
         "submissionFailed": "提交失败",
         "submissionFailedWithCode": "提交失败：{code}",
         "rateLimited": "已达到限制：每 24 小时最多提交 10 次。请明天再试。",
         "missingField": "这个包缺少提交所需的数据。",
-        "invalidSpritesheet": "精灵图集 Spritesheet 太小，或尺寸无效。",
+        "invalidSpritesheet": "精灵图集太小，或尺寸无效。",
+        "assetTooLarge": "{role} 超过了 {max} 的上传上限。请压缩后重试。",
         "invalidAssetUrl": "上传的资源没有通过托管检查。",
         "invalidSlug": "宠物 id 无法转换成有效的 URL slug。",
         "unauthorized": "请先登录再提交。",
@@ -408,11 +494,13 @@
         "zipMissingSpritesheet": "zip 根目录缺少精灵图集文件 spritesheet.webp（或 .png）。找到的文件：{present}",
         "invalidJson": "pet.json 不是有效的 JSON。",
         "invalidSpriteVersion": "pet.json 中的 spriteVersionNumber 不受支持：{value}。请使用 1、2，或省略该字段。",
-        "unreadableSpritesheet": "无法读取精灵图集 Spritesheet 图片。",
-        "tooSmall": "精灵图集 Spritesheet 看起来太小（{width}×{height}）。请使用 {classicWidth}×{classicHeight}（8×9）或 {v2Width}×{v2Height}（v2 8×11）。",
-        "badGrid": "精灵图集 Spritesheet 网格为 {width}×{height}，不符合 8×9（1536×1872）或 v2 8×11（1536×2288）帧网格，帧会错位显示。",
+        "unreadableSpritesheet": "无法读取精灵图集图片。",
+        "tooSmall": "精灵图集看起来太小（{width}×{height}）。请使用 {classicWidth}×{classicHeight}（8×9）或 {v2Width}×{v2Height}（v2 8×11）。",
+        "badGrid": "精灵图集网格为 {width}×{height}，不符合 8×9（1536×1872）或 v2 8×11（1536×2288）帧网格，帧会错位显示。",
         "spriteVersionMismatch": "精灵图集尺寸使用 v{detected}，但 pet.json 声明为 v{declared}。请先更新 spriteVersionNumber 再提交。",
-        "spritesheetMissingPetInfo": "此精灵图集旁未找到 pet.json，已生成占位名称/描述。请在下方填写宠物名称和描述后再提交。"
+        "spritesheetMissingPetInfo": "此精灵图集旁未找到 pet.json，已生成占位名称/描述。请在下方填写宠物名称和描述后再提交。",
+        "unreadable": "无法读取该文件包：{reason}",
+        "unreadableGeneric": "无法读取该文件包。请检查文件后重试。"
       }
     }
   },
@@ -520,13 +608,23 @@
         "signInUpvote__fixme": true,
         "voteFailed": "投票失败（{status}）",
         "voteFailed__fixme": true,
-        "network": "网络错误"
+        "network": "网络错误",
+        "queryLength": "请输入 4-200 个字符。",
+        "queryInvalidCharacters": "请使用纯文本。",
+        "queryNotSearchable": "请使用文字，不要只用符号。",
+        "requestWriteFailed": "该请求无法保存，请重试。",
+        "invalidImageUrl": "不允许使用该图片链接。",
+        "blockedContent": "该请求包含我们不能接受的用语。",
+        "urlInField": "这里不能填写链接。",
+        "invalidJson": "无法读取该请求。",
+        "generic": "出错了，请重试。",
+        "rateLimited": "请求过于频繁，请过几分钟再试。"
       }
     }
   },
   "create": {
     "metadata": {
-      "title": "创建一只宠物 | Petdex",
+      "title": "创建一只宠物",
       "title__fixme": true,
       "description": "5 分钟孵化属于你的动画宠物，然后分享到 Petdex。",
       "description__fixme": true
@@ -549,7 +647,7 @@
         "title__fixme": true,
         "beforeCommand": "在聊天框中输入",
         "beforeCommand__fixme": true,
-        "afterCommand": "。描述你想要的宠物（一种想法、一种氛围、桌上的某个东西）。技能会自动生成精灵图集 Spritesheet 和动画。",
+        "afterCommand": "。描述你想要的宠物（一种想法、一种氛围、桌上的某个东西）。技能会自动生成精灵图集和动画。",
         "afterCommand__fixme": true,
         "tip": "提示：越具体越好。“有绿色眼睛的小袜子精灵”比“一只动物”更有效。",
         "tip__fixme": true
@@ -561,9 +659,9 @@
         "beforeSettings__fixme": true,
         "settingsPath": "Settings → Appearance → Pets",
         "middle": "并点击",
-        "select": "Select",
+        "select": "选择",
         "afterSelect": "，在",
-        "customPets": "Custom pets",
+        "customPets": "自定义宠物",
         "tipBefore": "之后可以用",
         "tipAfter": "来唤醒它或把它收起来。",
         "tipAfter__fixme": true
@@ -596,7 +694,7 @@
         "vibe": {
           "label": "只保留一种氛围。",
           "label__fixme": true,
-          "body": "Cozy、focused、mischievous、heroic。不要试图同时兼顾全部。",
+          "body": "舒适、专注、淘气、英雄。不要试图同时兼顾全部。",
           "body__fixme": true
         },
         "ip": {
@@ -663,6 +761,7 @@
     "chapters": {
       "eyebrow": "生态系统指南",
       "title": "按章节探索",
+      "label": "第 {number} 章",
       "description": "按类别浏览 Petdex 生态系统。每个章节重点介绍开发者发布的内容以及他们如何让 Petdex 生动起来。",
       "viewAll": "查看全部（{count}）"
     },
@@ -713,11 +812,12 @@
     "card": {
       "screenshotAlt": "{name} 截图",
       "site": "网站"
-    }
+    },
+    "spritePreviewLabel": "{name} 宠物"
   },
   "brand": {
     "metadata": {
-      "title": "Petdex 品牌工具包",
+      "title": "品牌工具包",
       "title__fixme": true,
       "description": "下载 Petdex 的 logo、图标、颜色 token 和使用说明，可用于媒体、项目和社区帖子。",
       "description__fixme": true,
@@ -847,7 +947,7 @@
   },
   "about": {
     "metadata": {
-      "title": "关于 Petdex：为你的编程智能体准备的动画宠物",
+      "title": "关于：为你的编程智能体准备的动画宠物",
       "title__fixme": true,
       "description": "Petdex 是面向 ChatGPT（Codex）、Claude Code、Gemini、OpenCode、Qoder、Kimi Code、CodeBuddy 和 OMP 等编程智能体的开源动画宠物图库。浏览目录、用一条命令安装，或提交你自己的作品。",
       "description__fixme": true,
@@ -916,7 +1016,7 @@
         "submit": {
           "q": "我可以提交自己的宠物吗？",
           "q__fixme": true,
-          "a": "可以。先用 petdex CLI 登录（`npx petdex login`），再运行 `npx petdex submit ./my-pet/`，CLI 会把资源上传到 R2，并把提交加入审核队列。你也可以通过网站的 /submit 页面提交。你只需要一个 pet.json 文件和一张 9 状态精灵图集 Spritesheet。",
+          "a": "可以。先用 petdex CLI 登录（`npx petdex login`），再运行 `npx petdex submit ./my-pet/`，CLI 会把资源上传到 R2，并把提交加入审核队列。你也可以通过网站的 /submit 页面提交。你只需要一个 pet.json 文件和一张 9 状态精灵图集。",
           "a__fixme": true
         },
         "openSource": {
@@ -960,6 +1060,7 @@
       "description": "跟踪你发往 Petdex 的每只宠物状态，自定义个人资料，并编辑已上线条目。",
       "description__fixme": true
     },
+    "metadataTitle": "我的宠物",
     "edit": {
       "confirmWithdraw": "要撤回这次编辑吗？当前已批准的内容会继续保持上线。",
       "confirmWithdraw__fixme": true,
@@ -974,7 +1075,7 @@
       "open": "编辑宠物",
       "open__fixme": true,
       "modalTitle": "编辑宠物",
-      "modalBody": "文字修改如符合所有标准可自动批准。精灵图Sprite 与元数据变更须人工审核。",
+      "modalBody": "文字修改如符合所有标准可自动批准。精灵图与元数据变更须人工审核。",
       "modalBody__fixme": true,
       "fields": {
         "displayName": "显示名称",
@@ -988,8 +1089,8 @@
         "cancel": "取消",
         "submit": "提交编辑以供审核"
       },
-      "spritesheetLabel": "精灵图集 Spritesheet",
-      "spritesheetHelp": "替换当前精灵图集 Spritesheet。需要人工审核。",
+      "spritesheetLabel": "精灵图集",
+      "spritesheetHelp": "替换当前精灵图集。需要人工审核。",
       "metaLabel": "元数据 pet.json",
       "metaHelp": "替换当前元数据。需要人工审核。",
       "fileTooBig": "文件超过 8 MB",
@@ -997,7 +1098,38 @@
       "invalidJson": "无效的 JSON 文件",
       "autoApproved": "编辑已应用",
       "queuedForReview": "编辑已提交，等待审核",
-      "uploading": "上传中..."
+      "uploading": "上传中...",
+      "errors": {
+        "unauthorized": "请先登录再编辑这只宠物。",
+        "notFound": "这只宠物已不存在。",
+        "invalidJsonFile": "无法把该 pet.json 解析为 JSON。",
+        "invalidSpriteVersion": "spriteVersionNumber 必须省略，或为 1、2。",
+        "presignFailed": "无法准备上传。",
+        "missingSpriteSlot": "无法准备上传：缺少 sprite 位置。",
+        "spriteUploadFailed": "spritesheet 上传失败。",
+        "missingPetJsonSlot": "无法准备上传：缺少 pet.json 位置。",
+        "metadataUploadFailed": "pet.json 上传失败。",
+        "onlyApprovedEditable": "只有已通过的宠物才能编辑。",
+        "displayNameTooShort": "显示名称至少需要 2 个字符。",
+        "descriptionTooShort": "描述至少需要 10 个字符。",
+        "descriptionTooLong": "描述最多 280 个字符。",
+        "invalidTags": "这些标签无效。",
+        "invalidAssetUrl": "该文件地址不被允许。",
+        "assetNoLongerAvailable": "上传的文件之一已失效，请重新上传。",
+        "nothingChanged": "还没有任何改动。",
+        "rateLimited": "修改过于频繁，请过几分钟再试。",
+        "urlInField": "名称、描述或标签中不允许出现链接。",
+        "blockedContent": "该名称或描述包含被屏蔽的词。",
+        "petNotEditable": "这只宠物仅在已通过审核时可编辑。",
+        "failed": "编辑保存失败：{code}",
+        "unknown": "编辑保存失败。"
+      },
+      "spritePreviewAlt": "精灵预览",
+      "a11y": {
+        "close": "关闭",
+        "removeSprite": "移除已选的精灵图集",
+        "removeMeta": "移除已选的 pet.json"
+      }
     },
     "eyebrow": "仪表盘",
     "submissionCount": "{count, plural, =0 {暂无提交} =1 {1 份提交} other {# 份提交}}",
@@ -1008,7 +1140,33 @@
       "rejected": "已拒绝"
     },
     "submitAnother": "再次提交",
-    "emptyState": "该状态下暂无提交。"
+    "emptyState": "该状态下暂无提交。",
+    "claimBanner": {
+      "claimed": "已认领。刷新页面即可在列表中看到。",
+      "found": "找到 {count} 只可能是你的宠物",
+      "matchedViaBoth": "匹配依据：<mono>{email}</mono> 或 <mono>{github}</mono>。",
+      "matchedViaEmail": "匹配依据：<mono>{email}</mono>。",
+      "matchedViaGithub": "匹配依据：<mono>{github}</mono>。",
+      "matchedHint": "点击认领即可把它们转到你当前的账号，方便管理和重新提交修改。",
+      "claim": "认领",
+      "claiming": "认领中…",
+      "dismiss": "不是我的，忽略",
+      "errors": {
+        "unauthorized": "请先登录再认领宠物。",
+        "rateLimited": "认领过于频繁，请过几分钟再试。",
+        "notFound": "这只宠物已不存在。",
+        "identityMismatch": "这只宠物与你绑定的邮箱或 GitHub 账号不匹配。",
+        "noVerifiedIdentity": "请先添加已验证的邮箱或连接 GitHub，然后再认领。",
+        "network": "请求没能到达 Petdex，请检查网络后重试。",
+        "failed": "认领未成功，请重试。",
+        "failedWithCode": "认领未成功：{code}"
+      }
+    },
+    "status": {
+      "pending": "待审核",
+      "approved": "已通过",
+      "rejected": "已拒绝"
+    }
   },
   "myFeedback": {
     "metadata": {
@@ -1070,7 +1228,7 @@
   },
   "leaderboard": {
     "metadata": {
-      "title": "Petdex 排行榜",
+      "title": "排行榜",
       "description": "Petdex 上的顶级创作者：获批宠物最多、最受喜爱、安装量最高。",
       "description__fixme": true
     },
@@ -1114,7 +1272,8 @@
         "blurb": "按已捕获的获批宠物数量排序的收藏者。",
         "empty": "还没有收藏者。"
       }
-    }
+    },
+    "anonymousCreator": "匿名"
   },
   "claim": {
     "cta": "登录以认领",
@@ -1148,7 +1307,9 @@
       "insideCodex__fixme": true,
       "andClick": "并点击",
       "use": "使用",
-      "findPet": "在 <strong>{displayName}</strong> 下查找"
+      "findPet": "在 <strong>{displayName}</strong> 下查找",
+      "customPets": "自定义宠物",
+      "select": "选择"
     }
   },
   "commandLine": {
@@ -1184,7 +1345,7 @@
       "step2": "告诉我们是哪只宠物，以及你与相关 IP 的关系。",
       "step3": "我们会人工审核。通常 48 小时内响应。为保持透明，提交内容会公开保留在 GitHub。",
       "step4": "审核通过后，宠物会从图库和安装接口中移除。",
-      "nonIp": "非 IP 问题，例如精灵图Sprite 损坏或描述错误，请改用普通 issue。",
+      "nonIp": "非 IP 问题，例如精灵图损坏或描述错误，请改用普通 issue。",
       "prefillLabel": "本次请求会自动带上：",
       "confirmation": "向 Petdex 提交内容即表示你确认自己拥有相关作品权利，或正在创作同人内容。Petdex 会处理善意下架请求。",
       "cancel": "取消",
@@ -1207,13 +1368,28 @@
     "withdrawSubmission": "撤回提交",
     "withdrawing": "撤回中…",
     "submitNewVersion": "提交新版本",
-    "editDetails": "编辑名称和描述"
+    "editDetails": "编辑名称和描述",
+    "deleteConfirm": "输入“{slug}”以确认。这会从 Petdex 永久删除 {pet} 并释放该 slug，宠物的文件和点赞记录都会删除。",
+    "deleteMismatch": "slug 不匹配，宠物没有被删除。",
+    "withdrawConfirm": "撤回“{pet}”？待审核的提交无法恢复，只能重新提交。",
+    "errors": {
+      "unauthorized": "请先登录。",
+      "rateLimited": "操作过于频繁，请过几分钟再试。",
+      "notFound": "这只宠物已不存在。",
+      "forbidden": "这只宠物不属于你，无法移除。",
+      "claimRequired": "这只宠物是代你添加的。请先在主页认领，然后再删除。",
+      "invalidSlug": "宠物 id 无效。",
+      "onlyPending": "只有待审核的提交可以撤回。",
+      "network": "请求没能到达 Petdex，请检查网络后重试。",
+      "failed": "操作未完成：{code}"
+    }
   },
   "petStateViewer": {
     "eyebrow": "状态查看器",
     "frames": "{count} 帧",
     "rowFrames": "第 {row} 行 - {count} 帧",
     "animationLabel": "{petName} {state} 动画",
+    "spriteLabel": "{petName} {state}",
     "states": {
       "idle": {
         "label": "待机",
@@ -1258,7 +1434,8 @@
       "ariaLabel": "Dex 导航",
       "ariaLabel__fixme": true,
       "shuffleTitle": "切换到随机宠物（Space）",
-      "shuffleTitle__fixme": true
+      "shuffleTitle__fixme": true,
+      "shuffle": "随机"
     },
     "keyboardHint": {
       "tip": "提示：",
@@ -1284,8 +1461,37 @@
     },
     "variants": {
       "title": "该角色的变体",
-      "description": "其他已审核且精灵图Sprite 形状非常接近的宠物。"
-    }
+      "description": "其他已审核且精灵图形状非常接近的宠物。"
+    },
+    "metadata": {
+      "title": "{name}：Codex 动画宠物",
+      "description": "为 Codex 安装 {name}：{description} 一条命令、动画像素画、{tags}。",
+      "tagsFallback": "开源",
+      "keywordCodexPet": "{name} Codex 宠物",
+      "keywordPixelPet": "{name} 像素宠物",
+      "keywordCodexPetShort": "Codex 宠物"
+    },
+    "partOf": "所属合集",
+    "counters": {
+      "installs": "{count} 次安装",
+      "downloads": "{count} 次下载",
+      "skeleton": "— 次安装 · — 次下载"
+    },
+    "floater": {
+      "aria": "{name}：拖动、点击，或者就看着它",
+      "title": "{name}：拖我，点我",
+      "spriteLabel": "{name} 互动精灵"
+    },
+    "submission": {
+      "title": "提交信息",
+      "curated": "官方精选条目。",
+      "updated": "更新于 {date}"
+    },
+    "animatedLabel": "{name} 动画",
+    "spriteIdleLabel": "{name} 待机",
+    "eyebrowFeatured": "精选",
+    "eyebrowEntry": "Petdex 条目",
+    "dexNumber": "编号 {number}"
   },
   "collectionDetail": {
     "backToCollections": "← 返回全部合集",
@@ -1295,9 +1501,29 @@
     "noResults": "此合集中没有匹配 \"{query}\" 的宠物。",
     "empty": "此合集还没有已通过审核的宠物。",
     "loadingMore": "正在加载更多宠物…",
-    "endOfCollection": "已到合集末尾 · 共 {count} 个宠物"
+    "endOfCollection": "已到合集末尾 · 共 {count} 个宠物",
+    "metadata": {
+      "title": "{title} 合集",
+      "ogTitle": "{title} 在 Petdex"
+    },
+    "featuredEyebrow": "精选合集",
+    "viewCreator": "查看创作者",
+    "visitIpSite": "访问 IP 官网",
+    "petCount": "{count} 只宠物",
+    "installCount": "{count} 次安装",
+    "caught": "已捕获 {caught}/{total}",
+    "setContents": "合集内容",
+    "catchFull": "集齐整个合集",
+    "allCollections": "全部合集",
+    "animatedLabel": "{name} 动画"
   },
   "download": {
+    "metadata": {
+      "title": "下载 Petdex Desktop",
+      "description": "下载适用于 macOS、Windows 和 Linux 的 Petdex Desktop。你的宠物，陪伴每个编程助手。",
+      "ogTitle": "Petdex Desktop",
+      "ogDescription": "macOS、Windows 和 Linux 免费桌面宠物——陪伴每个编程助手。"
+    },
     "eyebrow": "终端优先安装",
     "eyebrow__fixme": true,
     "title": "运行一个命令，Petdex 完成剩下的事。",
@@ -1320,7 +1546,7 @@
     },
     "activation": {
       "items": {
-        "hooks": "Agent hooks",
+        "hooks": "Agent 钩子",
         "hooks__fixme": true,
         "desktop": "桌面应用",
         "desktop__fixme": true,
@@ -1462,7 +1688,26 @@
     "seeGuide": "查看完整安装指南",
     "seeGuide__fixme": true,
     "themeCodexLabel": "套用配色",
-    "themeCodexHint": "Codex 主题"
+    "themeCodexHint": "Codex 主题",
+    "themeDialog": {
+      "title": "来自 {name} 的 Codex 主题",
+      "description": "根据这只宠物的主色生成。Codex Desktop 目前还没有用于安装主题的深链接，所以把它粘贴到设置中即可应用。",
+      "loading": "正在生成主题…",
+      "light": "浅色",
+      "dark": "深色",
+      "copied": "已复制",
+      "copy": "复制{label}",
+      "stepAppearance": "Codex Desktop → 设置 → 外观。",
+      "stepImport": "在浅色主题上点击 <import>导入</import>，粘贴，然后在深色主题上重复一次。",
+      "stepColor": "两个主题都以 {color} 重新着色。",
+      "errors": {
+        "notFound": "这只宠物还未发布，所以暂时没有可生成的主题。",
+        "noColor": "这只宠物还没有提取到主色，而主题正是由主色生成的。",
+        "loadFailed": "无法生成主题，请稍后重试。",
+        "loadFailedWithCode": "无法生成主题：{code}",
+        "clipboardBlocked": "浏览器阻止了写入剪贴板。请重试，或选中文本手动复制。"
+      }
+    }
   },
   "desktopAnnouncement": {
     "eyebrow": "新功能 · 桌面应用",
@@ -1510,6 +1755,7 @@
       "title": "精选合集",
       "description": "按系列、类别或主题浏览 Petdex 合集，使用快速的公开目录。"
     },
+    "notFoundTitle": "未找到该合集",
     "hero": {
       "eyebrow": "精选合集 Featured collections",
       "title": "找到你的一套，一行命令安装",
@@ -1539,7 +1785,8 @@
     "card": {
       "petCount": "{count} 个宠物",
       "siteLink": "网站 Site",
-      "byOwner": "by {name}"
+      "byOwner": "作者：{name}",
+      "spriteStill": "{name} 精灵图"
     },
     "kindLabel": {
       "franchise": "系列 Franchise",
@@ -1550,6 +1797,7 @@
   },
   "profile": {
     "creatorBadge": "Petdex 创作者",
+    "notFoundTitle": "未找到该用户",
     "creatorOfPetdex": "Petdex 创作者",
     "yourAlbum": "你的图鉴：{caught}/{total}（{pct}%）",
     "editProfile": "编辑资料",
@@ -1561,14 +1809,61 @@
     "editOrder": "编辑顺序",
     "joined": "加入于 {date}",
     "installs": "{count} 安装数",
-    "petsCount": "{count} 个宠物"
+    "petsCount": "{count} 个宠物",
+    "metadata": {
+      "title": "{name}",
+      "description": "{name} 为 Codex 创作的宠物。",
+      "ogDescription": "{name} 创作的 Codex 动画宠物。"
+    },
+    "pin": {
+      "capAlert": "最多只能置顶 {max} 只宠物，请先取消一个。",
+      "failed": "置顶保存失败：{code}",
+      "networkError": "置顶保存失败，请检查网络后重试。",
+      "unavailable": "置顶功能暂时不可用",
+      "unpin": "取消置顶",
+      "capReached": "已达置顶上限（{max}）",
+      "pin": "置顶到主页"
+    },
+    "creatorOfPetdexTitle": "Petdex 的建造者之一",
+    "dragAria": "拖动 {name} 重新排序",
+    "openPetAria": "打开 {name}",
+    "rankTitle": "按已通过宠物数排名第 {rank}，共 {total} 位。查看完整排行榜",
+    "rankLabel": "宠物数第 {rank}"
   },
   "galleryReorder": {
-    "dragInstruction": "拖动宠物以重新排序。点击「完成」后保存更改。"
+    "dragInstruction": "拖动宠物以重新排序。点击「完成」后保存更改。",
+    "cancel": "取消",
+    "saving": "保存中……",
+    "done": "完成",
+    "saveFailed": "顺序保存失败：{code}",
+    "errors": {
+      "unauthorized": "请先登录再调整顺序。",
+      "rateLimited": "改动过于频繁，请过几分钟再试。",
+      "invalidOrder": "无法读取该顺序。",
+      "tooManyItems": "要排序的宠物太多了。",
+      "emptyOrder": "顺序不能为空。",
+      "noOwnedPets": "这些宠物都不属于你。"
+    },
+    "spriteStill": "{name} 精灵图"
   },
   "pinnedReorder": {
     "reorderLabel": "无法保存顺序",
-    "saveError": "无法保存顺序：{error}"
+    "saveError": "无法保存顺序：{error}",
+    "heading": "★ 置顶",
+    "saving": "保存中……",
+    "saved": "顺序已更新",
+    "count": "{count}/{max}",
+    "retry": "重试",
+    "restore": "恢复已保存的顺序",
+    "dragHint": "拖动宠物的把手即可调整顺序，松手后自动保存。",
+    "errors": {
+      "unauthorized": "请先登录再调整顺序。",
+      "rateLimited": "改动太频繁，请几分钟后再试。",
+      "invalidOrder": "无法读取该顺序。",
+      "noOwnedPets": "这些宠物都不属于你。",
+      "tooManyItems": "最多只能置顶 6 只宠物。",
+      "emptyOrder": "没有可保存的内容。"
+    }
   },
   "ownerCollections": {
     "title": "我的合集",
@@ -1580,19 +1875,46 @@
     "petsSelected": "宠物（已选 {selected}/{total}）",
     "petLimit": "每个合集最多包含 {max} 个宠物。请先移除成员，降到 {max} 个以下才能再添加。",
     "petLimitHint": "你已批准的宠物超过单个合集的上限，最多可选择 {max} 个。",
-    "emptyPetSlugs": "这样会移除该合集中的全部宠物。请添加一个，或改为删除该合集。"
+    "emptyPetSlugs": "这样会移除该合集中的全部宠物。请添加一个，或改为删除该合集。",
+    "usedCount": "已用 {used}/{max}。",
+    "newCollection": "新建合集",
+    "editCollection": "编辑合集",
+    "needApprovedPet": "至少需要一只已通过审核的宠物才能创建合集。",
+    "emptyState": "还没有合集。把宠物编成主题合集，就会显示在你的主页上。",
+    "confirmDelete": "删除“{title}”？宠物会留在你的主页上，只是移除这张合集卡片。",
+    "deleteFailed": "合集删除失败：{code}",
+    "saveFailed": "合集保存失败：{code}",
+    "curated": "官方精选",
+    "personal": "个人",
+    "petCount": "{count} 只宠物",
+    "fieldTitle": "标题",
+    "fieldDescription": "描述（可选）",
+    "descriptionPlaceholder": "它们之间有什么共同点？",
+    "cancel": "取消",
+    "create": "创建",
+    "save": "保存",
+    "unauthorized": "登录状态已过期，请重新登录后再试。",
+    "forbidden": "该合集不属于你。",
+    "notFound": "该合集已不存在。",
+    "featuredNotEditable": "精选合集无法编辑或删除。",
+    "invalidUrl": "不允许使用该链接。",
+    "collectionPetLimit": "该合集的宠物数量已达上限。",
+    "petNotOwnedOrApproved": "合集里的宠物必须都属于你且已通过审核。",
+    "collectionCapReached": "你的合集数量已达上限。",
+    "collectionSlugConflict": "已存在同名合集。"
   },
   "collectionEditor": {
     "selectPetsFirst": "请先选择宠物",
     "petLimit": "每个合集最多包含 {max} 个宠物。请先移除成员，降到 {max} 个以下才能再添加。",
-    "petLimitHint": "你已批准的宠物超过单个合集的上限，最多可选择 {max} 个。",
-    "emptyPetSlugs": "这样会移除该合集中的全部宠物。请添加一个，或改为删除该合集。"
+    "petLimitHint": "你已批准的宠物超过单个合集的上限，最多可选择 {max} 个。"
   },
   "onboarding": {
     "skip": "跳过引导"
   },
   "sticker": {
     "ctaWeChat": "保存为微信表情",
+    "reactionsTitle": "{name} 表情",
+    "reactionsDescription": "挑选一个表情，复制贴纸，或分享一套表情包。",
     "ctaGeneric": "保存为表情",
     "ctaShort": "保存表情",
     "hintWeChat": "动态 WebP · 微信 / WhatsApp / Discord 通用",
@@ -1634,7 +1956,7 @@
   },
   "takedownPage": {
     "metadata": {
-      "title": "下架请求 | Petdex",
+      "title": "下架请求",
       "description": "如果某只宠物侵犯了你的权利，可以这样申请下架。"
     },
     "eyebrow": "法务合规 · 下架请求",
@@ -1647,7 +1969,7 @@
       "review": "我们会人工审核，通常会在 48 小时内响应。为保持透明，请求内容会保留在 GitHub 上。",
       "remove": "审核通过后，宠物会从图库和安装接口中移除。"
     },
-    "nonIpBefore": "如果不是 IP 权利问题，比如精灵图Sprite 损坏、描述有误，请提交普通 issue，或通过",
+    "nonIpBefore": "如果不是 IP 权利问题，比如精灵图损坏、描述有误，请提交普通 issue，或通过",
     "emailLink": "邮件",
     "nonIpAfter": "联系我们。",
     "openRequest": "打开下架请求",
@@ -1655,7 +1977,7 @@
   },
   "unsubscribePage": {
     "metadata": {
-      "title": "取消订阅 | Petdex",
+      "title": "取消订阅",
       "description": "管理你的 Petdex 邮件偏好。"
     },
     "eyebrow": "邮件 · 偏好设置",
@@ -1676,7 +1998,7 @@
   },
   "telemetryPage": {
     "metadata": {
-      "title": "数据收集说明 | Petdex",
+      "title": "数据收集说明",
       "description": "了解 petdex CLI 会收集哪些匿名数据，以及如何关闭。"
     },
     "eyebrow": "法务合规 · 数据收集",
@@ -1728,10 +2050,9 @@
     "vibeEyebrow": "风格：{vibe}",
     "relatedKinds": "其他类型",
     "relatedVibes": "相关风格",
-    "count": "这个合集里有 {count} 只宠物",
+    "count": "共 {count} 只宠物",
     "kinds": {
       "creature": {
-        "label": "动物",
         "title": "面向编程智能体的动物类动画宠物",
         "title__fixme": true,
         "intro": "动物、小怪兽和各种想象出来的小伙伴都在这里。这是 Petdex 里最大的类别，也是很多创作者的起点：水獭、水豚、狐狸，还有一些说不上名字但很有生命力的小东西。",
@@ -1739,7 +2060,6 @@
         "metaDescription__fixme": true
       },
       "object": {
-        "label": "物品",
         "title": "面向编程智能体的物件类动画宠物",
         "title__fixme": true,
         "intro": "它们不一定是活物，但绝对有性格。回形针、马克杯、冰淇淋球，一些日常物品被画成像素宠物之后，突然就有了陪你写代码的气质。",
@@ -1747,7 +2067,6 @@
         "metaDescription__fixme": true
       },
       "character": {
-        "label": "角色",
         "title": "面向编程智能体的角色类动画宠物",
         "title__fixme": true,
         "intro": "人形角色、吉祥物、原创人物和致敬作品都放在这里。每只宠物都被整理成 Codex 可用的 9 种动画状态。",
@@ -1757,7 +2076,6 @@
     },
     "vibes": {
       "cozy": {
-        "label": "舒适",
         "title": "面向编程智能体的舒适系宠物",
         "title__fixme": true,
         "intro": "温柔、不抢戏，像给终端铺了一条小毯子。柔和的姿势、轻轻眨眼、安静待机，适合长时间写代码时放在旁边。",
@@ -1765,7 +2083,6 @@
         "metaDescription__fixme": true
       },
       "calm": {
-        "label": "平静",
         "title": "面向编程智能体的平静系宠物",
         "title__fixme": true,
         "intro": "适合专注时段的低调伙伴。动画节奏更像呼吸，不会在你调试半天的时候跳出来抢注意力。",
@@ -1773,7 +2090,6 @@
         "metaDescription__fixme": true
       },
       "playful": {
-        "label": "俏皮",
         "title": "面向编程智能体的顽皮系宠物",
         "title__fixme": true,
         "intro": "活泼、淘气、坐不住。它们会摇尾巴、转圈，偶尔像是在提示词旁边插一句嘴。",
@@ -1781,7 +2097,6 @@
         "metaDescription__fixme": true
       },
       "cheerful": {
-        "label": "开朗",
         "title": "面向编程智能体的欢快系宠物",
         "title__fixme": true,
         "intro": "Petdex 里的乐观派。配色明亮、表情轻快，待机时也像是在认真欢迎你打开终端。",
@@ -1789,7 +2104,6 @@
         "metaDescription__fixme": true
       },
       "focused": {
-        "label": "专注",
         "title": "面向编程智能体的专注系宠物",
         "title__fixme": true,
         "intro": "已经进入深度工作模式的伙伴。耳机、显示器、认真凝视，感觉下一秒就要和你一起把这个功能发出去。",
@@ -1797,7 +2111,6 @@
         "metaDescription__fixme": true
       },
       "mischievous": {
-        "label": "淘气",
         "title": "面向编程智能体的调皮系宠物",
         "title__fixme": true,
         "intro": "带一点坏笑和小心思。偷偷摸摸的待机姿势、斜眼表情，让人怀疑刚才那个 linter 报错是不是它干的。",
@@ -1805,7 +2118,6 @@
         "metaDescription__fixme": true
       },
       "heroic": {
-        "label": "英雄",
         "title": "面向编程智能体的英雄系宠物",
         "title__fixme": true,
         "intro": "披风、站姿和一点拯救世界的气场。它们相信你，也相信你那个还没合并的 PR。",
@@ -1813,7 +2125,6 @@
         "metaDescription__fixme": true
       },
       "edgy": {
-        "label": "酷感",
         "title": "面向编程智能体的酷炫系宠物",
         "title__fixme": true,
         "intro": "配色更深，轮廓更利落，态度也更明显。适合想让终端多一点锋芒的时候。",
@@ -1821,7 +2132,6 @@
         "metaDescription__fixme": true
       },
       "mystical": {
-        "label": "神秘",
         "title": "面向编程智能体的神秘系宠物",
         "title__fixme": true,
         "intro": "月亮、星光、长袍和一点神秘感。像是还没等模型回答，它就已经知道答案了。",
@@ -1829,7 +2139,6 @@
         "metaDescription__fixme": true
       },
       "wholesome": {
-        "label": "治愈",
         "title": "面向编程智能体的治愈系宠物",
         "title__fixme": true,
         "intro": "真诚、温柔，很难不喜欢。大眼睛和小动作都刚刚好，适合给工作区加一点软乎乎的善意。",
@@ -1837,7 +2146,6 @@
         "metaDescription__fixme": true
       },
       "chaotic": {
-        "label": "混乱",
         "title": "面向编程智能体的混乱系宠物",
         "title__fixme": true,
         "intro": "能量很满，也不太可预测。动画状态有点不按常理出牌，但这种不对劲刚刚好。",
@@ -1845,18 +2153,61 @@
         "metaDescription__fixme": true
       },
       "melancholic": {
-        "label": "忧郁",
         "title": "面向编程智能体的忧郁系宠物",
         "title__fixme": true,
         "intro": "安静、柔软，带一点怅然。适合夜深了、构建还在失败、你还不想关掉终端的时候。",
         "metaDescription": "面向编程智能体的忧郁系宠物。若有所思的像素动画伙伴，一条命令即可安装。",
         "metaDescription__fixme": true
       }
+    },
+    "cardInstalls": "{formatted} 次安装",
+    "cardDiscovered": "已发现",
+    "cardDiscoveredTitle": "代表原作者添加，尚未认领。",
+    "cardByAuthor": "作者 {name}",
+    "cardFeatured": "★ 精选",
+    "cardDexNumber": "编号 {number}",
+    "cardOpenPet": "打开 {name}",
+    "cardSpriteStill": "{name} 精灵图",
+    "cardBatchLabel": "{month} 批次"
+  },
+  "taxonomy": {
+    "kinds": {
+      "creature": "动物",
+      "object": "物品",
+      "character": "角色"
+    },
+    "vibes": {
+      "cozy": "舒适",
+      "calm": "平静",
+      "playful": "俏皮",
+      "cheerful": "开朗",
+      "focused": "专注",
+      "mischievous": "淘气",
+      "heroic": "英雄",
+      "edgy": "酷感",
+      "mystical": "神秘",
+      "wholesome": "治愈",
+      "chaotic": "混乱",
+      "melancholic": "忧郁"
+    },
+    "colors": {
+      "red": "红色",
+      "orange": "橙色",
+      "yellow": "黄色",
+      "lime": "青柠色",
+      "green": "绿色",
+      "teal": "青色",
+      "blue": "蓝色",
+      "indigo": "靛蓝",
+      "purple": "紫色",
+      "pink": "粉色",
+      "brown": "棕色",
+      "neutral": "中性色"
     }
   },
   "docsPage": {
     "metadata": {
-      "title": "文档 · Petdex",
+      "title": "文档",
       "description": "如何用 Petdex CLI 安装、分发并自动化你的宠物。",
       "description__fixme": true,
       "ogTitle": "Petdex CLI · 文档"
@@ -1879,7 +2230,7 @@
       "contribute": "参与贡献"
     },
     "hero": {
-      "eyebrow": "Petdex CLI · v0.1",
+      "eyebrow": "Petdex CLI · v1",
       "title": "文档",
       "description": "Petdex CLI 让你在终端里安装、浏览并提交宠物。认证通过 Clerk 走 OAuth 2.0 + PKCE，令牌保存在系统钥匙串中。",
       "description__fixme": true,
@@ -1914,8 +2265,8 @@
           },
           "verify": {
             "title": "验证配置是否正常",
-            "body": "如果宠物没有出现，运行诊断命令；安装 hooks 后，也可以在支持的 agent 里输入 <code>/petdex status</code>。",
-            "result": "doctor 会指出缺失的 binary、hook、token 或宠物目录，并给出具体修复提示。"
+            "body": "如果宠物没有出现，重新运行安装命令并检查输出的目录。Petdex Desktop 读取 <code>~/.petdex/pets/</code>；Codex Desktop 读取 <code>~/.codex/pets/</code>。",
+            "result": "成功时会打印两个目录——如果缺少哪个，重新运行安装命令。"
           }
         },
         "callout": "还没有宠物点子？用 Hatch Pet 技能<link>孵化你自己的</link>，然后回来运行 <code>petdex submit</code>。",
@@ -1938,9 +2289,9 @@
       },
       "commands": {
         "title": "命令",
-        "intro": "CLI 覆盖完整流程：发现、安装、孵化、发布，以及桌面应用和 Agent hooks。所有命令都支持 <code>--help</code>。",
+        "intro": "CLI 覆盖完整流程：发现、安装、发布，以及桌面应用和 Agent hooks。所有命令都支持 <code>--help</code>。",
         "listBody": "列出所有已通过审核的宠物和署名信息。安装前用它来浏览很方便。",
-        "installBody": "把宠物放到 <code>~/.codex/pets/{petName}/</code>。效果等同于 <code>curl -sSf https://petdex.dev/install/{petName} | sh</code>。",
+        "installBody": "把宠物放进 <code>~/.codex/pets/{petName}/</code> 和 <code>~/.petdex/pets/{petName}/</code>。<code>petdex install</code> CLI 会写入两个位置；<code>curl</code> 一行命令只写 <code>~/.codex/pets/</code>，Codex Desktop 能识别，Petdex Desktop 不会。",
         "submitIntro": "把你的宠物发布到图库。CLI 支持三种提交形式：",
         "submitSingle": "<strong>单个文件夹</strong>：<code>petdex submit ~/.codex/pets/boba</code>",
         "submitZip": "<strong>单个 zip</strong>：<code>petdex submit ~/Downloads/boba.zip</code>",
@@ -1961,19 +2312,18 @@
         "title": "桌面应用",
         "intro": "Petdex Desktop 是一个漂浮在工作区上的桌面宠物，会根据 Agent 的工具调用做出反应。支持 macOS、Linux 和 Windows。视觉介绍见 <download>/download</download>。",
         "sidecarCallout": "桌面应用内置了运行在本机 <code>7777</code> 端口的 HTTP hook server。任何能 <code>curl</code> 并读取每次会话 token（<code>~/.petdex/runtime/update-token</code>）的程序都能驱动宠物。这个 token 每次应用启动都会轮换，文件权限是 <code>0600</code>，只有当前用户能读；浏览器和远程网站不能直接访问：",
-        "windowTitle": "Living with the pet",
-        "windowBody": "The pet floats above every window and never steals focus. Clicks pass straight through the activity bubble to whatever is behind it, so a message appearing over your editor cannot swallow a keystroke. The sprite itself stays draggable: pick it up and drop it wherever it belongs on your screen.",
-        "shortcutsTitle": "Shortcuts",
-        "shortcutsBody": "Hover the pet and press <kbd>Cmd</kbd> + <kbd>,</kbd> to open Settings, or <kbd>Cmd</kbd> + <kbd>W</kbd> to send it away. Both also live in the Pet menu while the app is focused.",
-        "settingsTitle": "What is in Settings",
-        "settingsPets": "<strong>Pets.</strong> Search your installed pets, preview each one, and switch the active pet without restarting. Every custom pet you drop in the pets folder shows up here.",
-        "settingsAgents": "<strong>Agents.</strong> Shows which coding agents are on this machine and whether their hooks are wired. Install or disconnect any of them in one click; the app writes the hook files itself, no terminal involved.",
-        "settingsAppearance": "<strong>Appearance.</strong> Scale the sprite, and turn the activity bubble on or off if you would rather have the pet stay quiet.",
-        "chatgptTitle": "ChatGPT pets",
-        "chatgptBody": "ChatGPT exports pets as a 1536x2288 spritesheet, which is exactly the atlas Petdex already reads: same nine state rows, same frame counts. A pet made there works here with no conversion.",
-        "chatgptImport": "<strong>Bringing one in.</strong> Download the spritesheet from ChatGPT, then drop the PNG on <submit>/submit</submit>. Petdex measures the grid, generates the pet.json the export does not include, and shows an animated preview before you name it.",
-        "chatgptExport": "<strong>Taking one out.</strong> Every pet page has an Open in Codex button that installs it into the ChatGPT desktop app. Importing straight from a ChatGPT share link is not possible: those URLs are locked to the browser session that created them.",
-        "__fixme": true
+        "windowTitle": "和宠物一起工作",
+        "windowBody": "宠物会浮在所有窗口之上，但从不抢走焦点。点击会直接穿过活动气泡，落到后面的窗口上，所以即使消息弹在编辑器上方，也不会吞掉你的按键。精灵图本身可以拖动：把它拖到你屏幕上想放的位置即可。",
+        "shortcutsTitle": "快捷键",
+        "shortcutsBody": "把鼠标悬停在宠物上，按 <kbd>Cmd</kbd> + <kbd>,</kbd> 打开设置，或按 <kbd>Cmd</kbd> + <kbd>W</kbd> 让它暂时离开。应用处于焦点状态时，这两项也都在 Pet 菜单里。",
+        "settingsTitle": "设置里有什么",
+        "settingsPets": "<strong>宠物。</strong>搜索已安装的宠物、逐个预览，并在不重启的情况下切换当前宠物。放进 pets 文件夹的每一只自定义宠物都会出现在这里。",
+        "settingsAgents": "<strong>Agent。</strong>显示这台机器上装了哪些编程 Agent，以及它们的 hook 是否接好。一键安装或断开任意一个；hook 文件由应用自己写入，不需要碰终端。",
+        "settingsAppearance": "<strong>外观。</strong>调整精灵图缩放，也可以关闭活动气泡，让宠物安静待着。",
+        "chatgptTitle": "ChatGPT 宠物",
+        "chatgptBody": "ChatGPT 导出的宠物是一张 1536x2288 的精灵图，正好就是 Petdex 已经在读的图集：相同的 8×9 或 8×11 状态行网格、相同的帧数。在那边做好的宠物，拿到这里不用转换就能用。",
+        "chatgptImport": "<strong>导入。</strong>从 ChatGPT 下载精灵图，把 PNG 拖到 <submit>/submit</submit>。Petdex 会测量网格、生成导出文件里没有的 pet.json，并在你命名之前先给出动画预览。",
+        "chatgptExport": "<strong>导出。</strong>每个宠物页面都有一个 Open in Codex 按钮，可以把它装进 ChatGPT 桌面应用。无法直接从 ChatGPT 分享链接导入：那些链接锁定在创建它们的浏览器会话上。"
       },
       "distribute": {
         "title": "分享上架你的宠物",
@@ -1992,7 +2342,7 @@
         "title": "校验规则",
         "intro": "服务器会强制执行这些规则；CLI 也会在本地提前检查。",
         "files": "<code>pet.json</code> 和精灵图集文件 <code>spritesheet.webp</code>（或 <code>.png</code>）必须位于文件夹或 zip 根目录。",
-        "spritesheet": "精灵图集 Spritesheet 至少 256×256。推荐尺寸是 <strong>1536×1872</strong>（8×9 帧网格）。",
+        "spritesheet": "精灵图集至少 256×256。推荐尺寸是 <strong>1536×1872</strong>（8×9 帧网格）。",
         "rateLimit": "频率限制：<strong>每个用户 24 小时最多提交 10 次</strong>。管理员不受此限制。",
         "slugs": "宠物名会自动去重（<code>boba</code> → <code>boba-2</code> → <code>boba-3</code> → …）。成功提交后一定会得到可用名称。",
         "identity": "身份信息（userId、email、credit）来自经过验证的 OAuth token，永远不信任请求体。"
@@ -2016,14 +2366,14 @@
           "presign429": {
             "cause": "触发 24 小时 10 次提交限制",
             "fixBefore": "等待 24 小时，或创建",
-            "fixLink": "submit-fallback issue"
+            "fixLink": "带 submit-fallback 标签的 issue"
           },
           "invalidSpritesheet": {
-            "cause": "精灵图Sprite 小于 256×256",
+            "cause": "精灵图小于 256×256",
             "fix": "按 1536×1872 重新生成"
           },
           "missingField": {
-            "cause": "文件夹缺少 pet.json 或精灵图集 Spritesheet",
+            "cause": "文件夹缺少 pet.json 或精灵图集",
             "fix": "检查文件夹内容"
           },
           "r2Put403": {
@@ -2034,7 +2384,7 @@
       },
       "agents": {
         "title": "适用于 Agent 的用法（Skill）",
-        "intro": "Petdex 提供兼容 Claude Code / Codex / Cursor 的 <strong>skill</strong>：<code>.claude/skills/petdex/SKILL.md</code>。兼容的 Agent 会自动加载它，并学会在什么场景、用什么方式替你调用 CLI。",
+        "intro": "Petdex 提供兼容 Claude Code / Codex / Cursor 的 <strong>skill</strong>：<code>.claude/skills/petdex/SKILL.md</code>。兼容的 Agent 会自动加载它，并学会<em>在什么场景</em>、<em>用什么方式</em>替你调用 CLI。",
         "enablesTitle": "它能做什么",
         "enableCozy": "在任意智能体工具里说<em>“给我的智能体装个舒适系的”</em>。它会运行 <code>petdex list</code>，推荐 Boba/Boxcat，安装你选的那只，并提醒你通过 <strong>Settings → Appearance → Pets</strong> 激活。",
         "enableCozy__fixme": true,
@@ -2088,5 +2438,137 @@
       "linux": "下载 Linux 版"
     },
     "__fixme": true
+  },
+  "profileTabs": {
+    "noPetsYet": "还没有宠物",
+    "ownerEmptyBody": "提交宠物并通过审核后，它就会出现在这里。",
+    "visitorEmptyBody": "这位创作者还没有公开的宠物。",
+    "submitFirstPet": "提交第一只宠物",
+    "pinSaving": "置顶顺序正在保存",
+    "pendingReviewHeading": "待审核（{count}）",
+    "pendingReviewHint": "在管理员通过之前只有你自己能看到。",
+    "rejectedHeading": "已拒绝（{count}）",
+    "rejectedHint": "只有你自己能看到，随时可以提交新版本。",
+    "likedIntro": "用红心捕获的宠物，按时间倒序排列。点击卡片可以回看、安装或取消喜欢。",
+    "noCollectionsYet": "还没有合集。",
+    "curated": "官方精选",
+    "personal": "个人",
+    "petCount": "{count} 只宠物",
+    "featuredCollection": "精选合集",
+    "viewCollection": "查看合集",
+    "legacyCollectionMeta": "{count} 只宠物 · @{handle}",
+    "status": {
+      "pending": "待审核",
+      "rejected": "已拒绝"
+    }
+  },
+  "profileEditor": {
+    "title": "编辑你的资料",
+    "subtitle": "主页地址是 petdex.dev/u/{handle}。修改会立即生效，无需管理员审核。",
+    "displayName": "显示名称",
+    "displayNamePlaceholder": "Kevin Wu",
+    "profileUrl": "主页地址",
+    "handlePlaceholder": "kevwuzy",
+    "handleHint": "3-30 个小写字母、数字、短横线或下划线。",
+    "bio": "简介",
+    "bioPlaceholder": "像素画、治愈系小生物，偶尔来只虾。",
+    "pinnedPets": "置顶宠物（{pinned}/{max}）",
+    "noApprovedPets": "宠物通过审核后就可以在这里置顶。",
+    "pinCapTitle": "最多置顶 {max} 只，请先取消一个",
+    "clickToUnpin": "点击取消置顶",
+    "clickToPin": "点击置顶",
+    "pinTip": "提示：主页上的每张宠物卡片也有一个一键置顶按钮。",
+    "cancel": "取消",
+    "save": "保存",
+    "errors": {
+      "unauthorized": "请先登录再编辑资料。",
+      "rateLimited": "修改过于频繁，请过几分钟再试。",
+      "invalidDisplayName": "这个显示名称不可用。",
+      "invalidHandle": "这个主页地址无效。",
+      "handleTooShort": "主页地址至少需要 3 个字符。",
+      "handleTooLong": "主页地址最多 30 个字符。",
+      "handleReserved": "这个主页地址是保留名称。",
+      "handleTaken": "这个主页地址已被占用。",
+      "invalidBio": "简介过长或包含不支持的字符。",
+      "invalidFeatured": "无法保存这些置顶宠物。",
+      "pinCapReached": "最多只能置顶 {max} 只宠物，请先取消一个。",
+      "petNotOwned": "其中一只置顶宠物不属于你，或尚未通过审核。",
+      "nothingToUpdate": "没有需要更新的内容。",
+      "failed": "资料保存失败：{code}"
+    },
+    "a11y": {
+      "close": "关闭"
+    }
+  },
+  "notifications": {
+    "title": "通知",
+    "markAllRead": "全部标为已读",
+    "allCaughtUp": "没有新通知了。",
+    "relativeNow": "刚刚",
+    "relativeMinutes": "{count} 分钟前",
+    "relativeHours": "{count} 小时前",
+    "relativeDays": "{count} 天前",
+    "petApproved": "{pet} 已上线",
+    "petRejected": "{pet} 需要修改",
+    "editApproved": "{pet} 的修改已上线",
+    "editRejected": "{pet} 的修改被拒绝",
+    "feedbackReplied": "{author} 回复了你的反馈",
+    "requestFulfilledByYou": "{pet} 满足了“{query}”",
+    "requestFulfilledByYouSub": "社区提出需求，你把它实现了。",
+    "requestFulfilled": "你的需求“{query}”已被满足",
+    "requestFulfilledSub": "已上线为 {pet}",
+    "fallbackYourPet": "你的宠物",
+    "fallbackYourSubmission": "你的提交",
+    "fallbackARequest": "某个需求",
+    "fallbackEllipsis": "...",
+    "unreadLabel": "未读",
+    "bellAria": "通知",
+    "bellAriaUnread": "{count} 条未读通知",
+    "loadFailed": "无法加载通知。",
+    "petTakenDown": "{pet} 已被下架",
+    "petTakenDownSub": "它已不再显示在 Petdex 上。你可以修改后重新提交。"
+  },
+  "feedbackThread": {
+    "kindFallback": "反馈",
+    "status": {
+      "pending": "待处理",
+      "addressed": "已处理",
+      "archived": "已归档"
+    },
+    "notifyOn": "有回复时邮件通知我",
+    "notifyOff": "邮件通知已关闭",
+    "noReplies": "还没有回复。在下面继续留言即可保持对话。",
+    "adminName": "Hunter",
+    "you": "你",
+    "replyPlaceholder": "回复对方……（⌘+Enter 发送）",
+    "followUpPlaceholder": "补充一条留言……（⌘+Enter 发送）",
+    "send": "发送",
+    "sendFailed": "回复发送失败：{code}"
+  },
+  "claimRequest": {
+    "trigger": "我有宠物可以满足这个需求",
+    "submittedTitle": "已提交",
+    "submittedBody": "你的宠物正在等待管理员针对该需求进行审核。通过后会通知你。",
+    "done": "完成",
+    "title": "认领“{query}”",
+    "description": "从你已通过的宠物中选一只。管理员会审核并确认匹配。",
+    "noApprovedPets": "你还没有已通过审核的宠物。",
+    "submitOne": "去提交一只 →",
+    "cancel": "取消",
+    "submitCandidate": "提交候选宠物",
+    "errors": {
+      "exists": "已经作为候选提交过了。",
+      "requestNotOpen": "该需求已关闭。",
+      "petNotApproved": "宠物需要先通过审核。",
+      "loadFailed": "无法加载你已通过的宠物（{status}）。",
+      "failed": "候选宠物提交失败：{code}",
+      "unknown": "候选宠物提交失败。"
+    }
+  },
+  "errorPage": {
+    "title": "出错了",
+    "body": "该页面无法加载。不是你的问题——请重试，或返回图鉴。",
+    "retry": "重试",
+    "home": "返回图鉴"
   }
 }

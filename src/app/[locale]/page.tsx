@@ -39,7 +39,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-import { hasLocale, locales } from "@/i18n/config";
+import { hasLocale, locales, localizePath } from "@/i18n/config";
 
 // ISR. The home page renders an install-count ordered, anon shell.
 // visitor's shuffle seed and caught-slug set are pulled client-side
@@ -139,129 +139,137 @@ export default async function Home({
   ];
 
   return (
-    <main className="min-h-dvh bg-background text-foreground">
-      <JsonLd data={jsonLd} />
-      <SurprisePetCard initialPet={surprisePet} />
+    <>
       <SiteHeader />
-      <section className="petdex-hero relative -mt-14 overflow-clip pt-14">
-        <div className="relative mx-auto flex w-full max-w-[1440px] flex-col px-5 pb-10 md:px-8">
-          <div className="mt-12 flex flex-col items-center text-center md:mt-16">
-            <p className="inline-flex items-center gap-2 rounded-full border border-border-base bg-surface/60 px-3.5 py-1.5 font-mono text-[11px] tracking-[0.18em] text-brand uppercase backdrop-blur">
-              <span className="size-1.5 animate-pulse rounded-full bg-brand" />
-              {t("eyebrow")}
-            </p>
-            <h1 className="mt-5 text-[56px] leading-[0.95] font-semibold tracking-[-0.03em] md:text-[96px]">
-              {t("title")}
-            </h1>
-            {locale === "zh" && (
-              <p className="text-xs text-amber-300/70 mt-1 tracking-wider">
-                宠物图鉴 · {formattedTotalPets}+ 个开源伙伴
+      <main id="main" className="min-h-dvh bg-background text-foreground">
+        <JsonLd data={jsonLd} />
+        <SurprisePetCard initialPet={surprisePet} />
+        <section className="petdex-hero relative -mt-14 overflow-clip pt-14">
+          <div className="relative mx-auto flex w-full max-w-[1440px] flex-col px-5 pb-10 md:px-8">
+            <div className="mt-12 flex flex-col items-center text-center md:mt-16">
+              <p className="inline-flex items-center gap-2 rounded-full border border-border-base bg-surface/60 px-3.5 py-1.5 font-mono text-[11px] tracking-[0.18em] text-brand uppercase backdrop-blur">
+                <span className="size-1.5 animate-pulse rounded-full bg-brand" />
+                {t("eyebrow")}
               </p>
-            )}
-            <p className="mt-5 max-w-xl text-balance text-base leading-7 text-muted-1 md:text-lg">
-              {t.rich("tagline", {
-                totalPets,
-                brand: (chunks) => <strong>{chunks}</strong>,
-              })}
-            </p>
-            <div className="mt-4 flex items-center justify-center gap-3 text-xs text-muted-3">
-              <span>{t("worksWith")}</span>
-              <span className="flex items-center gap-2.5 opacity-80">
-                {(
-                  [
-                    ["claude-code", "Claude Code"],
-                    ["codex", "Codex"],
-                    ["gemini", "Gemini CLI"],
-                    ["opencode", "opencode"],
-                    ["qoder", "Qoder"],
-                    ["kimi-code", "Kimi Code"],
-                    ["codebuddy", "CodeBuddy"],
-                    ["omp", "OMP"],
-                  ] as const
-                ).map(([slug, name]) => (
-                  <Image
-                    key={slug}
-                    src={`/brand/agents/${slug}.svg`}
-                    alt={name}
-                    title={name}
-                    width={16}
-                    height={16}
-                    className="size-4 object-contain"
-                  />
-                ))}
-              </span>
+              <h1 className="mt-5 text-[56px] leading-[0.95] font-semibold tracking-[-0.03em] md:text-[96px]">
+                {t("title")}
+              </h1>
+              {/* `text-brand` not `amber-300/70`: amber-on-light was ~1.2:1
+                  against the hero surface, and brand is the eyebrow/link
+                  color the rest of the header already uses. */}
+              {locale === "zh" && (
+                <p className="mt-1 text-xs tracking-wider text-brand">
+                  宠物图鉴 · {formattedTotalPets}+ 个开源伙伴
+                </p>
+              )}
+              <p className="mt-5 max-w-xl text-balance text-base leading-7 text-muted-1 md:text-lg">
+                {t.rich("tagline", {
+                  totalPets,
+                  brand: (chunks) => <strong>{chunks}</strong>,
+                })}
+              </p>
+              <div className="mt-4 flex items-center justify-center gap-3 text-xs text-muted-3">
+                <span>{t("worksWith")}</span>
+                <span className="flex items-center gap-2.5 opacity-80">
+                  {(
+                    [
+                      ["claude-code", "Claude Code"],
+                      ["codex", "Codex"],
+                      ["gemini", "Gemini CLI"],
+                      ["opencode", "opencode"],
+                      ["qoder", "Qoder"],
+                      ["kimi-code", "Kimi Code"],
+                      ["codebuddy", "CodeBuddy"],
+                      ["omp", "OMP"],
+                    ] as const
+                  ).map(([slug, name]) => (
+                    <Image
+                      key={slug}
+                      src={`/brand/agents/${slug}.svg`}
+                      alt={name}
+                      title={name}
+                      width={16}
+                      height={16}
+                      className="size-4 object-contain"
+                    />
+                  ))}
+                </span>
+              </div>
+              <div className="mt-5 flex w-full flex-col items-stretch justify-center gap-2 sm:flex-row sm:items-center">
+                <CommandLine
+                  command="npx petdex install boba"
+                  className="btn-3d h-10 w-full sm:w-auto"
+                />
+                <DownloadDesktopCTA
+                  // `localizePath`, not `/${locale}`: the default locale is
+                  // unprefixed, so the literal form sent English readers to
+                  // `/en/download`, which only redirects back to `/download`.
+                  href={localizePath(locale, "/download")}
+                  source="hero_primary"
+                  className={cn(
+                    buttonVariants({
+                      variant: "petdex-cta",
+                      size: "petdex-pill",
+                      className: "gap-1.5",
+                    }),
+                  )}
+                >
+                  {t("downloadCta")}
+                  <ArrowRight className="size-3.5" />
+                </DownloadDesktopCTA>
+              </div>
             </div>
-            <div className="mt-5 flex w-full flex-col items-stretch justify-center gap-2 sm:flex-row sm:items-center">
-              <CommandLine
-                command="npx petdex install boba"
-                className="btn-3d h-10 w-full sm:w-auto"
-              />
-              <DownloadDesktopCTA
-                href={`/${locale}/download`}
-                source="hero_primary"
-                className={cn(
-                  buttonVariants({
-                    variant: "petdex-cta",
-                    size: "petdex-pill",
-                    className: "gap-1.5",
-                  }),
-                )}
-              >
-                {t("downloadCta")}
-                <ArrowRight className="size-3.5" />
-              </DownloadDesktopCTA>
+
+            <HeroPetParade pets={heroPets} isZh={isZh} />
+
+            <div className="mt-8 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-muted-3">
+              <SubmitCTA variant="petdex-secondary" className="gap-1.5">
+                {t("submitCta")} →
+              </SubmitCTA>
+              {showWechatCommunity ? (
+                <WechatCommunityDialog
+                  source="hero_secondary"
+                  className="inline-flex items-center gap-1.5 transition hover:text-foreground"
+                >
+                  {t("joinWeChat")}
+                </WechatCommunityDialog>
+              ) : process.env.NEXT_PUBLIC_DISCORD_INVITE_URL && !isZh ? (
+                <DiscordLink
+                  href={process.env.NEXT_PUBLIC_DISCORD_INVITE_URL}
+                  source="hero_secondary"
+                  className="inline-flex items-center gap-1.5 transition hover:text-foreground"
+                >
+                  <DiscordIcon className="size-4" />
+                  {t("joinDiscord")}
+                </DiscordLink>
+              ) : (
+                <Link
+                  href="#gallery"
+                  className="inline-flex items-center gap-1.5 transition hover:text-foreground"
+                >
+                  {t("browseGallery")}
+                </Link>
+              )}
             </div>
           </div>
+        </section>
 
-          <HeroPetParade pets={heroPets} isZh={isZh} />
+        <FeaturedCollections collections={collections} isZh={isZh} />
 
-          <div className="mt-8 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-muted-3">
-            <SubmitCTA variant="petdex-secondary" className="gap-1.5">
-              {t("submitCta")} →
-            </SubmitCTA>
-            {showWechatCommunity ? (
-              <WechatCommunityDialog
-                source="hero_secondary"
-                className="inline-flex items-center gap-1.5 transition hover:text-foreground"
-              >
-                {t("joinWeChat")}
-              </WechatCommunityDialog>
-            ) : process.env.NEXT_PUBLIC_DISCORD_INVITE_URL && !isZh ? (
-              <DiscordLink
-                href={process.env.NEXT_PUBLIC_DISCORD_INVITE_URL}
-                source="hero_secondary"
-                className="inline-flex items-center gap-1.5 transition hover:text-foreground"
-              >
-                <DiscordIcon className="size-4" />
-                {t("joinDiscord")}
-              </DiscordLink>
-            ) : (
-              <Link
-                href="#gallery"
-                className="inline-flex items-center gap-1.5 transition hover:text-foreground"
-              >
-                {t("browseGallery")}
-              </Link>
-            )}
-          </div>
-        </div>
-      </section>
+        <section
+          id="gallery"
+          className="mx-auto flex w-full max-w-[1440px] flex-col gap-8 px-5 py-12 md:px-8 md:py-16"
+        >
+          {totalPets > 0 ? (
+            <PetGallery initial={initialSearch} totalPets={totalPets} />
+          ) : null}
+        </section>
 
-      <FeaturedCollections collections={collections} isZh={isZh} />
+        <SiteFooter />
 
-      <section
-        id="gallery"
-        className="mx-auto flex w-full max-w-[1440px] flex-col gap-8 px-5 py-12 md:px-8 md:py-16"
-      >
-        {totalPets > 0 ? (
-          <PetGallery initial={initialSearch} totalPets={totalPets} />
-        ) : null}
-      </section>
-
-      <SiteFooter />
-
-      <DesktopReleaseDialog />
-    </main>
+        <DesktopReleaseDialog />
+      </main>
+    </>
   );
 }
 
@@ -320,6 +328,8 @@ async function FeaturedCollections({
                   coverSlug={collection.coverPetSlug}
                   max={5}
                   scale={0.5}
+                  emptyLabel={t("coverEmpty")}
+                  spriteLabel={(name) => t("spriteAnimated", { name })}
                   className="border-b border-foreground/[0.05]"
                 />
                 <CardContent className="flex flex-1 flex-col p-4">

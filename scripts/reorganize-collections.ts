@@ -19,13 +19,17 @@
 //           pet, top duplicates, biggest collections.
 //
 // Usage:
-//   bun --env-file .env.local scripts/reorganize-collections.ts --phase=1 --dry
 //   bun --env-file .env.local scripts/reorganize-collections.ts --phase=1
-//   bun --env-file .env.local scripts/reorganize-collections.ts --phase=2 --dry
+//   bun --env-file .env.local scripts/reorganize-collections.ts --phase=1 --apply
 //   bun --env-file .env.local scripts/reorganize-collections.ts --phase=2
-//   bun --env-file .env.local scripts/reorganize-collections.ts --phase=3 --dry
+//   bun --env-file .env.local scripts/reorganize-collections.ts --phase=2 --apply
 //   bun --env-file .env.local scripts/reorganize-collections.ts --phase=3
+//   bun --env-file .env.local scripts/reorganize-collections.ts --phase=3 --apply
 //   bun --env-file .env.local scripts/reorganize-collections.ts --phase=4
+//
+// Every phase defaults to DRY. Nothing is written without --apply, and
+// the phase-3 hollow sweep (which deletes whole collections) additionally
+// needs --drop-hollow.
 
 import { readFileSync } from "node:fs";
 
@@ -34,7 +38,12 @@ import { neon } from "@neondatabase/serverless";
 import { requiredEnv } from "./env";
 
 const sql = neon(requiredEnv("DATABASE_URL"));
-const dryRun = process.argv.includes("--dry");
+// Writing is opt-in. Every DELETE below is gated on !dryRun, and this
+// script previously defaulted to APPLY — a single dropped --dry flag ran
+// phase 3's hollow sweep, which deletes any featured, non-franchise
+// collection left under 10 pets. The safe default is to report; pass
+// --apply when the report is what you want to keep.
+const dryRun = !process.argv.includes("--apply");
 const phaseArg = process.argv.find((a) => a.startsWith("--phase="));
 if (!phaseArg) {
   console.error("missing --phase=<1|2|3|4>");
@@ -400,6 +409,12 @@ async function phase3() {
   // takes priority). Drop any collection that's left with <10 pets.
   // Skip franchises — those already have a >=4 threshold elsewhere
   // and we don't want to nuke small but coherent IPs like Pokemon (5).
+  //
+  // Deleting whole collections is the one irreversible step here, and
+  // phase 3's other work (removing duplicate memberships) is what
+  // --apply is usually reached for, so the sweep needs its own flag.
+  // Without --drop-hollow the list is still printed, just not applied.
+  const dropHollow = !dryRun && process.argv.includes("--drop-hollow");
   const HOLLOW_THRESHOLD = 10;
   const hollow = (await sql`
     SELECT pc.id, pc.slug, count(pi.pet_slug)::int AS n
@@ -414,19 +429,25 @@ async function phase3() {
   `) as Array<{ id: string; slug: string; n: number }>;
 
   console.log(
-    `\n${hollow.length} non-franchise collections ${dryRun ? "would be" : ""} dropped for going below ${HOLLOW_THRESHOLD} pets:`,
+    `\n${hollow.length} non-franchise collections ${dropHollow ? "" : "would be "}dropped for going below ${HOLLOW_THRESHOLD} pets:`,
   );
   for (const r of hollow.slice(0, 20)) {
     console.log(`  ${r.n.toString().padStart(3)}  ${r.slug}`);
   }
   if (hollow.length > 20) console.log(`  … +${hollow.length - 20} more`);
 
-  if (!dryRun) {
-    for (const h of hollow) {
-      await sql`DELETE FROM pet_collections WHERE id = ${h.id}`;
+  if (!dropHollow) {
+    if (!dryRun) {
+      console.log(
+        "\n(not applied — re-run with --apply --drop-hollow to delete these)",
+      );
     }
-    console.log(`\nremoved ${hollow.length} hollow collections`);
+    return;
   }
+  for (const h of hollow) {
+    await sql`DELETE FROM pet_collections WHERE id = ${h.id}`;
+  }
+  console.log(`\nremoved ${hollow.length} hollow collections`);
 }
 
 // =============== PHASE 4 — VERIFY ================================

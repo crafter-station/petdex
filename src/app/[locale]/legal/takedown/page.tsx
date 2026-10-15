@@ -11,6 +11,12 @@ import { hasLocale } from "@/i18n/config";
 const STEP_KEYS = ["open", "identify", "review", "remove"] as const;
 const REPO = "crafter-station/petdex";
 
+// Fully public: no auth, no cookies, no per-visitor data. The declaration is
+// also what gets every locale prerendered — without it Next builds the default
+// locale and leaves the others to be rendered on demand, so /zh and /es were
+// the only locales this page did not have a static copy for.
+export const dynamic = "force-static";
+
 export async function generateMetadata({
   params,
 }: {
@@ -45,53 +51,57 @@ export default async function TakedownPage({
   const issueUrl = `https://github.com/${REPO}/issues/new?template=takedown.yml`;
 
   return (
-    <main className="min-h-dvh bg-background text-foreground">
+    <>
       <SiteHeader />
-      <section className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-5 pt-8 pb-12 md:px-8 md:pb-16">
-        <header>
-          <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
-            {t("eyebrow")}
-          </p>
-          <h1 className="mt-3 text-4xl font-semibold tracking-tight md:text-5xl">
-            {t("title")}
-          </h1>
-          <p className="mt-4 text-base leading-7 text-muted-2">{t("intro")}</p>
-        </header>
+      <main id="main" className="min-h-dvh bg-background text-foreground">
+        <section className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-5 pt-8 pb-12 md:px-8 md:pb-16">
+          <header>
+            <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
+              {t("eyebrow")}
+            </p>
+            <h1 className="mt-3 text-4xl font-semibold tracking-tight md:text-5xl">
+              {t("title")}
+            </h1>
+            <p className="mt-4 text-base leading-7 text-muted-2">
+              {t("intro")}
+            </p>
+          </header>
 
-        <section className="space-y-3 rounded-2xl border border-border-base bg-surface/76 p-6 backdrop-blur">
-          <h2 className="text-lg font-semibold">{t("howItWorks")}</h2>
-          <ol className="list-decimal space-y-2 pl-5 text-sm leading-6 text-muted-2">
-            {STEP_KEYS.map((key) => (
-              <li key={key}>{t(`steps.${key}`)}</li>
-            ))}
-          </ol>
-          <p className="pt-2 text-xs text-muted-3">
-            {t("nonIpBefore")}{" "}
-            <a
-              href="mailto:railly@clerk.dev"
-              className="underline underline-offset-4"
-            >
-              {t("emailLink")}
-            </a>
-            {t("nonIpAfter")}
+          <section className="space-y-3 rounded-2xl border border-border-base bg-surface/76 p-6 backdrop-blur">
+            <h2 className="text-lg font-semibold">{t("howItWorks")}</h2>
+            <ol className="list-decimal space-y-2 pl-5 text-sm leading-6 text-muted-2">
+              {STEP_KEYS.map((key) => (
+                <li key={key}>{t(`steps.${key}`)}</li>
+              ))}
+            </ol>
+            <p className="pt-2 text-xs text-muted-3">
+              {t("nonIpBefore")}{" "}
+              <a
+                href="mailto:railly@clerk.dev"
+                className="underline underline-offset-4"
+              >
+                {t("emailLink")}
+              </a>
+              {t("nonIpAfter")}
+            </p>
+          </section>
+
+          <a
+            href={issueUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex h-12 w-fit items-center justify-center gap-2 rounded-full bg-inverse px-6 text-sm font-medium text-on-inverse transition hover:bg-inverse-hover"
+          >
+            <GithubIcon className="size-4" />
+            {t("openRequest")}
+          </a>
+
+          <p className="border-t border-border-base pt-6 text-xs text-muted-3">
+            {t("confirmation")}
           </p>
         </section>
-
-        <a
-          href={issueUrl}
-          target="_blank"
-          rel="noreferrer"
-          className="inline-flex h-12 w-fit items-center justify-center gap-2 rounded-full bg-inverse px-6 text-sm font-medium text-on-inverse transition hover:bg-inverse-hover"
-        >
-          <GithubIcon className="size-4" />
-          {t("openRequest")}
-        </a>
-
-        <p className="border-t border-border-base pt-6 text-xs text-muted-3">
-          {t("confirmation")}
-        </p>
-      </section>
-      <SiteFooter />
-    </main>
+        <SiteFooter />
+      </main>
+    </>
   );
 }

@@ -28,4 +28,12 @@ describe("embedding helpers", () => {
   it("formats pgvector literals", () => {
     expect(embeddingVectorLiteral([0.1, -0.2, 0])).toBe("[0.1,-0.2,0]");
   });
+
+  it("coerces non-finite components to 0 instead of emitting NaN tokens", () => {
+    // `NaN`/`Infinity` serialize as bare tokens that `::vector` rejects,
+    // turning one bad embedding into a failed UPDATE. They are replaced,
+    // not dropped, so the literal keeps the declared dimensionality.
+    expect(embeddingVectorLiteral([0.1, Number.NaN, 0])).toBe("[0.1,0,0]");
+    expect(embeddingVectorLiteral([Number.POSITIVE_INFINITY, 1])).toBe("[0,1]");
+  });
 });

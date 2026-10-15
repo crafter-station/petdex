@@ -20,6 +20,7 @@ import {
 } from "@/lib/pet-security";
 import { readResponseBodyBounded } from "@/lib/response-body";
 import { detectSpriteAtlas } from "@/lib/sprite-atlas";
+import { dhashFromSpriteBuffer } from "@/lib/sprite-dhash";
 import { decideAutomatedReview } from "@/lib/submission-review-decision";
 import { preparePolicyReviewImage } from "@/lib/submission-review-image";
 import {
@@ -49,11 +50,13 @@ const MAX_ZIP_ENTRIES = 80;
 const MAX_ZIP_PET_JSON_SCAN_ENTRIES = 16;
 const MAX_ZIP_PET_JSON_TOTAL_BYTES = MAX_ASSET_BYTES;
 const MIN_SPRITE_DIM = 256;
-const FRAME_W = 192;
-const FRAME_H = 208;
 const REVIEW_MODEL = "openai/gpt-5-mini";
 const VISUAL_MATCH_CHUNK_SIZE = 250;
 const VISUAL_MATCH_SCAN_LIMIT = 2000;
+// Same window as the visual scan: metadata is only used to corroborate a
+// visual/semantic match, and those are drawn from the newest rows too, so the
+// two must agree on which pets they consider.
+const METADATA_MATCH_SCAN_LIMIT = 2000;
 const REVIEW_FETCH_TIMEOUT_MS = 10_000;
 const POLICY_MODEL_TIMEOUT_MS = 15_000;
 const POLICY_PET_JSON_TEXT_LIMIT = 240;
@@ -89,6 +92,11 @@ type VisualMatchScan = {
   matches: ReviewEvidenceMatch[];
   complete: boolean;
   scanned: number;
+};
+
+type MetadataMatchScan = {
+  matches: ReviewEvidenceMatch[];
+  complete: boolean;
 };
 
 async function getDbModule(): Promise<DbModule> {
@@ -575,6 +583,13 @@ async function analyzeDuplicates(
   assets: AssetAnalysis,
 ): Promise<ReviewChecks["duplicates"]> {
   const reasons: string[] = [];
+  // Track whether every duplicate sub-check actually produced a verdict. The
+  // decision layer must hold when one did not: a check that errored or hit
+  // its scan cap reports no matches, and "no matches" from a check that never
+  // ran is not the same as "no duplicates". The comment on the hash columns
+  // below already promises review "holds instead of auto-approving"; this is
+  // what makes that true for the duplicate checks too.
+  let incomplete = false;
   const hashValues = assets.check.hashes;
   const exactMatchResult = hashValues
     ? await findExactHashMatches(row, hashValues)
@@ -582,9 +597,10 @@ async function analyzeDuplicates(
   const exactMatches = exactMatchResult ?? [];
   if (exactMatchResult === null) {
     reasons.push("Exact hash duplicate check did not complete.");
+    incomplete = true;
   }
 
-  const [visualScan, metadataMatches] = await Promise.all([
+  const [visualScan, metadataScan] = await Promise.all([
     assets.dhash
       ? findVisualMatches(row, assets.dhash)
       : Promise.resolve({ matches: [], complete: true, scanned: 0 }),
@@ -595,6 +611,14 @@ async function analyzeDuplicates(
     reasons.push(
       `Visual duplicate check scanned ${visualScan.scanned} candidates and needs manual review.`,
     );
+    incomplete = true;
+  }
+  const metadataMatches = metadataScan.matches;
+  if (!metadataScan.complete) {
+    reasons.push(
+      `Metadata duplicate check hit its ${METADATA_MATCH_SCAN_LIMIT}-row scan window and needs manual review.`,
+    );
+    incomplete = true;
   }
 
   const embedding = await embedTextValue(
@@ -615,11 +639,13 @@ async function analyzeDuplicates(
   const semanticMatches = embedding
     ? await findSemanticMatches(row.id).catch(() => {
         reasons.push("Semantic duplicate check failed.");
+        incomplete = true;
         return [] as ReviewEvidenceMatch[];
       })
     : [];
   if (!embedding) {
     reasons.push("Semantic duplicate check did not complete.");
+    incomplete = true;
   }
 
   const metadataById = new Map(
@@ -643,6 +669,7 @@ async function analyzeDuplicates(
   return {
     decision: duplicateDecision,
     reasons,
+    incomplete,
     exactMatches,
     visualMatches,
     semanticMatches,
@@ -779,8 +806,17 @@ async function findVisualMatches(
 
     scanned += rows.length;
     for (const match of rows) {
-      const visualDistance = hammingDistanceHex(dhash, match.dhash ?? "0");
-      if (visualDistance <= SUBMISSION_SIMILARITY_VISUAL_THRESHOLD) {
+      // `match.dhash` is read from a text column with only an isNotNull filter,
+      // and the argument comes from the same family of values. hammingDistanceHex
+      // does BigInt(`0x${a}`), which throws on an empty or non-hex string — one
+      // legacy or hand-edited row would fail the whole review. A value that is
+      // not the 16-hex shape dhashFromSpriteBuffer writes is simply not a
+      // visual match.
+      const visualDistance = safeHammingDistance(dhash, match.dhash ?? "");
+      if (
+        visualDistance !== null &&
+        visualDistance <= SUBMISSION_SIMILARITY_VISUAL_THRESHOLD
+      ) {
         matches.push({
           id: match.id,
           slug: match.slug,
@@ -810,8 +846,14 @@ async function findVisualMatches(
 
 async function findMetadataMatches(
   row: SubmittedPet,
-): Promise<ReviewEvidenceMatch[]> {
+): Promise<MetadataMatchScan> {
   const { db, schema } = await getDbModule();
+  // Bounded like the visual scan: without a limit this pulled every approved
+  // pet into memory on every submission, so the cost grew with the catalog.
+  // The newest rows are the likeliest duplicates of a fresh submission. The
+  // limit+1 probe tells the caller the scan was truncated — a pass on a
+  // truncated metadata scan must not auto-approve, because an older pet the
+  // window never reached may still be the duplicate.
   const rows = await db
     .select({
       id: schema.submittedPets.id,
@@ -831,12 +873,16 @@ async function findMetadataMatches(
         ne(schema.submittedPets.id, row.id),
         eq(schema.submittedPets.status, "approved"),
       ),
-    );
+    )
+    .orderBy(desc(schema.submittedPets.createdAt))
+    .limit(METADATA_MATCH_SCAN_LIMIT + 1);
+  const complete = rows.length <= METADATA_MATCH_SCAN_LIMIT;
+  const window = complete ? rows : rows.slice(0, METADATA_MATCH_SCAN_LIMIT);
 
   const rowName = normalizeText(row.displayName);
   const rowCreditName = normalizeText(row.creditName ?? "");
   const out: ReviewEvidenceMatch[] = [];
-  for (const match of rows) {
+  for (const match of window) {
     const matchedFields: string[] = [];
     if (
       normalizeText(match.displayName) === rowName &&
@@ -872,7 +918,7 @@ async function findMetadataMatches(
       });
     }
   }
-  return out;
+  return { matches: out.slice(0, SUBMISSION_SIMILARITY_MAX_RESULTS), complete };
 }
 
 async function findSemanticMatches(
@@ -1267,28 +1313,6 @@ function emptyChecks(dryRun: boolean): ReviewChecks {
   };
 }
 
-async function dhashFromSpriteBuffer(buf: Buffer): Promise<string | null> {
-  try {
-    const frame = await sharp(buf)
-      .extract({ left: 0, top: 0, width: FRAME_W, height: FRAME_H })
-      .resize(9, 8, { fit: "fill" })
-      .grayscale()
-      .raw()
-      .toBuffer();
-    let bits = "";
-    for (let row = 0; row < 8; row++) {
-      for (let col = 0; col < 8; col++) {
-        const left = frame[row * 9 + col];
-        const right = frame[row * 9 + col + 1];
-        bits += left < right ? "1" : "0";
-      }
-    }
-    return BigInt(`0b${bits}`).toString(16).padStart(16, "0");
-  } catch {
-    return null;
-  }
-}
-
 async function persistPetEmbedding(
   petId: string,
   vec: number[],
@@ -1303,6 +1327,19 @@ async function persistPetEmbedding(
         embedding_model = ${PETDEX_EMBEDDING_MODEL}
     WHERE id = ${petId}
   `;
+}
+
+const DHASH_HEX_RE = /^[0-9a-f]{16}$/;
+
+/**
+ * Hamming distance between two dhash values, or `null` when either is not the
+ * 16-hex shape `dhashFromSpriteBuffer` writes. Guarding here keeps a legacy or
+ * hand-edited value in the text column from turning `BigInt("0x…")` into a
+ * throw that fails the whole review.
+ */
+function safeHammingDistance(a: string, b: string): number | null {
+  if (!DHASH_HEX_RE.test(a) || !DHASH_HEX_RE.test(b)) return null;
+  return hammingDistanceHex(a, b);
 }
 
 function hammingDistanceHex(a: string, b: string): number {

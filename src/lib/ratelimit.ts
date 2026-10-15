@@ -229,6 +229,17 @@ export const manifestFullRatelimit = createNeonRatelimit({
   prefix: "petdex:manifest-full",
 });
 
+// A user reply in a feedback thread emails the admin inbox, and the replies
+// route had no cap at all: 5/hour gates starting a thread, nothing gated
+// continuing one, so an account could mail the admin without bound. 20/hour
+// is well past any real back-and-forth; admins are exempt because answering
+// many threads is their job.
+export const feedbackReplyRatelimit = createNeonRatelimit({
+  requests: 20,
+  window: "1h",
+  prefix: "petdex:feedback-reply",
+});
+
 // Telemetry event ingestion. One UUID per device, fire-and-forget. 60/min
 // stops a loop from filling the DB but never triggers on normal CLI usage.
 // Keyed by IP because install_id can be faked.

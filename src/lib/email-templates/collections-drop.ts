@@ -1,5 +1,6 @@
 import {
   buildUnsubscribeFooter,
+  escapeHtml,
   normalizeLocale,
   p,
   petdexUrl,
@@ -64,9 +65,12 @@ export function renderCollectionsDropEmail(
 
   const collectionBlocks = vars.collections.map((c) => {
     const url = petdexUrl(current, `/collections/${c.slug}`);
+    // Title and description are user-authored collection text; every other
+    // template routes its interpolations through p()/escapeHtml, and this
+    // one did not — a broadcast email is the last place to skip it.
     return `<div style="margin:0 0 18px;padding:14px 16px;border:1px solid #e7e5e4;border-radius:12px;">
-      <a href="${url}" style="color:#171717;text-decoration:none;font-weight:600;font-size:15px;">${c.title}</a>
-      <div style="margin-top:4px;color:#57534e;font-size:13px;line-height:1.5;">${c.description}</div>
+      <a href="${url}" style="color:#171717;text-decoration:none;font-weight:600;font-size:15px;">${escapeHtml(c.title)}</a>
+      <div style="margin-top:4px;color:#57534e;font-size:13px;line-height:1.5;">${escapeHtml(c.description)}</div>
     </div>`;
   });
 

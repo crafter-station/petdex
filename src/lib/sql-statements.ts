@@ -3,9 +3,37 @@ export function splitSqlStatements(source: string): string[] {
   let current = "";
   let quote: "single" | "double" | null = null;
   let dollarTag: string | null = null;
+  // `--` runs to end of line; `/* */` nests in Postgres. Both are comments
+  // wherever they appear outside a string, and the `--> statement-breakpoint`
+  // marker drizzle writes is itself a `--` line comment — so a splitter that
+  // treats `--` as ordinary text splits on the first `;` inside a comment and
+  // glues the following statement onto the comment body. Comments are kept in
+  // the output; only the statement boundaries care about them.
+  let inLineComment = false;
+  let blockDepth = 0;
 
   for (let index = 0; index < source.length; index += 1) {
     const character = source[index];
+
+    if (inLineComment) {
+      current += character;
+      if (character === "\n") inLineComment = false;
+      continue;
+    }
+
+    if (blockDepth > 0) {
+      current += character;
+      if (character === "*" && source[index + 1] === "/") {
+        current += source[index + 1];
+        index += 1;
+        blockDepth -= 1;
+      } else if (character === "/" && source[index + 1] === "*") {
+        current += source[index + 1];
+        index += 1;
+        blockDepth += 1;
+      }
+      continue;
+    }
 
     if (dollarTag) {
       if (source.startsWith(dollarTag, index)) {
@@ -40,6 +68,18 @@ export function splitSqlStatements(source: string): string[] {
       continue;
     }
 
+    if (character === "-" && source[index + 1] === "-") {
+      current += "--";
+      index += 1;
+      inLineComment = true;
+      continue;
+    }
+    if (character === "/" && source[index + 1] === "*") {
+      current += "/*";
+      index += 1;
+      blockDepth = 1;
+      continue;
+    }
     if (character === "'") {
       quote = "single";
       current += character;

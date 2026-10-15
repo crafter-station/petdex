@@ -11,6 +11,7 @@ import { and, eq, isNull, ne } from "drizzle-orm";
 import { invalidatePetCaches } from "@/lib/db/cached-aggregates";
 import { runtimeDb as db, schema } from "@/lib/db/runtime";
 import { R2_BUCKET, R2_PUBLIC_BASE, r2 } from "@/lib/r2";
+import { readResponseBodyBounded } from "@/lib/response-body";
 
 const execFileAsync = promisify(execFile);
 
@@ -23,6 +24,13 @@ const ELEVENLABS_MAX_PROMPT_CHARS = 450;
 const MIN_ACCEPTABLE_LUFS = -17;
 const MAX_ACCEPTABLE_LUFS = -15;
 const MAX_RENDER_ATTEMPTS = 3;
+// A generated clip is a few hundred KB. Cap the response and give the call a
+// deadline: the request had neither, so a stalled or oversized upstream could
+// hang the run or buffer without bound. The brief call carries a deadline for
+// the same reason the other AI calls in this tree do.
+const ELEVENLABS_MAX_BYTES = 8 * 1024 * 1024;
+const ELEVENLABS_TIMEOUT_MS = 120_000;
+const SOUND_BRIEF_TIMEOUT_MS = 15_000;
 const RETRY_BACKOFF_MS = [4000, 10000, 30000] as const;
 
 const SOUND_BRIEF_SYSTEM_PROMPT =
@@ -148,6 +156,7 @@ export async function buildSoundBrief(
   const result = await generateText({
     model: SOUND_BRIEF_MODEL,
     system: SOUND_BRIEF_SYSTEM_PROMPT,
+    abortSignal: AbortSignal.timeout(SOUND_BRIEF_TIMEOUT_MS),
     messages: [
       {
         role: "user",
@@ -163,7 +172,19 @@ export async function buildSoundBrief(
   });
 
   const raw = result.text;
-  const parsed = JSON.parse(raw) as Partial<SoundBrief>;
+  // The model is asked for a bare object and answers with a code fence or a
+  // sentence of prose around it often enough that the strict parse below threw
+  // a SyntaxError on replies that were perfectly good — and the throw landed
+  // ahead of the shape check, so the intended `invalid_brief_shape` error was
+  // unreachable for malformed JSON. Slicing to the outer braces first, the
+  // same extraction `parsePolicyJson` and `textPolicyModerationPasses` do for
+  // their model replies.
+  const start = raw.indexOf("{");
+  const end = raw.lastIndexOf("}");
+  if (start === -1 || end === -1 || end <= start) {
+    throw new Error("invalid_brief_shape");
+  }
+  const parsed = JSON.parse(raw.slice(start, end + 1)) as Partial<SoundBrief>;
 
   if (
     typeof parsed.promptForElevenLabs !== "string" ||
@@ -345,13 +366,22 @@ async function callElevenLabs(brief: SoundBrief): Promise<ElevenLabsResponse> {
       prompt_influence: 0.65,
       loop: false,
     }),
+    signal: AbortSignal.timeout(ELEVENLABS_TIMEOUT_MS),
   });
 
   if (res.ok) {
-    return { ok: true, bytes: Buffer.from(await res.arrayBuffer()) };
+    return {
+      ok: true,
+      bytes: await readResponseBodyBounded(res, ELEVENLABS_MAX_BYTES),
+    };
   }
 
-  const body = await res.text();
+  // A bodyless error response is normal; readResponseBodyBounded throws on
+  // one where res.text() returned "". Keep the empty-string behaviour so the
+  // detail code falls back instead of the call failing.
+  const body = await readResponseBodyBounded(res, ELEVENLABS_MAX_BYTES)
+    .then((buf) => buf.toString("utf8"))
+    .catch(() => "");
   const detailCode = getDetailCode(body);
   const retryable =
     res.status === 429 ||

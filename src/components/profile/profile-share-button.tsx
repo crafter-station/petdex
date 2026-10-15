@@ -96,6 +96,56 @@ export function ProfileShareButton({ handle, displayName }: Props) {
     };
   }, [open]);
 
+  // The menu is portalled to <body>, so without this it is unreachable by
+  // keyboard: focus stays on the trigger and Tab walks the rest of the page
+  // before reaching it. `role="menu"` also promises arrow-key roving, which
+  // has to be implemented. Move focus to the first item on open, support
+  // Up/Down/Home/End within the items, and return focus to the trigger on
+  // close.
+  useEffect(() => {
+    if (!open) return;
+    const menu = menuRef.current;
+    if (!menu) return;
+    const items = () =>
+      Array.from(
+        menu.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+      ).filter((el) => !el.hasAttribute("disabled"));
+    const first = items()[0];
+    first?.focus();
+
+    function onMenuKey(e: KeyboardEvent) {
+      const list = items();
+      if (list.length === 0) return;
+      const current = list.indexOf(document.activeElement as HTMLElement);
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        list[(current + 1 + list.length) % list.length]?.focus();
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        list[(current - 1 + list.length) % list.length]?.focus();
+      } else if (e.key === "Home") {
+        e.preventDefault();
+        list[0]?.focus();
+      } else if (e.key === "End") {
+        e.preventDefault();
+        list[list.length - 1]?.focus();
+      }
+    }
+    menu.addEventListener("keydown", onMenuKey);
+    return () => menu.removeEventListener("keydown", onMenuKey);
+  }, [open]);
+
+  // Return focus to the trigger when the menu closes, unless focus has since
+  // moved somewhere deliberate (another control the user clicked).
+  const wasOpen = useRef(false);
+  useEffect(() => {
+    if (wasOpen.current && !open) {
+      const active = document.activeElement;
+      if (!active || active === document.body) triggerRef.current?.focus();
+    }
+    wasOpen.current = open;
+  }, [open]);
+
   const onCopy = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(profileUrl);

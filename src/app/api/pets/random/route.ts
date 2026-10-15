@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { publicOrigin } from "@/lib/public-origin";
 import { getRandomPetPool } from "@/lib/random-pet-pool";
 
 export const runtime = "nodejs";
@@ -33,7 +34,21 @@ export async function GET(req: Request): Promise<Response> {
 
   if (wantsJson) {
     if (!next) {
-      return NextResponse.json({ error: "no pets available" }, { status: 404 });
+      // Same headers as the hit branch: the caller negotiated JSON, and the
+      // `Vary: Accept` is what keeps a cache from answering a later 302
+      // request with this empty-pool 404 (or the reverse) — the two branches
+      // are the same URL with different content. An unlabelled 404 is also
+      // the shape the CDN caches hardest.
+      return NextResponse.json(
+        { error: "no pets available" },
+        {
+          status: 404,
+          headers: {
+            "Cache-Control": RANDOM_CACHE_CONTROL,
+            Vary: RANDOM_VARY,
+          },
+        },
+      );
     }
     return NextResponse.json(
       {
@@ -53,13 +68,15 @@ export async function GET(req: Request): Promise<Response> {
     );
   }
 
+  const origin = publicOrigin(req);
+
   if (!next) {
-    return NextResponse.redirect(new URL("/", req.url), {
+    return NextResponse.redirect(new URL("/", origin), {
       status: 302,
       headers: { "Cache-Control": "private, no-store", Vary: RANDOM_VARY },
     });
   }
-  return NextResponse.redirect(new URL(`/pets/${next.slug}`, req.url), {
+  return NextResponse.redirect(new URL(`/pets/${next.slug}`, origin), {
     status: 302,
     headers: { "Cache-Control": RANDOM_CACHE_CONTROL, Vary: RANDOM_VARY },
   });

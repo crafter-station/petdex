@@ -59,6 +59,9 @@ async function main() {
     for (const slug of failures) {
       console.log(`- ${slug}`);
     }
+    // Non-zero so a scripted run is not read as complete when rows were left
+    // without a colour.
+    process.exitCode = 1;
   }
   for (const [family, count] of [...familyCounts.entries()].sort()) {
     console.log(`${family}: ${count}`);

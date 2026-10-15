@@ -237,6 +237,7 @@ function PetsPanel({
   isZh: boolean;
   approvedLabel: (count: number) => string;
 }) {
+  const tt = useTranslations("profileTabs");
   if (
     approvedPets.length === 0 &&
     pendingSubmissions.length === 0 &&
@@ -245,19 +246,17 @@ function PetsPanel({
     return (
       <div className="rounded-3xl border border-dashed border-border-base bg-surface/60 p-12 text-center">
         <p className="font-mono text-xs tracking-[0.22em] text-muted-3 uppercase">
-          No pets yet
+          {tt("noPetsYet")}
         </p>
         <p className="mt-3 text-base text-muted-2">
-          {isOwner
-            ? "Once you submit a pet and it gets approved, it shows up here."
-            : "This creator has not shipped a public pet yet."}
+          {isOwner ? tt("ownerEmptyBody") : tt("visitorEmptyBody")}
         </p>
         {isOwner ? (
           <Link
             href="/submit"
             className="mt-5 inline-flex h-10 items-center rounded-full bg-inverse px-4 text-sm font-medium text-on-inverse transition hover:bg-inverse-hover"
           >
-            Submit your first pet
+            {tt("submitFirstPet")}
           </Link>
         ) : null}
       </div>
@@ -307,7 +306,7 @@ function PetsPanel({
                             onPinChange: (isPinned) =>
                               onPinChange?.(pet.slug, isPinned),
                             disabled: pinActionsDisabled,
-                            disabledTitle: "Pinned order is saving",
+                            disabledTitle: tt("pinSaving"),
                           }
                         : undefined
                     }
@@ -336,11 +335,11 @@ function PetsPanel({
         <section className="space-y-3">
           <header className="flex flex-wrap items-end justify-between gap-3">
             <p className="font-mono text-[11px] tracking-[0.22em] text-chip-warning-fg uppercase">
-              Pending review ({pendingSubmissions.length})
+              {tt("pendingReviewHeading", {
+                count: pendingSubmissions.length,
+              })}
             </p>
-            <p className="text-xs text-muted-3">
-              Visible only to you until an admin approves.
-            </p>
+            <p className="text-xs text-muted-3">{tt("pendingReviewHint")}</p>
           </header>
           <div
             className={cn(
@@ -355,7 +354,10 @@ function PetsPanel({
                 index={index}
                 stateCount={stateCount}
                 hideAuthor
-                statusOverlay={{ label: "Pending", tone: "warning" }}
+                statusOverlay={{
+                  label: tt("status.pending"),
+                  tone: "warning",
+                }}
                 ownerActions={{
                   submissionId: submission.id,
                   status: "pending",
@@ -373,11 +375,9 @@ function PetsPanel({
         <section className="space-y-3">
           <header className="flex flex-wrap items-end justify-between gap-3">
             <p className="font-mono text-[11px] tracking-[0.22em] text-chip-danger-fg uppercase">
-              Rejected ({rejectedSubmissions.length})
+              {tt("rejectedHeading", { count: rejectedSubmissions.length })}
             </p>
-            <p className="text-xs text-muted-3">
-              Visible only to you. Submit a fresh version when ready.
-            </p>
+            <p className="text-xs text-muted-3">{tt("rejectedHint")}</p>
           </header>
           <div
             className={cn(
@@ -392,7 +392,7 @@ function PetsPanel({
                 index={index}
                 stateCount={stateCount}
                 hideAuthor
-                statusOverlay={{ label: "Rejected", tone: "danger" }}
+                statusOverlay={{ label: tt("status.rejected"), tone: "danger" }}
                 ownerActions={{
                   submissionId: submission.id,
                   status: "rejected",
@@ -453,13 +453,11 @@ function LikedPanel({
   stateCount: number;
   isZh: boolean;
 }) {
+  const tt = useTranslations("profileTabs");
   return (
     <section className="space-y-4">
       <header>
-        <p className="text-sm leading-6 text-muted-2">
-          Pets caught with the heart, most recent first. Tap a card to revisit,
-          install, or unlike.
-        </p>
+        <p className="text-sm leading-6 text-muted-2">{tt("likedIntro")}</p>
       </header>
       <div
         className={cn(
@@ -501,6 +499,7 @@ function CollectionsPanel({
   ownerCollections?: OwnerCollection[];
   maxOwnerCollections?: number;
 }) {
+  const tt = useTranslations("profileTabs");
   // Owner-side: multi-collection manager. Lists every collection the
   // user owns (personal + featured) and lets them create/edit/delete
   // the personal ones. Featured ones show as read-only chips.
@@ -521,7 +520,7 @@ function CollectionsPanel({
   if (visibleCollections.length === 0 && !collection) {
     return (
       <div className="rounded-3xl border border-dashed border-border-base bg-surface/60 p-10 text-center text-sm text-muted-2">
-        No collections yet.
+        {tt("noCollectionsYet")}
       </div>
     );
   }
@@ -537,15 +536,15 @@ function CollectionsPanel({
             <div className="flex flex-wrap items-center gap-2">
               {c.featured ? (
                 <span className="inline-flex items-center rounded-full bg-brand-tint px-2 py-0.5 font-mono text-[9px] tracking-[0.18em] text-brand-deep uppercase dark:bg-brand-tint-dark dark:text-brand-light">
-                  Curated
+                  {tt("curated")}
                 </span>
               ) : (
                 <span className="inline-flex items-center rounded-full border border-border-base bg-surface px-2 py-0.5 font-mono text-[9px] tracking-[0.18em] text-muted-3 uppercase">
-                  Personal
+                  {tt("personal")}
                 </span>
               )}
               <span className="font-mono text-[10px] tracking-[0.18em] text-muted-3 uppercase">
-                {c.petCount} pets
+                {tt("petCount", { count: c.petCount })}
               </span>
             </div>
             <h3 className="mt-2 text-lg font-semibold tracking-tight text-foreground">
@@ -573,7 +572,7 @@ function CollectionsPanel({
   return (
     <section className="rounded-3xl border border-border-base bg-surface/80 p-6 backdrop-blur md:p-8">
       <p className="font-mono text-[10px] tracking-[0.22em] text-brand uppercase">
-        Featured collection
+        {tt("featuredCollection")}
       </p>
       <h3 className="mt-3 text-2xl font-semibold tracking-tight text-foreground md:text-3xl">
         {collection?.title}
@@ -587,11 +586,13 @@ function CollectionsPanel({
           prefetch={false}
           className="inline-flex h-10 items-center rounded-full bg-inverse px-4 text-sm font-medium text-on-inverse transition hover:bg-inverse-hover"
         >
-          View collection
+          {tt("viewCollection")}
         </Link>
         <span className="font-mono text-[11px] tracking-[0.18em] text-muted-3 uppercase">
-          {collection?.petSlugs.length}{" "}
-          {collection?.petSlugs.length === 1 ? "pet" : "pets"} · @{publicHandle}
+          {tt("legacyCollectionMeta", {
+            count: collection?.petSlugs.length ?? 0,
+            handle: publicHandle,
+          })}
         </span>
       </div>
     </section>

@@ -18,12 +18,14 @@
 import { eq, sql } from "drizzle-orm";
 import { Resend } from "resend";
 
-import { db, schema } from "@/lib/db/client";
+import { db, executeAtomicReturning, schema } from "@/lib/db/client";
 import { renderSubmissionTakedownEmail } from "@/lib/email-templates/submission-takedown";
 import { createNotification } from "@/lib/notifications";
 import { petPublicArtifactKeys } from "@/lib/pet-public-artifact-keys";
 import { deleteR2Objects, keyFromR2Url } from "@/lib/r2";
 import { getPreferredLocaleForUser } from "@/lib/user-locale";
+
+import { emailEnv, sendEmail } from "../src/lib/email-send";
 
 type Args = {
   slug?: string;
@@ -95,48 +97,87 @@ async function main() {
   const slug = pet.slug;
   const id = pet.id;
 
-  // 1. Cross-table cleanup keyed by slug.
-  await db.delete(schema.petLikes).where(eq(schema.petLikes.petSlug, slug));
-  await db.delete(schema.petMetrics).where(eq(schema.petMetrics.petSlug, slug));
-  await db
-    .delete(schema.petCollectionItems)
-    .where(eq(schema.petCollectionItems.petSlug, slug));
-  await db
-    .delete(schema.petCollectionRequests)
-    .where(eq(schema.petCollectionRequests.petSlug, slug));
+  // Every cleanup below is keyed off the pet row, so a mid-sequence
+  // failure used to leave the pet half-removed — likes gone, candidates
+  // deleted, but the pet row still live and taking likes again. One
+  // transaction makes the takedown all-or-nothing. The statements stay
+  // separate for the reason `runAtomicReturning` documents: a single CTE
+  // would share one snapshot and could not see the row it just wrote.
+  await executeAtomicReturning([
+    // 1. Cross-table cleanup keyed by slug.
+    db
+      .delete(schema.petLikes)
+      .where(eq(schema.petLikes.petSlug, slug))
+      .getSQL(),
+    db
+      .delete(schema.petMetrics)
+      .where(eq(schema.petMetrics.petSlug, slug))
+      .getSQL(),
+    db
+      .delete(schema.petCollectionItems)
+      .where(eq(schema.petCollectionItems.petSlug, slug))
+      .getSQL(),
+    db
+      .delete(schema.petCollectionRequests)
+      .where(eq(schema.petCollectionRequests.petSlug, slug))
+      .getSQL(),
+    // Keyed by pet_id, not slug, and no FK cascades it — see takedown.ts.
+    db
+      .delete(schema.petRequestCandidates)
+      .where(eq(schema.petRequestCandidates.petId, id))
+      .getSQL(),
+    // Reviews hang off the pet by id too, and the FK that would cascade them
+    // is absent from push-built databases (see the schema declaration), so
+    // nothing may delete a pet without taking the reviews. The helper does
+    // the same; this list has to stay in step with it.
+    db
+      .delete(schema.submissionReviews)
+      .where(eq(schema.submissionReviews.submittedPetId, id))
+      .getSQL(),
 
-  // 2. Null out collection covers.
-  await db
-    .update(schema.petCollections)
-    .set({ coverPetSlug: null })
-    .where(eq(schema.petCollections.coverPetSlug, slug));
+    // 2. Null out collection covers.
+    db
+      .update(schema.petCollections)
+      .set({ coverPetSlug: null })
+      .where(eq(schema.petCollections.coverPetSlug, slug))
+      .getSQL(),
 
-  // 3. Reopen any pet request this fulfilled.
-  await db
-    .update(schema.petRequests)
-    .set({ fulfilledPetSlug: null, status: "open" })
-    .where(eq(schema.petRequests.fulfilledPetSlug, slug));
+    // 3. Reopen any pet request this fulfilled.
+    db
+      .update(schema.petRequests)
+      .set({ fulfilledPetSlug: null, status: "open" })
+      .where(eq(schema.petRequests.fulfilledPetSlug, slug))
+      .getSQL(),
 
-  // 4. Strip slug from user_profiles.featured_pet_slugs arrays.
-  await db.execute(sql`
-    UPDATE user_profiles
-    SET featured_pet_slugs = (
-      SELECT COALESCE(jsonb_agg(elem), '[]'::jsonb)
-      FROM jsonb_array_elements(featured_pet_slugs) AS elem
-      WHERE elem <> to_jsonb(${slug}::text)
-    )
-    WHERE featured_pet_slugs @> to_jsonb(${slug}::text)
-  `);
+    // 4. Strip slug from user_profiles.featured_pet_slugs arrays.
+    sql`
+      UPDATE user_profiles
+      SET featured_pet_slugs = (
+        SELECT COALESCE(jsonb_agg(elem), '[]'::jsonb)
+        FROM jsonb_array_elements(featured_pet_slugs) AS elem
+        WHERE elem <> to_jsonb(${slug}::text)
+      )
+      WHERE featured_pet_slugs @> to_jsonb(${slug}::text)
+    `,
 
-  // 5. Drop the row.
-  await db.delete(schema.submittedPets).where(eq(schema.submittedPets.id, id));
+    // 5. Drop the row.
+    db
+      .delete(schema.submittedPets)
+      .where(eq(schema.submittedPets.id, id))
+      .getSQL(),
+  ]);
 
-  // 6. R2 cleanup.
+  // 6. R2 cleanup. The failure is recorded and rethrown at the end rather
+  // than warned away: the DB row is already gone, so a warn here left the
+  // public spritesheet / zip / preview / thumb / stickers in the bucket while
+  // the run printed "Done" and exited 0. It is deferred so the owner is still
+  // notified and emailed about the takedown they just received.
+  let r2Error: unknown = null;
   try {
     await deleteR2Objects(keys);
     console.log(`R2: deleted ${keys.length} objects`);
   } catch (err) {
-    console.warn("R2 cleanup failed:", err);
+    r2Error = err;
   }
 
   // 7. Notify owner.
@@ -155,27 +196,38 @@ async function main() {
   if (pet.ownerEmail && process.env.RESEND_API_KEY) {
     try {
       const resend = new Resend(process.env.RESEND_API_KEY);
-      const from =
-        process.env.RESEND_FROM ?? "Petdex <petdex@updates.railly.dev>";
+      const from = emailEnv(
+        "RESEND_FROM",
+        "Petdex <petdex@updates.railly.dev>",
+      );
       const locale = await getPreferredLocaleForUser(pet.ownerId);
       const email = renderSubmissionTakedownEmail(locale, {
         petName: pet.displayName,
         reason: args.reason,
       });
-      await resend.emails.send({
-        from,
-        to: pet.ownerEmail,
-        subject: email.subject,
-        html: email.html,
-        text: email.text,
-      });
-      console.log(`email sent to ${pet.ownerEmail}`);
+      // sendEmail logs the rejection itself (Resend resolves 4xx/5xx with an
+      // `error` rather than throwing, so the old bare call dropped the failure
+      // silently); only claim success when it actually sent.
+      const sent = await sendEmail(
+        resend,
+        {
+          from,
+          to: pet.ownerEmail,
+          subject: email.subject,
+          html: email.html,
+          text: email.text,
+        },
+        `takedown ${pet.slug}`,
+      );
+      if (sent) console.log(`email sent to ${pet.ownerEmail}`);
     } catch (e) {
       console.warn("email failed:", e);
     }
   } else if (pet.ownerEmail) {
     console.log("RESEND_API_KEY missing — skipping email");
   }
+
+  if (r2Error) throw r2Error;
 
   console.log("\nDone. Slug is free for resubmit.");
 }

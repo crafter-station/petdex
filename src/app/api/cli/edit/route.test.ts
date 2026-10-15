@@ -37,6 +37,13 @@ testMock.module("@/lib/ratelimit", () => ({
   cliVerifyRatelimit: { limit: async () => ({ success: true }) },
 }));
 
+// This suite pins the ROUTE's contract: it verifies the bearer, takes the
+// identity from that principal (never the body), strips `petId` out of the
+// edit body, and forwards the rest. The ownership enforcement itself lives in
+// applyPetEdit and is covered at that layer (pet-edit-asset-size.test.ts).
+// The stub returns the real shape applyPetEdit produces — a 200 with a
+// `queued` body — not an invented 202, so the status assertion means
+// something.
 testMock.module("@/lib/pet-edit", () => ({
   applyPetEdit: async (input: {
     id: string;
@@ -44,7 +51,7 @@ testMock.module("@/lib/pet-edit", () => ({
     body: Record<string, unknown>;
   }) => {
     applied.push(input);
-    return { status: 202, body: { status: "queued" } };
+    return Response.json({ status: "queued" });
   },
 }));
 
@@ -77,10 +84,15 @@ describe("PATCH /api/cli/edit", () => {
       "Bearer valid",
     );
 
-    expect(response.status).toBe(202);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: "queued" });
     expect(applied[0]?.id).toBe("pet_owned");
+    // The body tried to claim `user_attacker`; the identity comes from the
+    // verified token.
     expect(applied[0]?.userId).toBe("user_owner");
     expect(applied[0]?.body.description).toBe("Updated from the CLI.");
+    // `petId` is the route's own field, not part of the edit body.
+    expect(applied[0]?.body).not.toHaveProperty("petId");
   });
 
   it("rejects missing or invalid bearer credentials before editing", async () => {

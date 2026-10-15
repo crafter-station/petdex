@@ -87,7 +87,32 @@ function readConfig(): ReadConfigResult {
     };
   }
   try {
-    return { kind: "ok", config: JSON.parse(raw) as TelemetryConfig };
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      // Parseable-but-not-an-object (`null`, a bare string, an array)
+      // used to pass the `as` assertion and crash every caller with
+      // `null is not an object` — including `petdex telemetry on/off`,
+      // the documented recovery path. Validate the shape here so it
+      // flows through the same fail-closed/error branch as a parse error.
+      return { kind: "error", reason: "config is not an object" };
+    }
+    const config = parsed as Partial<TelemetryConfig>;
+    if (
+      typeof config.install_id !== "string" ||
+      typeof config.enabled !== "boolean"
+    ) {
+      return { kind: "error", reason: "config has an invalid shape" };
+    }
+    return {
+      kind: "ok",
+      config: {
+        install_id: config.install_id,
+        enabled: config.enabled,
+        notice_seen: config.notice_seen === true,
+        first_seen:
+          typeof config.first_seen === "string" ? config.first_seen : "",
+      },
+    };
   } catch (err) {
     return {
       kind: "error",

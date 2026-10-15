@@ -8,6 +8,7 @@ import { NextResponse } from "next/server";
 
 import { isAdmin } from "@/lib/admin";
 import { verifyCliBearer } from "@/lib/cli-auth";
+import { publicTrafficGuardKey } from "@/lib/public-traffic-guard";
 import { cliVerifyRatelimit, submitRatelimit } from "@/lib/ratelimit";
 import {
   persistSubmission,
@@ -18,13 +19,10 @@ import {
 
 export const runtime = "nodejs";
 
-function clientIp(req: Request): string {
-  const xff = req.headers.get("x-forwarded-for") ?? "";
-  return xff.split(",")[0]?.trim() || "anon";
-}
-
 export async function POST(req: Request): Promise<Response> {
-  const verifyLim = await cliVerifyRatelimit.limit(clientIp(req));
+  const verifyLim = await cliVerifyRatelimit.limit(
+    publicTrafficGuardKey(req.headers),
+  );
   if (!verifyLim.success) {
     return NextResponse.json({ error: "rate_limited" }, { status: 429 });
   }

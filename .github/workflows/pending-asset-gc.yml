@@ -1,0 +1,87 @@
+name: pending-asset-gc
+
+# Collects R2 objects that no row references: abandoned pending-edit uploads
+# (`pets/<slug>-pending-<id>/…`) and abandoned submission uploads
+# (`pets/<slugHint>-<uploadId>/…`). Both shapes are written before the row
+# that would reference them, so a caller who presigns and then never
+# registers — or withdraws — leaves bytes nothing else would ever collect.
+# Until this job existed the only path was running `scripts/gc-pending-r2.ts`
+# by hand, which in practice never happened, so the bucket only grew.
+#
+# The script is dry-run by default; the scheduled run passes `--apply`. It
+# refuses to touch anything younger than the age window (24h) and re-checks
+# references under an advisory lock, so a re-run is safe and a live pet's
+# assets are never candidates.
+
+on:
+  schedule:
+    # Daily, off the hour so it does not stack with the snapshot jobs above.
+    - cron: "23 4 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "check (dry-run, report only) or apply (delete from R2)"
+        type: choice
+        required: false
+        default: "check"
+        options:
+          - check
+          - apply
+      age_hours:
+        description: "Only collect objects older than this many hours"
+        type: string
+        required: false
+        default: "24"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pending-asset-gc
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    name: Collect orphaned uploads
+    if: github.repository == 'crafter-station/petdex'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: manifest-snapshot
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          # Always run reviewed code from the default branch. A manual
+          # dispatch can target any ref, and this job holds prod R2 delete
+          # credentials, so we never run a non-main branch here.
+          ref: main
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Collect orphaned uploads
+        # MODE and AGE_HOURS reach the script through env, never through
+        # interpolation into the shell, so a dispatch input cannot inject a
+        # command. AGE_HOURS is re-validated by the script's own parser.
+        #
+        # APPLY_FLAG is intentionally unquoted and may be empty: word
+        # splitting is what turns "" into no argument and "--apply" into one,
+        # which is how the same step serves both dispatch modes without a
+        # duplicated env block. shellcheck flags the split as SC2086; the
+        # disable is deliberate.
+        run: |
+          # shellcheck disable=SC2086
+          bun --conditions react-server scripts/gc-pending-r2.ts \
+            --age-hours "$AGE_HOURS" $APPLY_FLAG
+        env:
+          APPLY_FLAG: ${{ (github.event.inputs.mode || 'apply') == 'apply' && '--apply' || '' }}
+          AGE_HOURS: ${{ github.event.inputs.age_hours || '24' }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}

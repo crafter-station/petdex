@@ -8,6 +8,11 @@ import { toCurrentR2PublicUrl } from "@/lib/r2-public-url";
 
 export const runtime = "nodejs";
 
+// Per-user data on a URL that carries no user identity, so an intermediary
+// must not reuse it. Same reason as `/api/notifications` and
+// `/api/pet-requests`, which say `private, no-store`; this one said nothing.
+const PRIVATE_HEADERS = { "Cache-Control": "private, no-store" };
+
 // Compact list of the signed-in user's approved pets — used by the
 // "I have a pet for this" modal on /requests to populate a selector.
 // Returns id + slug + displayName + spritesheet (and nothing else, so
@@ -34,10 +39,13 @@ export async function GET(): Promise<Response> {
     )
     .orderBy(desc(schema.submittedPets.approvedAt));
 
-  return NextResponse.json({
-    pets: rows.map((row) => ({
-      ...row,
-      spritesheetUrl: toCurrentR2PublicUrl(row.spritesheetUrl),
-    })),
-  });
+  return NextResponse.json(
+    {
+      pets: rows.map((row) => ({
+        ...row,
+        spritesheetUrl: toCurrentR2PublicUrl(row.spritesheetUrl),
+      })),
+    },
+    { headers: PRIVATE_HEADERS },
+  );
 }

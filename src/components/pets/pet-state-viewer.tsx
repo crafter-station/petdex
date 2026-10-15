@@ -64,6 +64,7 @@ export function PetStateViewer({ src, petName }: PetStateViewerProps) {
             key={state.id}
             type="button"
             onClick={() => setSelectedState(state.id)}
+            aria-pressed={selectedState === state.id}
             className={`rounded-xl border p-4 text-left backdrop-blur transition ${
               selectedState === state.id
                 ? "border-brand/40 bg-brand/10"
@@ -80,7 +81,15 @@ export function PetStateViewer({ src, petName }: PetStateViewerProps) {
                 </p>
               </div>
               <div className="rounded-lg border border-border-base bg-surface-muted p-2">
-                <StaticPetSprite src={src} state={state.id} scale={0.32} />
+                <StaticPetSprite
+                  src={src}
+                  state={state.id}
+                  scale={0.32}
+                  label={t("spriteLabel", {
+                    petName,
+                    state: t(`states.${state.id}.label`),
+                  })}
+                />
               </div>
             </div>
           </button>

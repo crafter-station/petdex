@@ -11,9 +11,10 @@
 // The parent collection (category-<big>) keeps every pet — sub
 // collections are additive, not exclusive.
 //
-// Run after seed-all-collections.ts:
-//   bun --env-file .env.local scripts/split-large-categories.ts --dry
+// Run after seed-all-collections.ts (dry-run unless --apply is passed, matching
+// the other mutating scripts — a bare run used to write):
 //   bun --env-file .env.local scripts/split-large-categories.ts
+//   bun --env-file .env.local scripts/split-large-categories.ts --apply
 
 import { readFileSync } from "node:fs";
 
@@ -22,7 +23,10 @@ import { neon } from "@neondatabase/serverless";
 import { requiredEnv } from "./env";
 
 const sql = neon(requiredEnv("DATABASE_URL"));
-const dryRun = process.argv.includes("--dry");
+const apply = process.argv.includes("--apply");
+// `--dry` stays accepted so an older invocation keeps meaning dry-run;
+// the default now is dry.
+const dryRun = !apply || process.argv.includes("--dry");
 
 const BIG_THRESHOLD = Number(
   process.argv.find((a) => a.startsWith("--big-threshold="))?.split("=")[1] ??

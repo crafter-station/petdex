@@ -19,6 +19,41 @@ export function escapeHtml(value: string): string {
     .replaceAll("'", "&#39;");
 }
 
+/**
+ * Make a user-supplied value safe to interpolate into a subject line.
+ *
+ * Pet names, display names and request queries reach the `subject` of the
+ * transactional emails, and a CR/LF in a header value is the classic SMTP
+ * header-injection vector. The Resend SDK sends JSON, so the final fold
+ * happens server-side at Resend, but the value is still the app's to clean —
+ * and a previous defense in `submissions.ts` was bypassable: it used
+ * `subject.replace(displayName, safeName)`, whose replacement string
+ * expands `$&`, so a name containing `$&` re-inserted the matched CRLF.
+ *
+ * Strips every C0 control character (CR, LF, TAB, NUL, …) and DEL, then
+ * trims. Apply at the point of interpolation so every caller is covered.
+ */
+export function sanitizeSubject(value: string): string {
+  // charCode loop rather than a control-character regex: Biome rejects
+  // control chars in patterns, and consecutive ones must collapse to one
+  // space so "A\r\nB" reads "A B", not "A  B".
+  let out = "";
+  let pendingSpace = false;
+  for (const char of String(value)) {
+    const code = char.charCodeAt(0);
+    if (code < 0x20 || code === 0x7f) {
+      pendingSpace = out.length > 0;
+      continue;
+    }
+    if (pendingSpace) {
+      out += " ";
+      pendingSpace = false;
+    }
+    out += char;
+  }
+  return out.trim();
+}
+
 export function textToHtml(value: string): string {
   return escapeHtml(value).replaceAll("\n", "<br />");
 }

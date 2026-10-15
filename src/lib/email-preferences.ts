@@ -13,9 +13,20 @@ export function newUnsubscribeToken(): string {
     .slice(0, 12)}`;
 }
 
+// NUL is the one control character Postgres rejects outright in a `text`
+// column — `invalid byte sequence for encoding "UTF8": 0x00`. The same
+// guard already exists on the pet-requests query (which answers 400); the
+// unsubscribe token comparison had it missing, so `?token=a%00b` reached
+// the driver from a public, unauthenticated page and 500'd. The other C0
+// controls pass through fine and are left alone.
+function isUnqueryableToken(token: string): boolean {
+  return token.includes("\u0000");
+}
+
 export async function findByToken(
   token: string,
 ): Promise<EmailPreference | null> {
+  if (isUnqueryableToken(token)) return null;
   const rows = await db
     .select()
     .from(schema.emailPreferences)
@@ -25,6 +36,7 @@ export async function findByToken(
 }
 
 export async function markUnsubscribed(token: string): Promise<boolean> {
+  if (isUnqueryableToken(token)) return false;
   const result = await db
     .update(schema.emailPreferences)
     .set({
@@ -38,6 +50,7 @@ export async function markUnsubscribed(token: string): Promise<boolean> {
 }
 
 export async function markResubscribed(token: string): Promise<boolean> {
+  if (isUnqueryableToken(token)) return false;
   const result = await db
     .update(schema.emailPreferences)
     .set({

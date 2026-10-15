@@ -61,6 +61,13 @@ export type ReviewChecks = {
   duplicates: {
     decision: ReviewCheckDecision;
     reasons: string[];
+    /**
+     * Set when a duplicate sub-check could not produce a verdict (exact-hash
+     * query failed, visual scan hit its cap, embedding unavailable). The
+     * decision layer holds on this even with no match in hand — a check that
+     * did not run must not read as "no duplicates found".
+     */
+    incomplete?: boolean;
     exactMatches: ReviewEvidenceMatch[];
     visualMatches: ReviewEvidenceMatch[];
     semanticMatches: ReviewEvidenceMatch[];

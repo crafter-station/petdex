@@ -58,16 +58,25 @@ function LocaleSwitcherInner() {
       return;
     }
 
+    // Persist the choice for signed-in visitors so the next server render
+    // already speaks their language. Signed-out visitors get a 401, which is
+    // expected — the URL switch below still happens, so the rejection is
+    // swallowed rather than surfaced. The `.catch` is what keeps a network
+    // failure from becoming an unhandled rejection in the console.
     void fetch("/api/profile", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ preferredLocale: nextLocale }),
-    });
+    }).catch(() => {});
 
     const basePath = stripLocalePrefix(pathname);
     const query = searchParams.toString();
+    // Hash survives the switch the way query does — /docs#install and
+    // /#gallery are real navigation targets here, and dropping the visitor
+    // back to the top of the localized page loses their place.
+    const hash = typeof window === "undefined" ? "" : window.location.hash;
     const nextPath = withLocale(basePath, nextLocale);
-    const href = query ? `${nextPath}?${query}` : nextPath;
+    const href = `${nextPath}${query ? `?${query}` : ""}${hash}`;
 
     setOpen(false);
     startTransition(() => {

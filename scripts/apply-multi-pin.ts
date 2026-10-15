@@ -2,7 +2,26 @@ import { neon } from "@neondatabase/serverless";
 
 import { requiredEnv } from "./env";
 
+// This script's whole body writes: the add-column and backfill are
+// irreversible-ish DDL + a table-wide UPDATE, and the legacy drop is the
+// only step that is destructive in the git-history sense. The original
+// header claimed "dry by default" but gated only the drop — running it to
+// *look* at the plan silently added the column and rewrote every profile
+// row. Everything now sits behind --apply, like the other maintenance
+// scripts on this branch.
+const apply = process.argv.includes("--apply");
+
 const sql = neon(requiredEnv("DATABASE_URL"));
+
+if (!apply) {
+  console.log(
+    "(dry run) no changes written — this script would add\n" +
+      "  user_profiles.featured_pet_slugs, backfill it from\n" +
+      "  featured_pet_slug, and (with --apply) drop the legacy column.\n" +
+      "Pass --apply to execute.",
+  );
+  process.exit(0);
+}
 
 async function tryRun(label: string, fn: () => Promise<unknown>) {
   try {
@@ -40,9 +59,16 @@ await tryRun("backfill from featured_pet_slug", async () => {
   `;
 });
 
-await tryRun(
-  "drop legacy featured_pet_slug column",
-  () => sql`ALTER TABLE user_profiles DROP COLUMN featured_pet_slug`,
-);
+if (!apply) {
+  console.log(
+    "\n(pass --apply to drop the legacy featured_pet_slug column. " +
+      "Dropping it is irreversible.)",
+  );
+} else {
+  await tryRun(
+    "drop legacy featured_pet_slug column",
+    () => sql`ALTER TABLE user_profiles DROP COLUMN featured_pet_slug`,
+  );
+}
 
 console.log("done");

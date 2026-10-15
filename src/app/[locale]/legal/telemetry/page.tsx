@@ -23,6 +23,12 @@ const FIELD_ROWS = [
 ] as const;
 const NOT_COLLECT_KEYS = ["email", "files", "ip", "crashes", "pets"] as const;
 
+// Fully public: no auth, no cookies, no per-visitor data. The declaration is
+// also what gets every locale prerendered — without it Next builds the default
+// locale and leaves the others to be rendered on demand, so /zh and /es were
+// the only locales this page did not have a static copy for.
+export const dynamic = "force-static";
+
 export async function generateMetadata({
   params,
 }: {
@@ -61,81 +67,92 @@ export default async function TelemetryPrivacyPage({
   };
 
   return (
-    <main className="min-h-dvh bg-background text-foreground">
+    <>
       <SiteHeader />
-      <section className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-5 pt-8 pb-12 md:px-8 md:pb-16">
-        <header>
-          <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
-            {t("eyebrow")}
-          </p>
-          <h1 className="mt-3 text-4xl font-semibold tracking-tight md:text-5xl">
-            {t("title")}
-          </h1>
-          <p className="mt-4 text-base leading-7 text-muted-2">{t("intro")}</p>
-        </header>
+      <main id="main" className="min-h-dvh bg-background text-foreground">
+        <section className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-5 pt-8 pb-12 md:px-8 md:pb-16">
+          <header>
+            <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
+              {t("eyebrow")}
+            </p>
+            <h1 className="mt-3 text-4xl font-semibold tracking-tight md:text-5xl">
+              {t("title")}
+            </h1>
+            <p className="mt-4 text-base leading-7 text-muted-2">
+              {t("intro")}
+            </p>
+          </header>
 
-        <section className="space-y-3 rounded-2xl border border-border-base bg-surface/76 p-6 backdrop-blur">
-          <h2 className="text-lg font-semibold">{t("collectTitle")}</h2>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border-base text-left font-mono text-xs text-muted-3">
-                <th className="pb-2 pr-4">{t("table.field")}</th>
-                <th className="pb-2 pr-4">{t("table.type")}</th>
-                <th className="pb-2">{t("table.description")}</th>
-              </tr>
-            </thead>
-            <tbody className="text-muted-2">
-              {FIELD_ROWS.map(([field, type, key], index) => (
-                <tr
-                  key={field}
-                  className={
-                    index === FIELD_ROWS.length - 1
-                      ? undefined
-                      : "border-b border-border-base/50"
-                  }
-                >
-                  <td className="py-2 pr-4 font-mono text-xs">{field}</td>
-                  <td className="py-2 pr-4 font-mono text-xs">{type}</td>
-                  <td className="py-2">{t.rich(`fields.${key}`, rich)}</td>
-                </tr>
+          <section className="space-y-3 rounded-2xl border border-border-base bg-surface/76 p-6 backdrop-blur">
+            <h2 className="text-lg font-semibold">{t("collectTitle")}</h2>
+            {/* The field/type columns hold long unbreakable tokens
+                (binary_version, string[]); without a scroll container a
+                narrow viewport widens the page instead of the table. */}
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[520px] text-sm">
+                <thead>
+                  <tr className="border-b border-border-base text-left font-mono text-xs text-muted-3">
+                    <th className="pb-2 pr-4">{t("table.field")}</th>
+                    <th className="pb-2 pr-4">{t("table.type")}</th>
+                    <th className="pb-2">{t("table.description")}</th>
+                  </tr>
+                </thead>
+                <tbody className="text-muted-2">
+                  {FIELD_ROWS.map(([field, type, key], index) => (
+                    <tr
+                      key={field}
+                      className={
+                        index === FIELD_ROWS.length - 1
+                          ? undefined
+                          : "border-b border-border-base/50"
+                      }
+                    >
+                      <td className="py-2 pr-4 font-mono text-xs">{field}</td>
+                      <td className="py-2 pr-4 font-mono text-xs">{type}</td>
+                      <td className="py-2">{t.rich(`fields.${key}`, rich)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="space-y-3 rounded-2xl border border-border-base bg-surface/76 p-6 backdrop-blur">
+            <h2 className="text-lg font-semibold">{t("notCollectTitle")}</h2>
+            <ul className="list-disc space-y-1.5 pl-5 text-sm leading-6 text-muted-2">
+              {NOT_COLLECT_KEYS.map((key) => (
+                <li key={key}>{t(`notCollect.${key}`)}</li>
               ))}
-            </tbody>
-          </table>
-        </section>
+            </ul>
+          </section>
 
-        <section className="space-y-3 rounded-2xl border border-border-base bg-surface/76 p-6 backdrop-blur">
-          <h2 className="text-lg font-semibold">{t("notCollectTitle")}</h2>
-          <ul className="list-disc space-y-1.5 pl-5 text-sm leading-6 text-muted-2">
-            {NOT_COLLECT_KEYS.map((key) => (
-              <li key={key}>{t(`notCollect.${key}`)}</li>
-            ))}
-          </ul>
-        </section>
+          <section className="space-y-3 rounded-2xl border border-border-base bg-surface/76 p-6 backdrop-blur">
+            <h2 className="text-lg font-semibold">{t("optOutTitle")}</h2>
+            <p className="text-sm leading-6 text-muted-2">
+              {t.rich("optOutIntro", rich)}
+            </p>
+            <div className="rounded-xl bg-background/60 px-4 py-3 font-mono text-sm">
+              <p className="text-muted-3">{t("codeComments.disable")}</p>
+              <p>petdex telemetry off</p>
+              <p className="mt-2 text-muted-3">{t("codeComments.enable")}</p>
+              <p>petdex telemetry on</p>
+              <p className="mt-2 text-muted-3">{t("codeComments.status")}</p>
+              <p>petdex telemetry status</p>
+            </div>
+            <p className="text-sm leading-6 text-muted-2">
+              {t.rich("optOutEnv", rich)}
+            </p>
+          </section>
 
-        <section className="space-y-3 rounded-2xl border border-border-base bg-surface/76 p-6 backdrop-blur">
-          <h2 className="text-lg font-semibold">{t("optOutTitle")}</h2>
-          <p className="text-sm leading-6 text-muted-2">
-            {t.rich("optOutIntro", rich)}
-          </p>
-          <div className="rounded-xl bg-background/60 px-4 py-3 font-mono text-sm">
-            <p className="text-muted-3">{t("codeComments.disable")}</p>
-            <p>petdex telemetry off</p>
-            <p className="mt-2 text-muted-3">{t("codeComments.enable")}</p>
-            <p>petdex telemetry on</p>
-            <p className="mt-2 text-muted-3">{t("codeComments.status")}</p>
-            <p>petdex telemetry status</p>
-          </div>
-          <p className="text-sm leading-6 text-muted-2">
-            {t.rich("optOutEnv", rich)}
-          </p>
+          <section className="space-y-3 rounded-2xl border border-border-base bg-surface/76 p-6 backdrop-blur">
+            <h2 className="text-lg font-semibold">{t("retentionTitle")}</h2>
+            <p className="text-sm leading-6 text-muted-2">
+              {t("retentionBody")}
+            </p>
+          </section>
         </section>
-
-        <section className="space-y-3 rounded-2xl border border-border-base bg-surface/76 p-6 backdrop-blur">
-          <h2 className="text-lg font-semibold">{t("retentionTitle")}</h2>
-          <p className="text-sm leading-6 text-muted-2">{t("retentionBody")}</p>
-        </section>
-      </section>
-      <SiteFooter />
-    </main>
+        <SiteFooter />
+      </main>
+    </>
   );
 }

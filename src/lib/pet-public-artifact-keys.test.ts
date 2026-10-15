@@ -37,7 +37,12 @@ describe("pet public artifact keys", () => {
       }
     }
 
+    // A duplicate would make the cleanup key list scan the same object twice.
+    // Asserted as a count, not `new Set(keys).size === keys.length`: the
+    // function is a flatMap over constant arrays, so that identity holds no
+    // matter what and cannot fail.
     expect(new Set(keys).size).toBe(keys.length);
+    expect(keys.length).toBeGreaterThan(0);
   });
 
   it("covers every legacy immutable sticker redirect", () => {

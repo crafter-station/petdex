@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import { cache } from "react";
 
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { asc, desc, sql as dsql, eq } from "drizzle-orm";
@@ -18,7 +19,7 @@ import { getMetricsBySlugs } from "@/lib/db/metrics";
 import { formatLocalizedNumber } from "@/lib/format-number";
 import { userIdForHandle, viewerIdForFallbackHandle } from "@/lib/handles";
 import { getOwnerRank } from "@/lib/leaderboard";
-import { buildLocaleAlternates } from "@/lib/locale-routing";
+import { buildLocaleAlternates, withLocale } from "@/lib/locale-routing";
 import { type PetWithMetrics, rowToPet } from "@/lib/pets";
 import { toCurrentR2PublicUrl } from "@/lib/r2-public-url";
 
@@ -42,6 +43,28 @@ const SITE_URL = "https://petdex.dev";
 // replaces the entire pet list with whatever it was given.
 const OWNER_COLLECTION_PREVIEW_PETS = 6;
 
+// The metadata pass and the page body both need these two records, and the
+// route is force-dynamic — without request-level dedupe every profile view
+// paid for two user_profiles reads and two Clerk Backend API getUser
+// round-trips for the same row. React's cache() spans generateMetadata and
+// the page in one request (the same way getPet dedupes pets/[slug]).
+const getProfileRow = cache(async (userId: string) =>
+  db.query.userProfiles.findFirst({
+    where: eq(schema.userProfiles.userId, userId),
+  }),
+);
+
+// `null` means "Clerk did not answer", which both call sites already treat
+// as "render with the handle only".
+const getClerkUser = cache(async (userId: string) => {
+  try {
+    const client = await clerkClient();
+    return await client.users.getUser(userId);
+  } catch {
+    return null;
+  }
+});
+
 type PageProps = { params: Promise<{ handle: string; locale: string }> };
 
 export async function generateMetadata({ params }: PageProps) {
@@ -51,42 +74,51 @@ export async function generateMetadata({ params }: PageProps) {
   const userId =
     viewerIdForFallbackHandle(requestedHandle, viewerId) ??
     (await userIdForHandle(handle));
-  if (!userId) return { title: "Profile not found", robots: { index: false } };
+  if (!userId) {
+    const tProfile = await getTranslations({
+      locale: hasLocale(locale) ? locale : "en",
+      namespace: "profile",
+    });
+    return { title: tProfile("notFoundTitle"), robots: { index: false } };
+  }
   let displayName = `@${handle}`;
-  const profile = await db.query.userProfiles.findFirst({
-    where: eq(schema.userProfiles.userId, userId),
-  });
-  try {
-    const client = await clerkClient();
-    const u = await client.users.getUser(userId);
+  const profile = await getProfileRow(userId);
+  const u = await getClerkUser(userId);
+  if (u) {
     const name = [u.firstName, u.lastName].filter(Boolean).join(" ").trim();
     const fallbackName = name || (u.username ? `@${u.username}` : `@${handle}`);
     displayName = profile?.displayName ?? fallbackName;
-  } catch {
-    if (profile?.displayName) displayName = profile.displayName;
-    /* fall back */
+  } else if (profile?.displayName) {
+    displayName = profile.displayName;
   }
   const publicHandle = profile?.handle ?? handle.toLowerCase();
   // Pin OG image to locale-stripped path; next-intl redirects
   // /en/u/<handle>/opengraph-image with 307 which scrapers drop.
   const ogImage = `${SITE_URL}/u/${publicHandle}/opengraph-image`;
+  const tMeta = await getTranslations({
+    locale: hasLocale(locale) ? locale : "en",
+    namespace: "profile.metadata",
+  });
+  const title = tMeta("title", { name: displayName });
+  const ogDescription = tMeta("ogDescription", { name: displayName });
+  const alternates = buildLocaleAlternates(
+    `/u/${publicHandle}`,
+    hasLocale(locale) ? locale : undefined,
+  );
   return {
-    title: `${displayName} on Petdex`,
-    description: `Pets created by ${displayName} for Codex.`,
-    alternates: buildLocaleAlternates(
-      `/u/${publicHandle}`,
-      hasLocale(locale) ? locale : undefined,
-    ),
+    title,
+    description: tMeta("description", { name: displayName }),
+    alternates,
     openGraph: {
-      title: `${displayName} on Petdex`,
-      description: `Animated Codex pets created by ${displayName}.`,
-      url: `${SITE_URL}/u/${publicHandle}`,
+      title,
+      description: ogDescription,
+      url: alternates.canonical,
       images: [{ url: ogImage, width: 1200, height: 630 }],
     },
     twitter: {
       card: "summary_large_image",
-      title: `${displayName} on Petdex`,
-      description: `Animated Codex pets created by ${displayName}.`,
+      title,
+      description: ogDescription,
       images: [ogImage],
     },
   };
@@ -102,15 +134,14 @@ export default async function UserProfilePage({ params }: PageProps) {
     (await userIdForHandle(handle));
   if (!ownerId) notFound();
 
-  // Pull Clerk profile.
+  // Pull Clerk profile (same cached lookup generateMetadata already used).
   let displayName: string | null = null;
   let username: string | null = null;
   let avatarUrl: string | null = null;
   const externalUrls: { url: string; label: string }[] = [];
   let memberSince: number | null = null;
-  try {
-    const client = await clerkClient();
-    const u = await client.users.getUser(ownerId);
+  const u = await getClerkUser(ownerId);
+  if (u) {
     const name = [u.firstName, u.lastName].filter(Boolean).join(" ").trim();
     displayName = name || u.username || null;
     username = u.username ?? null;
@@ -134,16 +165,18 @@ export default async function UserProfilePage({ params }: PageProps) {
         });
       }
     }
-  } catch {
-    /* will render with handle only */
   }
+  /* null from getClerkUser: will render with handle only */
 
   // Profile customization (bio, featured slug).
-  const profile = await db.query.userProfiles.findFirst({
-    where: eq(schema.userProfiles.userId, ownerId),
-  });
+  const profile = await getProfileRow(ownerId);
   if (profile?.handle && profile.handle !== requestedHandle) {
-    redirect(`/u/${profile.handle}`);
+    // Locale-prefixed: a bare `/u/...` drops a zh/es visitor back to the
+    // default-locale profile mid-session (the same `withLocale` the rest of
+    // this tree uses for internal navigation).
+    redirect(
+      withLocale(`/u/${profile.handle}`, hasLocale(locale) ? locale : "en"),
+    );
   }
   const publicHandle =
     profile?.handle ?? username?.toLowerCase() ?? requestedHandle;
@@ -291,181 +324,187 @@ export default async function UserProfilePage({ params }: PageProps) {
   };
 
   return (
-    <main className="min-h-dvh bg-background text-foreground">
-      <JsonLd data={jsonLd} />
-
+    <>
       <SiteHeader />
-      <section className="petdex-hero relative -mt-14 overflow-clip pt-14">
-        <div className="relative mx-auto flex w-full max-w-[1440px] flex-col px-5 pb-10 md:px-8">
-          <header className="mt-10 grid gap-8 md:mt-14 lg:grid-cols-[auto_1fr_auto] lg:items-start">
-            {/* Avatar */}
-            <div className="flex justify-center lg:block">
-              {avatarUrl ? (
-                // biome-ignore lint/performance/noImgElement: Clerk-hosted avatar
-                <img
-                  src={avatarUrl}
-                  alt={displayName ?? `@${publicHandle}`}
-                  className="size-28 rounded-3xl object-cover ring-1 ring-black/10 md:size-32"
-                />
-              ) : (
-                <div className="grid size-28 place-items-center rounded-3xl bg-surface font-mono text-3xl font-semibold text-muted-2 ring-1 ring-black/10 md:size-32">
-                  {fallbackInitial}
-                </div>
-              )}
-            </div>
+      <main id="main" className="min-h-dvh bg-background text-foreground">
+        <JsonLd data={jsonLd} />
 
-            {/* Identity */}
-            <div className="text-center lg:text-left">
-              <div className="flex flex-wrap items-center justify-center gap-2 lg:justify-start">
-                <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
-                  {t("creatorBadge")}
-                </p>
-                {catchProgress ? (
-                  <p className="font-mono text-xs tracking-[0.22em] text-muted-3 uppercase">
-                    {t("yourAlbum", {
-                      caught: catchProgress.caught,
-                      total: catchProgress.total,
-                      pct: catchProgress.pct,
-                    })}
+        <section className="petdex-hero relative -mt-14 overflow-clip pt-14">
+          <div className="relative mx-auto flex w-full max-w-[1440px] flex-col px-5 pb-10 md:px-8">
+            <header className="mt-10 grid gap-8 md:mt-14 lg:grid-cols-[auto_1fr_auto] lg:items-start">
+              {/* Avatar */}
+              <div className="flex justify-center lg:block">
+                {avatarUrl ? (
+                  // biome-ignore lint/performance/noImgElement: Clerk-hosted avatar
+                  <img
+                    src={avatarUrl}
+                    alt={displayName ?? `@${publicHandle}`}
+                    className="size-28 rounded-3xl object-cover ring-1 ring-black/10 md:size-32"
+                  />
+                ) : (
+                  <div className="grid size-28 place-items-center rounded-3xl bg-surface font-mono text-3xl font-semibold text-muted-2 ring-1 ring-black/10 md:size-32">
+                    {fallbackInitial}
+                  </div>
+                )}
+              </div>
+
+              {/* Identity */}
+              <div className="text-center lg:text-left">
+                <div className="flex flex-wrap items-center justify-center gap-2 lg:justify-start">
+                  <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
+                    {t("creatorBadge")}
+                  </p>
+                  {catchProgress ? (
+                    <p className="font-mono text-xs tracking-[0.22em] text-muted-3 uppercase">
+                      {t("yourAlbum", {
+                        caught: catchProgress.caught,
+                        total: catchProgress.total,
+                        pct: catchProgress.pct,
+                      })}
+                    </p>
+                  ) : null}
+                  {isOwnerAdmin ? (
+                    <span
+                      className="inline-flex items-center gap-1 rounded-full bg-brand px-2 py-0.5 font-mono text-[10px] tracking-[0.15em] text-on-inverse uppercase"
+                      title={t("creatorOfPetdexTitle")}
+                    >
+                      <Trophy className="size-3" />
+                      {t("creatorOfPetdex")}
+                    </span>
+                  ) : rank ? (
+                    <Link
+                      href="/leaderboard"
+                      className="inline-flex items-center gap-1 rounded-full bg-chip-warning-bg px-2 py-0.5 font-mono text-[10px] tracking-[0.15em] text-chip-warning-fg uppercase transition hover:opacity-80"
+                      title={t("rankTitle", {
+                        rank: rank.rank,
+                        total: rank.total,
+                      })}
+                    >
+                      <Trophy className="size-3" />
+                      {t("rankLabel", { rank: rank.rank })}
+                    </Link>
+                  ) : null}
+                </div>
+                <h1 className="mt-3 text-balance text-[40px] leading-[1] font-semibold tracking-tight md:text-[56px]">
+                  {displayName ?? `@${publicHandle}`}
+                </h1>
+                {displayName ? (
+                  <p className="mt-2 font-mono text-sm tracking-[0.08em] text-muted-3">
+                    @{publicHandle}
                   </p>
                 ) : null}
-                {isOwnerAdmin ? (
-                  <span
-                    className="inline-flex items-center gap-1 rounded-full bg-brand px-2 py-0.5 font-mono text-[10px] tracking-[0.15em] text-white uppercase"
-                    title="One of the people who built Petdex"
-                  >
-                    <Trophy className="size-3" />
-                    {t("creatorOfPetdex")}
-                  </span>
-                ) : rank ? (
-                  <Link
-                    href="/leaderboard"
-                    className="inline-flex items-center gap-1 rounded-full bg-chip-warning-bg px-2 py-0.5 font-mono text-[10px] tracking-[0.15em] text-chip-warning-fg uppercase transition hover:opacity-80"
-                    title={`Ranked #${rank.rank} of ${rank.total} by approved pets. See the full leaderboard`}
-                  >
-                    <Trophy className="size-3" />#{rank.rank} most pets
-                  </Link>
+                {bio ? (
+                  <p className="mt-4 max-w-xl text-balance text-base leading-7 text-muted-1 md:text-lg">
+                    {bio}
+                  </p>
                 ) : null}
-              </div>
-              <h1 className="mt-3 text-balance text-[40px] leading-[1] font-semibold tracking-tight md:text-[56px]">
-                {displayName ?? `@${publicHandle}`}
-              </h1>
-              {displayName ? (
-                <p className="mt-2 font-mono text-sm tracking-[0.08em] text-muted-3">
-                  @{publicHandle}
-                </p>
-              ) : null}
-              {bio ? (
-                <p className="mt-4 max-w-xl text-balance text-base leading-7 text-muted-1 md:text-lg">
-                  {bio}
-                </p>
-              ) : null}
 
-              {/* Stats row */}
-              <div className="mt-5 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 font-mono text-[11px] tracking-[0.18em] text-muted-3 uppercase lg:justify-start">
-                <span>{t("petsCount", { count: pets.length })}</span>
-                {totalLikes > 0 ? (
-                  <span className="inline-flex items-center gap-1.5">
-                    <Heart className="size-3" />
-                    {formatLocalizedNumber(totalLikes, locale)}
-                  </span>
-                ) : null}
-                {totalInstalls > 0 ? (
-                  <span className="inline-flex items-center gap-1.5">
-                    <TerminalSquare className="size-3" />
-                    {t("installs", {
-                      count: formatLocalizedNumber(totalInstalls, locale),
-                    })}
-                  </span>
-                ) : null}
-                {memberSince ? (
-                  <span>
-                    {t("joined", {
-                      date: new Date(memberSince).toLocaleDateString(
-                        locale === "zh"
-                          ? "zh-Hans-CN"
-                          : locale === "es"
-                            ? "es"
-                            : "en",
-                        { month: "long", year: "numeric" },
-                      ),
-                    })}
-                  </span>
-                ) : null}
-              </div>
-
-              {/* External links */}
-              {externalUrls.length > 0 ? (
-                <div className="mt-4 flex flex-wrap items-center justify-center gap-2 lg:justify-start">
-                  {externalUrls.map((e) => (
-                    <ProfileExternalLink
-                      key={e.url}
-                      handle={publicHandle}
-                      url={e.url}
-                      label={e.label}
-                    />
-                  ))}
+                {/* Stats row */}
+                <div className="mt-5 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 font-mono text-[11px] tracking-[0.18em] text-muted-3 uppercase lg:justify-start">
+                  <span>{t("petsCount", { count: pets.length })}</span>
+                  {totalLikes > 0 ? (
+                    <span className="inline-flex items-center gap-1.5">
+                      <Heart className="size-3" />
+                      {formatLocalizedNumber(totalLikes, locale)}
+                    </span>
+                  ) : null}
+                  {totalInstalls > 0 ? (
+                    <span className="inline-flex items-center gap-1.5">
+                      <TerminalSquare className="size-3" />
+                      {t("installs", {
+                        count: formatLocalizedNumber(totalInstalls, locale),
+                      })}
+                    </span>
+                  ) : null}
+                  {memberSince ? (
+                    <span>
+                      {t("joined", {
+                        date: new Date(memberSince).toLocaleDateString(
+                          locale === "zh"
+                            ? "zh-Hans-CN"
+                            : locale === "es"
+                              ? "es"
+                              : "en",
+                          { month: "long", year: "numeric" },
+                        ),
+                      })}
+                    </span>
+                  ) : null}
                 </div>
-              ) : null}
-            </div>
 
-            {/* Owner + visitor actions. Share is on for everyone so a
+                {/* External links */}
+                {externalUrls.length > 0 ? (
+                  <div className="mt-4 flex flex-wrap items-center justify-center gap-2 lg:justify-start">
+                    {externalUrls.map((e) => (
+                      <ProfileExternalLink
+                        key={e.url}
+                        handle={publicHandle}
+                        url={e.url}
+                        label={e.label}
+                      />
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+
+              {/* Owner + visitor actions. Share is on for everyone so a
                 fan can spread a profile they liked, the same growth
                 motion as the creator promoting their own page. */}
-            <div className="flex flex-wrap items-center justify-center gap-2 lg:justify-end">
-              <ProfileShareButton
-                handle={publicHandle}
-                displayName={displayName}
-              />
-              {isOwner ? (
-                <ProfileInlineEditor
+              <div className="flex flex-wrap items-center justify-center gap-2 lg:justify-end">
+                <ProfileShareButton
                   handle={publicHandle}
-                  initialDisplayName={displayName}
-                  initialBio={bio}
-                  initialFeaturedSlugs={featuredSlugs}
-                  approvedPets={pets.map((p) => ({
-                    slug: p.slug,
-                    displayName: p.displayName,
-                  }))}
+                  displayName={displayName}
                 />
-              ) : null}
-            </div>
-          </header>
-        </div>
-      </section>
+                {isOwner ? (
+                  <ProfileInlineEditor
+                    handle={publicHandle}
+                    initialDisplayName={displayName}
+                    initialBio={bio}
+                    initialFeaturedSlugs={featuredSlugs}
+                    approvedPets={pets.map((p) => ({
+                      slug: p.slug,
+                      displayName: p.displayName,
+                    }))}
+                  />
+                ) : null}
+              </div>
+            </header>
+          </div>
+        </section>
 
-      <section className="mx-auto flex w-full max-w-[1440px] flex-col gap-8 px-5 py-12 md:px-8 md:py-16">
-        <ProfilePinningSurface
-          isOwner={isOwner}
-          publicHandle={publicHandle}
-          pets={pets}
-          initialPinnedSlugs={featuredSlugs}
-          ownerSubmissions={ownerSubmissions}
-          likedPets={likedPets}
-          collection={
-            collection
-              ? {
-                  slug: collection.slug,
-                  title: collection.title,
-                  description: collection.description,
-                  externalUrl: collection.externalUrl,
-                  coverPetSlug: collection.coverPetSlug,
-                  petSlugs: collection.pets.map((pet) => pet.slug),
-                }
-              : null
-          }
-          canManageCollections={canManageOwnCollection}
-          collectionApprovedPets={pets.map((p) => ({
-            slug: p.slug,
-            displayName: p.displayName,
-            spritesheetUrl: p.spritesheetPath,
-          }))}
-          ownerCollections={ownerCollectionsForTabs}
-          maxOwnerCollections={MAX_OWNER_COLLECTIONS}
-        />
-      </section>
+        <section className="mx-auto flex w-full max-w-[1440px] flex-col gap-8 px-5 py-12 md:px-8 md:py-16">
+          <ProfilePinningSurface
+            isOwner={isOwner}
+            publicHandle={publicHandle}
+            pets={pets}
+            initialPinnedSlugs={featuredSlugs}
+            ownerSubmissions={ownerSubmissions}
+            likedPets={likedPets}
+            collection={
+              collection
+                ? {
+                    slug: collection.slug,
+                    title: collection.title,
+                    description: collection.description,
+                    externalUrl: collection.externalUrl,
+                    coverPetSlug: collection.coverPetSlug,
+                    petSlugs: collection.pets.map((pet) => pet.slug),
+                  }
+                : null
+            }
+            canManageCollections={canManageOwnCollection}
+            collectionApprovedPets={pets.map((p) => ({
+              slug: p.slug,
+              displayName: p.displayName,
+              spritesheetUrl: p.spritesheetPath,
+            }))}
+            ownerCollections={ownerCollectionsForTabs}
+            maxOwnerCollections={MAX_OWNER_COLLECTIONS}
+          />
+        </section>
 
-      <SiteFooter />
-    </main>
+        <SiteFooter />
+      </main>
+    </>
   );
 }

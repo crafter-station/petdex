@@ -8,6 +8,7 @@ import { useLocale, useTranslations } from "next-intl";
 import type { PetWithMetrics } from "@/lib/pets";
 import { cn } from "@/lib/utils";
 
+import { useHeaderState } from "@/components/layout/header-state-provider";
 import { PetCard } from "@/components/pets/pet-gallery";
 
 const PAGE_SIZE = 24;
@@ -18,12 +19,18 @@ type Props = {
   caughtSlugs?: string[];
 };
 
-export function CollectionPetGrid({ pets, dexMap, caughtSlugs = [] }: Props) {
+export function CollectionPetGrid({ pets, dexMap, caughtSlugs }: Props) {
   const isZh = useLocale() === "zh";
   const t = useTranslations("collectionDetail");
   const [query, setQuery] = useState("");
   const [pageCount, setPageCount] = useState(1);
-  const caughtSet = useMemo(() => new Set(caughtSlugs), [caughtSlugs]);
+  // No caller passes caughtSlugs, so the viewer's liked pets come from the
+  // polled header state — otherwise every heart on this grid is unfilled.
+  const { state } = useHeaderState();
+  const caughtSet = useMemo(
+    () => new Set(caughtSlugs ?? state.caught),
+    [caughtSlugs, state.caught],
+  );
 
   const normalizedQuery = query.trim().toLowerCase();
   const filtered = useMemo(() => {

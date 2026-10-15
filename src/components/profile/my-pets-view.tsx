@@ -408,7 +408,7 @@ export function SubmissionCard({ submission }: { submission: Submission }) {
         </p>
         <p className="font-mono text-[10px] tracking-[0.12em] text-muted-4 uppercase">
           {statusConfig.timeLabel}{" "}
-          {new Date(statusConfig.time).toLocaleDateString(undefined, {
+          {new Date(statusConfig.time).toLocaleDateString(locale, {
             year: "numeric",
             month: "short",
             day: "numeric",
@@ -559,13 +559,44 @@ type Claimable = {
   status: "pending" | "approved" | "rejected";
 };
 
+/**
+ * A message key under `myPets.claimBanner.errors`, never the API's own text.
+ *
+ * The route answers `unauthorized`, `rate_limited`, `not_found`,
+ * `identity_mismatch` and `no_verified_identity`, and the last of those ships
+ * an English `message` alongside the code. Rendering either verbatim is how a
+ * Spanish user reads "Sign in with a verified email or a GitHub account before
+ * claiming.", so the codes are mapped and anything unrecognized degrades to one
+ * generic message carrying the code.
+ */
+type ClaimErrorKey =
+  | "unauthorized"
+  | "rateLimited"
+  | "notFound"
+  | "identityMismatch"
+  | "noVerifiedIdentity"
+  | "network"
+  | "failed";
+
+const CLAIM_ERROR_KEYS: Record<string, ClaimErrorKey> = {
+  unauthorized: "unauthorized",
+  rate_limited: "rateLimited",
+  not_found: "notFound",
+  identity_mismatch: "identityMismatch",
+  no_verified_identity: "noVerifiedIdentity",
+};
+
 export function ClaimableBanner() {
+  const t = useTranslations("myPets.claimBanner");
   const [pets, setPets] = useState<Claimable[] | null>(null);
   const [email, setEmail] = useState<string | null>(null);
   const [githubUrl, setGithubUrl] = useState<string | null>(null);
   const [claiming, setClaiming] = useState<string | null>(null);
   const [claimed, setClaimed] = useState<Set<string>>(new Set());
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{
+    key: ClaimErrorKey;
+    code?: string;
+  } | null>(null);
   const [dismissed, setDismissed] = useState(false);
 
   useEffect(() => {
@@ -602,13 +633,17 @@ export function ClaimableBanner() {
         body: JSON.stringify({ id }),
       });
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setError(data.message ?? data.error ?? "claim_failed");
+        const data = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          message?: string;
+        };
+        const code = data.error ?? data.message ?? `http_${res.status}`;
+        setError({ key: CLAIM_ERROR_KEYS[code] ?? "failed", code });
         return;
       }
       setClaimed((prev) => new Set(prev).add(id));
     } catch {
-      setError("network_error");
+      setError({ key: "network" });
     } finally {
       setClaiming(null);
     }
@@ -619,10 +654,14 @@ export function ClaimableBanner() {
   if (remaining.length === 0) {
     return (
       <div className="rounded-3xl border border-emerald-200 bg-chip-success-bg p-5 text-sm text-chip-success-fg dark:border-emerald-800/60">
-        Claimed. Refresh to see them in your list.
+        {t("claimed")}
       </div>
     );
   }
+
+  // The GitHub URL is stored with its scheme but reads as a bare handle, which
+  // is how the source account is named everywhere else in the UI.
+  const githubLabel = githubUrl?.replace("https://", "") ?? null;
 
   return (
     <div className="rounded-3xl border border-amber-200 bg-amber-50/60 p-5 dark:border-amber-800/60 dark:bg-amber-950/40">
@@ -632,20 +671,29 @@ export function ClaimableBanner() {
         </span>
         <div className="flex-1 space-y-2">
           <p className="text-sm font-semibold text-amber-900 dark:text-amber-300">
-            We found {remaining.length} pet
-            {remaining.length === 1 ? "" : "s"} that look like yours
+            {t("found", { count: remaining.length })}
           </p>
           <p className="text-sm leading-6 text-amber-900/80">
-            Matched via{" "}
-            {email ? <span className="font-mono">{email}</span> : null}
-            {email && githubUrl ? " or " : null}
-            {githubUrl ? (
-              <span className="font-mono">
-                {githubUrl.replace("https://", "")}
-              </span>
-            ) : null}
-            . Click claim to move each one to your current account so you can
-            manage and re-submit edits.
+            {email && githubLabel
+              ? t.rich("matchedViaBoth", {
+                  email,
+                  github: githubLabel,
+                  mono: (chunks) => <span className="font-mono">{chunks}</span>,
+                })
+              : email
+                ? t.rich("matchedViaEmail", {
+                    email,
+                    mono: (chunks) => (
+                      <span className="font-mono">{chunks}</span>
+                    ),
+                  })
+                : t.rich("matchedViaGithub", {
+                    github: githubLabel ?? "",
+                    mono: (chunks) => (
+                      <span className="font-mono">{chunks}</span>
+                    ),
+                  })}{" "}
+            {t("matchedHint")}
           </p>
           <ul className="mt-2 space-y-2">
             {remaining.map((pet) => (
@@ -656,7 +704,7 @@ export function ClaimableBanner() {
                 <div className="flex items-center gap-2 text-sm text-foreground">
                   <span className="font-semibold">{pet.displayName}</span>
                   <span className="font-mono text-[10px] tracking-[0.18em] text-muted-3 uppercase">
-                    {pet.status}
+                    {t(`status.${pet.status}`)}
                   </span>
                 </div>
                 <button
@@ -665,14 +713,16 @@ export function ClaimableBanner() {
                   disabled={claiming !== null}
                   className="inline-flex h-8 items-center rounded-full bg-amber-900 px-3 text-xs font-medium text-amber-50 transition hover:bg-amber-800 disabled:opacity-50"
                 >
-                  {claiming === pet.id ? "Claiming…" : "Claim"}
+                  {claiming === pet.id ? t("claiming") : t("claim")}
                 </button>
               </li>
             ))}
           </ul>
           {error ? (
-            <p className="font-mono text-[10px] tracking-[0.12em] text-rose-700 uppercase dark:text-rose-300">
-              {error}
+            <p className="text-xs font-medium text-rose-700 dark:text-rose-300">
+              {error.key === "failed" && error.code
+                ? t("errors.failedWithCode", { code: error.code })
+                : t(`errors.${error.key}`)}
             </p>
           ) : null}
           <button
@@ -680,7 +730,7 @@ export function ClaimableBanner() {
             onClick={() => setDismissed(true)}
             className="mt-1 text-xs font-medium text-amber-900/60 transition hover:text-amber-900"
           >
-            Not mine, dismiss
+            {t("dismiss")}
           </button>
         </div>
       </div>

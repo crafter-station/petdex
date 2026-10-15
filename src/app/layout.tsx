@@ -10,9 +10,12 @@ export const metadata: Metadata = {
   authors: [{ name: "Crafter Station", url: "https://crafter.run" }],
   creator: "Crafter Station",
   publisher: "Crafter Station",
-  alternates: {
-    canonical: "/",
-  },
+  // No `alternates.canonical` here. A root-level canonical is inherited by
+  // every page that does not set its own — including the noindex ones
+  // (/my-pets, /my-feedback, the 404 page), where "noindex" plus a canonical
+  // pointing at the homepage is exactly the contradictory pair Google warns
+  // about. Indexable pages all set their own locale-prefixed canonical via
+  // buildLocaleAlternates, so nothing loses a canonical by its removal.
   icons: {
     icon: "/favicon.ico",
     shortcut: "/favicon.ico",

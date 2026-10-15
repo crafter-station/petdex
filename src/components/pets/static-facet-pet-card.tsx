@@ -13,12 +13,39 @@ type StaticFacetPetCardProps = {
   pet: SearchPet;
   index: number;
   locale: string;
+  labels: {
+    // `count` is the raw number and decides the plural; `formatted` is the
+    // abbreviated display value ("1.5K", "230万"). They cannot be one
+    // argument: an ICU `plural` needs a number, and handing it the display
+    // string makes the selector coerce "1.5K" and render `NaN`.
+    installs: (count: number, formatted: string) => string;
+    discovered: string;
+    discoveredTitle: string;
+    byAuthor: (name: string) => string;
+    featured: string;
+    dexNumber: (number: string) => string;
+    // The link's accessible name and the sprite's `role="img"` name. Both
+    // used to be English literals, so a screen reader on /es and /zh heard
+    // "Open Boba" and "Boba sprite" under a translated page.
+    openPet: (name: string) => string;
+    spriteStill: (name: string) => string;
+    // `month` is the localized month and year from `formatBatchLabel`; the
+    // "Class of …" wrapper is a phrase, so it lives in the messages.
+    batchLabel: (month: string) => string;
+    // The kind badge and the `#vibe` chips used to render the raw slug
+    // ("object", "#focused") on every locale. The maps come from the
+    // `taxonomy` messages; the slug stays as the fallback for a value the
+    // messages do not know yet.
+    kinds: Record<string, string>;
+    vibes: Record<string, string>;
+  };
 };
 
 export function StaticFacetPetCard({
   pet,
   index,
   locale,
+  labels,
 }: StaticFacetPetCardProps) {
   const isZh = locale === "zh";
   const dexNumber = pet.dexNumber ?? index + 1;
@@ -30,7 +57,9 @@ export function StaticFacetPetCard({
   const href = `/pets/${pet.slug}`;
   const formattedInstallCount = formatLocalizedNumber(installCount, locale);
   const batchLabel = pet.approvedAt
-    ? formatBatchLabel(getBatchKey(new Date(pet.approvedAt)))
+    ? labels.batchLabel(
+        formatBatchLabel(getBatchKey(new Date(pet.approvedAt)), locale),
+      )
     : null;
   const accentStyle = pet.dominantColor
     ? ({ "--pet-accent": pet.dominantColor } as CSSProperties)
@@ -58,19 +87,19 @@ export function StaticFacetPetCard({
       <Link
         href={href}
         prefetch={false}
-        aria-label={`Open ${pet.displayName}`}
+        aria-label={labels.openPet(pet.displayName)}
         className="flex flex-1 flex-col rounded-3xl"
       >
         <div className="flex items-center justify-between rounded-t-3xl border-b border-black/[0.06] px-5 pt-4 pr-5 pb-3 dark:border-white/[0.06]">
           <span className="font-mono text-[11px] tracking-[0.22em] text-muted-3 uppercase">
-            No. {dexLabel}
+            {labels.dexNumber(dexLabel)}
           </span>
           {pet.featured ? (
             <span
-              title="Featured"
+              title={labels.featured}
               className="rounded-md bg-amber-500 px-1.5 py-0.5 font-bold text-[#0a0e1f] text-[10px] leading-none dark:bg-amber-400"
             >
-              ★ FEATURED
+              {labels.featured}
             </span>
           ) : null}
         </div>
@@ -90,12 +119,11 @@ export function StaticFacetPetCard({
             src={pet.spritesheetPath}
             state={spriteState.id}
             scale={0.7}
-            label={`${pet.displayName} sprite`}
+            label={labels.spriteStill(pet.displayName)}
           />
           {installCount > 0 ? (
             <span className="pointer-events-none absolute right-5 bottom-2 font-mono text-[10px] tracking-[0.22em] text-muted-4 uppercase">
-              {formattedInstallCount} install
-              {installCount === 1 ? "" : "s"}
+              {labels.installs(installCount, formattedInstallCount)}
             </span>
           ) : null}
         </div>
@@ -106,7 +134,7 @@ export function StaticFacetPetCard({
               <span className="truncate">{pet.displayName}</span>
               {pet.featured ? (
                 <span
-                  title="Featured"
+                  title={labels.featured}
                   className="font-mono text-[10px] text-brand"
                 >
                   ★
@@ -114,7 +142,7 @@ export function StaticFacetPetCard({
               ) : null}
             </h3>
             <span className="font-mono text-[10px] tracking-[0.18em] text-muted-4 uppercase">
-              {pet.kind}
+              {labels.kinds[pet.kind] ?? pet.kind}
             </span>
           </div>
           <p
@@ -137,19 +165,22 @@ export function StaticFacetPetCard({
                   key={vibe}
                   className="font-mono text-[10px] tracking-[0.12em] text-muted-3 uppercase"
                 >
-                  #{vibe}
+                  #{labels.vibes[vibe] ?? vibe}
                 </span>
               ))}
             </div>
           ) : null}
           {pet.source === "discover" ? (
-            <span className="inline-flex h-5 w-fit items-center justify-center rounded-full bg-chip-warning-bg px-2 py-0.5 font-mono text-[10px] text-chip-warning-fg tracking-[0.12em] uppercase ring-1 ring-chip-warning-fg/20">
-              Discovered
+            <span
+              title={labels.discoveredTitle}
+              className="inline-flex h-5 w-fit items-center justify-center rounded-full bg-chip-warning-bg px-2 py-0.5 font-mono text-[10px] text-chip-warning-fg tracking-[0.12em] uppercase ring-1 ring-chip-warning-fg/20"
+            >
+              {labels.discovered}
             </span>
           ) : null}
           {pet.submittedBy ? (
             <div className="mt-2 flex items-center gap-1.5 border-t border-black/[0.05] pt-2 font-mono text-[10px] tracking-[0.12em] text-muted-3 uppercase dark:border-white/[0.05]">
-              by {pet.submittedBy.name}
+              {labels.byAuthor(pet.submittedBy.name)}
             </div>
           ) : null}
         </div>

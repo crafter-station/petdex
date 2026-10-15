@@ -170,7 +170,20 @@ const publicHtmlCacheSources = [
 
 const mockRoot = path.resolve(__dirname, "src/lib/mock");
 
+// `output: "standalone"` makes `next build` also emit `.next/standalone` — a
+// server bundle plus the exact `node_modules` subset the runtime touches,
+// traced from the imports. The Docker image needs it: without it the container
+// has to carry the whole install (928M here) to run `next start`.
+//
+// Gated on an opt-in env var rather than set unconditionally, because the same
+// config also builds the Vercel deployment, and the setting's effect there is
+// not documented either way. Vercel's own build does its own output handling,
+// so the safe move is to leave its build byte-identical to what it was and
+// turn tracing on only for the Dockerfile, which sets this.
+const IS_STANDALONE = process.env.PETDEX_STANDALONE === "1";
+
 const nextConfig: NextConfig = {
+  ...(IS_STANDALONE ? { output: "standalone" as const } : {}),
   experimental: {
     // TypeScript 7 dropped the compiler API Next reads for its dev-time
     // type checking, so `bun dev` crashed on boot after the 6-to-7 bump
@@ -192,15 +205,18 @@ const nextConfig: NextConfig = {
     ],
   },
   // Server-only modules that don't survive Turbopack/webpack bundling:
-  // - @electric-sql/pglite (mock mode) — native wasm + workers
+  // - @electric-sql/pglite — native wasm + workers. Listed unconditionally:
+  //   `src/lib/db/client.ts` imports `../mock/db` at module scope regardless
+  //   of IS_MOCK, and that module imports PGlite the same way, so the bundler
+  //   pulls it into every build. Marking it external only in mock mode left
+  //   the production build to inline it, and Turbopack then emitted the
+  //   17 MB wasm/data pair into `.next/static/media`, where it is served
+  //   publicly despite no client chunk referencing it.
   // - ali-oss — uses urllib's dynamic require('proxy-agent') for an
   //   optional dependency that the bundler can't resolve and treats
   //   as fatal. Marking ali-oss external lets the server runtime do
   //   the require() lazily, where the missing optional is harmless.
-  serverExternalPackages: [
-    "ali-oss",
-    ...(IS_MOCK ? ["@electric-sql/pglite"] : []),
-  ],
+  serverExternalPackages: ["ali-oss", "@electric-sql/pglite"],
   async headers() {
     return [
       {
@@ -227,13 +243,28 @@ const nextConfig: NextConfig = {
     return [
       {
         source: "/:path*",
-        has: [{ type: "host", value: "petdex.crafter.run" }],
+        has: [{ type: "host", value: "petdex\\.crafter\\.run\\.?" }],
         destination: "https://petdex.dev/:path*",
         permanent: true,
       },
       {
         source: "/:path*",
-        has: [{ type: "host", value: "www.petdex.crafter.run" }],
+        has: [{ type: "host", value: "www\\.petdex\\.crafter\\.run\\.?" }],
+        destination: "https://petdex.dev/:path*",
+        permanent: true,
+      },
+      // The `www` alias of the canonical host, not a legacy one. It answered
+      // 200 with the full site while every canonical, hreflang, and sitemap
+      // URL is absolute on `petdex.dev`. Keep in sync with `REDIRECT_HOSTS`
+      // in `src/proxy.ts`, which covers the same set for requests that never
+      // reach this config.
+      //
+      // The value is compiled as `^…$`, so `\.?` admits the fully-qualified
+      // spelling with a trailing root dot (`www.petdex.dev.`) — the same host
+      // to DNS, and one Next's exact match would otherwise let through.
+      {
+        source: "/:path*",
+        has: [{ type: "host", value: "www\\.petdex\\.dev\\.?" }],
         destination: "https://petdex.dev/:path*",
         permanent: true,
       },

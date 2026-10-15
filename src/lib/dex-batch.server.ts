@@ -5,10 +5,9 @@
 import { sql } from "drizzle-orm";
 
 import { db } from "@/lib/db/client";
-import { formatBatchLabel } from "@/lib/dex-batch";
 
 export async function getAvailableBatches(): Promise<
-  Array<{ key: string; label: string; count: number }>
+  Array<{ key: string; count: number }>
 > {
   const result = await db.execute<{ key: string; count: number }>(sql`
     SELECT
@@ -20,9 +19,11 @@ export async function getAvailableBatches(): Promise<
     ORDER BY 1 DESC
   `);
 
+  // No `label`: this runs inside a locale-agnostic cached aggregate, so any
+  // month name built here would be frozen in one language for every visitor.
+  // The client derives the label from `key` with the active locale.
   return (result.rows ?? []).map((row) => ({
     key: row.key,
-    label: formatBatchLabel(row.key),
     count: row.count,
   }));
 }

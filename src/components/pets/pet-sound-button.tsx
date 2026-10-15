@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { Loader2, Volume2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 let activeAudio: HTMLAudioElement | null = null;
 let activeToken: string | null = null;
@@ -10,12 +11,16 @@ let activeToken: string | null = null;
 export function PetSoundButton({
   soundUrl,
   displayName,
-  labelPrefix = "Play sound for",
 }: {
   soundUrl: string;
   displayName: string;
-  labelPrefix?: string;
 }) {
+  const t = useTranslations("gallery");
+  // Always the localized default. A `labelPrefix` prop used to let a caller
+  // override this, and `pets/[slug]` passed a hardcoded English string — so
+  // the aria-label and title announced English on /zh and /es. No caller may
+  // inject an untranslated phrase now.
+  const label = t("playSoundFor", { name: displayName });
   const [playing, setPlaying] = useState(false);
   const [busy, setBusy] = useState(false);
   const token = soundUrl;
@@ -72,6 +77,18 @@ export function PetSoundButton({
       }
     };
 
+    // A load or decode failure fires `error`, not a rejected `play()`: the
+    // play promise has already resolved by then, so without this the button
+    // stayed lit as "playing" over a pet whose sound never loads (a stale
+    // soundUrl, or the R2 object gone).
+    audio.onerror = () => {
+      if (activeToken === token) {
+        activeAudio = null;
+        activeToken = null;
+      }
+      setPlaying(false);
+    };
+
     try {
       await audio.play();
       setPlaying(true);
@@ -90,8 +107,8 @@ export function PetSoundButton({
     <button
       type="button"
       onClick={handleClick}
-      aria-label={`${labelPrefix} ${displayName}`}
-      title={`${labelPrefix} ${displayName}`}
+      aria-label={label}
+      title={label}
       className={`inline-flex size-9 items-center justify-center rounded-full border backdrop-blur transition ${
         playing
           ? "border-brand/30 bg-brand/15 text-brand"

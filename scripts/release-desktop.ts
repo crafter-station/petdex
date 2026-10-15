@@ -664,7 +664,7 @@ async function probeProduction(tag: string): Promise<void> {
   // bit. We hit the GH API directly first to confirm the release is
   // live, then probe the proxy with a short retry.
   const ghUrl = `https://api.github.com/repos/crafter-station/petdex/releases/tags/${tag}`;
-  const ghRes = await fetch(ghUrl);
+  const ghRes = await fetch(ghUrl, { signal: AbortSignal.timeout(30_000) });
   if (!ghRes.ok) {
     console.warn(
       `  ! GH API didn't have ${tag} yet (status ${ghRes.status}). Replication delay; check in a minute.`,
@@ -676,6 +676,7 @@ async function probeProduction(tag: string): Promise<void> {
   for (let i = 0; i < 3; i++) {
     const r = await fetch("https://petdex.dev/api/desktop/latest-release", {
       redirect: "manual",
+      signal: AbortSignal.timeout(30_000),
     });
     const loc = r.headers.get("location") ?? "";
     if (loc.includes(tag)) {

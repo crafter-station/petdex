@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-pub const endpoint = "https://petdex.crafter.run/api/desktop/latest-release?format=json";
+pub const endpoint = "https://petdex.dev/api/desktop/latest-release?format=json";
 pub const release_page = "https://github.com/crafter-station/petdex/releases";
 pub const brew_command = "brew upgrade --cask petdex";
 pub const current_version = "0.9.2";
@@ -63,14 +63,14 @@ pub fn isNewer(latest: []const u8, current: []const u8) bool {
 pub fn downloadUrl() []const u8 {
     return switch (builtin.os.tag) {
         .macos => switch (builtin.cpu.arch) {
-            .aarch64 => "https://petdex.crafter.run/api/desktop/latest-release?asset=darwin-arm64",
-            .x86_64 => "https://petdex.crafter.run/api/desktop/latest-release?asset=darwin-x64",
+            .aarch64 => "https://petdex.dev/api/desktop/latest-release?asset=darwin-arm64",
+            .x86_64 => "https://petdex.dev/api/desktop/latest-release?asset=darwin-x64",
             else => release_page,
         },
-        .windows => "https://petdex.crafter.run/api/desktop/latest-release?asset=win32-x64",
+        .windows => "https://petdex.dev/api/desktop/latest-release?asset=win32-x64",
         .linux => switch (builtin.cpu.arch) {
-            .aarch64 => "https://petdex.crafter.run/api/desktop/latest-release?asset=linux-arm64",
-            .x86_64 => "https://petdex.crafter.run/api/desktop/latest-release?asset=linux-x64",
+            .aarch64 => "https://petdex.dev/api/desktop/latest-release?asset=linux-arm64",
+            .x86_64 => "https://petdex.dev/api/desktop/latest-release?asset=linux-x64",
             else => release_page,
         },
         else => release_page,

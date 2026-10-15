@@ -2,17 +2,15 @@ import { NextResponse } from "next/server";
 
 import { verifyCliBearer } from "@/lib/cli-auth";
 import { applyPetEdit, type PatchBody } from "@/lib/pet-edit";
+import { publicTrafficGuardKey } from "@/lib/public-traffic-guard";
 import { cliVerifyRatelimit } from "@/lib/ratelimit";
 
 export const runtime = "nodejs";
 
-function clientIp(req: Request): string {
-  const xff = req.headers.get("x-forwarded-for") ?? "";
-  return xff.split(",")[0]?.trim() || "anon";
-}
-
 export async function PATCH(req: Request): Promise<Response> {
-  const verifyLim = await cliVerifyRatelimit.limit(clientIp(req));
+  const verifyLim = await cliVerifyRatelimit.limit(
+    publicTrafficGuardKey(req.headers),
+  );
   if (!verifyLim.success) {
     return NextResponse.json({ error: "rate_limited" }, { status: 429 });
   }
@@ -26,6 +24,10 @@ export async function PATCH(req: Request): Promise<Response> {
   try {
     body = (await req.json()) as PatchBody & { petId?: string };
   } catch {
+    return NextResponse.json({ error: "invalid_json" }, { status: 400 });
+  }
+  // A literal `null` parses fine; the property reads below would 500 it.
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
 

@@ -159,6 +159,7 @@ async function fetchCharges(input: {
       Authorization: `Bearer ${input.token}`,
       "Accept-Encoding": "gzip",
     },
+    signal: AbortSignal.timeout(30_000),
   });
 
   if (!response.ok) {

@@ -50,6 +50,13 @@ on:
       - ".github/workflows/desktop-native-ci.yml"
   workflow_dispatch:
 
+# Builds and runs PR code, so the token must stay read-only. Declared
+# explicitly rather than inherited: this is the one workflow without a
+# permissions block otherwise, and on same-repo branches the inherited
+# default can be read/write.
+permissions:
+  contents: read
+
 jobs:
   build:
     name: build ${{ matrix.platform }}

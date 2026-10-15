@@ -46,17 +46,19 @@ testMock.module("@/lib/pet-search", () => ({
   },
 }));
 
+// Only the seed *source* is stubbed (createShuffleSeed / readShuffleSeed).
+// `setShuffleSeedCookie` is the real one, re-exported below: a hand-written
+// stub that emits the cookie string the assertion looks for proves only that
+// the mock ran, and leaves the real attributes (Path, SameSite, httpOnly,
+// Max-Age) unpinned. The real setter writes through NextResponse.cookies.set,
+// so the route's Set-Cookie header is genuine.
+const realShuffleSeed = await import("@/lib/shuffle-seed");
 testMock.module("@/lib/shuffle-seed", () => ({
+  ...realShuffleSeed,
   createShuffleSeed: () => TEST_SEED,
   normalizeShuffleSeed: (value: string | null | undefined) =>
     value && /^[a-f0-9]{16}$/.test(value) ? value : null,
   readShuffleSeed: async () => null,
-  setShuffleSeedCookie: (response: Response, seed: string) => {
-    response.headers.append(
-      "Set-Cookie",
-      `petdex_shuffle_seed=${seed}; Path=/; Max-Age=2592000; SameSite=Lax`,
-    );
-  },
 }));
 
 async function search(url: string): Promise<Response> {
@@ -124,9 +126,12 @@ describe("GET /api/pets/search", () => {
 
     expect(firstBody.shuffleSeed).toBe(TEST_SEED);
     expect(first.headers.get("Cache-Control")).toBe("private, no-store");
-    expect(first.headers.get("Set-Cookie") ?? "").toContain(
-      `petdex_shuffle_seed=${TEST_SEED}`,
-    );
+    const cookie = first.headers.get("Set-Cookie") ?? "";
+    expect(cookie).toContain(`petdex_shuffle_seed=${TEST_SEED}`);
+    // The real setter's attributes, not a stub's — Path=/ and SameSite=lax
+    // are what let the client reuse the seed on the next page.
+    expect(cookie.toLowerCase()).toContain("path=/");
+    expect(cookie.toLowerCase()).toContain("samesite=lax");
     expect(firstCall?.input.shuffleSeed).toBe(TEST_SEED);
 
     calls.length = 0;
@@ -144,6 +149,24 @@ describe("GET /api/pets/search", () => {
       includeTotal: false,
       includeFacets: false,
     });
+  });
+
+  it("forwards a cursor past the safe range instead of dropping it", async () => {
+    // `cursor` is handed to the query as a SQL OFFSET. Unclamped, a value like
+    // this one arrives at Postgres as 1e20 and comes back `22003 bigint out of
+    // range`, turning a request that only paged too far into a 500 — with the
+    // whole statement in the logs. The cap is applied in `searchPets`, which
+    // this suite stubs, so what is asserted here is the other half of the
+    // contract: the route forwards the raw value rather than dropping or
+    // rejecting it, and it is `searchPets` that bounds it. The bound itself is
+    // covered by `pet-search-cursor.test.ts`, and that `searchPets` still
+    // applies it by `pet-search-cursor-wiring.test.ts`.
+    await search(
+      "https://petdex.local/api/pets/search?sort=alpha&cursor=99999999999999999999&includeMeta=0",
+    );
+
+    // `parseInt` rounds it to the same double Postgres would have rejected.
+    expect(calls[0]?.input.cursor).toBe(100000000000000000000);
   });
 
   it("accepts a smaller static-home cursor before loading the normal page size", async () => {

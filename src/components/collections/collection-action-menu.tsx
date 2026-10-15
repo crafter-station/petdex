@@ -32,6 +32,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
+import { localizePath } from "@/i18n/config";
+
 const SITE_URL = "https://petdex.dev";
 // Cap on the install command length. Beyond this we truncate with a
 // hint so the user can paste the rest manually instead of getting a
@@ -75,7 +77,7 @@ export function CollectionActionMenu({ collection }: Props) {
   const installSlugs = truncated ? slugs.slice(0, MAX_SLUGS_IN_COMMAND) : slugs;
   const installCmd = `npx petdex install ${installSlugs.join(" ")}`;
   const petdexInstallUrl = buildPetdexInstallUrl(installSlugs);
-  const downloadHref = `/${locale}/download?next=${encodeURIComponent(buildDownloadInstallNext(installSlugs))}`;
+  const downloadHref = `${localizePath(locale, "/download")}?next=${encodeURIComponent(buildDownloadInstallNext(installSlugs))}`;
   const collectionUrl = `${SITE_URL}/collections/${collection.slug}`;
   const installHint = truncated
     ? t("installHintTruncated", {

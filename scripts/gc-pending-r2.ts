@@ -9,7 +9,7 @@ import { ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { neon } from "@neondatabase/serverless";
 
 import { parsePendingGcArgs } from "../src/lib/gc-pending-args";
-import { isPendingAssetKey } from "../src/lib/pending-asset";
+import { isGcCandidateAssetKey } from "../src/lib/pending-asset";
 import { PENDING_ASSET_GC_LOCK_KEY } from "../src/lib/pending-asset-gc";
 import {
   deleteR2Objects,
@@ -69,7 +69,11 @@ async function referencedKeys(): Promise<Set<string>> {
       "pending_zip_url",
     ]) {
       const key = keyFromR2PublicUrl(row[column]);
-      if (key && isPendingAssetKey(key)) keys.add(key);
+      // Both key shapes: a live approved pet's assets are stored under the
+      // submission shape (`pets/<slug>-<uploadId>/…`), so counting only the
+      // pending shape would let the widened candidate filter below delete a
+      // live pet's spritesheet.
+      if (key && isGcCandidateAssetKey(key)) keys.add(key);
     }
   }
   return keys;
@@ -77,10 +81,16 @@ async function referencedKeys(): Promise<Set<string>> {
 
 async function claimOrphanedKeys(keys: string[]): Promise<string[]> {
   if (keys.length === 0) return [];
-  const results = await sql.transaction(
-    (tx) => [
-      tx`SELECT pg_advisory_xact_lock(${PENDING_ASSET_GC_LOCK_KEY})`,
-      tx`
+  // READ COMMITTED (the default), deliberately not SERIALIZABLE: the guard
+  // pattern is "wait on the advisory lock, then re-read", and each statement
+  // must take a fresh snapshot after the wait. Under SERIALIZABLE the whole
+  // transaction shares the snapshot taken at the lock statement, so a
+  // reference committed while this waited would still be invisible and the
+  // key would be claimed as orphaned. `pet-edit.ts`'s claim guard documents
+  // the same requirement.
+  const results = await sql.transaction((tx) => [
+    tx`SELECT pg_advisory_xact_lock(${PENDING_ASSET_GC_LOCK_KEY})`,
+    tx`
         WITH candidates(key) AS (
           SELECT unnest(${keys}::text[])
         ),
@@ -123,9 +133,7 @@ async function claimOrphanedKeys(keys: string[]): Promise<string[]> {
         FROM pending_asset_gc_claims AS claim
         INNER JOIN eligible ON eligible.key = claim.key
       `,
-    ],
-    { isolationLevel: "Serializable" },
-  );
+  ]);
   const rows = results[1] as Array<{ key: string }>;
   return rows.map((row) => row.key);
 }
@@ -170,20 +178,16 @@ async function deleteInBatches(keys: string[]): Promise<DeleteSummary> {
       const batchSummary = summarizeR2DeleteBatch(batch, result);
       summary.deletedKeys.push(...batchSummary.deletedKeys);
       summary.failures.push(...batchSummary.failures);
-      try {
-        // Once R2 confirms deletion, or reports an already-missing key,
-        // release the claim so the table cannot grow forever.
-        await releaseClaims(batchSummary.deletedKeys);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        summary.failures.push(
-          ...batchSummary.deletedKeys.map((key) => ({
-            key,
-            code: "claim_release_failed",
-            message,
-          })),
-        );
-      }
+      // Deliberately do NOT release the claims for the keys just deleted.
+      // The claim is what stops a concurrent `pet-edit` from writing a
+      // pending_*_url that points at this key (its guard is `NOT EXISTS`
+      // over the claim table); releasing on delete re-opened exactly the
+      // window that guard exists to close, so a stale client could reference
+      // an object that is now gone. Keeping the claim as a tombstone makes
+      // such a reference impossible. The table stays bounded because
+      // `purgeStaleClaims` removes claims older than the age cutoff whose key
+      // is gone and unreferenced — the same age window during which a stale
+      // client might still hold the URL.
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       summary.failures.push(
@@ -209,9 +213,16 @@ async function main(): Promise<void> {
         referenced,
       )
     : 0;
+  // Both GC-eligible shapes: pending-edit keys (`-pending-`) and submission
+  // uploads (`/api/cli/submit` presigns `pets/<slugHint>-<uploadId>/…`). The
+  // submit shape was never a candidate before, so an abandoned presign (or a
+  // withdrawn submission) left objects nothing would collect. `referenced`
+  // above now counts the same two shapes, so live rows still protect their
+  // assets.
   const candidates = objects.filter(
     (object) =>
-      object.lastModified.getTime() < cutoff && isPendingAssetKey(object.key),
+      object.lastModified.getTime() < cutoff &&
+      isGcCandidateAssetKey(object.key),
   );
   const orphaned = candidates.filter((object) => !referenced.has(object.key));
 

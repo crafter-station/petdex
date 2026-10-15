@@ -59,7 +59,22 @@ export function PetKeyboardNav({
         router.push(`/pets/${nextSlug}`, { scroll: false });
         return;
       }
-      if (event.key === " " && shuffleHref) {
+      if (event.key === " ") {
+        // Space is how the focused control is activated. Hijacking it stole
+        // activation from anything focused on the page — the Codex dialog's
+        // Close button, the footer's copy button — and navigated to a random
+        // pet instead. Only a page with no activatable element in the target
+        // chain may spend Space on shuffle.
+        const target = event.target;
+        if (
+          target instanceof HTMLElement &&
+          target.closest(
+            'button, a[href], summary, input, select, textarea, label, [role="button"], [role="link"], [role="menuitem"], [role="tab"], [role="switch"], [contenteditable="true"], [tabindex]:not([tabindex="-1"])',
+          )
+        ) {
+          return;
+        }
+        if (!shuffleHref) return;
         event.preventDefault();
         // The shuffle endpoint returns JSON `{ slug, href }` when
         // requested with Accept: application/json (and 302s otherwise

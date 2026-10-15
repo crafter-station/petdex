@@ -80,14 +80,14 @@ export async function getTelemetrySummary(): Promise<TelemetrySummary> {
     `),
     db.execute(sql`
       SELECT
-        to_char(date_trunc('day', created_at), 'YYYY-MM-DD') AS date,
+        to_char(date_trunc('day', created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS date,
         COUNT(DISTINCT install_id) AS count
       FROM telemetry_events
       WHERE
         event = 'cli_install_desktop_success'
         AND created_at >= now() - interval '30 days'
-      GROUP BY date_trunc('day', created_at)
-      ORDER BY date_trunc('day', created_at) ASC
+      GROUP BY date_trunc('day', created_at AT TIME ZONE 'UTC')
+      ORDER BY date_trunc('day', created_at AT TIME ZONE 'UTC') ASC
     `),
     db.execute(sql`
       SELECT os, COUNT(*) AS count
@@ -348,7 +348,7 @@ function mapSourceRows(result: unknown): RouteCostSourceBucketInput[] {
 export async function versionAdoptionOverTime(): Promise<VersionAdoptionRow[]> {
   const result = await db.execute(sql`
     SELECT
-      to_char(date_trunc('day', created_at), 'YYYY-MM-DD') AS day,
+      to_char(date_trunc('day', created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS day,
       binary_version AS version,
       COUNT(DISTINCT install_id) AS installs
     FROM telemetry_events

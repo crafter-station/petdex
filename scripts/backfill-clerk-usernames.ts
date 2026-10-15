@@ -81,3 +81,9 @@ for (const row of todo) {
 console.log(
   `\ndone (mode=${dryRun ? "DRY" : "APPLY"}). synced=${synced} | already-matched=${alreadyMatched} | failed=${failed}`,
 );
+
+// Non-zero so a scripted run is not read as complete when rows were left
+// un-diverged from Clerk — the same convention the sibling backfills
+// (backfill-color, backfill-sprite-version-number) follow. A `failed` counts
+// both a Clerk getUser miss and an updateUser rejection.
+if (failed > 0) process.exitCode = 1;

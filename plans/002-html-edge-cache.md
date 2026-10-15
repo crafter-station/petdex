@@ -6,7 +6,7 @@
 > report — do not improvise. When done, update the status row for this plan
 > in `plans/README.md`.
 >
-> **Drift check (run first)**: `git diff --stat 82ffb6b..HEAD -- src/proxy.ts next.config.ts src/components/locale-switcher.tsx`
+> **Drift check (run first)**: `git diff --stat 82ffb6b..HEAD -- src/proxy.ts next.config.ts src/components/brand/locale-switcher.tsx`
 > If any in-scope file changed since this plan was written, compare the
 > "Current state" excerpts against the live code before proceeding; on a
 > mismatch, treat it as a STOP condition.
@@ -53,7 +53,7 @@ Public HTML on `petdex.dev` is never cached by Cloudflare. Verified live 2026-06
 
 - Clerk session cookies are `__session` and `__client_uat` (plus `__clerk_*` variants). Signed-in users carry them; anonymous users don't. The HTML shell is the same either way (Clerk hydrates client-side), but bypassing cache for cookie-carrying requests is the conservative correctness choice (some pages may render differently in future).
 
-- `src/components/locale-switcher.tsx` — client component that switches locale (currently relies on next-intl navigation which works path-based; the middleware cookie made the choice sticky for bare-`/` visits).
+- `src/components/brand/locale-switcher.tsx` — client component that switches locale (currently relies on next-intl navigation which works path-based; the middleware cookie made the choice sticky for bare-`/` visits).
 
 - next-intl v4 (`next-intl@^4.11.0` in package.json). Its `createMiddleware` accepts `localeCookie: false` (disables the Set-Cookie entirely) and `localeDetection: false` (disables Accept-Language redirect). Docs: `node_modules/next-intl/dist/...` or https://next-intl.dev/docs/routing/middleware#locale-cookie.
 
@@ -77,7 +77,7 @@ With the cookie gone and detection off, a first-time visitor to bare `/` always 
 **In scope**:
 - `src/proxy.ts` (middleware i18n config only)
 - `next.config.ts` (`headers()` block only)
-- `src/components/locale-switcher.tsx` (client-side cookie write)
+- `src/components/brand/locale-switcher.tsx` (client-side cookie write)
 - Cloudflare zone `petdex.dev` (one Cache Rule) — ops step
 - New test file for the locale switcher cookie behavior if a pattern exists
 
@@ -144,7 +144,7 @@ Note on the 300s TTL: pet approvals/edits must show up reasonably fast on home/d
 
 ### Step 3: Locale switcher sets the cookie client-side (conditional — see Step 1 note)
 
-If cookie reads still work with detection off: in `src/components/locale-switcher.tsx`, when the user picks a locale, set `document.cookie = "NEXT_LOCALE=" + locale + "; path=/; max-age=31536000; samesite=lax"` before/alongside the navigation it already does. Users who explicitly picked a locale then carry the cookie → the Cloudflare rule (Step 4) bypasses cache for them → middleware routes them correctly on bare `/`.
+If cookie reads still work with detection off: in `src/components/brand/locale-switcher.tsx`, when the user picks a locale, set `document.cookie = "NEXT_LOCALE=" + locale + "; path=/; max-age=31536000; samesite=lax"` before/alongside the navigation it already does. Users who explicitly picked a locale then carry the cookie → the Cloudflare rule (Step 4) bypasses cache for them → middleware routes them correctly on bare `/`.
 
 If Step 1 determined cookie reads are dead, skip this step and remove any stale `NEXT_LOCALE` references.
 
@@ -176,12 +176,12 @@ In a real browser, sign in on production, navigate home/pets/collections — con
 
 ## Done criteria
 
-- [ ] Production `curl -sI https://petdex.dev/en` shows no `set-cookie: NEXT_LOCALE` and second hit shows `cf-cache-status: HIT`
-- [ ] Request with `__session` cookie is not served from cache
-- [ ] `/zh` serves `lang="zh"` HTML; `/es` serves Spanish
-- [ ] `bun run check`, `bun run i18n:check`, `bun test --env-file=.env.mock`, and the mock build all exit 0
-- [ ] No files outside the in-scope list modified (`git status`)
-- [ ] `plans/README.md` status row updated
+- [x] Production `curl -sI https://petdex.dev/en` shows no `set-cookie: NEXT_LOCALE` and second hit shows `cf-cache-status: HIT`
+- [x] Request with `__session` cookie is not served from cache
+- [x] `/zh` serves `lang="zh"` HTML; `/es` serves Spanish
+- [x] `bun run check`, `bun run i18n:check`, `bun test --env-file=.env.mock`, and the mock build all exit 0
+- [x] No files outside the in-scope list modified (`git status`)
+- [x] `plans/README.md` status row updated
 
 ## STOP conditions
 

@@ -66,8 +66,17 @@ jobs:
       - name: Install with frozen lockfile
         run: bun install --frozen-lockfile
 
+      - name: Lint and format check
+        run: bun run check
+
       - name: Typecheck
         run: bunx tsc --noEmit
 
+      - name: Check i18n messages
+        run: bun run i18n:check
+
       - name: Run app tests
-        run: bun test --timeout 60000
+        # The root script, so the per-test raise has one source. Passing a
+        # second `--timeout` here worked, but it drifted: raising the script's
+        # value for a new spec would not have reached CI.
+        run: bun run test

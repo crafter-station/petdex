@@ -5,10 +5,17 @@ import { auth } from "@clerk/nextjs/server";
 import { getAllPetsPackPath } from "@/lib/downloads";
 import { logManifestFetch } from "@/lib/manifest-telemetry";
 import { getAllApprovedPets } from "@/lib/pets";
+import { publicOrigin } from "@/lib/public-origin";
 import { manifestFullRatelimit } from "@/lib/ratelimit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+// Per-user data on a URL that carries no user identity, so no intermediary may
+// reuse any branch of it — including the failures. A bare 401/429 is
+// heuristically cacheable on a GET, and the deployment runs a
+// cache-everything rule in front.
+const PRIVATE_HEADERS = { "Cache-Control": "private, no-store" };
 
 // Authenticated, full-fat manifest. Only returns when the caller is
 // signed in. Surfaces description, tags, vibes, install commands,
@@ -19,7 +26,10 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request): Promise<Response> {
   const { userId } = await auth();
   if (!userId) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    return NextResponse.json(
+      { error: "unauthorized" },
+      { status: 401, headers: PRIVATE_HEADERS },
+    );
   }
   const lim = await manifestFullRatelimit.limit(userId);
   if (!lim.success) {
@@ -28,6 +38,7 @@ export async function GET(req: Request): Promise<Response> {
       {
         status: 429,
         headers: {
+          ...PRIVATE_HEADERS,
           "Retry-After": String(
             Math.max(1, Math.ceil((lim.reset - Date.now()) / 1000)),
           ),
@@ -37,7 +48,7 @@ export async function GET(req: Request): Promise<Response> {
   }
   void logManifestFetch(req, "full");
 
-  const origin = new URL(req.url).origin;
+  const origin = publicOrigin(req);
   const pets = await getAllApprovedPets();
 
   const items = pets.map((pet) => ({

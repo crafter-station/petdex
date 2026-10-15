@@ -19,6 +19,10 @@ import { hasLocale } from "@/i18n/config";
 // data. 24h ceiling + revalidateTag('collection:list') from admin
 // write paths keeps the page fresh on actual changes without burning
 // a function on every visit.
+//
+// `force-static` is also what gets every locale prerendered: without it Next
+// builds the default locale and leaves the others to be rendered on demand.
+export const dynamic = "force-static";
 export const revalidate = 86400;
 
 const SITE_URL = "https://petdex.dev";
@@ -115,66 +119,70 @@ export default async function CollectionsPage({
   }));
 
   return (
-    <main className="min-h-dvh bg-background text-foreground">
-      <JsonLd data={jsonLd} />
+    <>
       <SiteHeader />
-      <section className="petdex-hero relative -mt-14 overflow-clip pt-14">
-        <div className="relative mx-auto flex w-full max-w-[1440px] flex-col px-5 pb-10 md:px-8">
-          <div className="mt-12 max-w-2xl md:mt-16">
-            <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
-              {t("hero.eyebrow")}
-            </p>
-            <h1 className="mt-3 text-balance text-[40px] leading-[1] font-semibold tracking-tight md:text-[64px]">
-              {t("hero.title")}
-            </h1>
-            <p className="mt-5 text-balance text-base leading-7 text-muted-1 md:text-lg">
-              {t("hero.description", { count: collections.length })}
-            </p>
+      <main id="main" className="min-h-dvh bg-background text-foreground">
+        <JsonLd data={jsonLd} />
+        <section className="petdex-hero relative -mt-14 overflow-clip pt-14">
+          <div className="relative mx-auto flex w-full max-w-[1440px] flex-col px-5 pb-10 md:px-8">
+            <div className="mt-12 max-w-2xl md:mt-16">
+              <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
+                {t("hero.eyebrow")}
+              </p>
+              <h1 className="mt-3 text-balance text-[40px] leading-[1] font-semibold tracking-tight md:text-[64px]">
+                {t("hero.title")}
+              </h1>
+              <p className="mt-5 text-balance text-base leading-7 text-muted-1 md:text-lg">
+                {t("hero.description", { count: collections.length })}
+              </p>
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      <section className="mx-auto w-full max-w-[1440px] px-5 py-10 md:px-8 md:py-14">
-        <div className="mb-4 flex items-center justify-end">
-          <span className="text-xs text-muted-3">
-            {browserT("showingCount", {
-              visible: browserItems.length,
-              total: browserItems.length,
+        <section className="mx-auto w-full max-w-[1440px] px-5 py-10 md:px-8 md:py-14">
+          <div className="mb-4 flex items-center justify-end">
+            <span className="text-xs text-muted-3">
+              {browserT("showingCount", {
+                visible: browserItems.length,
+                total: browserItems.length,
+              })}
+            </span>
+          </div>
+          <div className="grid auto-rows-fr gap-5 md:grid-cols-2 lg:grid-cols-3">
+            {browserItems.map((collection) => {
+              const owner = collection.ownerId
+                ? (creditsObj[collection.ownerId] ?? null)
+                : null;
+              return (
+                <StaticCollectionCard
+                  key={collection.slug}
+                  collection={collection}
+                  owner={owner}
+                  labels={{
+                    kind: {
+                      franchise: browserT("kindLabel.franchise"),
+                      category: browserT("kindLabel.category"),
+                      categorySub: browserT("kindLabel.categorySub"),
+                      other: browserT("kindLabel.other"),
+                    },
+                    petCount: browserT("card.petCount", {
+                      count: collection.petCount,
+                    }),
+                    siteLink: browserT("card.siteLink"),
+                    byOwner: owner
+                      ? browserT("card.byOwner", { name: owner.name })
+                      : null,
+                    spriteStill: (name) =>
+                      browserT("card.spriteStill", { name }),
+                  }}
+                />
+              );
             })}
-          </span>
-        </div>
-        <div className="grid auto-rows-fr gap-5 md:grid-cols-2 lg:grid-cols-3">
-          {browserItems.map((collection) => {
-            const owner = collection.ownerId
-              ? (creditsObj[collection.ownerId] ?? null)
-              : null;
-            return (
-              <StaticCollectionCard
-                key={collection.slug}
-                collection={collection}
-                owner={owner}
-                labels={{
-                  kind: {
-                    franchise: browserT("kindLabel.franchise"),
-                    category: browserT("kindLabel.category"),
-                    categorySub: browserT("kindLabel.categorySub"),
-                    other: browserT("kindLabel.other"),
-                  },
-                  petCount: browserT("card.petCount", {
-                    count: collection.petCount,
-                  }),
-                  siteLink: browserT("card.siteLink"),
-                  byOwner: owner
-                    ? browserT("card.byOwner", { name: owner.name })
-                    : null,
-                }}
-              />
-            );
-          })}
-        </div>
-      </section>
+          </div>
+        </section>
 
-      <SiteFooter />
-    </main>
+        <SiteFooter />
+      </main>
+    </>
   );
 }

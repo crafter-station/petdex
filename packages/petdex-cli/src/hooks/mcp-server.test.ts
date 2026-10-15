@@ -62,7 +62,13 @@ async function runServer(input: string, beforeInputDelay = 0) {
   const code = await new Promise<number | null>((resolve) => {
     child.on("close", resolve);
   });
-  return { beforeInputStdout, code, frames: parseFrames(stdout), stderr };
+  return {
+    beforeInputStdout,
+    code,
+    frames: parseFrames(stdout),
+    stderr,
+    stdout,
+  };
 }
 
 describe("Petdex MCP server stdio", () => {
@@ -143,6 +149,105 @@ describe("Petdex MCP server stdio", () => {
       id: 1,
       result: { serverInfo: { name: "petdex-mcp-server" } },
     });
+  });
+
+  test("refuses a frame whose declared length is past the ceiling", async () => {
+    // A framed client that declares a huge Content-Length would otherwise make
+    // the server buffer up to the declaration before it can parse anything.
+    // The server refuses the declaration and keeps serving, so a following
+    // valid frame still gets an answer.
+    const oversized = `Content-Length: 999999999\r\n\r\n`;
+    const initialize = frame({
+      jsonrpc: "2.0",
+      id: 7,
+      method: "initialize",
+      params: { protocolVersion: "2025-03-26" },
+    });
+
+    const result = await runServer(oversized + initialize);
+
+    expect(result.code).toBe(0);
+    // The first response is the refusal (id null, parse error), then the
+    // initialize is answered normally.
+    expect(result.frames[0]).toMatchObject({
+      jsonrpc: "2.0",
+      id: null,
+      error: { code: -32700 },
+    });
+    expect(result.frames[1]).toMatchObject({
+      jsonrpc: "2.0",
+      id: 7,
+      result: { serverInfo: { name: "petdex-mcp-server" } },
+    });
+  });
+
+  test("refuses a JSONL line that never terminates within the ceiling", async () => {
+    // No newline ever arrives and the buffer passes the ceiling: the server
+    // answers with a parse error rather than growing memory without bound.
+    // (One byte over the cap, so the test stays cheap.)
+    const cap = 16 * 1024 * 1024;
+    const blob = `{"jsonrpc":"2.0","id":1,"method":"initialize","padding":"${"x".repeat(
+      cap,
+    )}"}`;
+
+    const result = await runServer(blob);
+
+    expect(result.code).toBe(0);
+    expect(result.frames[0]).toMatchObject({
+      jsonrpc: "2.0",
+      id: null,
+      error: { code: -32700 },
+    });
+  });
+
+  test("answers a framed null body instead of crashing", async () => {
+    // `JSON.parse("null")` succeeds, so a framed body of `null` used to reach
+    // `handleRequest(null)`, whose rejection handler read `req.id` off null and
+    // threw again — inside the handler, so the finally never ran and the
+    // process died with an unhandled rejection, dropping any buffered sibling
+    // frame. It must instead answer an invalid-request error and keep serving.
+    const initialize = frame({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: { protocolVersion: "2025-03-26" },
+    });
+    const result = await runServer(frame(null) + initialize);
+
+    expect(result.code).toBe(0);
+    expect(result.stderr).not.toContain("null is not an object");
+    // The refusal comes first, then the initialize is still answered.
+    expect(result.frames[0]).toMatchObject({
+      id: null,
+      error: { code: -32600 },
+    });
+    expect(result.frames[1]).toMatchObject({
+      id: 1,
+      result: { serverInfo: { name: "petdex-mcp-server" } },
+    });
+  });
+
+  test("rejects a tools/call whose name is not a string", async () => {
+    const initialize = frame({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: { protocolVersion: "2025-03-26" },
+    });
+    const badCall = frame({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: { name: 123, arguments: {} },
+    });
+
+    const result = await runServer(initialize + badCall);
+
+    expect(result.code).toBe(0);
+    const call = result.frames.find((f) => (f as { id?: unknown }).id === 2) as
+      | { error?: { code?: number } }
+      | undefined;
+    expect(call?.error?.code).toBe(-32602);
   });
 
   test("accepts Antigravity JSONL initialize request", async () => {

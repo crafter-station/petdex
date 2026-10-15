@@ -9,6 +9,8 @@ import { useLocale, useTranslations } from "next-intl";
 
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 
+import { localizePath } from "@/i18n/config";
+
 // Bump the suffix to announce a later release; the old key stays
 // dismissed so nobody who already closed v0.3.0 sees it again.
 const SEEN_KEY = "petdex:announce:desktop-v030";
@@ -72,9 +74,9 @@ export function DesktopReleaseDialog() {
         <div className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm leading-5 text-muted-2">{t("body")}</p>
           <Link
-            href={`/${locale}/download`}
+            href={localizePath(locale, "/download")}
             onClick={() => handleOpenChange(false)}
-            className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-lg bg-brand px-5 text-sm font-semibold text-white transition hover:bg-brand-deep"
+            className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-lg bg-brand px-5 text-sm font-semibold text-on-inverse transition hover:bg-brand-deep"
           >
             <ArrowDownToLine className="size-4" />
             {t("cta")}

@@ -159,6 +159,21 @@ describe("decideAutomatedReview", () => {
     expect(result.reasonCode).toBe("clean_unique_submission");
   });
 
+  it("holds when a duplicate check did not complete (no false clean pass)", () => {
+    // A degraded subsystem reports no matches. That must not read as
+    // "no duplicates found" — the review holds instead of auto-approving.
+    const checks = cleanChecks();
+    checks.duplicates.decision = "hold";
+    checks.duplicates.incomplete = true;
+    checks.duplicates.reasons.push(
+      "Semantic duplicate check did not complete.",
+    );
+    const result = decideAutomatedReview(checks);
+    expect(result.decision).toBe("hold");
+    expect(result.reasonCode).toBe("duplicate_check_incomplete");
+    expect(result.canApply).toBe(false);
+  });
+
   it("auto-rejects 100% visual sprite duplicates", () => {
     const checks = cleanChecks();
     checks.duplicates.decision = "fail";
@@ -203,6 +218,32 @@ describe("decideAutomatedReview", () => {
     const result = decideAutomatedReview(checks);
     expect(result.decision).toBe("auto_reject");
     expect(result.reasonCode).toBe("duplicate_near_exact_sprite");
+  });
+
+  it("holds a corroborated near-exact match when a duplicate check did not finish", () => {
+    // {decision:"fail"} only carries the visual/hash layers. The semantic scan
+    // is capped at its newest rows, so `semanticMatches` may be empty purely
+    // because the match is older than the window — the same shape as the
+    // happy-path auto-reject above. The incomplete flag has to win, or a
+    // match is rejected on evidence one of the checks never produced.
+    const checks = cleanChecks();
+    checks.duplicates.decision = "fail";
+    checks.duplicates.incomplete = true;
+    checks.duplicates.reasons.push(
+      "Semantic duplicate check did not complete.",
+    );
+    checks.duplicates.visualMatches.push({
+      id: "pet_existing",
+      slug: "existing",
+      displayName: "Existing",
+      status: "approved",
+      visualDistance: 2,
+      matchedFields: ["displayName"],
+    });
+    const result = decideAutomatedReview(checks);
+    expect(result.decision).toBe("hold");
+    expect(result.reasonCode).toBe("duplicate_check_incomplete");
+    expect(result.canApply).toBe(false);
   });
 
   it("auto-rejects pending near-exact visual matches with metadata corroboration", () => {

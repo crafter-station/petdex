@@ -6,7 +6,7 @@
 > report — do not improvise. When done, update the status row for this plan
 > in `plans/README.md`.
 >
-> **Drift check (run first)**: `git diff --stat 82ffb6b..HEAD -- "src/app/[locale]/requests" "src/app/[locale]/leaderboard" "src/app/[locale]/download" src/components/requests-view.tsx src/components/leaderboard-view.tsx`
+> **Drift check (run first)**: `git diff --stat 82ffb6b..HEAD -- "src/app/[locale]/requests" "src/app/[locale]/leaderboard" "src/app/[locale]/download" src/components/requests/requests-view.tsx src/components/leaderboard/leaderboard-view.tsx`
 > If any in-scope file changed since this plan was written, compare the
 > "Current state" excerpts against the live code before proceeding; on a
 > mismatch, treat it as a STOP condition.
@@ -59,8 +59,8 @@ Three public pages still declare `export const dynamic = "force-dynamic"`, so ev
 ## Scope
 
 **In scope**:
-- `src/app/[locale]/requests/page.tsx`, `src/components/requests-view.tsx`
-- `src/app/[locale]/leaderboard/page.tsx`, `src/components/leaderboard-view.tsx`
+- `src/app/[locale]/requests/page.tsx`, `src/components/requests/requests-view.tsx`
+- `src/app/[locale]/leaderboard/page.tsx`, `src/components/leaderboard/leaderboard-view.tsx`
 - `src/app/[locale]/download/page.tsx` + a new small client island for the pending-install command (e.g. `src/components/download-activation-command.tsx`)
 - `src/app/api/me/header-state/route.ts` and `src/components/header-state-provider.tsx` ONLY if the requests-votes state needs a new field (see Step 1 escape hatch)
 - `next.config.ts` — add the three routes to the `Cloudflare-CDN-Cache-Control` list from plan 002 (only if 002 already landed)
@@ -81,7 +81,7 @@ Three public pages still declare `export const dynamic = "force-dynamic"`, so ev
 ### Step 1: /requests — move "my votes" to the client
 
 1. In `src/app/[locale]/requests/page.tsx`: delete the `auth()` call (line 40) and the `import { auth, ... }` (keep `clerkClient` if still used for requester/voter credits). Compute and pass ONLY the user-agnostic data (rows, counts, voter display info).
-2. Per-user "already voted" marking moves into `src/components/requests-view.tsx` (already a client component — verify with `head -5`): determine the signed-in user's voted request ids client-side. Check first whether the vote POST/DELETE endpoint or an existing API returns the user's votes; if `HeaderStateProvider` already carries something usable, prefer it. If NO existing client-readable source of "my voted request ids" exists, see STOP conditions — adding a field to header-state is allowed but report the size impact in the commit message (header-state response is currently ~109 bytes; keep the addition compact, e.g. `requestVotes: string[]`).
+2. Per-user "already voted" marking moves into `src/components/requests/requests-view.tsx` (already a client component — verify with `head -5`): determine the signed-in user's voted request ids client-side. Check first whether the vote POST/DELETE endpoint or an existing API returns the user's votes; if `HeaderStateProvider` already carries something usable, prefer it. If NO existing client-readable source of "my voted request ids" exists, see STOP conditions — adding a field to header-state is allowed but report the size impact in the commit message (header-state response is currently ~109 bytes; keep the addition compact, e.g. `requestVotes: string[]`).
 3. Replace line 16 with `export const dynamic = "force-static"; export const revalidate = 3600;`.
 
 **Verify**: mock build → route table shows `/[locale]/requests` as static/ISR. `bun test --env-file=.env.mock` → pass.
@@ -117,12 +117,12 @@ Add `/requests`, `/leaderboard`, `/download` (with locale variants) to the `Clou
 
 ## Done criteria
 
-- [ ] Build route table: `/[locale]/requests`, `/[locale]/leaderboard`, `/[locale]/download` are static/ISR (not `ƒ`)
-- [ ] `grep -rn "force-dynamic" "src/app/[locale]/requests" "src/app/[locale]/leaderboard" "src/app/[locale]/download"` → no matches
-- [ ] Tab deep-links and pending-install commands still work (manual smoke documented in PR)
-- [ ] Signed-in user still sees their voted state on /requests (manual smoke)
-- [ ] All commands in the table exit 0
-- [ ] `plans/README.md` status row updated
+- [x] Build route table: `/[locale]/requests`, `/[locale]/leaderboard`, `/[locale]/download` are static/ISR (not `ƒ`)
+- [x] `grep -rn "force-dynamic" "src/app/[locale]/requests" "src/app/[locale]/leaderboard" "src/app/[locale]/download"` → no matches
+- [x] Tab deep-links and pending-install commands still work (manual smoke documented in PR)
+- [x] Signed-in user still sees their voted state on /requests (manual smoke)
+- [x] All commands in the table exit 0
+- [x] `plans/README.md` status row updated
 
 ## STOP conditions
 

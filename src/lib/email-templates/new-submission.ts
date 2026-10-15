@@ -1,4 +1,9 @@
-import { normalizeLocale, p, wrapEmail } from "@/lib/email-templates/shared";
+import {
+  normalizeLocale,
+  p,
+  sanitizeSubject,
+  wrapEmail,
+} from "@/lib/email-templates/shared";
 
 import type { Locale } from "@/i18n/config";
 
@@ -59,5 +64,5 @@ export function renderNewSubmissionEmail(
     p(`${copy.zip}: ${vars.zipUrl}`),
   ]);
 
-  return { subject: copy.subject, html, text };
+  return { subject: sanitizeSubject(copy.subject), html, text };
 }

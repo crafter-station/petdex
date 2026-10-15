@@ -1,7 +1,19 @@
 # Agent adapter research: OpenClaw, Kimi Code, CodeBuddy, OMP
 
-Research for #289, #290, #291 and #559. No adapter code shipped yet; this
-decides which are worth building and in what order.
+Research for #289, #290, #291 and #559.
+
+**Status update (2026-10-13):** the "no adapter code shipped yet" line below
+was true when written and is stale now — all three "Build it" verdicts
+shipped that same day: Kimi Code (#634), CodeBuddy (#635), OMP (#636), with
+Hermes (#690), DeepSeek Harness (#702) and remote SSH agents (#692) since.
+The adapters live in `packages/petdex-desktop-native/src/agent_hooks.zig` (`kimi_code`, `codebuddy`,
+`omp` hooks), which also implements the `PostToolUseFailure` event this
+document predicted and the `$KIMI_CODE_HOME/config.toml` override from the
+TOML section. The icon-slot blocker in "The blocker that comes first" is
+resolved the way that section recommended: agent icons are packed into a
+single-slot atlas (`agent_icon_atlas_id = 9`, main.zig), removing the
+ceiling instead of raising it. The research below is kept for the reasoning
+— what makes an agent adapterable — not as a to-do list.
 
 Everything below was verified against upstream docs and live registries on
 2026-08-02. Claims that could not be sourced are marked as such.

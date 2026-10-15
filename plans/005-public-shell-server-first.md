@@ -6,7 +6,7 @@
 > report — do not improvise. When done, update the status row for this plan
 > in `plans/README.md`.
 >
-> **Drift check (run first)**: `git diff --stat 82ffb6b..HEAD -- "src/app/[locale]/layout.tsx" src/components/theme-providers.tsx src/components/header-state-provider.tsx src/components/site-header.tsx src/components/feedback-widget.tsx`
+> **Drift check (run first)**: `git diff --stat 82ffb6b..HEAD -- "src/app/[locale]/layout.tsx" src/components/layout/theme-providers.tsx src/components/layout/header-state-provider.tsx src/components/site-header/index.tsx src/components/feedback/feedback-widget.tsx`
 > If any in-scope file changed since this plan was written, compare the
 > "Current state" excerpts against the live code before proceeding; on a
 > mismatch, treat it as a STOP condition.
@@ -42,10 +42,10 @@ Every public page — including fully static ones like `/collections`, `/kind/[k
   </body>
   ```
 
-- `src/components/theme-providers.tsx` — `"use client"`; `AppProviders` = next-themes `ThemeProvider` wrapping `ClerkWithTheme`, which mounts `ClerkProvider` (lines 5-66) with lazy dark-theme and lazy es/zh localization imports. ClerkProvider itself is unconditional.
-- `src/components/header-state-provider.tsx` — `"use client"`; context provider that fetches `/api/me/header-state` for signed-in users (signed-out short-circuits, PR #390) and feeds: signed-in header UI, notifications bell, caught-progress components (e.g. `src/components/collection-caught-progress.tsx` from PR #359), like buttons, feedback counters.
-- `src/components/site-header.tsx` — header with nav + auth controls; several sub-islands already lazy (mobile menu, user dropdown, notifications panel — PRs #431-434).
-- `src/components/feedback-widget.tsx` — already lazy-loaded internally (PR #429) but still mounted globally inside the provider stack.
+- `src/components/layout/theme-providers.tsx` — `"use client"`; `AppProviders` = next-themes `ThemeProvider` wrapping `ClerkWithTheme`, which mounts `ClerkProvider` (lines 5-66) with lazy dark-theme and lazy es/zh localization imports. ClerkProvider itself is unconditional.
+- `src/components/layout/header-state-provider.tsx` — `"use client"`; context provider that fetches `/api/me/header-state` for signed-in users (signed-out short-circuits, PR #390) and feeds: signed-in header UI, notifications bell, caught-progress components (e.g. `src/components/collection-caught-progress.tsx` from PR #359), like buttons, feedback counters.
+- `src/components/site-header/index.tsx` — header with nav + auth controls; several sub-islands already lazy (mobile menu, user dropdown, notifications panel — PRs #431-434).
+- `src/components/feedback/feedback-widget.tsx` — already lazy-loaded internally (PR #429) but still mounted globally inside the provider stack.
 - Consumers of Clerk hooks/`HeaderStateProvider` context exist across public pages (like buttons, caught progress, owner controls). Inventory command:
   `grep -rln "useHeaderState\|from \"@clerk/nextjs\"" src/components src/app | grep -v server | sort`
 - Build measurement baseline (this commit): `/[locale]/collections` ≈ 146KB gzip first-load JS; home ≈ 247KB. Measure via the build output table from `TELEMETRY_RATELIMIT_SECRET=mock-telemetry-secret bun --env-file=.env.mock run build` (Next prints First Load JS per route).
@@ -81,10 +81,10 @@ This is a known-hard refactor: the main cost is the long tail of `useHeaderState
 
 **In scope**:
 - `src/app/[locale]/layout.tsx`
-- `src/components/theme-providers.tsx` (split: ThemeProvider stays global; Clerk moves out)
+- `src/components/layout/theme-providers.tsx` (split: ThemeProvider stays global; Clerk moves out)
 - New files: auth island boundary component(s), optional `(auth)` route-group layout
-- `src/components/site-header.tsx` and the auth-corner components it renders
-- `src/components/header-state-provider.tsx` (export a safe no-provider default so consumers can render anonymous state)
+- `src/components/site-header/index.tsx` and the auth-corner components it renders
+- `src/components/layout/header-state-provider.tsx` (export a safe no-provider default so consumers can render anonymous state)
 - The minimal set of consumer components needed to degrade gracefully (like-button, collection-caught-progress, pet-card-footer, notifications-bell, feedback-widget mounting point)
 
 **Out of scope** (do NOT touch):
@@ -118,7 +118,7 @@ Create `src/components/auth-island.tsx` (`"use client"`): checks for an existing
 
 `theme-providers.tsx` shrinks to ThemeProvider-only; the Clerk logic moves into the dynamically-imported module so it is code-split out of the shared bundle.
 
-**Verify**: mock build → exit 0; `grep -rn "ClerkProvider" src/components/theme-providers.tsx` → no matches.
+**Verify**: mock build → exit 0; `grep -rn "ClerkProvider" src/components/layout/theme-providers.tsx` → no matches.
 
 ### Step 4: Rewire the locale layout
 
@@ -147,12 +147,12 @@ Per the Step 1 table: like-button, caught-progress, pet-card-footer, notificatio
 
 ## Done criteria
 
-- [ ] First Load JS, mock build: `/[locale]/collections` and `/[locale]/docs` < 90KB gzip; home < 170KB (record before/after table in PR)
-- [ ] `grep -rn "ClerkProvider" "src/app/[locale]/layout.tsx" src/components/theme-providers.tsx` → no matches
-- [ ] Anonymous page load in browser devtools: no `clerk` JS chunks fetched, no `/api/me/header-state` request
-- [ ] Signed-in preview smoke passes (like, notifications, submit gate, sign-out)
-- [ ] `bun run check`, `bun run i18n:check`, `bun test --env-file=.env.mock`, mock build all exit 0
-- [ ] `plans/README.md` status row updated
+- [x] First Load JS, mock build: `/[locale]/collections` and `/[locale]/docs` < 90KB gzip; home < 170KB (record before/after table in PR)
+- [x] `grep -rn "ClerkProvider" "src/app/[locale]/layout.tsx" src/components/layout/theme-providers.tsx` → no matches
+- [x] Anonymous page load in browser devtools: no `clerk` JS chunks fetched, no `/api/me/header-state` request
+- [x] Signed-in preview smoke passes (like, notifications, submit gate, sign-out)
+- [x] `bun run check`, `bun run i18n:check`, `bun test --env-file=.env.mock`, mock build all exit 0
+- [x] `plans/README.md` status row updated
 
 ## STOP conditions
 

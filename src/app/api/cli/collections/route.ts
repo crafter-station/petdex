@@ -92,7 +92,10 @@ export async function GET(req: Request): Promise<Response> {
     petSlugs: slugsByCollection.get(row.id) ?? [],
   }));
   if (!includeApprovedPetCount)
-    return NextResponse.json({ collections: items });
+    return NextResponse.json(
+      { collections: items },
+      { headers: { "Cache-Control": "private, no-store" } },
+    );
 
   const approvedPets = await db
     .select({ slug: schema.submittedPets.slug })
@@ -105,10 +108,13 @@ export async function GET(req: Request): Promise<Response> {
     )
     .orderBy(asc(schema.submittedPets.slug));
 
-  return NextResponse.json({
-    collections: items,
-    approvedPetCount: approvedPets.length,
-  });
+  return NextResponse.json(
+    {
+      collections: items,
+      approvedPetCount: approvedPets.length,
+    },
+    { headers: { "Cache-Control": "private, no-store" } },
+  );
 }
 
 export async function POST(req: Request): Promise<Response> {

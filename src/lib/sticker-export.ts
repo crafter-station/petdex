@@ -113,6 +113,105 @@ export async function getStickerCollection(
   };
 }
 
+export type StickerSitemapEntry = {
+  slug: string;
+  updatedAt: Date | null;
+};
+
+/**
+ * The sticker collections worth listing in `sitemap.xml`.
+ *
+ * The page behind `/stickers/[collection]` reaches 200 and inherits
+ * `index, follow` from the layout exactly when the explorer is on and the
+ * collection has at least one pet the current policy publishes — the
+ * `pets.length === 0` guard calls `notFound()` otherwise. So the sitemap has
+ * to reproduce both conditions, or it advertises 404s; that is the same
+ * two-way pairing the vibe and kind entries rely on, and the reason this
+ * reuses `isStickerExplorerEnabled` and the per-pet predicates rather than
+ * listing slugs.
+ *
+ * Explorer off means the whole route 404s, so the list is empty rather than
+ * a set of entries for pages that do not exist. `STICKER_EXPORT_DISABLED`
+ * is read inside `isStickerExplorerEnabled`, so a kill switch also removes
+ * these entries.
+ *
+ * Redis-free on purpose: a Redis call anywhere in the sitemap's call graph
+ * makes Next render `/sitemap.xml` dynamically and moves `<lastmod>` to
+ * request time. `db.query` and the `unstable_cache`d read below do not.
+ */
+export async function getStickerSitemapEntries(): Promise<
+  StickerSitemapEntry[]
+> {
+  if (!isStickerExplorerEnabled()) return [];
+  return withNextDataCache(
+    async () => {
+      try {
+        const rows = await db
+          .select({
+            id: schema.petCollections.id,
+            slug: schema.petCollections.slug,
+            updatedAt: schema.petCollections.updatedAt,
+            status: schema.submittedPets.status,
+            spriteSha256: schema.submittedPets.spriteSha256,
+            approval: schema.petExportApprovals,
+            publication: schema.petStickerPublications,
+          })
+          .from(schema.petCollections)
+          .innerJoin(
+            schema.petCollectionItems,
+            eq(
+              schema.petCollectionItems.collectionId,
+              schema.petCollections.id,
+            ),
+          )
+          .innerJoin(
+            schema.submittedPets,
+            eq(schema.petCollectionItems.petSlug, schema.submittedPets.slug),
+          )
+          .leftJoin(
+            schema.petExportApprovals,
+            and(
+              eq(schema.petExportApprovals.petId, schema.submittedPets.id),
+              eq(schema.petExportApprovals.scope, STICKER_EXPORT_SCOPE),
+            ),
+          )
+          .leftJoin(
+            schema.petStickerPublications,
+            eq(schema.petStickerPublications.petId, schema.submittedPets.id),
+          )
+          // Owner-scoped collections are not sticker collections; the page
+          // filters them the same way `getStickerCollection` does.
+          .where(isNull(schema.petCollections.ownerId))
+          .orderBy(asc(schema.petCollections.slug));
+
+        // A collection is listed when at least one of its pets survives the
+        // same filter `getStickerCollection` applies, so the sitemap and a
+        // reachable page are the same set. `Set` collapses the one entry per
+        // qualifying pet that the join produces.
+        const populated = new Set<string>();
+        const updatedAt = new Map<string, Date | null>();
+        for (const row of rows) {
+          updatedAt.set(row.slug, row.updatedAt);
+          if (
+            isCurrentStickerExportAllowed(row, row.approval) &&
+            isCurrentStickerPublication(row, row.publication)
+          ) {
+            populated.add(row.slug);
+          }
+        }
+        return [...populated]
+          .map((slug) => ({ slug, updatedAt: updatedAt.get(slug) ?? null }))
+          .sort((a, b) => a.slug.localeCompare(b.slug));
+      } catch (error) {
+        if (isMissingStickerTableError(error)) return [];
+        throw error;
+      }
+    },
+    ["petdex-sticker-sitemap-entries"],
+    { tags: ["collection:list", "sticker:collections"], revalidate: 86400 },
+  )();
+}
+
 export async function getStickerArtifactAccess(
   slug: string,
   state: PetStateId,
@@ -202,4 +301,19 @@ export async function getPetStickerAvailability(slug: string): Promise<{
     )
     .limit(1);
   return { available: true, collectionSlug: collection[0]?.slug ?? null };
+}
+
+/**
+ * Postgres `undefined_table`. A deployment whose schema predates the sticker
+ * tables has no collections to list, and the sitemap should render without them
+ * rather than fail — the same tolerance `src/lib/collections.ts` applies.
+ */
+function isMissingStickerTableError(error: unknown): boolean {
+  const cause =
+    error && typeof error === "object" && "cause" in error
+      ? (error as { cause?: unknown }).cause
+      : error;
+  if (!cause || typeof cause !== "object") return false;
+  const code = "code" in cause ? (cause as { code?: unknown }).code : null;
+  return code === "42P01";
 }

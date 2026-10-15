@@ -6,6 +6,7 @@ import {
   powershellNotFoundScript,
   resolveInstallablePet,
 } from "@/lib/install-script";
+import { publicTrafficGuardKey } from "@/lib/public-traffic-guard";
 import { installCounterRatelimit } from "@/lib/ratelimit";
 
 export const runtime = "nodejs";
@@ -44,7 +45,6 @@ export async function GET(
   ctx: { params: Promise<Params> },
 ): Promise<Response> {
   const { slug } = await ctx.params;
-  const origin = new URL(req.url).origin;
   const platform = detectPlatformFromRequest(req);
 
   if (!INSTALL_SLUG_RE.test(slug)) {
@@ -65,7 +65,7 @@ export async function GET(
     });
   }
 
-  const pet = await resolveInstallablePet(slug, origin);
+  const pet = await resolveInstallablePet(slug);
   if (!pet) {
     const body =
       platform === "ps1"
@@ -88,9 +88,8 @@ export async function GET(
   // We rate-limit by IP first so a bash loop can't inflate any pet's
   // install count to game the 'Most installed' sort.
   void (async () => {
-    const xff = req.headers.get("x-forwarded-for") ?? "";
-    const ip = xff.split(",")[0]?.trim() || "anon";
-    const { success } = await installCounterRatelimit.limit(ip);
+    const key = publicTrafficGuardKey(req.headers);
+    const { success } = await installCounterRatelimit.limit(key);
     if (success) {
       await incrementInstallCount(slug).catch(() => {});
     }

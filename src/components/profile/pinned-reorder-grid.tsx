@@ -38,6 +38,18 @@ import {
   shouldResetPinnedOrderFromProps,
 } from "@/components/profile/profile-pinning-state";
 
+// The save is a PATCH to /api/profile, whose error codes are the same set the
+// gallery reorder grid maps. Without this the user sees the raw code
+// (`pet_not_owned_or_not_approved`) interpolated into a localized sentence.
+const ERROR_KEYS: Record<string, string> = {
+  unauthorized: "unauthorized",
+  rate_limited: "rateLimited",
+  invalid_featured: "invalidOrder",
+  pet_not_owned_or_not_approved: "noOwnedPets",
+  pin_cap_reached: "tooManyItems",
+  nothing_to_update: "emptyOrder",
+};
+
 type PinnedReorderGridProps = {
   pets: PetWithMetrics[];
   petStateCount: number;
@@ -172,7 +184,10 @@ export function PinnedReorderGrid({
         const body = (await res.json().catch(() => ({}))) as {
           error?: string;
         };
-        throw new Error(body.error ?? `save failed (${res.status})`);
+        // Keep the code, not the message: the render below maps it through
+        // ERROR_KEYS, and a raw code would otherwise be interpolated into the
+        // localized sentence.
+        throw new Error(body.error ?? `save_failed_${res.status}`);
       }
       setSavedSlugs(slugs);
       onOrderChange?.(slugs);
@@ -234,9 +249,9 @@ export function PinnedReorderGrid({
 
   const statusLabel =
     saveState === "saving"
-      ? "Saving..."
+      ? t("saving")
       : saveState === "saved"
-        ? "Order updated"
+        ? t("saved")
         : saveState === "error"
           ? t("reorderLabel")
           : null;
@@ -245,11 +260,12 @@ export function PinnedReorderGrid({
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="font-mono text-[11px] tracking-[0.22em] text-brand uppercase">
-          ★ Pinned
+          {t("heading")}
         </p>
         <div className="flex flex-wrap items-center justify-end gap-2">
           {statusLabel ? (
             <span
+              role="status"
               className={`inline-flex h-7 items-center gap-1.5 rounded-full border px-3 text-[11px] font-medium ${
                 saveState === "error"
                   ? "border-red-300 bg-red-50 text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300"
@@ -261,14 +277,21 @@ export function PinnedReorderGrid({
             </span>
           ) : null}
           <p className="font-mono text-[10px] tracking-[0.18em] text-muted-4 uppercase">
-            {order.length} of {MAX_PINNED_PETS}
+            {t("count", { count: order.length, max: MAX_PINNED_PETS })}
           </p>
         </div>
       </div>
 
       {error ? (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
-          <p>{t("saveError", { error })}</p>
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300"
+        >
+          <p>
+            {ERROR_KEYS[error]
+              ? t(`errors.${ERROR_KEYS[error]}`)
+              : t("saveError", { error })}
+          </p>
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -277,7 +300,7 @@ export function PinnedReorderGrid({
               className="inline-flex h-7 items-center gap-1 rounded-full border border-red-300/70 bg-white/70 px-2.5 font-medium transition hover:bg-white disabled:opacity-50 dark:border-red-800 dark:bg-red-950/50"
             >
               <RefreshCcw className="size-3" />
-              Retry
+              {t("retry")}
             </button>
             <button
               type="button"
@@ -285,16 +308,14 @@ export function PinnedReorderGrid({
               disabled={isSaving}
               className="inline-flex h-7 items-center rounded-full border border-red-300/70 bg-white/70 px-2.5 font-medium transition hover:bg-white disabled:opacity-50 dark:border-red-800 dark:bg-red-950/50"
             >
-              Restore saved order
+              {t("restore")}
             </button>
           </div>
         </div>
       ) : null}
 
       {!oneOnly ? (
-        <p className="text-xs text-muted-3">
-          Drag a pet by its handle to reorder. Changes save when you drop.
-        </p>
+        <p className="text-xs text-muted-3">{t("dragHint")}</p>
       ) : null}
 
       <DndContext
@@ -384,6 +405,7 @@ function SortablePinnedPet({
     id: pet.slug,
     disabled: oneOnly || isSaving,
   });
+  const tp = useTranslations("profile");
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -411,7 +433,7 @@ function SortablePinnedPet({
             maxPins: MAX_PINNED_PETS,
             onPinChange: (isPinned) => onPinChange?.(pet.slug, isPinned),
             disabled: pinActionsDisabled,
-            disabledTitle: "Pinned order is saving",
+            disabledTitle: tp("pinSaving"),
           }}
           actionMode="profilePinHover"
         />
@@ -422,7 +444,7 @@ function SortablePinnedPet({
           ref={setActivatorNodeRef}
           type="button"
           disabled={isSaving}
-          aria-label={`Drag ${pet.displayName} to reorder`}
+          aria-label={tp("dragAria", { name: pet.displayName })}
           className="absolute top-6 right-4 z-40 grid size-8 -translate-y-1/2 cursor-grab touch-none place-items-center rounded-md text-muted-3 transition hover:bg-surface-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-50"
           {...attributes}
           {...listeners}

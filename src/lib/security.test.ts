@@ -30,13 +30,14 @@ import { validateSubmission } from "@/lib/submissions-validation";
 import {
   isAllowedAssetUrl,
   isAllowedAvatarUrl,
+  isAllowedSubmissionAssetUrl,
   isSafeExternalUrl,
 } from "@/lib/url-allowlist";
 
 const BASE_INPUT = {
-  zipUrl: "https://assets.petdex.dev/community/x/x.zip",
-  spritesheetUrl: "https://assets.petdex.dev/community/x/spritesheet.webp",
-  petJsonUrl: "https://assets.petdex.dev/community/x/pet.json",
+  zipUrl: "https://assets.petdex.dev/pets/x-a1b2c3d4e5f6/zip.zip",
+  spritesheetUrl: "https://assets.petdex.dev/pets/x-a1b2c3d4e5f6/sprite.webp",
+  petJsonUrl: "https://assets.petdex.dev/pets/x-a1b2c3d4e5f6/petjson.json",
   displayName: "Test Pet",
   description: "A test pet.",
   petId: "test-pet",
@@ -96,6 +97,60 @@ describe("isAllowedAssetUrl", () => {
     expect(isAllowedAssetUrl("")).toBe(false);
     expect(isAllowedAssetUrl(null)).toBe(false);
     expect(isAllowedAssetUrl(undefined)).toBe(false);
+  });
+});
+
+describe("isAllowedSubmissionAssetUrl", () => {
+  // Host alone is not enough for new submissions: the same bucket holds every
+  // user's reference uploads under requests/, and pointing an asset field at
+  // one would dress another user's upload up as this submission's asset.
+  it("accepts the namespaces submissions are written into", () => {
+    expect(
+      isAllowedSubmissionAssetUrl(
+        "https://assets.petdex.dev/pets/boba-a1b2c3d4/sprite.webp",
+      ),
+    ).toBe(true);
+    expect(
+      isAllowedSubmissionAssetUrl(
+        "https://assets.petdex.dev/curated/cash-cuy/spritesheet.webp",
+      ),
+    ).toBe(true);
+    expect(
+      isAllowedSubmissionAssetUrl(
+        "https://assets.petdex.dev/community/boba/zip.zip",
+      ),
+    ).toBe(true);
+  });
+
+  it("refuses another user's request-reference upload", () => {
+    expect(
+      isAllowedSubmissionAssetUrl(
+        "https://assets.petdex.dev/requests/someone-else1-a1b2c3/reference.webp",
+      ),
+    ).toBe(false);
+  });
+
+  it("refuses unknown namespaces on the trusted host", () => {
+    expect(
+      isAllowedSubmissionAssetUrl("https://assets.petdex.dev/avatars/me.png"),
+    ).toBe(false);
+    expect(isAllowedSubmissionAssetUrl("https://assets.petdex.dev/")).toBe(
+      false,
+    );
+  });
+
+  it("still enforces the host rules underneath", () => {
+    expect(
+      isAllowedSubmissionAssetUrl(
+        "http://assets.petdex.dev/pets/boba-a1b2c3d4/sprite.webp",
+      ),
+    ).toBe(false);
+    expect(
+      isAllowedSubmissionAssetUrl(
+        "https://evil.com/pets/boba-a1b2c3d4/sprite.webp",
+      ),
+    ).toBe(false);
+    expect(isAllowedSubmissionAssetUrl(null)).toBe(false);
   });
 });
 
@@ -228,6 +283,10 @@ describe("validateSubmission", () => {
 });
 
 describe("posixInstallScript shell-injection", () => {
+  // `skipIf` rather than an early `return`: a runner without `sh` would
+  // otherwise report these two as passing while asserting nothing, which is
+  // exactly the shell-injection coverage that matters. Skipped tests are
+  // visible as skipped.
   const shAvailable = spawnSync("sh", ["-c", "exit 0"]).status === 0;
 
   const safeBase = {
@@ -240,17 +299,18 @@ describe("posixInstallScript shell-injection", () => {
     spriteExt: "webp" as const,
   };
 
-  it("escapes single quotes in URLs (sh syntax-checks clean)", () => {
-    if (!shAvailable) return;
-
-    // If our hard-quoting was wrong, the script would not parse. `sh -n`
-    // catches that without running the installer body.
-    const evilUrl = "https://x.com/a'; rm -rf /; echo '";
-    const script = posixInstallScript({ ...safeBase, petJsonUrl: evilUrl });
-    const r = spawnSync("sh", ["-n"], { input: script, encoding: "utf8" });
-    expect(r.status).toBe(0);
-    expect(r.stderr).toBe("");
-  });
+  it.skipIf(!shAvailable)(
+    "escapes single quotes in URLs (sh syntax-checks clean)",
+    () => {
+      // If our hard-quoting was wrong, the script would not parse. `sh -n`
+      // catches that without running the installer body.
+      const evilUrl = "https://x.com/a'; rm -rf /; echo '";
+      const script = posixInstallScript({ ...safeBase, petJsonUrl: evilUrl });
+      const r = spawnSync("sh", ["-n"], { input: script, encoding: "utf8" });
+      expect(r.status).toBe(0);
+      expect(r.stderr).toBe("");
+    },
+  );
 
   it("strips path traversal from slug", () => {
     const script = posixInstallScript({ ...safeBase, slug: "../../etc/pas" });
@@ -265,57 +325,58 @@ describe("posixInstallScript shell-injection", () => {
     expect(script).not.toMatch(/\nrm -rf/);
   });
 
-  it("treats displayName command substitutions as text", () => {
-    if (!shAvailable) return;
+  it.skipIf(!shAvailable)(
+    "treats displayName command substitutions as text",
+    () => {
+      const tempDir = mkdtempSync(join(tmpdir(), "petdex-install-"));
+      try {
+        const marker = join(tempDir, "pwned");
+        const backtickMarker = `${marker}-backtick`;
+        const binDir = join(tempDir, "bin");
+        mkdirSync(binDir);
+        const curlPath = join(binDir, "curl");
+        writeFileSync(
+          curlPath,
+          [
+            "#!/bin/sh",
+            "out=",
+            'while [ "$#" -gt 0 ]; do',
+            '  if [ "$1" = "-o" ]; then',
+            "    shift",
+            '    out="$1"',
+            "  fi",
+            "  shift",
+            "done",
+            'mkdir -p "$(dirname "$out")"',
+            "printf '{}\\n' > \"$out\"",
+            "",
+          ].join("\n"),
+        );
+        chmodSync(curlPath, 0o755);
 
-    const tempDir = mkdtempSync(join(tmpdir(), "petdex-install-"));
-    try {
-      const marker = join(tempDir, "pwned");
-      const backtickMarker = `${marker}-backtick`;
-      const binDir = join(tempDir, "bin");
-      mkdirSync(binDir);
-      const curlPath = join(binDir, "curl");
-      writeFileSync(
-        curlPath,
-        [
-          "#!/bin/sh",
-          "out=",
-          'while [ "$#" -gt 0 ]; do',
-          '  if [ "$1" = "-o" ]; then',
-          "    shift",
-          '    out="$1"',
-          "  fi",
-          "  shift",
-          "done",
-          'mkdir -p "$(dirname "$out")"',
-          "printf '{}\\n' > \"$out\"",
-          "",
-        ].join("\n"),
-      );
-      chmodSync(curlPath, 0o755);
+        const script = posixInstallScript({
+          ...safeBase,
+          displayName: `Boba $(touch ${marker}) \`touch ${backtickMarker}\``,
+        });
+        const result = spawnSync("sh", [], {
+          input: script,
+          env: {
+            ...process.env,
+            HOME: tempDir,
+            PATH: `${binDir}:${process.env.PATH ?? ""}`,
+          },
+          encoding: "utf8",
+        });
 
-      const script = posixInstallScript({
-        ...safeBase,
-        displayName: `Boba $(touch ${marker}) \`touch ${backtickMarker}\``,
-      });
-      const result = spawnSync("sh", [], {
-        input: script,
-        env: {
-          ...process.env,
-          HOME: tempDir,
-          PATH: `${binDir}:${process.env.PATH ?? ""}`,
-        },
-        encoding: "utf8",
-      });
-
-      expect(result.status).toBe(0);
-      expect(result.stderr).toBe("");
-      expect(existsSync(marker)).toBe(false);
-      expect(existsSync(backtickMarker)).toBe(false);
-    } finally {
-      rmSync(tempDir, { recursive: true, force: true });
-    }
-  });
+        expect(result.status).toBe(0);
+        expect(result.stderr).toBe("");
+        expect(existsSync(marker)).toBe(false);
+        expect(existsSync(backtickMarker)).toBe(false);
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("notFound script also strips slug", () => {
     const out = posixNotFoundScript("../../etc/pas");
@@ -387,10 +448,35 @@ describe("isSameOrigin (CSRF guard)", () => {
     expect(isSameOrigin(reqWith({ "user-agent": "curl/8.0" }))).toBe(true);
   });
 
-  it("allows Vercel preview subdomain", () => {
-    expect(
-      isSameOrigin(reqWith({ origin: "https://petdex-abc123.vercel.app" })),
-    ).toBe(true);
+  it("allows the deployment's own Vercel host", () => {
+    // Previews are still allowed, but by exact host from the env Vercel sets
+    // on the deployment rather than by a `*.vercel.app` suffix. That suffix
+    // is a public one — anyone can deploy under it — so a bare suffix match
+    // let `https://evil.vercel.app` POST as the visitor. The attacker case is
+    // asserted below.
+    const previous = process.env.VERCEL_URL;
+    process.env.VERCEL_URL = "petdex-abc123.vercel.app";
+    try {
+      expect(
+        isSameOrigin(reqWith({ origin: "https://petdex-abc123.vercel.app" })),
+      ).toBe(true);
+    } finally {
+      if (previous === undefined) delete process.env.VERCEL_URL;
+      else process.env.VERCEL_URL = previous;
+    }
+  });
+
+  it("blocks an unrelated Vercel deployment", () => {
+    const previous = process.env.VERCEL_URL;
+    process.env.VERCEL_URL = "petdex-abc123.vercel.app";
+    try {
+      expect(isSameOrigin(reqWith({ origin: "https://evil.vercel.app" }))).toBe(
+        false,
+      );
+    } finally {
+      if (previous === undefined) delete process.env.VERCEL_URL;
+      else process.env.VERCEL_URL = previous;
+    }
   });
 });
 

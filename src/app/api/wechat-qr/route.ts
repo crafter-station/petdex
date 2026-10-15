@@ -18,12 +18,17 @@ import { NextResponse } from "next/server";
 
 import OSS from "ali-oss";
 
+import { readResponseBodyBounded } from "@/lib/response-body";
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const QR_OBJECT_KEY = "petdex-qr-code.jpg";
 const SIGNED_URL_TTL_SECONDS = 60;
 const CACHE_HEADER = "public, max-age=300, s-maxage=300";
+// The QR is a single JPEG well under 1MB; these bound the read, not the image.
+const UPSTREAM_MAX_BYTES = 4 * 1024 * 1024;
+const UPSTREAM_FETCH_TIMEOUT_MS = 5_000;
 
 let cachedClient: OSS | null = null;
 
@@ -58,7 +63,10 @@ export async function GET(): Promise<Response> {
 
   let upstream: Response;
   try {
-    upstream = await fetch(signedUrl, { redirect: "error" });
+    upstream = await fetch(signedUrl, {
+      redirect: "error",
+      signal: AbortSignal.timeout(UPSTREAM_FETCH_TIMEOUT_MS),
+    });
   } catch {
     return new NextResponse("upstream_unreachable", { status: 502 });
   }
@@ -67,7 +75,18 @@ export async function GET(): Promise<Response> {
     return new NextResponse("upstream_error", { status: upstream.status });
   }
 
-  const buf = Buffer.from(await upstream.arrayBuffer());
+  // The URL is server-signed, but the object is whatever the bucket holds —
+  // bound the read so a stalled or oversized upstream cannot pin the route.
+  let buf: Buffer;
+  try {
+    buf = await readResponseBodyBounded(
+      upstream,
+      UPSTREAM_MAX_BYTES,
+      UPSTREAM_FETCH_TIMEOUT_MS,
+    );
+  } catch {
+    return new NextResponse("upstream_unreadable", { status: 502 });
+  }
   const contentType = upstream.headers.get("content-type") ?? "image/jpeg";
 
   return new NextResponse(new Uint8Array(buf), {

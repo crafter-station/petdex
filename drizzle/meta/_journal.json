@@ -169,6 +169,13 @@
       "when": 1788064500001,
       "tag": "0022_pet_license",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1791438851550,
+      "tag": "0023_pending_pair_partial",
+      "breakpoints": true
     }
   ]
 }

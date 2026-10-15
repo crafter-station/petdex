@@ -6,14 +6,9 @@ import {
   pickAssetForPlatform,
   releasePageUrl,
 } from "@/lib/desktop-release";
+import { withNextDataCache } from "@/lib/next-data-cache";
 
 export const runtime = "nodejs";
-// Cache the resolved desktop release URL for 5 minutes. Releases ship
-// rarely, the GitHub API has its own per-IP rate limit, and this
-// endpoint is hit on every "Download for macOS" click on /download.
-// stale-while-revalidate keeps clicks instant during a release
-// rollout window.
-export const revalidate = 300;
 
 const RELEASES_API_BASE =
   "https://api.github.com/repos/crafter-station/petdex/releases";
@@ -23,7 +18,7 @@ const RELEASES_PAGE_SIZE = 30;
 // repo somehow lost every desktop tag.
 const RELEASES_MAX_PAGES = 5;
 
-async function findLatestDesktopRelease(): Promise<GhRelease | null> {
+async function findLatestDesktopReleaseUncached(): Promise<GhRelease | null> {
   // Walk pages newest-first until we hit a desktop-v* tag or
   // exhaust the cap. Most repos resolve on page 1; the loop
   // exists so a long run of web-v*/sidecar-v* releases doesn't
@@ -49,6 +44,19 @@ async function findLatestDesktopRelease(): Promise<GhRelease | null> {
   }
   return null;
 }
+
+// Segment `revalidate` does not cache a Route Handler: the GET here reads
+// `searchParams`, so it is dynamic, and Next only caches a GET handler
+// that opts into `force-static`. So the GitHub walk is cached at the data
+// layer instead, keyed on nothing but the endpoint, for 5 minutes —
+// releases ship rarely, the GitHub API has a per-IP rate limit, and this
+// is hit on every "Download for macOS" click. Falls back to a live fetch
+// wherever `unstable_cache` is unavailable (tests, non-Next contexts).
+const findLatestDesktopRelease = withNextDataCache(
+  findLatestDesktopReleaseUncached,
+  ["petdex-desktop-latest-release"],
+  { revalidate: 300 },
+);
 
 /**
  * GET /api/desktop/latest-release

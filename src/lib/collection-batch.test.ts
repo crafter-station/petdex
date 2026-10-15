@@ -4,6 +4,7 @@ import { sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { PgDialect } from "drizzle-orm/pg-core";
 
+import { rowsOf, runAtomicReturning } from "@/lib/db/atomic";
 import * as schema from "@/lib/db/schema";
 
 // The Neon HTTP path is the only one that calls db.batch, and it is the path
@@ -61,7 +62,17 @@ mock.module("@/lib/db/client", () => {
   // @/lib/db/client resolves this factory's exports, and one that links a
   // missing name fails with a SyntaxError. Export the real schema so an
   // unrelated DB-backed suite still sees real tables.
-  return { db, schema };
+  // A suite that links `executeAtomicReturning` — the helper every write
+  // goes through — fails with a SyntaxError if this factory omits it, so
+  // it is bound to this stand-in the same way the real module binds it to
+  // the configured client.
+  return {
+    db,
+    schema,
+    executeAtomicReturning: (queries: never) =>
+      runAtomicReturning(db as never, queries),
+    rowsOf,
+  };
 });
 
 const {

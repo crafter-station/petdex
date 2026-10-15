@@ -1,5 +1,11 @@
+import { type FetchCappedResult, fetchCapped } from "../../fetch-capped.js";
 import type { TokenSet, UserInfo } from "../types.js";
 import { ClerkCliAuthError } from "../types.js";
+
+// An idle token endpoint must not hold the CLI open forever, and the response
+// is a small JSON document — a megabyte is already generous.
+const TOKEN_TIMEOUT_MS = 15_000;
+const MAX_TOKEN_RESPONSE_BYTES = 1024 * 1024;
 
 export interface ExchangeParams {
   issuer: string;
@@ -34,12 +40,13 @@ function endpoint(issuer: string, path: string): string {
   return `${issuer.replace(/\/+$/, "")}${path}`;
 }
 
-async function parseBody(response: Response): Promise<unknown> {
+function parseBody(response: FetchCappedResult): unknown {
+  const text = response.body.toString("utf8");
   const contentType = response.headers.get("content-type") ?? "";
   if (contentType.includes("application/json")) {
-    return response.json();
+    return JSON.parse(text);
   }
-  return response.text();
+  return text;
 }
 
 function messageFromBody(body: unknown, fallback: string): string {
@@ -82,12 +89,16 @@ async function requestTokens(
   issuer: string,
   body: URLSearchParams,
 ): Promise<TokenSet> {
-  let response: Response;
+  let response: FetchCappedResult;
   try {
-    response = await fetch(endpoint(issuer, "/oauth/token"), {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: body.toString(),
+    response = await fetchCapped(endpoint(issuer, "/oauth/token"), {
+      init: {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: body.toString(),
+      },
+      maxBytes: MAX_TOKEN_RESPONSE_BYTES,
+      timeoutMs: TOKEN_TIMEOUT_MS,
     });
   } catch (error) {
     throw new ClerkCliAuthError(
@@ -98,7 +109,7 @@ async function requestTokens(
 
   let parsed: unknown;
   try {
-    parsed = await parseBody(response);
+    parsed = parseBody(response);
   } catch (error) {
     throw new ClerkCliAuthError(
       "token_exchange",
@@ -154,10 +165,14 @@ export async function refreshAccessToken(
 }
 
 export async function fetchUserInfo(params: UserInfoParams): Promise<UserInfo> {
-  let response: Response;
+  let response: FetchCappedResult;
   try {
-    response = await fetch(endpoint(params.issuer, "/oauth/userinfo"), {
-      headers: { Authorization: `Bearer ${params.accessToken}` },
+    response = await fetchCapped(endpoint(params.issuer, "/oauth/userinfo"), {
+      init: {
+        headers: { Authorization: `Bearer ${params.accessToken}` },
+      },
+      maxBytes: MAX_TOKEN_RESPONSE_BYTES,
+      timeoutMs: TOKEN_TIMEOUT_MS,
     });
   } catch (error) {
     throw new ClerkCliAuthError(
@@ -168,7 +183,7 @@ export async function fetchUserInfo(params: UserInfoParams): Promise<UserInfo> {
 
   let parsed: unknown;
   try {
-    parsed = await parseBody(response);
+    parsed = parseBody(response);
   } catch (error) {
     throw new ClerkCliAuthError(
       "userinfo",

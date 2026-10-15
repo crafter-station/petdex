@@ -2,6 +2,8 @@
 
 import { useMemo } from "react";
 
+import { useTranslations } from "next-intl";
+
 import { useHeaderState } from "@/components/layout/header-state-provider";
 
 type Props = {
@@ -9,6 +11,7 @@ type Props = {
 };
 
 export function CollectionCaughtProgress({ petSlugs }: Props) {
+  const t = useTranslations("collectionDetail");
   const { state } = useHeaderState();
   const caughtCount = useMemo(() => {
     const caught = new Set(state.caught);
@@ -18,8 +21,6 @@ export function CollectionCaughtProgress({ petSlugs }: Props) {
   if (!state.signedIn) return null;
 
   return (
-    <span>
-      caught {caughtCount}/{petSlugs.length}
-    </span>
+    <span>{t("caught", { caught: caughtCount, total: petSlugs.length })}</span>
   );
 }

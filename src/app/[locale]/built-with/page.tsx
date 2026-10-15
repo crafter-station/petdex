@@ -105,17 +105,18 @@ export async function generateMetadata({
   const total = builtWithData.projects.length;
   const title = t("titleTemplate", { total });
   const description = t("description", { total });
+  const alternates = buildLocaleAlternates(
+    "/built-with",
+    hasLocale(locale) ? locale : undefined,
+  );
   return {
     title,
     description,
-    alternates: buildLocaleAlternates(
-      "/built-with",
-      hasLocale(locale) ? locale : undefined,
-    ),
+    alternates,
     openGraph: {
       title,
       description,
-      url: `${SITE_URL}/built-with`,
+      url: alternates.canonical,
       type: "website",
     },
   };
@@ -154,259 +155,269 @@ export default async function BuiltWithPage({
   };
 
   return (
-    <main className="min-h-dvh overflow-x-clip bg-background text-foreground">
-      <JsonLd data={jsonLd} />
+    <>
       <SiteHeader />
+      <main
+        id="main"
+        className="min-h-dvh overflow-x-clip bg-background text-foreground"
+      >
+        <JsonLd data={jsonLd} />
 
-      <section className="petdex-hero relative -mt-14 overflow-hidden border-b border-border-base pt-14 xl:h-[56dvh]">
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 mx-auto h-px max-w-7xl bg-gradient-to-r from-transparent via-brand/50 to-transparent" />
-        <div className="relative mx-auto grid w-full max-w-7xl lg:grid-cols-[minmax(0,0.88fr)_minmax(520px,1.12fr)] xl:h-full">
-          <div className="relative flex min-h-[500px] flex-col justify-center border-border-base px-5 py-12 sm:px-8 lg:border-r lg:px-12 lg:py-8 xl:h-full xl:min-h-0">
-            <div className="relative z-10 max-w-2xl">
-              <p className="font-mono text-[11px] font-medium tracking-[0.24em] text-brand uppercase">
-                {t("eyebrow")}
-              </p>
-              <h1 className="mt-5 max-w-[620px] text-balance text-[46px] leading-[0.98] font-semibold tracking-[-0.05em] sm:text-[58px] lg:text-[48px] xl:text-[62px] [@media(min-width:1280px)_and_(max-height:900px)]:mt-2.5 [@media(min-width:1280px)_and_(max-height:900px)]:text-[48px]">
-                {t("title")}
-              </h1>
-              <p className="mt-6 max-w-xl text-pretty text-base leading-7 text-muted-1 sm:text-lg sm:leading-8 [@media(min-width:1280px)_and_(max-height:900px)]:mt-3.5 [@media(min-width:1280px)_and_(max-height:900px)]:text-base [@media(min-width:1280px)_and_(max-height:900px)]:leading-[26px]">
-                {t("subtitle", { total })}
-              </p>
+        <section className="petdex-hero relative -mt-14 overflow-hidden border-b border-border-base pt-14 xl:h-[56dvh]">
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 mx-auto h-px max-w-7xl bg-gradient-to-r from-transparent via-brand/50 to-transparent" />
+          <div className="relative mx-auto grid w-full max-w-7xl lg:grid-cols-[minmax(0,0.88fr)_minmax(520px,1.12fr)] xl:h-full">
+            <div className="relative flex min-h-[500px] flex-col justify-center border-border-base px-5 py-12 sm:px-8 lg:border-r lg:px-12 lg:py-8 xl:h-full xl:min-h-0">
+              <div className="relative z-10 max-w-2xl">
+                <p className="font-mono text-[11px] font-medium tracking-[0.24em] text-brand uppercase">
+                  {t("eyebrow")}
+                </p>
+                <h1 className="mt-5 max-w-[620px] text-balance text-[46px] leading-[0.98] font-semibold tracking-[-0.05em] sm:text-[58px] lg:text-[48px] xl:text-[62px] [@media(min-width:1280px)_and_(max-height:900px)]:mt-2.5 [@media(min-width:1280px)_and_(max-height:900px)]:text-[48px]">
+                  {t("title")}
+                </h1>
+                <p className="mt-6 max-w-xl text-pretty text-base leading-7 text-muted-1 sm:text-lg sm:leading-8 [@media(min-width:1280px)_and_(max-height:900px)]:mt-3.5 [@media(min-width:1280px)_and_(max-height:900px)]:text-base [@media(min-width:1280px)_and_(max-height:900px)]:leading-[26px]">
+                  {t("subtitle", { total })}
+                </p>
 
-              <div className="mt-9 flex flex-wrap items-center gap-3 [@media(min-width:1280px)_and_(max-height:900px)]:mt-[18px]">
-                <Link
-                  href={SUBMIT_ISSUE_URL}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="btn-3d-brand inline-flex h-11 items-center gap-2 rounded-full bg-brand-deep px-5 text-[13px] font-semibold text-white transition hover:bg-brand"
-                >
-                  <PlusIcon className="size-4" weight="bold" />
-                  {t("cta.submit")}
-                </Link>
-                <Link
-                  href="#registry"
-                  className="inline-flex h-11 items-center gap-2 rounded-full border border-border-base bg-surface/70 px-5 text-[13px] font-semibold text-muted-1 backdrop-blur transition hover:border-brand/40 hover:text-foreground"
-                >
-                  {t("cta.browseRegistry")}
-                  <ArrowUpRightIcon className="size-4" weight="bold" />
-                </Link>
+                <div className="mt-9 flex flex-wrap items-center gap-3 [@media(min-width:1280px)_and_(max-height:900px)]:mt-[18px]">
+                  <Link
+                    href={SUBMIT_ISSUE_URL}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="btn-3d-brand inline-flex h-11 items-center gap-2 rounded-full bg-brand-deep px-5 text-[13px] font-semibold text-on-inverse transition hover:bg-brand"
+                  >
+                    <PlusIcon className="size-4" weight="bold" />
+                    {t("cta.submit")}
+                  </Link>
+                  <Link
+                    href="#registry"
+                    className="inline-flex h-11 items-center gap-2 rounded-full border border-border-base bg-surface/70 px-5 text-[13px] font-semibold text-muted-1 backdrop-blur transition hover:border-brand/40 hover:text-foreground"
+                  >
+                    {t("cta.browseRegistry")}
+                    <ArrowUpRightIcon className="size-4" weight="bold" />
+                  </Link>
+                </div>
+              </div>
+
+              <div className="relative z-10 mt-10 grid grid-cols-2 border-y border-border-base sm:grid-cols-4 [@media(min-width:1280px)_and_(max-height:900px)]:mt-4">
+                <Stat
+                  value={total.toString()}
+                  label={t("stats.projectsLabel")}
+                />
+                <Stat
+                  value={CATEGORY_ORDER.length.toString()}
+                  label={t("stats.categoriesLabel")}
+                />
+                <Stat
+                  value={formatLocalizedNumber(totalStars, locale)}
+                  label={t("stats.starsLabel")}
+                />
+                <Stat
+                  value={builtWithData.lastUpdated.slice(5).replace("-", ".")}
+                  label={t("stats.updatedLabel")}
+                />
+              </div>
+
+              <div className="pointer-events-none absolute bottom-3 left-2 hidden -rotate-6 drop-shadow-[0_18px_36px_rgba(39,71,255,0.28)] xl:-left-12 xl:block">
+                <PetSprite
+                  src={MALLOW_PREVIEW}
+                  layout="row"
+                  scale={0.48}
+                  label={t("spritePreviewLabel", { name: "Mallow" })}
+                />
               </div>
             </div>
 
-            <div className="relative z-10 mt-10 grid grid-cols-2 border-y border-border-base sm:grid-cols-4 [@media(min-width:1280px)_and_(max-height:900px)]:mt-4">
-              <Stat value={total.toString()} label={t("stats.projectsLabel")} />
-              <Stat
-                value={CATEGORY_ORDER.length.toString()}
-                label={t("stats.categoriesLabel")}
-              />
-              <Stat
-                value={formatLocalizedNumber(totalStars, locale)}
-                label={t("stats.starsLabel")}
-              />
-              <Stat
-                value={builtWithData.lastUpdated.slice(5).replace("-", ".")}
-                label={t("stats.updatedLabel")}
-              />
-            </div>
-
-            <div className="pointer-events-none absolute bottom-3 left-2 hidden -rotate-6 drop-shadow-[0_18px_36px_rgba(39,71,255,0.28)] xl:-left-12 xl:block">
-              <PetSprite
-                src={MALLOW_PREVIEW}
-                layout="row"
-                scale={0.48}
-                label="Mallow pet"
-              />
-            </div>
+            <FeaturedProject
+              project={featured}
+              screenshotAlt={t("card.screenshotAlt", { name: featured.name })}
+              siteLabel={t("card.site")}
+            />
           </div>
+        </section>
 
-          <FeaturedProject
-            project={featured}
-            screenshotAlt={t("card.screenshotAlt", { name: featured.name })}
-            siteLabel={t("card.site")}
-          />
-        </div>
-      </section>
-
-      <section className="relative border-b border-border-base bg-surface/25 xl:h-[44dvh]">
-        <div className="mx-auto flex w-full max-w-7xl flex-col px-5 py-10 sm:px-8 lg:px-12 lg:py-6 xl:h-full">
-          <div className="grid gap-6 border-b border-border-base pb-5 lg:grid-cols-[0.7fr_1.3fr] lg:items-end">
-            <div>
-              <p className="font-mono text-[11px] font-medium tracking-[0.24em] text-brand uppercase">
-                {t("chapters.eyebrow")}
+        <section className="relative border-b border-border-base bg-surface/25 xl:h-[44dvh]">
+          <div className="mx-auto flex w-full max-w-7xl flex-col px-5 py-10 sm:px-8 lg:px-12 lg:py-6 xl:h-full">
+            <div className="grid gap-6 border-b border-border-base pb-5 lg:grid-cols-[0.7fr_1.3fr] lg:items-end">
+              <div>
+                <p className="font-mono text-[11px] font-medium tracking-[0.24em] text-brand uppercase">
+                  {t("chapters.eyebrow")}
+                </p>
+                <h2 className="mt-3 text-3xl font-semibold tracking-[-0.04em] sm:text-4xl">
+                  {t("chapters.title")}
+                </h2>
+              </div>
+              <p className="max-w-2xl text-base leading-7 text-muted-1 lg:justify-self-end">
+                {t("chapters.description")}
               </p>
-              <h2 className="mt-3 text-3xl font-semibold tracking-[-0.04em] sm:text-4xl">
-                {t("chapters.title")}
-              </h2>
             </div>
-            <p className="max-w-2xl text-base leading-7 text-muted-1 lg:justify-self-end">
-              {t("chapters.description")}
-            </p>
-          </div>
 
-          <div className="relative grid flex-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-            {CATEGORY_ORDER.map((categoryKey, index) => {
+            <div className="relative grid flex-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+              {CATEGORY_ORDER.map((categoryKey, index) => {
+                const items = grouped[categoryKey];
+                const i18nKey = CATEGORY_KEY_TO_I18N[categoryKey];
+                const Icon = CATEGORY_ICONS[categoryKey];
+                return (
+                  <article
+                    key={categoryKey}
+                    className="group relative flex min-h-[285px] flex-col border-b border-border-base px-1 py-6 sm:px-6 sm:[&:nth-child(odd)]:border-r lg:[&:nth-child(3n+1)]:border-r lg:[&:nth-child(3n+2)]:border-r xl:min-h-0 xl:border-b-0 xl:border-r xl:px-5 xl:py-4 xl:last:border-r-0"
+                  >
+                    <div className="flex items-center justify-between">
+                      <Icon className="size-5 text-brand" weight="duotone" />
+                      <span className="font-mono text-[10px] tracking-[0.18em] text-muted-2 uppercase">
+                        0{index + 1}
+                      </span>
+                    </div>
+                    <h3 className="mt-4 text-base font-semibold tracking-tight">
+                      {t(`categories.${i18nKey}.label`)}
+                    </h3>
+                    <p className="mt-2 min-h-[54px] text-xs leading-[18px] text-muted-2">
+                      {t(`categories.${i18nKey}.description`)}
+                    </p>
+                    <div className="mt-4 divide-y divide-border-base border-y border-border-base">
+                      {items.slice(0, 3).map((project) => (
+                        <a
+                          key={project.slug}
+                          href={`#${project.slug}`}
+                          className="flex min-h-8 items-center gap-2.5 py-1.5 text-xs font-medium text-muted-1 transition hover:text-brand"
+                        >
+                          <span className="relative size-6 shrink-0 overflow-hidden rounded border border-border-base bg-background">
+                            <Image
+                              src={project.screenshot}
+                              alt=""
+                              fill
+                              sizes="24px"
+                              className="object-cover"
+                            />
+                          </span>
+                          <span className="truncate">{project.name}</span>
+                        </a>
+                      ))}
+                    </div>
+                    <a
+                      href={`#category-${categoryKey}`}
+                      className="mt-auto inline-flex items-center gap-1.5 pt-3 font-mono text-[10px] font-medium tracking-[0.12em] text-muted-2 uppercase transition group-hover:text-brand"
+                    >
+                      {t("chapters.viewAll", { count: items.length })}
+                      <ArrowUpRightIcon className="size-3" weight="bold" />
+                    </a>
+                  </article>
+                );
+              })}
+
+              <div className="pointer-events-none absolute -right-14 bottom-1 hidden rotate-6 drop-shadow-[0_18px_36px_rgba(39,71,255,0.3)] xl:block">
+                <PetSprite
+                  src={BOBA_PREVIEW}
+                  layout="row"
+                  scale={0.5}
+                  label={t("spritePreviewLabel", { name: "Boba" })}
+                />
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="registry" className="scroll-mt-20">
+          <div className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8 lg:px-12 lg:py-24">
+            <div className="grid gap-7 border-b border-border-base pb-10 lg:grid-cols-[0.8fr_1.2fr] lg:items-end">
+              <div>
+                <p className="font-mono text-[11px] font-medium tracking-[0.24em] text-brand uppercase">
+                  {t("registry.eyebrow")}
+                </p>
+                <h2 className="mt-3 text-balance text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">
+                  {t("registry.title")}
+                </h2>
+              </div>
+              <p className="max-w-2xl text-base leading-7 text-muted-1 lg:justify-self-end">
+                {t("registry.description")}
+              </p>
+            </div>
+
+            {CATEGORY_ORDER.map((categoryKey, categoryIndex) => {
               const items = grouped[categoryKey];
               const i18nKey = CATEGORY_KEY_TO_I18N[categoryKey];
               const Icon = CATEGORY_ICONS[categoryKey];
               return (
-                <article
+                <section
+                  id={`category-${categoryKey}`}
                   key={categoryKey}
-                  className="group relative flex min-h-[285px] flex-col border-b border-border-base px-1 py-6 sm:px-6 sm:[&:nth-child(odd)]:border-r lg:[&:nth-child(3n+1)]:border-r lg:[&:nth-child(3n+2)]:border-r xl:min-h-0 xl:border-b-0 xl:border-r xl:px-5 xl:py-4 xl:last:border-r-0"
+                  className="scroll-mt-20 border-b border-border-base py-12 last:border-b-0 lg:grid lg:grid-cols-[280px_minmax(0,1fr)] lg:gap-12 lg:py-16"
                 >
-                  <div className="flex items-center justify-between">
-                    <Icon className="size-5 text-brand" weight="duotone" />
-                    <span className="font-mono text-[10px] tracking-[0.18em] text-muted-2 uppercase">
-                      0{index + 1}
-                    </span>
+                  <div className="mb-7 lg:sticky lg:top-24 lg:mb-0 lg:self-start">
+                    <div className="flex items-center gap-3">
+                      <Icon className="size-5 text-brand" weight="duotone" />
+                      <span className="font-mono text-[10px] tracking-[0.18em] text-muted-2 uppercase">
+                        {t("chapters.label", {
+                          number: String(categoryIndex + 1).padStart(2, "0"),
+                        })}
+                      </span>
+                    </div>
+                    <h3 className="mt-5 text-2xl font-semibold tracking-[-0.025em]">
+                      {t(`categories.${i18nKey}.label`)}
+                    </h3>
+                    <p className="mt-3 text-sm leading-6 text-muted-2">
+                      {t(`categories.${i18nKey}.description`)}
+                    </p>
+                    <p className="mt-5 font-mono text-[10px] tracking-[0.14em] text-brand uppercase">
+                      {items.length} {t("registry.entries")}
+                    </p>
                   </div>
-                  <h3 className="mt-4 text-base font-semibold tracking-tight">
-                    {t(`categories.${i18nKey}.label`)}
-                  </h3>
-                  <p className="mt-2 min-h-[54px] text-xs leading-[18px] text-muted-2">
-                    {t(`categories.${i18nKey}.description`)}
-                  </p>
-                  <div className="mt-4 divide-y divide-border-base border-y border-border-base">
-                    {items.slice(0, 3).map((project) => (
-                      <a
+
+                  <div className="divide-y divide-border-base border-y border-border-base">
+                    {items.map((project) => (
+                      <ProjectRow
                         key={project.slug}
-                        href={`#${project.slug}`}
-                        className="flex min-h-8 items-center gap-2.5 py-1.5 text-xs font-medium text-muted-1 transition hover:text-brand"
-                      >
-                        <span className="relative size-6 shrink-0 overflow-hidden rounded border border-border-base bg-background">
-                          <Image
-                            src={project.screenshot}
-                            alt=""
-                            fill
-                            sizes="24px"
-                            className="object-cover"
-                          />
-                        </span>
-                        <span className="truncate">{project.name}</span>
-                      </a>
+                        project={project}
+                        locale={locale}
+                        evidenceLabel={t("registry.evidence")}
+                        siteLabel={t("card.site")}
+                      />
                     ))}
                   </div>
-                  <a
-                    href={`#category-${categoryKey}`}
-                    className="mt-auto inline-flex items-center gap-1.5 pt-3 font-mono text-[10px] font-medium tracking-[0.12em] text-muted-2 uppercase transition group-hover:text-brand"
-                  >
-                    {t("chapters.viewAll", { count: items.length })}
-                    <ArrowUpRightIcon className="size-3" weight="bold" />
-                  </a>
-                </article>
+                </section>
               );
             })}
-
-            <div className="pointer-events-none absolute -right-14 bottom-1 hidden rotate-6 drop-shadow-[0_18px_36px_rgba(39,71,255,0.3)] xl:block">
-              <PetSprite
-                src={BOBA_PREVIEW}
-                layout="row"
-                scale={0.5}
-                label="Boba pet"
-              />
-            </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      <section id="registry" className="scroll-mt-20">
-        <div className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8 lg:px-12 lg:py-24">
-          <div className="grid gap-7 border-b border-border-base pb-10 lg:grid-cols-[0.8fr_1.2fr] lg:items-end">
+        <section className="border-y border-border-base bg-surface/30">
+          <div className="mx-auto grid w-full max-w-7xl gap-8 px-5 py-12 sm:px-8 lg:grid-cols-[1fr_auto] lg:items-center lg:px-12">
             <div>
               <p className="font-mono text-[11px] font-medium tracking-[0.24em] text-brand uppercase">
-                {t("registry.eyebrow")}
+                {t("submit.eyebrow")}
               </p>
-              <h2 className="mt-3 text-balance text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">
-                {t("registry.title")}
+              <h2 className="mt-3 text-3xl font-semibold tracking-[-0.035em]">
+                {t("submit.title")}
               </h2>
+              <p className="mt-3 max-w-3xl text-sm leading-6 text-muted-1">
+                {t("submit.summary")}
+              </p>
             </div>
-            <p className="max-w-2xl text-base leading-7 text-muted-1 lg:justify-self-end">
-              {t("registry.description")}
-            </p>
-          </div>
-
-          {CATEGORY_ORDER.map((categoryKey, categoryIndex) => {
-            const items = grouped[categoryKey];
-            const i18nKey = CATEGORY_KEY_TO_I18N[categoryKey];
-            const Icon = CATEGORY_ICONS[categoryKey];
-            return (
-              <section
-                id={`category-${categoryKey}`}
-                key={categoryKey}
-                className="scroll-mt-20 border-b border-border-base py-12 last:border-b-0 lg:grid lg:grid-cols-[280px_minmax(0,1fr)] lg:gap-12 lg:py-16"
+            <div className="flex flex-wrap items-center gap-4 lg:justify-end">
+              <Link
+                href={SUBMIT_ISSUE_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="btn-3d-brand inline-flex h-11 items-center gap-2 rounded-full bg-brand-deep px-5 text-[13px] font-semibold text-on-inverse transition hover:bg-brand"
               >
-                <div className="mb-7 lg:sticky lg:top-24 lg:mb-0 lg:self-start">
-                  <div className="flex items-center gap-3">
-                    <Icon className="size-5 text-brand" weight="duotone" />
-                    <span className="font-mono text-[10px] tracking-[0.18em] text-muted-2 uppercase">
-                      Chapter 0{categoryIndex + 1}
-                    </span>
-                  </div>
-                  <h3 className="mt-5 text-2xl font-semibold tracking-[-0.025em]">
-                    {t(`categories.${i18nKey}.label`)}
-                  </h3>
-                  <p className="mt-3 text-sm leading-6 text-muted-2">
-                    {t(`categories.${i18nKey}.description`)}
-                  </p>
-                  <p className="mt-5 font-mono text-[10px] tracking-[0.14em] text-brand uppercase">
-                    {items.length} {t("registry.entries")}
-                  </p>
-                </div>
-
-                <div className="divide-y divide-border-base border-y border-border-base">
-                  {items.map((project) => (
-                    <ProjectRow
-                      key={project.slug}
-                      project={project}
-                      locale={locale}
-                      evidenceLabel={t("registry.evidence")}
-                      siteLabel={t("card.site")}
-                    />
-                  ))}
-                </div>
-              </section>
-            );
-          })}
-        </div>
-      </section>
-
-      <section className="border-y border-border-base bg-surface/30">
-        <div className="mx-auto grid w-full max-w-7xl gap-8 px-5 py-12 sm:px-8 lg:grid-cols-[1fr_auto] lg:items-center lg:px-12">
-          <div>
-            <p className="font-mono text-[11px] font-medium tracking-[0.24em] text-brand uppercase">
-              {t("submit.eyebrow")}
-            </p>
-            <h2 className="mt-3 text-3xl font-semibold tracking-[-0.035em]">
-              {t("submit.title")}
-            </h2>
-            <p className="mt-3 max-w-3xl text-sm leading-6 text-muted-1">
-              {t("submit.summary")}
-            </p>
+                <PlusIcon className="size-4" weight="bold" />
+                {t("submit.openIssue")}
+              </Link>
+              <Link
+                href={REGISTRY_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-2 text-sm font-semibold text-brand hover:underline"
+              >
+                built-with.json
+                <ArrowUpRightIcon className="size-4" weight="bold" />
+              </Link>
+            </div>
           </div>
-          <div className="flex flex-wrap items-center gap-4 lg:justify-end">
-            <Link
-              href={SUBMIT_ISSUE_URL}
-              target="_blank"
-              rel="noreferrer"
-              className="btn-3d-brand inline-flex h-11 items-center gap-2 rounded-full bg-brand-deep px-5 text-[13px] font-semibold text-white transition hover:bg-brand"
-            >
-              <PlusIcon className="size-4" weight="bold" />
-              {t("submit.openIssue")}
-            </Link>
-            <Link
-              href={REGISTRY_URL}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-2 text-sm font-semibold text-brand hover:underline"
-            >
-              built-with.json
-              <ArrowUpRightIcon className="size-4" weight="bold" />
-            </Link>
-          </div>
-        </div>
-      </section>
+        </section>
 
-      <SiteFooter />
-    </main>
+        <SiteFooter />
+      </main>
+    </>
   );
 }
 

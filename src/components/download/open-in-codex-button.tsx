@@ -16,6 +16,7 @@ type OpenInCodexButtonProps = {
   displayName: string;
   description: string;
   spritesheetUrl: string;
+  spriteVersionNumber: 1 | 2;
 };
 
 /**
@@ -39,6 +40,7 @@ export function OpenInCodexButton({
   displayName,
   description,
   spritesheetUrl,
+  spriteVersionNumber,
 }: OpenInCodexButtonProps) {
   const [mounted, setMounted] = useState(false);
   const [supported, setSupported] = useState(false);
@@ -56,6 +58,7 @@ export function OpenInCodexButton({
     displayName,
     description,
     spritesheetUrl,
+    spriteVersionNumber,
   });
 
   function handleClick(e: React.MouseEvent<HTMLAnchorElement>) {

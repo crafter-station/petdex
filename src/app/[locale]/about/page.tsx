@@ -14,6 +14,17 @@ import { hasLocale } from "@/i18n/config";
 
 const SITE_URL = "https://petdex.dev";
 
+// `force-static` pins the static/dynamic classification at build time. Without
+// it the page is only *conditionally* static: `getApprovedPetCount()` reaches
+// Redis through `cachedAggregate`, whose Upstash client fetches with
+// `cache: "no-store"` — a dynamic signal. A build that has no `UPSTASH_*`
+// (the Docker builder) short-circuits before that fetch and prerenders the
+// route as SSG; the same route at runtime, with Redis configured, then takes
+// the no-store path and Next throws E132 "Page changed from static to dynamic"
+// for every locale that was prerendered. Every other content page in this
+// directory declares `force-static` for the same reason; this one and
+// `brand/page.tsx` were the only two that did not.
+export const dynamic = "force-static";
 export const revalidate = 3600;
 
 export async function generateMetadata({
@@ -23,18 +34,19 @@ export async function generateMetadata({
 }) {
   const { locale } = await params;
   const t = await getTranslations({ locale, namespace: "about.metadata" });
+  const alternates = buildLocaleAlternates(
+    "/about",
+    hasLocale(locale) ? locale : undefined,
+  );
 
   return {
     title: t("title"),
     description: t("description"),
-    alternates: buildLocaleAlternates(
-      "/about",
-      hasLocale(locale) ? locale : undefined,
-    ),
+    alternates,
     openGraph: {
       title: t("ogTitle"),
       description: t("ogDescription"),
-      url: `${SITE_URL}/about`,
+      url: alternates.canonical,
       type: "website",
     },
   };
@@ -51,7 +63,10 @@ export default async function AboutPage({
   const t = await getTranslations("about");
   const faq = [
     { q: t("faq.items.whatIs.q"), a: t("faq.items.whatIs.a") },
-    { q: t("faq.items.install.q"), a: t("faq.items.install.a") },
+    // Raw, not `t`: the answer writes a literal `~/.codex/pets/<slug>/`
+    // placeholder. ICU reads `<slug>` as a rich-text tag, so `t` throws
+    // UNCLOSED_TAG in development and falls back to printing the key.
+    { q: t("faq.items.install.q"), a: t.raw("faq.items.install.a") },
     { q: t("faq.items.origin.q"), a: t("faq.items.origin.a") },
     { q: t("faq.items.submit.q"), a: t("faq.items.submit.a") },
     { q: t("faq.items.openSource.q"), a: t("faq.items.openSource.a") },
@@ -93,111 +108,113 @@ export default async function AboutPage({
   ];
 
   return (
-    <main className="min-h-dvh bg-background text-foreground">
-      <JsonLd data={jsonLd} />
+    <>
       <SiteHeader />
-      <section className="petdex-hero relative -mt-14 overflow-clip pt-14">
-        <div className="relative mx-auto flex w-full max-w-[1440px] flex-col px-5 pb-10 md:px-8">
-          <div className="mt-12 flex flex-col items-center text-center md:mt-16">
-            <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
-              {t("eyebrow")}
-            </p>
-            <h1 className="mt-3 text-balance text-[40px] leading-[1] font-semibold tracking-tight md:text-[64px]">
-              {t("hero.title")}
-            </h1>
-            <p className="mt-5 max-w-2xl text-balance text-base leading-7 text-muted-1 md:text-lg">
-              {t.rich("hero.body", {
-                totalPets,
-                strong: (chunks) => <strong>{chunks}</strong>,
-              })}
-            </p>
-            <StaticCommandLine
-              command="npx petdex install boba"
-              className="mt-5 w-full max-w-sm"
-            />
+      <main id="main" className="min-h-dvh bg-background text-foreground">
+        <JsonLd data={jsonLd} />
+        <section className="petdex-hero relative -mt-14 overflow-clip pt-14">
+          <div className="relative mx-auto flex w-full max-w-[1440px] flex-col px-5 pb-10 md:px-8">
+            <div className="mt-12 flex flex-col items-center text-center md:mt-16">
+              <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
+                {t("eyebrow")}
+              </p>
+              <h1 className="mt-3 text-balance text-[40px] leading-[1] font-semibold tracking-tight md:text-[64px]">
+                {t("hero.title")}
+              </h1>
+              <p className="mt-5 max-w-2xl text-balance text-base leading-7 text-muted-1 md:text-lg">
+                {t.rich("hero.body", {
+                  totalPets,
+                  strong: (chunks) => <strong>{chunks}</strong>,
+                })}
+              </p>
+              <StaticCommandLine
+                command="npx petdex install boba"
+                className="mt-5 w-full max-w-sm"
+              />
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      <section className="mx-auto flex w-full max-w-3xl flex-col gap-12 px-5 py-14 md:px-8 md:py-20">
-        <div className="space-y-4">
-          <h2 className="text-2xl font-semibold tracking-tight text-foreground md:text-3xl">
-            {t("sections.what.title")}
-          </h2>
-          <p className="text-base leading-7 text-muted-2 md:text-lg">
-            {t("sections.what.body1")}
-          </p>
-          <p className="text-base leading-7 text-muted-2 md:text-lg">
-            {t("sections.what.body2.beforeCozy")}{" "}
-            <Link
-              href={withLocale("/vibe/cozy", localeValue)}
-              className="text-brand underline-offset-2 hover:underline"
-            >
-              {t("sections.what.body2.cozyLabel")}
-            </Link>{" "}
-            {t("sections.what.body2.middle")}{" "}
-            <Link
-              href={withLocale("/vibe/focused", localeValue)}
-              className="text-brand underline-offset-2 hover:underline"
-            >
-              {t("sections.what.body2.focusedLabel")}
-            </Link>
-            {t("sections.what.body2.afterFocused")}
-          </p>
-        </div>
-
-        <div className="space-y-4">
-          <h2 className="text-2xl font-semibold tracking-tight text-foreground md:text-3xl">
-            {t("sections.pack.title")}
-          </h2>
-          <p className="text-base leading-7 text-muted-2 md:text-lg">
-            {t("sections.pack.beforePetJson")}{" "}
-            <code className="rounded bg-brand-tint px-1 py-0.5 text-brand dark:bg-brand-tint-dark">
-              pet.json
-            </code>{" "}
-            {t("sections.pack.betweenFiles")}{" "}
-            <code className="rounded bg-brand-tint px-1 py-0.5 text-brand dark:bg-brand-tint-dark">
-              spritesheet.webp
-            </code>{" "}
-            {t("sections.pack.afterSpritesheet")}
-          </p>
-        </div>
-
-        <div className="space-y-4">
-          <h2 className="text-2xl font-semibold tracking-tight text-foreground md:text-3xl">
-            {t("faq.title")}
-          </h2>
-          <div className="space-y-6">
-            {faq.map((item) => (
-              <article key={item.q} className="space-y-2">
-                <h3 className="text-lg font-semibold text-foreground">
-                  {item.q}
-                </h3>
-                <p className="text-base leading-7 text-muted-2">{item.a}</p>
-              </article>
-            ))}
-          </div>
-        </div>
-
-        <div className="space-y-4">
-          <h2 className="text-2xl font-semibold tracking-tight text-foreground md:text-3xl">
-            {t("browse.title")}
-          </h2>
-          <div className="flex flex-wrap gap-2">
-            {browseLinks.map(([label, href]) => (
+        <section className="mx-auto flex w-full max-w-3xl flex-col gap-12 px-5 py-14 md:px-8 md:py-20">
+          <div className="space-y-4">
+            <h2 className="text-2xl font-semibold tracking-tight text-foreground md:text-3xl">
+              {t("sections.what.title")}
+            </h2>
+            <p className="text-base leading-7 text-muted-2 md:text-lg">
+              {t("sections.what.body1")}
+            </p>
+            <p className="text-base leading-7 text-muted-2 md:text-lg">
+              {t("sections.what.body2.beforeCozy")}{" "}
               <Link
-                key={href}
-                href={href}
-                className="inline-flex h-9 items-center rounded-full border border-border-base bg-surface px-3 text-sm text-muted-2 transition hover:border-border-strong"
+                href={withLocale("/vibe/cozy", localeValue)}
+                className="text-brand underline-offset-2 hover:underline"
               >
-                {label}
+                {t("sections.what.body2.cozyLabel")}
+              </Link>{" "}
+              {t("sections.what.body2.middle")}{" "}
+              <Link
+                href={withLocale("/vibe/focused", localeValue)}
+                className="text-brand underline-offset-2 hover:underline"
+              >
+                {t("sections.what.body2.focusedLabel")}
               </Link>
-            ))}
+              {t("sections.what.body2.afterFocused")}
+            </p>
           </div>
-        </div>
-      </section>
 
-      <SiteFooter />
-    </main>
+          <div className="space-y-4">
+            <h2 className="text-2xl font-semibold tracking-tight text-foreground md:text-3xl">
+              {t("sections.pack.title")}
+            </h2>
+            <p className="text-base leading-7 text-muted-2 md:text-lg">
+              {t("sections.pack.beforePetJson")}{" "}
+              <code className="rounded bg-brand-tint px-1 py-0.5 text-brand dark:bg-brand-tint-dark">
+                pet.json
+              </code>{" "}
+              {t("sections.pack.betweenFiles")}{" "}
+              <code className="rounded bg-brand-tint px-1 py-0.5 text-brand dark:bg-brand-tint-dark">
+                spritesheet.webp
+              </code>{" "}
+              {t("sections.pack.afterSpritesheet")}
+            </p>
+          </div>
+
+          <div className="space-y-4">
+            <h2 className="text-2xl font-semibold tracking-tight text-foreground md:text-3xl">
+              {t("faq.title")}
+            </h2>
+            <div className="space-y-6">
+              {faq.map((item) => (
+                <article key={item.q} className="space-y-2">
+                  <h3 className="text-lg font-semibold text-foreground">
+                    {item.q}
+                  </h3>
+                  <p className="text-base leading-7 text-muted-2">{item.a}</p>
+                </article>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <h2 className="text-2xl font-semibold tracking-tight text-foreground md:text-3xl">
+              {t("browse.title")}
+            </h2>
+            <div className="flex flex-wrap gap-2">
+              {browseLinks.map(([label, href]) => (
+                <Link
+                  key={href}
+                  href={href}
+                  className="inline-flex h-9 items-center rounded-full border border-border-base bg-surface px-3 text-sm text-muted-2 transition hover:border-border-strong"
+                >
+                  {label}
+                </Link>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <SiteFooter />
+      </main>
+    </>
   );
 }

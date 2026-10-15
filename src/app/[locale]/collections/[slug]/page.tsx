@@ -30,7 +30,14 @@ export async function generateMetadata({ params }: PageProps) {
   const { slug, locale } = await params;
   const collection = await getCollection(slug);
   if (!collection) {
-    return { title: "Collection not found", robots: { index: false } };
+    const tCollections = await getTranslations({
+      locale: hasLocale(locale) ? locale : "en",
+      namespace: "collectionsPage",
+    });
+    return {
+      title: tCollections("notFoundTitle"),
+      robots: { index: false },
+    };
   }
 
   // Pin the OG image URL to the locale-stripped path. The auto-detected
@@ -41,22 +48,31 @@ export async function generateMetadata({ params }: PageProps) {
   // and silently fall back to the parent layout's image — so unfurls
   // showed the generic Petdex hero instead of the per-collection art.
   const ogImage = `${SITE_URL}/collections/${collection.slug}/opengraph-image`;
+  // `collection.title` and `collection.description` are content data (the
+  // collection's own name and blurb), so only the surrounding template is
+  // localized here.
+  const tMeta = await getTranslations({
+    locale: hasLocale(locale) ? locale : "en",
+    namespace: "collectionDetail.metadata",
+  });
+  const ogTitle = tMeta("ogTitle", { title: collection.title });
+  const alternates = buildLocaleAlternates(
+    `/collections/${collection.slug}`,
+    hasLocale(locale) ? locale : undefined,
+  );
   return {
-    title: `${collection.title} collection`,
+    title: tMeta("title", { title: collection.title }),
     description: collection.description,
-    alternates: buildLocaleAlternates(
-      `/collections/${collection.slug}`,
-      hasLocale(locale) ? locale : undefined,
-    ),
+    alternates,
     openGraph: {
-      title: `${collection.title} on Petdex`,
+      title: ogTitle,
       description: collection.description,
-      url: `${SITE_URL}/collections/${collection.slug}`,
+      url: alternates.canonical,
       images: [{ url: ogImage, width: 1200, height: 630 }],
     },
     twitter: {
       card: "summary_large_image",
-      title: `${collection.title} on Petdex`,
+      title: ogTitle,
       description: collection.description,
       images: [ogImage],
     },
@@ -113,108 +129,114 @@ export default async function CollectionPage({ params }: PageProps) {
   };
 
   return (
-    <main className="min-h-dvh bg-background text-foreground">
-      <JsonLd data={jsonLd} />
+    <>
       <SiteHeader />
-      <section className="petdex-hero relative -mt-14 overflow-clip pt-14">
-        <div className="relative mx-auto flex w-full max-w-[1440px] flex-col px-5 pb-12 md:px-8">
-          <div className="mt-6">
+      <main id="main" className="min-h-dvh bg-background text-foreground">
+        <JsonLd data={jsonLd} />
+        <section className="petdex-hero relative -mt-14 overflow-clip pt-14">
+          <div className="relative mx-auto flex w-full max-w-[1440px] flex-col px-5 pb-12 md:px-8">
+            <div className="mt-6">
+              <Link
+                href="/collections"
+                className="inline-flex h-8 items-center rounded-full border border-border-base bg-surface/70 px-3 text-xs font-medium text-muted-2 backdrop-blur transition hover:bg-surface-muted hover:text-foreground"
+              >
+                {t("backToCollections")}
+              </Link>
+            </div>
+            <div className="mt-6 grid gap-8 md:mt-10 lg:grid-cols-[1fr_420px] lg:items-center">
+              <div>
+                <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
+                  {t("featuredEyebrow")}
+                </p>
+                <h1 className="mt-3 text-balance text-[44px] leading-[0.98] font-semibold tracking-tight md:text-[72px]">
+                  {collection.title}
+                </h1>
+                <p className="mt-5 max-w-2xl text-balance text-base leading-7 text-muted-1 md:text-lg">
+                  {collection.description}
+                </p>
+
+                <div className="mt-6 flex flex-wrap items-center gap-3">
+                  {ownerHref ? (
+                    <Link
+                      href={ownerHref}
+                      prefetch={false}
+                      className="inline-flex h-10 items-center rounded-full bg-inverse px-4 text-sm font-medium text-on-inverse transition hover:bg-inverse-hover"
+                    >
+                      {t("viewCreator")}
+                    </Link>
+                  ) : null}
+                  {collection.externalUrl ? (
+                    <Link
+                      href={collection.externalUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex h-9 items-center gap-1.5 rounded-full border border-border-base bg-surface/70 px-3.5 text-[13px] font-medium text-muted-2 backdrop-blur transition hover:bg-surface-muted hover:text-foreground"
+                    >
+                      <ExternalLink className="size-4" />
+                      {t("visitIpSite")}
+                    </Link>
+                  ) : null}
+                </div>
+
+                <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 font-mono text-[11px] tracking-[0.18em] text-muted-3 uppercase">
+                  <span>
+                    {t("petCount", { count: collection.pets.length })}
+                  </span>
+                  <CollectionCaughtProgress petSlugs={petSlugs} />
+                  {totalLikes > 0 ? (
+                    <span className="inline-flex items-center gap-1.5">
+                      <Heart className="size-3" />
+                      {formatLocalizedNumber(totalLikes, locale)}
+                    </span>
+                  ) : null}
+                  {totalInstalls > 0 ? (
+                    <span className="inline-flex items-center gap-1.5">
+                      <TerminalSquare className="size-3" />
+                      {t("installCount", {
+                        count: formatLocalizedNumber(totalInstalls, locale),
+                      })}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="pet-sprite-stage relative grid aspect-square place-items-center overflow-hidden rounded-2xl border border-border-base bg-surface/70">
+                {leadPet ? (
+                  <PetSprite
+                    src={leadPet.spritesheetPath}
+                    cycleStates
+                    scale={1}
+                    label={t("animatedLabel", { name: leadPet.displayName })}
+                  />
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="mx-auto flex w-full max-w-[1440px] flex-col gap-6 px-5 py-12 md:px-8 md:py-16">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <p className="font-mono text-[11px] tracking-[0.22em] text-brand uppercase">
+                {t("setContents")}
+              </p>
+              <h2 className="mt-2 text-2xl font-semibold tracking-tight">
+                {t("catchFull")}
+              </h2>
+            </div>
             <Link
               href="/collections"
-              className="inline-flex h-8 items-center rounded-full border border-border-base bg-surface/70 px-3 text-xs font-medium text-muted-2 backdrop-blur transition hover:bg-surface-muted hover:text-foreground"
+              className="inline-flex h-9 items-center rounded-full border border-border-base bg-surface/70 px-3.5 text-[13px] font-medium text-muted-2 backdrop-blur transition hover:bg-surface-muted hover:text-foreground"
             >
-              {t("backToCollections")}
+              {t("allCollections")}
             </Link>
           </div>
-          <div className="mt-6 grid gap-8 md:mt-10 lg:grid-cols-[1fr_420px] lg:items-center">
-            <div>
-              <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
-                Featured collection
-              </p>
-              <h1 className="mt-3 text-balance text-[44px] leading-[0.98] font-semibold tracking-tight md:text-[72px]">
-                {collection.title}
-              </h1>
-              <p className="mt-5 max-w-2xl text-balance text-base leading-7 text-muted-1 md:text-lg">
-                {collection.description}
-              </p>
 
-              <div className="mt-6 flex flex-wrap items-center gap-3">
-                {ownerHref ? (
-                  <Link
-                    href={ownerHref}
-                    prefetch={false}
-                    className="inline-flex h-10 items-center rounded-full bg-inverse px-4 text-sm font-medium text-on-inverse transition hover:bg-inverse-hover"
-                  >
-                    View creator
-                  </Link>
-                ) : null}
-                {collection.externalUrl ? (
-                  <Link
-                    href={collection.externalUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex h-9 items-center gap-1.5 rounded-full border border-border-base bg-surface/70 px-3.5 text-[13px] font-medium text-muted-2 backdrop-blur transition hover:bg-surface-muted hover:text-foreground"
-                  >
-                    <ExternalLink className="size-4" />
-                    Visit IP site
-                  </Link>
-                ) : null}
-              </div>
+          <CollectionPetGrid pets={collection.pets} dexMap={dexMap} />
+        </section>
 
-              <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 font-mono text-[11px] tracking-[0.18em] text-muted-3 uppercase">
-                <span>{collection.pets.length} pets</span>
-                <CollectionCaughtProgress petSlugs={petSlugs} />
-                {totalLikes > 0 ? (
-                  <span className="inline-flex items-center gap-1.5">
-                    <Heart className="size-3" />
-                    {formatLocalizedNumber(totalLikes, locale)}
-                  </span>
-                ) : null}
-                {totalInstalls > 0 ? (
-                  <span className="inline-flex items-center gap-1.5">
-                    <TerminalSquare className="size-3" />
-                    {formatLocalizedNumber(totalInstalls, locale)} installs
-                  </span>
-                ) : null}
-              </div>
-            </div>
-
-            <div className="pet-sprite-stage relative grid aspect-square place-items-center overflow-hidden rounded-2xl border border-border-base bg-surface/70">
-              {leadPet ? (
-                <PetSprite
-                  src={leadPet.spritesheetPath}
-                  cycleStates
-                  scale={1}
-                  label={`${leadPet.displayName} animated`}
-                />
-              ) : null}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="mx-auto flex w-full max-w-[1440px] flex-col gap-6 px-5 py-12 md:px-8 md:py-16">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <p className="font-mono text-[11px] tracking-[0.22em] text-brand uppercase">
-              Set contents
-            </p>
-            <h2 className="mt-2 text-2xl font-semibold tracking-tight">
-              Catch the full collection
-            </h2>
-          </div>
-          <Link
-            href="/collections"
-            className="inline-flex h-9 items-center rounded-full border border-border-base bg-surface/70 px-3.5 text-[13px] font-medium text-muted-2 backdrop-blur transition hover:bg-surface-muted hover:text-foreground"
-          >
-            All collections
-          </Link>
-        </div>
-
-        <CollectionPetGrid pets={collection.pets} dexMap={dexMap} />
-      </section>
-
-      <SiteFooter />
-    </main>
+        <SiteFooter />
+      </main>
+    </>
   );
 }

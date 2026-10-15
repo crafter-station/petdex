@@ -204,6 +204,9 @@ async function main() {
   }
 
   console.log(`done. ok=${ok} failed=${failed}`);
+  // Non-zero so a scripted run is not read as complete when pets were left
+  // untagged.
+  if (failed > 0) process.exitCode = 1;
 }
 
 await main();

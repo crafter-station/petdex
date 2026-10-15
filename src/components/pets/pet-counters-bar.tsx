@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-import { useLocale } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 
 import { formatLocalizedNumber } from "@/lib/format-number";
 import { loadPetMetrics } from "@/lib/pet-metrics-client";
@@ -18,6 +18,7 @@ type CountersResponse = {
 
 export function PetCountersBar({ slug }: PetCountersBarProps) {
   const locale = useLocale();
+  const t = useTranslations("pet.counters");
   const [counts, setCounts] = useState<CountersResponse | null>(null);
 
   useEffect(() => {
@@ -46,12 +47,16 @@ export function PetCountersBar({ slug }: PetCountersBarProps) {
     >
       {counts ? (
         <>
-          {formatLocalizedNumber(counts.installCount, locale)} installs
+          {t("installs", {
+            count: formatLocalizedNumber(counts.installCount, locale),
+          })}
           {" · "}
-          {formatLocalizedNumber(counts.zipDownloadCount, locale)} downloads
+          {t("downloads", {
+            count: formatLocalizedNumber(counts.zipDownloadCount, locale),
+          })}
         </>
       ) : (
-        <span className="opacity-50">— installs · — downloads</span>
+        <span className="opacity-50">{t("skeleton")}</span>
       )}
     </span>
   );

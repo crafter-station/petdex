@@ -4,14 +4,17 @@ import { redirect } from "next/navigation";
 import { auth } from "@clerk/nextjs/server";
 import { desc, sql as dsql, eq, inArray } from "drizzle-orm";
 import { Bug, Heart, Lightbulb, MessageSquare } from "lucide-react";
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 
 import { db, schema } from "@/lib/db/client";
+import { withLocale } from "@/lib/locale-routing";
 
 import { FullAuthProviders } from "@/components/auth/auth-providers";
 import { MyFeedbackFilters } from "@/components/feedback/my-feedback-filters";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
+
+import { hasLocale } from "@/i18n/config";
 
 export const dynamic = "force-dynamic";
 
@@ -29,32 +32,27 @@ export async function generateMetadata({
   return {
     title: t("title"),
     description: t("description"),
-    alternates: { canonical: "/my-feedback" },
+    // No canonical: this page is noindex, and the previous self-canonical
+    // pointed at the unprefixed path, so a /zh visitor's page declared the
+    // English URL as its canonical.
     robots: { index: false, follow: false },
   };
 }
 
-const KIND_META: Record<
-  string,
-  { label: string; tone: string; icon: React.ReactNode }
-> = {
+const KIND_META: Record<string, { tone: string; icon: React.ReactNode }> = {
   suggestion: {
-    label: "Suggest",
     tone: "bg-chip-warning-bg text-chip-warning-fg ring-chip-warning-fg/20",
     icon: <Lightbulb className="size-3.5" />,
   },
   bug: {
-    label: "Bug",
     tone: "bg-chip-danger-bg text-chip-danger-fg ring-chip-danger-fg/20",
     icon: <Bug className="size-3.5" />,
   },
   praise: {
-    label: "Praise",
     tone: "bg-chip-success-bg text-chip-success-fg ring-chip-success-fg/20",
     icon: <Heart className="size-3.5" />,
   },
   other: {
-    label: "Other",
     tone: "bg-surface-muted text-stone-900 ring-stone-200 dark:text-stone-200 dark:ring-stone-700",
     icon: <MessageSquare className="size-3.5" />,
   },
@@ -70,9 +68,11 @@ export default async function MyFeedbackPage({
   searchParams: Promise<SP>;
 }) {
   const t = await getTranslations("myFeedback");
+  const tKinds = await getTranslations("feedback.kinds");
+  const locale = await getLocale();
   const { userId } = await auth();
   if (!userId) {
-    redirect("/");
+    redirect(withLocale("/", hasLocale(locale) ? locale : "en"));
   }
 
   const sp = await searchParams;
@@ -179,8 +179,8 @@ export default async function MyFeedbackPage({
 
   return (
     <FullAuthProviders>
-      <main className="min-h-dvh bg-background text-foreground">
-        <SiteHeader />
+      <SiteHeader />
+      <main id="main" className="min-h-dvh bg-background text-foreground">
         <section className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-5 pt-8 pb-20 md:px-8">
           <header className="space-y-3">
             <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
@@ -210,6 +210,16 @@ export default async function MyFeedbackPage({
             <ul className="space-y-2">
               {visible.map(({ row: r, agg, unread, replied, waiting }) => {
                 const meta = KIND_META[r.kind] ?? KIND_META.other;
+                // `feedback.kinds` already names these four in every locale;
+                // the local copy was a second, untranslated spelling of them.
+                const kindLabel = [
+                  "suggestion",
+                  "bug",
+                  "praise",
+                  "other",
+                ].includes(r.kind)
+                  ? tKinds(r.kind)
+                  : r.kind;
                 const lastAdminAt = agg?.latestAdminAt ?? null;
                 const lastAdminBody = agg?.latestAdminBody ?? null;
                 const replyCount = agg?.replyCount ?? 0;
@@ -218,10 +228,10 @@ export default async function MyFeedbackPage({
                   <li key={r.id}>
                     <Link
                       href={`/my-feedback/${r.id}`}
-                      className={`block rounded-2xl border p-4 transition hover:bg-white ${
+                      className={`block rounded-2xl border p-4 transition hover:bg-surface-muted ${
                         unread
-                          ? "border-brand/40 bg-white shadow-[0_0_0_1px_rgba(82,102,234,0.18),0_18px_45px_-26px_rgba(82,102,234,0.4)]"
-                          : "border-black/10 bg-surface/80 hover:border-black/30 dark:border-white/10 dark:hover:border-white/30"
+                          ? "border-brand/40 bg-surface shadow-[0_0_0_1px_rgba(82,102,234,0.18),0_18px_45px_-26px_rgba(82,102,234,0.4)]"
+                          : "border-border-base bg-surface/80 hover:border-border-strong"
                       }`}
                     >
                       <div className="flex items-start gap-3">
@@ -231,10 +241,10 @@ export default async function MyFeedbackPage({
                               className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-mono text-[10px] tracking-[0.12em] uppercase ring-1 ${meta.tone}`}
                             >
                               {meta.icon}
-                              {meta.label}
+                              {kindLabel}
                             </span>
                             {unread ? (
-                              <span className="inline-flex items-center gap-1 rounded-full bg-brand px-2 py-0.5 font-mono text-[10px] tracking-[0.12em] text-white uppercase">
+                              <span className="inline-flex items-center gap-1 rounded-full bg-brand px-2 py-0.5 font-mono text-[10px] tracking-[0.12em] text-on-inverse uppercase">
                                 {t("badges.newReply")}
                               </span>
                             ) : replied ? (
@@ -247,7 +257,7 @@ export default async function MyFeedbackPage({
                               </span>
                             ) : null}
                             <span className="ml-auto font-mono text-[10px] tracking-[0.12em] text-muted-4 uppercase">
-                              {new Date(r.createdAt).toLocaleDateString()}
+                              {new Date(r.createdAt).toLocaleDateString(locale)}
                             </span>
                           </div>
 
@@ -267,8 +277,11 @@ export default async function MyFeedbackPage({
                                     <span>
                                       ·{" "}
                                       {new Date(lastAdminAt).toLocaleDateString(
-                                        undefined,
-                                        { month: "short", day: "numeric" },
+                                        locale,
+                                        {
+                                          month: "short",
+                                          day: "numeric",
+                                        },
                                       )}
                                     </span>
                                   ) : null}

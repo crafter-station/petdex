@@ -42,7 +42,7 @@ press <kbd>Cmd</kbd>+<kbd>,</kbd> to open Settings.
 
 The floating mascot ships as the **Petdex desktop app**, not through this CLI. The app installs agent hooks from its Settings window (one click per agent) and updates itself. Download it at <https://petdex.dev/download>.
 
-The `init`, `up`, `down`, `toggle`, `desktop`, `update`, `doctor`, and `hooks` commands were removed in v1.0.0; running them prints a pointer to the app.
+The `init`, `up`, `start`, `restart`, `down`, `stop`, `toggle`, `select`, `desktop`, `update`, `doctor`, and `hooks` commands were removed in v1.0.0; running them prints a pointer to the app.
 
 ## Commands
 
@@ -112,7 +112,7 @@ Per submission the CLI:
 3. PUTs the three files to Cloudflare R2 directly. No body passes through Petdex servers.
 4. Calls `POST /api/cli/submit/register` to record the submission as `pending`. Identity comes from the verified token, never from the body.
 
-A spinner shows progress per pet; a summary lists failures with reasons. Slugs auto-deduplicate (`boba` → `boba-2` → `boba-3` → …) so submissions never rebote on collisions.
+A spinner shows progress per pet; a summary lists failures with reasons. Slugs auto-deduplicate (`boba` → `boba-2` → `boba-3` → …) so submissions never collide.
 
 ## Validation rules
 
@@ -149,7 +149,7 @@ This CLI distributes pets. It does not generate them.
 the folder it writes: `petdex submit ~/.codex/pets/<slug>`.
 
 **From a ChatGPT pet export.** ChatGPT exports a 1536x2288 spritesheet, which is the
-same atlas Petdex reads: nine state rows, matching frame counts. Download the PNG and
+same atlas Petdex reads: 11 state rows at 8×11, matching frame counts. Download the PNG and
 drop it on <https://petdex.dev/submit>. The grid is measured for you and the `pet.json`
 the export omits is generated before you name it.
 
@@ -169,9 +169,10 @@ The full step-by-step (with tips on what makes a great pet) lives at <https://pe
 
 ## Common install issues
 
-The CLI is a single bundled JS file with no native dependencies.
-install path is just `fetch a JSON manifest, write two files to
-~/.petdex/pets/<slug>/`. Most "stuck" reports trace to one of these:
+The CLI is a single bundled JS file with no native dependencies, and the
+install path is just `fetch a JSON manifest, write files to
+~/.petdex/pets/<slug>/ and ~/.codex/pets/<slug>/`. Most "stuck" reports
+trace to one of these:
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |

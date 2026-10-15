@@ -15,14 +15,16 @@
 //      owner_email on every pet credited to that GitHub URL.
 //
 // Run:  CLERK_SECRET_KEY=$(grep '^CLERK_SECRET_KEY=' .env.production.local | cut -d= -f2) \
-//       bun --env-file .env.local scripts/reassign-rescued-pets.ts [--dry] [--admin-id=<userId>]
+//       bun --env-file .env.local scripts/reassign-rescued-pets.ts [--apply] [--admin-id=<userId>]
+//
+// Dry by default: ownership is rewritten in place, so writing is opt-in.
 
 import { clerkClient } from "@clerk/nextjs/server";
 import { neon } from "@neondatabase/serverless";
 
 import { requiredEnv } from "./env";
 
-const dryRun = process.argv.includes("--dry");
+const dryRun = !process.argv.includes("--apply");
 const adminArg = process.argv.find((a) => a.startsWith("--admin-id="));
 const ADMIN_USER_ID = adminArg
   ? adminArg.split("=")[1]
@@ -160,6 +162,7 @@ async function main() {
   console.log(
     `\nDone. reassigned=${totalReassigned} unresolved-authors=${unresolvedAuthors}`,
   );
+  if (dryRun) console.log("(dry run — pass --apply to write)");
 }
 
 await main();

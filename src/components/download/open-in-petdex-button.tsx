@@ -12,6 +12,8 @@ import {
 } from "@/lib/petdex-desktop-link";
 import { usePlatform } from "@/lib/use-platform";
 
+import { localizePath } from "@/i18n/config";
+
 type OpenInPetdexButtonProps = {
   slug: string;
 };
@@ -48,7 +50,7 @@ export function OpenInPetdexButton({ slug }: OpenInPetdexButtonProps) {
   // would dead-end at a binary they cannot install.
   if (!isDesktop) return null;
 
-  const downloadHref = `/${locale}/download?next=${encodeURIComponent(`install/${slug}`)}`;
+  const downloadHref = `${localizePath(locale, "/download")}?next=${encodeURIComponent(`install/${slug}`)}`;
   const deepLink = buildPetdexActivateUrl(slug);
 
   function handleClick(e: React.MouseEvent<HTMLAnchorElement>) {

@@ -9,8 +9,10 @@ import {
 } from "@/lib/submissions-validation";
 
 // Asset URLs are derived from the R2 base the validator trusts, so this
-// fixture keeps working if the bucket ever moves.
-const asset = (name: string) => `${DEFAULT_R2_PUBLIC_BASE}/${name}`;
+// fixture keeps working if the bucket ever moves. The path sits under
+// `pets/` because the validator pins the namespace, not just the host.
+const asset = (name: string) =>
+  `${DEFAULT_R2_PUBLIC_BASE}/pets/boba-a1b2c3d4/${name}`;
 
 const validBody = {
   zipUrl: asset("pet.zip"),

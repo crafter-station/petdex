@@ -15,8 +15,13 @@ import sharp from "sharp";
 
 import { db, schema } from "@/lib/db/client";
 import { userIdForHandle } from "@/lib/handles";
-import { fetchR2Asset } from "@/lib/r2-fetch";
+import { fetchR2AssetBuffer } from "@/lib/r2-fetch";
+import { toCurrentR2PublicUrl } from "@/lib/r2-public-url";
+import { readResponseBodyBounded } from "@/lib/response-body";
+import { isDecodableSpriteSize } from "@/lib/sprite-atlas";
 import { isAllowedAssetUrl, isAllowedAvatarUrl } from "@/lib/url-allowlist";
+
+import { defaultLocale, hasLocale } from "@/i18n/config";
 
 export const runtime = "nodejs";
 export const contentType = "image/png";
@@ -30,13 +35,18 @@ export const revalidate = 86400;
 const FRAME_W = 192;
 const FRAME_H = 208;
 const SPRITE_DISPLAY = 192; // square plate per sprite
+// Clerk avatar images are a few hundred KB at most; 2MB is generous headroom
+// while still refusing an upstream that streams something else entirely.
+const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
+const AVATAR_FETCH_TIMEOUT_MS = 5_000;
 
 export default async function Image({
   params,
 }: {
   params: Promise<{ locale: string; handle: string }>;
 }) {
-  const { handle } = await params;
+  const { locale, handle } = await params;
+  const copy = await getOgImageCopy(locale);
   const ownerId = await userIdForHandle(handle);
   if (!ownerId) return petdexFallback();
 
@@ -107,9 +117,14 @@ export default async function Image({
   // Decode sprites in parallel. Failures fall through to no-sprite
   // (the slot just renders empty).
   const spriteUrls = await Promise.all(
-    collageRows
-      .slice(0, 4)
-      .map((r) => loadFirstFrameAsDataUrl(r.spritesheetUrl)),
+    collageRows.slice(0, 4).map((r) =>
+      // Rewrite the stored URL to the canonical host before the guard, the
+      // way every other OG route does. `loadFirstFrameAsDataUrl` checks
+      // `isAllowedAssetUrl` first and only `fetchR2Asset` rewrites, so a row
+      // still stored on a retired host was rejected before it could be
+      // rewritten and the sprite silently dropped from the collage.
+      loadFirstFrameAsDataUrl(toCurrentR2PublicUrl(r.spritesheetUrl)),
+    ),
   );
 
   const avatarDataUrl = clerkUser?.imageUrl
@@ -180,7 +195,7 @@ export default async function Image({
             fontWeight: 600,
           }}
         >
-          Petdex creator
+          {copy.creatorLabel}
         </div>
       </div>
 
@@ -352,9 +367,19 @@ export default async function Image({
 async function loadFirstFrameAsDataUrl(url: string): Promise<string | null> {
   if (!isAllowedAssetUrl(url)) return null;
   try {
-    const res = await fetchR2Asset(url, { redirect: "error" });
-    if (!res.ok) return null;
-    const buf = Buffer.from(await res.arrayBuffer());
+    const buf = await fetchR2AssetBuffer(url);
+    if (!buf) return null;
+    // Same decode-dimension gate as the pet OG route: these buffers come
+    // from DB rows the current submit flow no longer produces.
+    const meta = await sharp(buf).metadata();
+    if (
+      !meta.width ||
+      !meta.height ||
+      !isDecodableSpriteSize(meta.width, meta.height)
+    ) {
+      return null;
+    }
+
     const png = await sharp(buf)
       .extract({ left: 0, top: 0, width: FRAME_W, height: FRAME_H })
       .resize(SPRITE_DISPLAY - 24, SPRITE_DISPLAY - 24, { kernel: "nearest" })
@@ -369,9 +394,19 @@ async function loadFirstFrameAsDataUrl(url: string): Promise<string | null> {
 async function loadAvatarAsDataUrl(url: string): Promise<string | null> {
   if (!isAllowedAvatarUrl(url)) return null;
   try {
-    const res = await fetch(url, { redirect: "error" });
+    const res = await fetch(url, {
+      redirect: "error",
+      signal: AbortSignal.timeout(AVATAR_FETCH_TIMEOUT_MS),
+    });
     if (!res.ok) return null;
-    const buf = Buffer.from(await res.arrayBuffer());
+    // Avatars are not R2 assets, but the URL is still one the DB recorded
+    // (Clerk today, possibly proxied later), so the body gets the same
+    // deadline-and-ceiling treatment instead of an unbounded `arrayBuffer()`.
+    const buf = await readResponseBodyBounded(
+      res,
+      AVATAR_MAX_BYTES,
+      AVATAR_FETCH_TIMEOUT_MS,
+    );
     const png = await sharp(buf)
       .resize(220, 220, { fit: "cover" })
       .png()
@@ -441,6 +476,16 @@ function petdexFallback() {
     </div>,
     { ...size },
   );
+}
+
+async function getOgImageCopy(locale: string) {
+  const resolvedLocale = locale && hasLocale(locale) ? locale : defaultLocale;
+  const messages = (await import(`@/i18n/messages/${resolvedLocale}.json`))
+    .default as { ogImage?: { creatorLabel?: string } };
+
+  return {
+    creatorLabel: messages.ogImage?.creatorLabel ?? "Petdex creator",
+  };
 }
 
 function clip(s: string, n: number): string {

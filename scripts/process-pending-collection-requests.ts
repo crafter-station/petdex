@@ -8,16 +8,21 @@
 //              We surface a useful rejection_reason so the owner sees
 //              what happened.
 //
-// Usage:
-//   bun --env-file .env.local scripts/process-pending-collection-requests.ts --dry
+// Usage (dry-run unless --apply is passed, matching the other mutating
+// scripts — a bare run used to execute, and an inverted gate means the
+// safe case is the one a typo falls into):
 //   bun --env-file .env.local scripts/process-pending-collection-requests.ts
+//   bun --env-file .env.local scripts/process-pending-collection-requests.ts --apply
 
 import { neon } from "@neondatabase/serverless";
 
 import { requiredEnv } from "./env";
 
 const sql = neon(requiredEnv("DATABASE_URL"));
-const dryRun = process.argv.includes("--dry");
+const apply = process.argv.includes("--apply");
+// `--dry` stays accepted so an older invocation keeps meaning dry-run;
+// the default now is dry.
+const dryRun = !apply || process.argv.includes("--dry");
 
 type PendingRow = {
   id: string;

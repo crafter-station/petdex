@@ -76,7 +76,12 @@ describe("GET /api/pets/[slug]/sticker", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
   });
 
-  it("redirects a compliant WhatsApp artifact", async () => {
+  it("redirects a compliant WhatsApp artifact to the canonical slug", async () => {
+    // The access row's slug is the canonical one; the request slug may be an
+    // alias or a different case. The redirect must use access.slug — building
+    // it from the request param instead is the bug this pins, and it only
+    // shows when the two differ.
+    accessStatus = { status: "ok", petId: "pet-1", slug: "canonical-crab" };
     const response = await request(
       "claude-crab",
       "?state=waiting&treatment=outline&profile=whatsapp&format=webp",
@@ -85,7 +90,7 @@ describe("GET /api/pets/[slug]/sticker", () => {
     expect(response.status).toBe(307);
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(response.headers.get("location")).toBe(
-      `${R2_PUBLIC_BASE}/pets/claude-crab/stickers/whatsapp/waiting-outline.webp`,
+      `${R2_PUBLIC_BASE}/pets/canonical-crab/stickers/whatsapp/waiting-outline.webp`,
     );
     expect(calls).toEqual([
       ["claude-crab", "waiting", "webp", "outline", "whatsapp"],

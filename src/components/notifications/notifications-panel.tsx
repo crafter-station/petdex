@@ -10,8 +10,13 @@ import {
   Sparkles,
   XCircle,
 } from "lucide-react";
+import { useLocale, useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
+
+// The admin persona's display name. A proper noun, so it stays the same in
+// every locale and is interpolated rather than translated.
+const ADMIN_NAME = "Hunter";
 
 export type NotificationKind =
   | "pet_approved"
@@ -66,6 +71,10 @@ type Props = {
   onMarkAll: () => void;
   onMarkOne: (id: string) => void;
   unread: number;
+  /** The list fetch failed. Without this the empty list below renders the
+   *  "all caught up" state, telling the user there is nothing to see when the
+   *  request actually errored. */
+  loadFailed?: boolean;
 };
 
 export function NotificationsPanel({
@@ -74,12 +83,15 @@ export function NotificationsPanel({
   onMarkAll,
   onMarkOne,
   unread,
+  loadFailed = false,
 }: Props) {
+  const t = useTranslations("notifications");
+  const locale = useLocale();
   return (
     <>
       <div className="flex shrink-0 items-center justify-between border-b border-black/[0.06] px-4 py-3 dark:border-white/[0.06]">
         <span className="text-sm font-semibold text-foreground">
-          Notifications
+          {t("title")}
         </span>
         {unread > 0 ? (
           <Button
@@ -89,20 +101,20 @@ export function NotificationsPanel({
             className="inline-flex items-center gap-1 font-mono text-[10px] tracking-[0.12em] text-brand uppercase hover:underline"
           >
             <Check className="size-3" />
-            Mark all read
+            {t("markAllRead")}
           </Button>
         ) : null}
       </div>
 
       {items.length === 0 ? (
         <div className="px-4 py-10 text-center text-sm text-muted-3">
-          You're all caught up.
+          {loadFailed ? t("loadFailed") : t("allCaughtUp")}
         </div>
       ) : (
         <ul className="min-h-0 flex-1 divide-y divide-black/[0.06] overflow-y-auto dark:divide-white/[0.06]">
           {items.map((n) => {
             const meta = KIND_META[n.kind];
-            const { title, sub } = describe(n);
+            const { title, sub } = describe(n, t);
             const isUnread = !n.readAt;
             return (
               <li key={n.id}>
@@ -135,10 +147,12 @@ export function NotificationsPanel({
                         {title}
                       </p>
                       {isUnread ? (
-                        <span className="size-1.5 shrink-0 rounded-full bg-brand" />
+                        <span className="size-1.5 shrink-0 rounded-full bg-brand">
+                          <span className="sr-only">{t("unreadLabel")}</span>
+                        </span>
                       ) : null}
                       <span className="ml-auto shrink-0 font-mono text-[10px] tracking-[0.12em] text-muted-4 uppercase">
-                        {relativeTime(n.createdAt)}
+                        {relativeTime(n.createdAt, t, locale)}
                       </span>
                     </div>
                     {sub ? (
@@ -157,52 +171,87 @@ export function NotificationsPanel({
   );
 }
 
-function describe(n: NotificationItem): { title: string; sub?: string } {
+function describe(
+  n: NotificationItem,
+  t: ReturnType<typeof useTranslations<"notifications">>,
+): { title: string; sub?: string } {
   const p = n.payload as Record<string, string | undefined>;
   switch (n.kind) {
     case "pet_approved":
-      return { title: `${p.petName ?? "Your pet"} is live` };
-    case "pet_rejected":
       return {
-        title: `${p.petName ?? "Your submission"} needs changes`,
+        title: t("petApproved", {
+          pet: p.petName ?? t("fallbackYourPet"),
+        }),
+      };
+    case "pet_rejected":
+      // A takedown rides the `pet_rejected` kind (the enum has no takedown
+      // value) and flags itself in the payload. Its copy and destination are
+      // different: the pet was live and is now gone, not waiting for edits.
+      if (p.takedown) {
+        return {
+          title: t("petTakenDown", {
+            pet: p.petName ?? t("fallbackYourPet"),
+          }),
+          sub: p.reason ?? t("petTakenDownSub"),
+        };
+      }
+      return {
+        title: t("petRejected", {
+          pet: p.petName ?? t("fallbackYourSubmission"),
+        }),
         sub: p.reason,
       };
     case "edit_approved":
-      return { title: `Edit to ${p.petName ?? "your pet"} is live` };
+      return {
+        title: t("editApproved", { pet: p.petName ?? t("fallbackYourPet") }),
+      };
     case "edit_rejected":
       return {
-        title: `Edit to ${p.petName ?? "your pet"} was rejected`,
+        title: t("editRejected", { pet: p.petName ?? t("fallbackYourPet") }),
         sub: p.reason,
       };
     case "feedback_replied":
       return {
-        title: "Hunter replied to your feedback",
+        title: t("feedbackReplied", { author: ADMIN_NAME }),
         sub: p.excerpt,
       };
     case "request_fulfilled":
       if (p.role === "creator") {
         return {
-          title: `${p.petName ?? "Your pet"} fulfilled "${p.requestQuery ?? "a request"}"`,
-          sub: "The community asked, you delivered.",
+          title: t("requestFulfilledByYou", {
+            pet: p.petName ?? t("fallbackYourPet"),
+            query: p.requestQuery ?? t("fallbackARequest"),
+          }),
+          sub: t("requestFulfilledByYouSub"),
         };
       }
       return {
-        title: `Your request "${p.requestQuery ?? "..."}" was fulfilled`,
-        sub: p.petName ? `Now live as ${p.petName}` : undefined,
+        title: t("requestFulfilled", {
+          query: p.requestQuery ?? t("fallbackEllipsis"),
+        }),
+        sub: p.petName
+          ? t("requestFulfilledSub", { pet: p.petName })
+          : undefined,
       };
   }
 }
 
-function relativeTime(iso: string): string {
+function relativeTime(
+  iso: string,
+  t: ReturnType<typeof useTranslations<"notifications">>,
+  locale: string,
+): string {
   const ms = Date.now() - new Date(iso).getTime();
   const m = Math.floor(ms / 60000);
-  if (m < 1) return "now";
-  if (m < 60) return `${m}m`;
+  if (m < 1) return t("relativeNow");
+  if (m < 60) return t("relativeMinutes", { count: m });
   const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h`;
+  if (h < 24) return t("relativeHours", { count: h });
   const d = Math.floor(h / 24);
-  if (d < 7) return `${d}d`;
-  return new Date(iso).toLocaleDateString(undefined, {
+  if (d < 7) return t("relativeDays", { count: d });
+  // Past a week the exact date reads better than "12d", and it was previously
+  // formatted with `undefined` — the server's locale, not the reader's.
+  return new Date(iso).toLocaleDateString(locale, {
     month: "short",
     day: "numeric",
   });

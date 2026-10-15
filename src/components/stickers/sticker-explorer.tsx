@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   Check,
@@ -38,6 +38,7 @@ type Labels = {
   outline: string;
   copy: string;
   copied: string;
+  copyFailed: string;
   download: string;
   downloadWhatsApp: string;
   whatsappNote: string;
@@ -50,6 +51,7 @@ type Labels = {
   shareDeck: string;
   shared: string;
   deckFull: string;
+  remove: string;
   reactions: Record<string, string>;
 };
 
@@ -82,6 +84,7 @@ export function StickerExplorer({
     parseStickerDeck(initialParams.get("deck"), petSlugs),
   );
   const [notice, setNotice] = useState<string | null>(null);
+  const noticeTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(searchParams.toString());
@@ -115,10 +118,18 @@ export function StickerExplorer({
       ]);
       showNotice(labels.copied);
     } catch {
-      await navigator.clipboard.writeText(
-        new URL(previewUrl, window.location.origin).toString(),
-      );
-      showNotice(labels.copied);
+      // Fall back to the link. The clipboard call can reject too (denied
+      // permission, insecure context), and the click handler awaits this
+      // function — an unhandled rejection here reached the console with no
+      // notice shown at all, so both outcomes are handled.
+      try {
+        await navigator.clipboard.writeText(
+          new URL(previewUrl, window.location.origin).toString(),
+        );
+        showNotice(labels.copied);
+      } catch {
+        showNotice(labels.copyFailed);
+      }
     }
   }
 
@@ -138,10 +149,14 @@ export function StickerExplorer({
       selection,
       [],
     );
-    await navigator.clipboard.writeText(
-      `${window.location.origin}${pathname}?${params.toString()}`,
-    );
-    showNotice(labels.reactionShared);
+    try {
+      await navigator.clipboard.writeText(
+        `${window.location.origin}${pathname}?${params.toString()}`,
+      );
+      showNotice(labels.reactionShared);
+    } catch {
+      showNotice(labels.copyFailed);
+    }
   }
 
   async function shareDeck() {
@@ -150,16 +165,29 @@ export function StickerExplorer({
       selection,
       deck,
     );
-    await navigator.clipboard.writeText(
-      `${window.location.origin}${pathname}?${params.toString()}`,
-    );
-    showNotice(labels.shared);
+    try {
+      await navigator.clipboard.writeText(
+        `${window.location.origin}${pathname}?${params.toString()}`,
+      );
+      showNotice(labels.shared);
+    } catch {
+      showNotice(labels.copyFailed);
+    }
   }
 
   function showNotice(value: string) {
     setNotice(value);
-    window.setTimeout(() => setNotice(null), 1800);
+    // Replace the previous timer, and drop it on unmount: a second notice
+    // within the window was being cleared early by the first, and the timer
+    // otherwise fired against a dead component.
+    window.clearTimeout(noticeTimerRef.current ?? undefined);
+    noticeTimerRef.current = window.setTimeout(() => setNotice(null), 1800);
   }
+
+  useEffect(
+    () => () => window.clearTimeout(noticeTimerRef.current ?? undefined),
+    [],
+  );
 
   function nextPet() {
     const index = petSlugs.indexOf(selection.pet);
@@ -187,7 +215,11 @@ export function StickerExplorer({
             priority
           />
           {notice ? (
-            <div className="absolute right-5 bottom-5 inline-flex items-center gap-2 rounded-full bg-inverse px-4 py-2 text-sm font-medium text-on-inverse shadow-lg">
+            // A toast that appears by itself is invisible to a screen reader.
+            <div
+              role="status"
+              className="absolute right-5 bottom-5 inline-flex items-center gap-2 rounded-full bg-inverse px-4 py-2 text-sm font-medium text-on-inverse shadow-lg"
+            >
               <Check className="size-4" />
               {notice}
             </div>
@@ -197,7 +229,7 @@ export function StickerExplorer({
           <button
             type="button"
             onClick={copySticker}
-            className="inline-flex h-11 items-center gap-2 rounded-full bg-brand px-5 text-sm font-semibold text-white transition hover:brightness-110"
+            className="inline-flex h-11 items-center gap-2 rounded-full bg-brand px-5 text-sm font-semibold text-on-inverse transition hover:brightness-110"
           >
             <Copy className="size-4" />
             {labels.copy}
@@ -338,7 +370,7 @@ export function StickerExplorer({
                     </button>
                     <button
                       type="button"
-                      aria-label="Remove"
+                      aria-label={labels.remove}
                       onClick={() =>
                         sync(
                           selection,

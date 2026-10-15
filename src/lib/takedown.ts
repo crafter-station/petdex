@@ -14,6 +14,7 @@ import {
   revalidateCollectionTags,
 } from "@/lib/db/cached-aggregates";
 import { db, type schema } from "@/lib/db/client";
+import { emailEnv, sendEmail } from "@/lib/email-send";
 import { renderSubmissionTakedownEmail } from "@/lib/email-templates/submission-takedown";
 import { createNotification } from "@/lib/notifications";
 import { petPublicArtifactKeys } from "@/lib/pet-public-artifact-keys";
@@ -55,6 +56,15 @@ export type TakedownContext = {
    * doing a self-delete know what they did; no need to ping them.
    */
   silent?: boolean;
+  /**
+   * Confines every statement to the owner's row: the row lock, the cleanup
+   * gate, and the DELETE all additionally require owner_id = actorId, the
+   * same in-statement restatement withdraw uses. Without it a takedown
+   * racing a claim (which rewrites owner_id) would still delete the row the
+   * caller no longer owns — the pre-flight 403 check reads a snapshot the
+   * batch cannot see. Only the owner self-service path may set this.
+   */
+  ownerScoped?: boolean;
 };
 
 export type TakedownResult = {
@@ -66,7 +76,7 @@ export type TakedownResult = {
 export async function takedownPet(
   ctx: TakedownContext,
 ): Promise<TakedownResult> {
-  const { pet, reason, source, actorId, silent } = ctx;
+  const { pet, reason, source, actorId, silent, ownerScoped } = ctx;
   const slug = pet.slug;
 
   // 1-5. Hold a slug-scoped transaction lock and the exact pet row lock
@@ -95,9 +105,14 @@ export async function takedownPet(
     FROM "submitted_pets"
     WHERE "id" = ${pet.id}
       AND "slug" = ${slug}
+      ${ownerScoped ? sql`AND "owner_id" = ${actorId}` : sql``}
     FOR UPDATE
   `;
-  const oldPetExists = takedownRowStillMatches(pet.id, slug);
+  const oldPetExists = takedownRowStillMatches(
+    pet.id,
+    slug,
+    ownerScoped ? actorId : null,
+  );
   const cleanupQueries = [
     sql`
       DELETE FROM "pet_likes"
@@ -117,6 +132,24 @@ export async function takedownPet(
     sql`
       DELETE FROM "pet_collection_requests"
       WHERE "pet_slug" = ${slug}
+        AND ${oldPetExists}
+    `,
+    // Reviews hang off the pet by id, not slug, so they cannot ride the slug-
+    // keyed cleanups above. The FK that used to cascade them was dropped from
+    // live databases when `push` met a migration-only constraint (see the
+    // schema declaration), and this path is also the reason withdraw is not
+    // the only delete: nothing may delete a pet without taking the reviews.
+    sql`
+      DELETE FROM "submission_reviews"
+      WHERE "submitted_pet_id" = ${pet.id}
+        AND ${oldPetExists}
+    `,
+    // Candidates are keyed by (pet_id, request_id) and carry no FK to the pet,
+    // so nothing takes them when the row goes. A leftover pending candidate
+    // is an orphan the admin queue would keep surfacing for a deleted pet.
+    sql`
+      DELETE FROM "pet_request_candidates"
+      WHERE "pet_id" = ${pet.id}
         AND ${oldPetExists}
     `,
     sql`
@@ -147,6 +180,7 @@ export async function takedownPet(
     DELETE FROM "submitted_pets"
     WHERE "id" = ${pet.id}
       AND "slug" = ${slug}
+      ${ownerScoped ? sql`AND "owner_id" = ${actorId}` : sql``}
     RETURNING "id"
   `;
   const batch = getTakedownBatchRunner();
@@ -193,6 +227,11 @@ export async function takedownPet(
   await revalidateCollectionTags(...collectionSlugs);
   await invalidateAggregates(AGGREGATE_KEYS.metricsIndex);
   await invalidateMetricCaches(pet.slug);
+  // Data-cache tags alone leave the force-static /pets/<slug> shell serving
+  // deleted sprite references for the page's 24h ISR window. Purge the
+  // full-route entries the way /api/revalidate does.
+  const { revalidatePetPagePaths } = await import("@/lib/pet-page-revalidate");
+  await revalidatePetPagePaths(pet.slug);
 
   // 6. Best-effort R2 cleanup. Stored source URLs and deterministic
   //    public derivatives are removed together. Anything off-host is
@@ -222,28 +261,43 @@ export async function takedownPet(
         ...(reason ? { reason } : {}),
         takedown: true,
       },
-      href: "/",
-    }).catch(() => {});
+      // The enum has no takedown kind, so this rides `pet_rejected` with a
+      // `takedown` flag the panel reads to pick different copy. The href goes
+      // to /my-pets like a rejection's, not "/" — the owner needs a way back
+      // to the pet, and the home page is not it.
+      href: "/my-pets",
+    }).catch((err) =>
+      console.warn("[notify] takedown notification failed:", err),
+    );
 
     if (pet.ownerEmail && process.env.RESEND_API_KEY) {
       try {
         const resend = new Resend(process.env.RESEND_API_KEY);
-        const from =
-          process.env.RESEND_FROM ?? "Petdex <petdex@updates.railly.dev>";
+        const from = emailEnv(
+          "RESEND_FROM",
+          "Petdex <petdex@updates.railly.dev>",
+        );
         const locale = await getPreferredLocaleForUser(pet.ownerId);
         const email = renderSubmissionTakedownEmail(locale, {
           petName: pet.displayName,
           reason: reason ?? null,
         });
-        await resend.emails.send({
-          from,
-          to: pet.ownerEmail,
-          subject: email.subject,
-          html: email.html,
-          text: email.text,
-        });
-      } catch {
-        /* silent */
+        await sendEmail(
+          resend,
+          {
+            from,
+            to: pet.ownerEmail,
+            subject: email.subject,
+            html: email.html,
+            text: email.text,
+          },
+          "takedown notice",
+        );
+      } catch (error) {
+        console.error(
+          "[takedown] owner notification failed:",
+          error instanceof Error ? error.message : String(error),
+        );
       }
     }
   }
@@ -270,13 +324,18 @@ export async function takedownPet(
  * takedown-cleanup.test.ts — an assertion on the statement text would keep
  * passing if the condition were dropped from the statements that use it.
  */
-export function takedownRowStillMatches(petId: string, slug: string) {
+export function takedownRowStillMatches(
+  petId: string,
+  slug: string,
+  ownerId: string | null = null,
+) {
   return sql`
     EXISTS (
       SELECT 1
       FROM "submitted_pets"
       WHERE "id" = ${petId}
         AND "slug" = ${slug}
+        ${ownerId ? sql`AND "owner_id" = ${ownerId}` : sql``}
     )
   `;
 }

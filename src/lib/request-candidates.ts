@@ -2,7 +2,7 @@ import "server-only";
 
 import { and, sql as drizzleSql, eq } from "drizzle-orm";
 
-import { db, schema } from "@/lib/db/client";
+import { db, executeAtomicReturning, rowsOf, schema } from "@/lib/db/client";
 import { PETDEX_EMBEDDING_MODEL } from "@/lib/embeddings";
 import { toCurrentR2PublicUrl } from "@/lib/r2-public-url";
 
@@ -143,13 +143,22 @@ export async function createManualCandidate(args: {
   });
   if (existing) return { ok: false, reason: "exists" };
 
-  await db.insert(schema.petRequestCandidates).values({
-    petId: args.petId,
-    requestId: args.requestId,
-    similarity: null,
-    source: "manual",
-    status: "pending",
-  });
+  // The pre-read above is a not-in-the-same-transaction check, so two manual
+  // adds racing the same (petId, requestId) both pass it and the second hits
+  // the composite PK as an uncaught 23505 → 500. The auto path already uses
+  // `onConflictDoNothing`; do the same here and report the duplicate.
+  const inserted = await db
+    .insert(schema.petRequestCandidates)
+    .values({
+      petId: args.petId,
+      requestId: args.requestId,
+      similarity: null,
+      source: "manual",
+      status: "pending",
+    })
+    .onConflictDoNothing()
+    .returning({ petId: schema.petRequestCandidates.petId });
+  if (inserted.length === 0) return { ok: false, reason: "exists" };
 
   return { ok: true };
 }
@@ -285,47 +294,69 @@ export async function approveCandidate(args: {
 
   const now = new Date();
 
-  // Resolve this candidate → approved
-  await db
-    .update(schema.petRequestCandidates)
-    .set({
-      status: "approved",
-      resolvedAt: now,
-      resolvedBy: args.resolvedBy,
-    })
-    .where(
-      and(
-        eq(schema.petRequestCandidates.petId, args.petId),
-        eq(schema.petRequestCandidates.requestId, args.requestId),
-      ),
-    );
+  // Resolve this candidate → approved, and auto-reject the siblings, in
+  // one transaction. The three writes used to run bare: a failure after
+  // the first left the winner approved with its siblings still pending,
+  // and two admins racing the same candidate could both pass the
+  // `status !== "pending"` read above and both write. The winner's
+  // UPDATE repeats that read as a guard and only reports success if it
+  // still owned the row, so the losing racer returns `not_pending`
+  // instead of silently re-resolving.
+  const results = await executeAtomicReturning([
+    // Resolve this candidate → approved (guarded on it still being pending)
+    db
+      .update(schema.petRequestCandidates)
+      .set({
+        status: "approved",
+        resolvedAt: now,
+        resolvedBy: args.resolvedBy,
+      })
+      .where(
+        and(
+          eq(schema.petRequestCandidates.petId, args.petId),
+          eq(schema.petRequestCandidates.requestId, args.requestId),
+          eq(schema.petRequestCandidates.status, "pending"),
+        ),
+      )
+      .returning({ petId: schema.petRequestCandidates.petId })
+      .getSQL(),
 
-  // Auto-reject siblings: any other pending candidate for the same
-  // request loses now that we picked a winner.
-  await db
-    .update(schema.petRequestCandidates)
-    .set({
-      status: "rejected",
-      resolvedAt: now,
-      resolvedBy: args.resolvedBy,
-      rejectionReason: "another_candidate_approved",
-    })
-    .where(
-      and(
-        eq(schema.petRequestCandidates.requestId, args.requestId),
-        eq(schema.petRequestCandidates.status, "pending"),
-      ),
-    );
+    // Auto-reject siblings: any other pending candidate for the same
+    // request loses now that we picked a winner.
+    db
+      .update(schema.petRequestCandidates)
+      .set({
+        status: "rejected",
+        resolvedAt: now,
+        resolvedBy: args.resolvedBy,
+        rejectionReason: "another_candidate_approved",
+      })
+      .where(
+        and(
+          eq(schema.petRequestCandidates.requestId, args.requestId),
+          eq(schema.petRequestCandidates.status, "pending"),
+        ),
+      )
+      .getSQL(),
 
-  // Mark the request fulfilled with the chosen pet.
-  await db
-    .update(schema.petRequests)
-    .set({
-      status: "fulfilled",
-      fulfilledPetSlug: pet.slug,
-      updatedAt: now,
-    })
-    .where(eq(schema.petRequests.id, args.requestId));
+    // Mark the request fulfilled with the chosen pet.
+    db
+      .update(schema.petRequests)
+      .set({
+        status: "fulfilled",
+        fulfilledPetSlug: pet.slug,
+        updatedAt: now,
+      })
+      .where(eq(schema.petRequests.id, args.requestId))
+      .getSQL(),
+  ]);
+
+  if (rowsOf(results[0]).length === 0) {
+    // Lost the race, or the candidate was resolved between the read and
+    // the write. The transaction rolled the sibling/request writes back
+    // with it, so nothing changed.
+    return { ok: false, reason: "not_pending" };
+  }
 
   return {
     ok: true,
@@ -354,7 +385,10 @@ export async function rejectCandidate(args: {
   if (candidate.status !== "pending")
     return { ok: false, reason: "not_pending" };
 
-  await db
+  // The read above is a fast path for the common case; the guard lives
+  // in the write so a concurrent approval cannot be overwritten by a
+  // rejection that read `pending` a moment earlier.
+  const rejected = await db
     .update(schema.petRequestCandidates)
     .set({
       status: "rejected",
@@ -366,8 +400,11 @@ export async function rejectCandidate(args: {
       and(
         eq(schema.petRequestCandidates.petId, args.petId),
         eq(schema.petRequestCandidates.requestId, args.requestId),
+        eq(schema.petRequestCandidates.status, "pending"),
       ),
-    );
+    )
+    .returning({ petId: schema.petRequestCandidates.petId });
+  if (rejected.length === 0) return { ok: false, reason: "not_pending" };
 
   return { ok: true };
 }

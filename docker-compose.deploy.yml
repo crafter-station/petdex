@@ -1,0 +1,195 @@
+# Self-contained deployment of the Petdex web app.
+#
+# Everything the app needs is in this file: Postgres, Redis behind the Upstash
+# REST shim, and the app image built from the repo. No external credentials —
+# auth runs against the in-process Clerk mocks (`PETDEX_MOCK_AUTH=1`), which is
+# what lets this boot without a Clerk secret key.
+#
+#   docker compose -f docker-compose.deploy.yml up --build
+#   open http://127.0.0.1:3100
+#
+# The infra services mirror `docker-compose.dev.yml`; the difference is that
+# nothing binds to `127.0.0.1` on the host except the app port, because here
+# they are reached over the compose network rather than from `bun dev` on the
+# host.
+#
+# For a real deployment, replace the `app` environment with your own
+# DATABASE_URL / UPSTASH_* / Clerk keys and drop `PETDEX_MOCK_AUTH`.
+
+name: petdex-deploy
+
+services:
+  postgres:
+    # pgvector/pgvector:pg16 is postgres:16-alpine plus the `vector` extension.
+    # The stock image has no pgvector, so `bootstrap-pgvector.ts` had nothing
+    # to create and semantic search / exact-hash dedup were silently absent
+    # from this stack. The app's push-built schema cannot carry the vector
+    # columns on its own (see that script's header).
+    image: pgvector/pgvector@sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: petdex
+      POSTGRES_PASSWORD: petdex
+      POSTGRES_DB: petdex
+    volumes:
+      - petdex-deploy-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U petdex -d petdex"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # Upstash's client speaks REST; local Redis speaks the plain protocol. srh
+  # bridges them so `@upstash/redis` works unchanged.
+  redis-rest:
+    image: hiett/serverless-redis-http@sha256:5b0bb9239fce53abf87b2018a7a0deb9ec7bd900c5360738fe5fbeeb426f9150
+    restart: unless-stopped
+    environment:
+      SRH_MODE: env
+      SRH_TOKEN: petdex-dev-token
+      SRH_CONNECTION_STRING: redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # One-shot: push the schema, then seed. Kept out of the app's entrypoint so
+  # `docker compose restart` does not re-run it and two replicas cannot race
+  # the push. A plain `up` does re-run it (only `restart` skips a completed
+  # one-shot), which is harmless because push is idempotent and the seed skips
+  # existing slugs.
+  #
+  # The seed skips slugs that already exist (`findFirst` then `continue`, not
+  # an upsert), so re-running is safe and edits to a seeded row survive — but
+  # it also means the seed can never correct a row it previously wrote.
+  #
+  # `drizzle-kit push` is what the repo uses everywhere (`dev:docker` does the
+  # same); there are no migration files to apply. It reconciles the schema by
+  # diffing and, on a destructive change, emits the DROP and proceeds — the
+  # `--force` skips the confirmation prompt, not the statement. Point this at a
+  # database whose contents you are willing to lose.
+  #
+  # Built from the `source` stage, not `builder`: this needs the source tree
+  # and its dependencies, not a compiled Next app. Targeting `builder` would
+  # make BuildKit build that stage a second time under different build args.
+  migrate:
+    build:
+      context: .
+      target: source
+    working_dir: /app
+    command:
+      - sh
+      - -c
+      - |
+        bun x drizzle-kit push --force &&
+        bun --conditions react-server scripts/bootstrap-pgvector.ts &&
+        bun --conditions react-server scripts/seed-dev.ts
+    environment:
+      # Both services share one variable so pointing the app at an external
+      # database moves the migrations with it — a migrate service pinned to
+      # the built-in postgres while the app talks to a replaced DATABASE_URL
+      # would push the schema into a database nothing reads.
+      DATABASE_URL: ${PETDEX_DEPLOY_DATABASE_URL:-postgresql://petdex:petdex@postgres:5432/petdex}
+      # `seed-dev.ts` imports only the DB client and the mock module, so it
+      # needs neither Redis nor R2 — verified by running it against a bare
+      # Postgres with none of those set.
+      #
+      # Unblocks the optional personal-profile slice of the seed: it only
+      # seeds a real owner's pets when this is set, and without it the run
+      # still succeeds, just with the gallery slice alone.
+      PETDEX_MOCK_AUTH: "1"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  app:
+    restart: unless-stopped
+    build:
+      context: .
+      target: runner
+      args:
+        # The shared Clerk dev publishable key from `.env.dev`. It is a public
+        # client identifier, and the mock auth alias means no secret key is
+        # needed — but `NEXT_PUBLIC_*` is inlined at build time, so the build
+        # needs a value here rather than at runtime.
+        #
+        # WARNING: PETDEX_MOCK_AUTH is baked in at BUILD time — next.config
+        # aliases @clerk/nextjs to the in-process mock during this build, and
+        # that alias survives any runtime env change. Swapping in real Clerk
+        # keys at runtime does NOT restore real authentication; a public
+        # deployment built from this file would treat every visitor as the
+        # same signed-in mock user. A real deployment needs a separate build
+        # with PETDEX_MOCK_AUTH unset (or empty) in the build args.
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-pk_test_bWF4aW11bS1oZW4tNzIuY2xlcmsuYWNjb3VudHMuZGV2JA}
+        PETDEX_MOCK_AUTH: "1"
+    ports:
+      - "127.0.0.1:3100:3000"
+    environment:
+      DATABASE_URL: ${PETDEX_DEPLOY_DATABASE_URL:-postgresql://petdex:petdex@postgres:5432/petdex}
+      UPSTASH_REDIS_REST_URL: http://redis-rest:80
+      UPSTASH_REDIS_REST_TOKEN: petdex-dev-token
+      # The telemetry route hashes IPs with this before writing a rate-limit
+      # key, and refuses to start in production without a stable secret. It
+      # would accept the Upstash token above as the source, but only because
+      # that string happens to be exactly the 16-char minimum — say it here
+      # instead of depending on the length of a dev token.
+      TELEMETRY_RATELIMIT_SECRET: petdex-dev-telemetry-secret
+      # Uploads are not part of this stack. `src/lib/r2.ts` warns once at
+      # startup when these are missing and then fails the upload on the
+      # placeholder credentials, so a stray write never reaches a real bucket.
+      # R2_PUBLIC_BASE is deliberately NOT overridden: `normalizeBase` in
+      # `src/lib/r2-public-url.ts` rejects anything that is not https and
+      # falls back to `https://assets.petdex.dev`, which is where the seeded
+      # sprites live — an `http://` override here would be silently ignored.
+      R2_ACCOUNT_ID: devnull
+      R2_ACCESS_KEY_ID: devnull
+      R2_SECRET_ACCESS_KEY: devnull
+      R2_BUCKET: petdex-dev-bucket
+      PETDEX_MOCK_AUTH: "1"
+      # The app's configured public origin. Read at request time (never
+      # inlined into the bundle), and used to pin the `Location` that
+      # `/api/pets/random` answers with, so a forged `Host` cannot turn a
+      # shuffle into an open redirect. Set to this stack's own origin.
+      PETDEX_URL: http://127.0.0.1:3100
+    # The runner image carries bun and node but no curl or wget, so the probe
+    # uses bun's fetch. `/version.json` is a static file written at build time,
+    # so it answers from disk without touching Postgres or Redis — a probe that
+    # reached the database would report the app unhealthy whenever the database
+    # was merely slow, and would keep a dependency the app is meant to survive.
+    # The trade-off: this is a liveness check, not a readiness one. A wedged
+    # Postgres leaves the app reporting healthy while every DB-backed route
+    # 500s, and nothing restarts it — `depends_on` is evaluated at creation
+    # only, and `restart: unless-stopped` ignores healthcheck failures.
+    healthcheck:
+      test:
+        - CMD
+        - bun
+        - -e
+        - "fetch('http://127.0.0.1:3000/version.json').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      # The rate limiter fails open (see `failOpen` in `src/lib/ratelimit.ts`),
+      # so a missing Redis cannot take the site down — but declaring the
+      # dependency keeps the app from starting its first requests against a
+      # shim that is still booting.
+      redis-rest:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  petdex-deploy-postgres:

@@ -7,7 +7,6 @@
 //   - scripts/compute-similarity.ts for bulk backfill
 
 import { eq } from "drizzle-orm";
-import sharp from "sharp";
 
 import {
   AGGREGATE_KEYS,
@@ -21,44 +20,26 @@ import {
   embedTextValue,
   PETDEX_EMBEDDING_MODEL,
 } from "@/lib/embeddings";
+import { fetchR2AssetBuffer } from "@/lib/r2-fetch";
+import { toCurrentR2PublicUrl } from "@/lib/r2-public-url";
+import { dhashFromSpriteBuffer } from "@/lib/sprite-dhash";
 import { isAllowedAssetUrl } from "@/lib/url-allowlist";
 
-const FRAME_W = 192;
-const FRAME_H = 208;
+// The pixel hashing lives in its own module so the review path can hash a
+// sheet without importing this module's DB client; re-exported here so the
+// existing `@/lib/similarity` importers keep working.
+export { dhashFromSpriteBuffer };
 
 export async function dhashFromSpriteUrl(
   spriteUrl: string,
 ): Promise<string | null> {
   if (!isAllowedAssetUrl(spriteUrl)) return null;
   try {
-    const res = await fetch(spriteUrl);
-    if (!res.ok) return null;
-    const buf = Buffer.from(await res.arrayBuffer());
+    // The allowlist pins the host, but the body is whatever the bucket
+    // serves — bounded read with a deadline, same ceiling as the review path.
+    const buf = await fetchR2AssetBuffer(spriteUrl);
+    if (!buf) return null;
     return dhashFromSpriteBuffer(buf);
-  } catch {
-    return null;
-  }
-}
-
-export async function dhashFromSpriteBuffer(
-  buf: Buffer,
-): Promise<string | null> {
-  try {
-    const frame = await sharp(buf)
-      .extract({ left: 0, top: 0, width: FRAME_W, height: FRAME_H })
-      .resize(9, 8, { fit: "fill" })
-      .grayscale()
-      .raw()
-      .toBuffer();
-    let bits = "";
-    for (let row = 0; row < 8; row++) {
-      for (let col = 0; col < 8; col++) {
-        const left = frame[row * 9 + col];
-        const right = frame[row * 9 + col + 1];
-        bits += left < right ? "1" : "0";
-      }
-    }
-    return BigInt(`0b${bits}`).toString(16).padStart(16, "0");
   } catch {
     return null;
   }
@@ -94,7 +75,11 @@ export async function refreshSimilarityFor(petId: string): Promise<void> {
   if (!row) return;
 
   const [hash, vec] = await Promise.all([
-    dhashFromSpriteUrl(row.spritesheetUrl),
+    // The row's stored URL may still point at a legacy public host, which the
+    // allowlist deliberately excludes — so the hash came back null for every
+    // such pet and it never got a dhash. Rewrite first: the value that is
+    // validated and fetched is then the value the bucket actually serves.
+    dhashFromSpriteUrl(toCurrentR2PublicUrl(row.spritesheetUrl)),
     embedPetText({
       displayName: row.displayName,
       description: row.description,
@@ -122,14 +107,18 @@ export async function persistPetEmbedding(
   vec: number[],
 ): Promise<void> {
   if (!process.env.DATABASE_URL) return;
-  // Drizzle doesn't model pgvector yet; raw SQL via the neon-http driver.
+  // Drizzle doesn't model pgvector yet; raw SQL through the shared db
+  // client (the same escape hatch dex.ts uses). The bare neon() this
+  // replaced opened a second connection pool that skipped the local-driver
+  // detection and the postgres-js `.rows` normalization, so a local run
+  // wrote through a different path than production — same statement, two
+  // code paths, one of them untested.
   const literal = embeddingVectorLiteral(vec);
-  const { neon } = await import("@neondatabase/serverless");
-  const sql = neon(process.env.DATABASE_URL);
-  await sql`
+  const { sql } = await import("drizzle-orm");
+  await db.execute(sql`
     UPDATE submitted_pets
     SET embedding = ${literal}::vector,
         embedding_model = ${PETDEX_EMBEDDING_MODEL}
     WHERE id = ${petId}
-  `;
+  `);
 }

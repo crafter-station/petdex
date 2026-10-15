@@ -23,6 +23,11 @@ export async function generateMetadata({
   return {
     title: t("title"),
     description: t("description"),
+    // robots.txt disallows /submit, and a disallowed URL is never crawled —
+    // so the `index, follow` this page inherited from the root layout was
+    // never read, and contradicted the disallow for anyone auditing the two
+    // by hand. Say the same thing in both places.
+    robots: { index: false, follow: false },
     alternates: buildLocaleAlternates(
       "/submit",
       hasLocale(locale) ? locale : undefined,
@@ -35,12 +40,12 @@ export default async function SubmitPage() {
 
   return (
     <FullAuthProviders>
-      <main className="min-h-dvh bg-background">
-        <SiteHeader hideSubmitCta />
+      <SiteHeader hideSubmitCta />
+      <main id="main" className="min-h-dvh bg-background">
         <section className="petdex-hero relative -mt-14 overflow-clip pt-14">
           <div className="relative mx-auto flex w-full max-w-6xl flex-col gap-10 px-5 pb-12 md:px-8 md:pb-16">
             <header className="max-w-3xl">
-              <p className="text-sm font-medium text-brand-light">
+              <p className="text-sm font-medium text-brand dark:text-brand-light">
                 {t("eyebrow")}
               </p>
               <h1 className="mt-4 text-5xl leading-tight font-medium tracking-normal text-foreground md:text-7xl">

@@ -1,3 +1,5 @@
+// DEAD CODE (verified 2026-10): nothing imports this module. /api/wechat-qr reads through its own inline OSS client, and `uploadWeChatQr` was never wired up — note that it also assumed a public bucket while the route's bucket is private, so do NOT wire it in without fixing that. Delete or wire in an upstream decision.
+
 import OSS from "ali-oss";
 
 let cachedClient: OSS | null = null;

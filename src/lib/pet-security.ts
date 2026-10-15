@@ -103,7 +103,12 @@ export function scanPetSecurity(input: ScanInput): PetSecurityScan {
   ) => {
     if (severity === "fail") hasFail = true;
     if (severity === "hold") hasHold = true;
-    const clipped = redactEvidence(code, evidence, key)
+    // Every finding's evidence passes through here, and several codes report
+    // the offending value verbatim (`control_character_payload`,
+    // `shell_command_substitution`, the hold patterns), so the scrub belongs
+    // on the shared path rather than on any one code — measured: a value
+    // carrying a NUL left it in four different codes' evidence.
+    const clipped = redactControlCharacters(redactEvidence(code, evidence, key))
       .replace(/\s+/g, " ")
       .trim()
       .slice(0, 220);
@@ -403,6 +408,42 @@ function isUnsafePathSegment(value: string): boolean {
 function hasTokenValue(value: string): boolean {
   tokenValueRe.lastIndex = 0;
   return tokenValueRe.test(value);
+}
+
+/**
+ * Replace the control characters `hasBlockedControlCharacter` catches with a
+ * readable marker.
+ *
+ * A finding's evidence can carry them because the scan reports the offending
+ * value verbatim, and it found the value offending precisely because of those
+ * characters. Postgres refuses a NUL in `text` and `jsonb` both ("null
+ * character not permitted", and `\u0000 cannot be converted to text"), so a
+ * value with one made the review write throw and left the submission stuck in
+ * `running` with no decision. ESC and DEL are legal in the DB but are
+ * invisible or terminal-driving in the owner-facing rejection reason.
+ *
+ * Applied to every finding in `add()`, not to one code: measured, a NUL
+ * survived in the evidence of `control_character_payload`,
+ * `shell_command_substitution`, `external_url_in_pet_json`,
+ * `encoded_payload_marker` and `secret_token_value` alike.
+ */
+export function redactControlCharacters(value: string): string {
+  // Scanned by char code rather than a regex: the characters this matches are
+  // exactly the ones a regex literal may not carry (`noControlCharactersInRegex`),
+  // and `hasBlockedControlCharacter` above reads the same three codes the same way.
+  let out = "";
+  for (let index = 0; index < value.length; index++) {
+    const code = value.charCodeAt(index);
+    out +=
+      code === 0
+        ? "[NUL]"
+        : code === 27
+          ? "[ESC]"
+          : code === 127
+            ? "[DEL]"
+            : value[index];
+  }
+  return out;
 }
 
 function redactEvidence(code: string, evidence: string, key?: string): string {

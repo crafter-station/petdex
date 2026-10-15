@@ -1,4 +1,13 @@
-import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import {
+  mkdir,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 
@@ -7,6 +16,7 @@ import JSZip from "jszip";
 import pc from "picocolors";
 
 import pkg from "../package.json";
+import { apiRequest } from "../src/api-fetch.js";
 import { isTrustedAssetUrl } from "../src/asset-hosts.js";
 import { resolveAuthConfig } from "../src/auth-config.js";
 import { ClerkCliAuth } from "../src/cli-auth/index.js";
@@ -21,24 +31,47 @@ import {
   readCollectionList,
 } from "../src/collections.js";
 import {
+  MAX_EDIT_ASSET_BYTES,
   parseImageDims,
   readEditMetadataAsset,
   readEditSpriteAsset,
   readEditZipAsset,
 } from "../src/edit-assets.js";
+import { fetchCapped } from "../src/fetch-capped.js";
 import {
   fetchManifest as fetchCatalogManifest,
+  isInstallSlug,
   type ManifestPet,
 } from "../src/manifest.js";
+import { checkPetdexUrl } from "../src/petdex-url.js";
 import {
   emit,
   getStatus,
   maybeShowFirstRunNotice,
   setEnabled,
 } from "../src/telemetry.js";
+import {
+  assertZipEntriesWithinLimits,
+  readZipEntryBuffer,
+} from "../src/zip-guard.js";
 
 // ─── config ────────────────────────────────────────────────────────────────
-const PETDEX_URL = process.env.PETDEX_URL ?? "https://petdex.dev";
+// Bearer tokens ride every request this base URL produces, so the override
+// follows the issuer rule (normalizeIssuer): https only, http allowed for
+// loopback where a dev stack runs. Without it PETDEX_URL=http://attacker.tld
+// silently shipped the token in cleartext.
+function resolvePetdexUrl(): string {
+  const raw = process.env.PETDEX_URL ?? "https://petdex.dev";
+  const resolved = checkPetdexUrl(raw);
+  if (!resolved.ok) {
+    // Module-evaluation failure: main().catch never runs yet, so print and
+    // exit here instead of throwing into a raw stack trace.
+    console.error(`petdex: ${resolved.reason}`);
+    process.exit(1);
+  }
+  return resolved.url;
+}
+const PETDEX_URL = resolvePetdexUrl();
 const PETDEX_REFERER = `${PETDEX_URL.replace(/\/+$/, "")}/`;
 const DOWNLOAD_URL = `${PETDEX_URL.replace(/\/+$/, "")}/download`;
 
@@ -90,6 +123,17 @@ async function getAuth({
 }
 
 const VERSION = pkg.version;
+
+// `getAccessToken()`/`whoami()` throw for reasons that are not "signed
+// out" — a locked keychain, an unreadable credential file, a failed
+// refresh or userinfo request. Collapsing every one of those into the
+// bare login hint sent users to `login`, which then failed the same way
+// with no visible cause. Keep the hint (it is right for the common case)
+// and append the underlying message so the real problem is readable.
+function authFailureHint(err: unknown): string {
+  const detail = err instanceof Error ? err.message : String(err);
+  return `Not signed in. Run ${pc.cyan("petdex login")}. (${detail})`;
+}
 
 // ─── entrypoint ────────────────────────────────────────────────────────────
 // Called at the bottom of the file.
@@ -445,8 +489,8 @@ async function cmdWhoami() {
       ].join("\n"),
       "Signed in",
     );
-  } catch {
-    p.cancel(`Not signed in. Run ${pc.cyan("petdex login")}.`);
+  } catch (err) {
+    p.cancel(authFailureHint(err));
     process.exit(1);
   }
 }
@@ -475,6 +519,13 @@ async function installOne(pet: ManifestPet): Promise<void> {
 
   // Multi-target: ~/.petdex/pets and ~/.codex/pets so both Petdex
   // Desktop and Codex Desktop see the pet immediately.
+  //
+  // The slug is joined into both paths, so it has to be the shape the
+  // install routes accept before it reaches `path.join` — otherwise
+  // `../../…` writes outside the pets directory.
+  if (!isInstallSlug(slug)) {
+    throw new Error(`invalid pet slug: ${slug}`);
+  }
   const petdexDir = path.join(homedir(), ".petdex", "pets", slug);
   const codexDir = path.join(homedir(), ".codex", "pets", slug);
   await Promise.all([
@@ -482,37 +533,103 @@ async function installOne(pet: ManifestPet): Promise<void> {
     mkdir(codexDir, { recursive: true }),
   ]);
 
-  const ext = pet.spritesheetUrl.endsWith(".png") ? "png" : "webp";
+  // Read the extension off the parsed pathname, not the whole URL: a URL
+  // carrying a query (`…/sprite.png?v=2`) does not end with ".png", so the
+  // old check wrote real PNG bytes to `spritesheet.webp`.
+  let ext: "png" | "webp" = "webp";
+  try {
+    ext = new URL(pet.spritesheetUrl).pathname.toLowerCase().endsWith(".png")
+      ? "png"
+      : "webp";
+  } catch {
+    /* leave the webp default */
+  }
   // Validate response status before reading the body so a 404/500
-  // doesn't silently land HTML inside pet.json or spritesheet.*.
-  const fetchOrThrow = async (url: string): Promise<ArrayBuffer> => {
-    const res = await fetch(url, { headers: { Referer: PETDEX_REFERER } });
-    if (!res.ok) {
-      throw new Error(`download ${url} -> ${res.status} ${res.statusText}`);
-    }
-    return res.arrayBuffer();
+  // doesn't silently land HTML inside pet.json or spritesheet.*. Both files
+  // are capped at the same 8 MB the server uploads them under, and both have
+  // a timeout, so a hostile or hung CDN cannot stream into unbounded memory.
+  const fetchOrThrow = async (url: string): Promise<Buffer> => {
+    const { body } = await fetchCapped(url, {
+      init: { headers: { Referer: PETDEX_REFERER } },
+      maxBytes: MAX_EDIT_ASSET_BYTES,
+      timeoutMs: 30_000,
+      throwOnNotOk: true,
+    });
+    return body;
   };
   const [petJson, spritesheet] = await Promise.all([
     fetchOrThrow(pet.petJsonUrl),
     fetchOrThrow(pet.spritesheetUrl),
   ]);
-  await Promise.all([
-    writeFile(path.join(petdexDir, "pet.json"), Buffer.from(petJson)),
-    writeFile(
-      path.join(petdexDir, `spritesheet.${ext}`),
-      Buffer.from(spritesheet),
+  // Write each file through a temp name and rename over the target: a
+  // rename is atomic, so a crash or a concurrent reader never sees a
+  // half-written pet.json/spritesheet. Within each directory the sprite
+  // lands before pet.json so an interrupted install never pairs new
+  // metadata with the old image.
+  const otherExt: "png" | "webp" = ext === "png" ? "webp" : "png";
+  // Stage all four temps first and only then rename: the two install
+  // directories commit back-to-back instead of the second directory's
+  // downloads waiting on the first's renames, shrinking the window where
+  // ~/.petdex/pets and ~/.codex/pets describe different installs. Each
+  // rename is still atomic (a crash can interleave the two directories,
+  // but never expose a half-written file), and within each directory the
+  // sprite renames before pet.json so new metadata never pairs with the
+  // old image.
+  // Staging is completion-ordered, so the rename list is built per phase:
+  // all sprites rename before any pet.json, keeping the
+  // sprite-before-metadata order the comment promises regardless of which
+  // writeFile finished first.
+  const spriteStaged: Array<{ tmp: string; target: string }> = [];
+  const jsonStaged: Array<{ tmp: string; target: string }> = [];
+  const stage = async (
+    list: Array<{ tmp: string; target: string }>,
+    dir: string,
+    name: string,
+    data: Buffer,
+  ) => {
+    const target = path.join(dir, name);
+    const tmp = `${target}.${process.pid}.tmp`;
+    await writeFile(tmp, data);
+    list.push({ tmp, target });
+  };
+  const staged = () => [...spriteStaged, ...jsonStaged];
+  try {
+    await Promise.all(
+      [petdexDir, codexDir].map((dir) =>
+        stage(spriteStaged, dir, `spritesheet.${ext}`, spritesheet),
+      ),
+    );
+    await Promise.all(
+      [petdexDir, codexDir].map((dir) =>
+        stage(jsonStaged, dir, "pet.json", petJson),
+      ),
+    );
+    for (const { tmp, target } of staged()) {
+      await rename(tmp, target);
+    }
+  } finally {
+    await Promise.all(
+      staged()
+        .filter(({ tmp }) => existsSync(tmp))
+        .map(({ tmp }) => rm(tmp, { force: true })),
+    );
+  }
+  await Promise.all(
+    [petdexDir, codexDir].map((dir) =>
+      // The desktop loader takes the first of spritesheet.webp /
+      // spritesheet.png that exists, so a leftover file in the other
+      // extension from an earlier install shadows the one just written
+      // and the pet keeps rendering the old art. Drop it.
+      rm(path.join(dir, `spritesheet.${otherExt}`), { force: true }),
     ),
-    writeFile(path.join(codexDir, "pet.json"), Buffer.from(petJson)),
-    writeFile(
-      path.join(codexDir, `spritesheet.${ext}`),
-      Buffer.from(spritesheet),
-    ),
-  ]);
-
-  // Fire-and-forget install metric so the gallery counter ticks up.
-  void fetch(`${PETDEX_URL}/install/${slug}`, { method: "GET" }).catch(
-    () => {},
   );
+
+  // Fire-and-forget install metric so the gallery counter ticks up. The
+  // timeout keeps a hung endpoint from holding the process open at exit.
+  void fetch(`${PETDEX_URL}/install/${slug}`, {
+    method: "GET",
+    signal: AbortSignal.timeout(3000),
+  }).catch(() => {});
 }
 
 async function cmdInstall(args: string[]) {
@@ -625,7 +742,9 @@ async function cmdInstall(args: string[]) {
   }
   if (lines.length > 0) p.note(lines.join("\n"), "Next steps");
 
-  if (failed.length > 0 && installed.length === 0) {
+  if (failed.length > 0 || missing.length > 0) {
+    // Partial success still exits non-zero: a script that asks for three
+    // pets and got one must be able to tell. Mirrors cmdSubmit's rule.
     process.exit(1);
   }
 }
@@ -717,8 +836,8 @@ async function cmdSubmit(args: string[]) {
       process.exit(1);
     }
     token = t;
-  } catch {
-    p.cancel(`Not signed in. Run ${pc.cyan("petdex login")}.`);
+  } catch (err) {
+    p.cancel(authFailureHint(err));
     process.exit(1);
   }
   let profileUrl = PETDEX_URL;
@@ -884,8 +1003,8 @@ async function cmdEdit(args: string[]): Promise<void> {
       process.exit(1);
     }
     token = t;
-  } catch {
-    p.cancel(`Not signed in. Run ${pc.cyan("petdex login")}.`);
+  } catch (err) {
+    p.cancel(authFailureHint(err));
     process.exit(1);
   }
 
@@ -911,9 +1030,17 @@ async function cmdEdit(args: string[]): Promise<void> {
   const s = p.spinner();
   s.start(`Resolving ${slug}`);
 
-  const petRes = await fetch(`${PETDEX_URL}/api/pets/${slug}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  // The slug comes straight from argv, so encode it before it reaches the
+  // path: a value like `../cli/edit` (or one carrying `?`/`#`) would
+  // otherwise rewrite the request line and hit a different endpoint with
+  // the bearer attached. Real slugs are `[a-z0-9-]`, which encoding leaves
+  // untouched — this only neutralizes the malformed ones.
+  const petRes = await apiRequest(
+    `${PETDEX_URL}/api/pets/${encodeURIComponent(slug)}`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
   if (!petRes.ok) {
     s.stop(pc.red("not found"));
     p.cancel(`Pet "${slug}" not found or you don't own it.`);
@@ -947,7 +1074,7 @@ async function cmdEdit(args: string[]): Promise<void> {
       p.cancel(message);
       process.exit(1);
     }
-    const presignRes = await fetch(`${PETDEX_URL}/api/cli/edit-presign`, {
+    const presignRes = await apiRequest(`${PETDEX_URL}/api/cli/edit-presign`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,
@@ -1013,7 +1140,7 @@ async function cmdEdit(args: string[]): Promise<void> {
   }
 
   s.start("Submitting edit");
-  const editRes = await fetch(`${PETDEX_URL}/api/cli/edit`, {
+  const editRes = await apiRequest(`${PETDEX_URL}/api/cli/edit`, {
     method: "PATCH",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -1117,7 +1244,19 @@ async function readFolderCandidate(folder: string): Promise<Candidate | null> {
   } catch {
     throw new Error(`pet.json in ${folder} is not valid JSON`);
   }
+  // Cap the sprite the same way the zip path does before reading it: a
+  // stray multi-GB image in the folder would otherwise be slurped into
+  // memory and then duplicated by the DEFLATE pass below.
+  const spriteStat = await stat(spritePath);
+  if (spriteStat.size <= 0 || spriteStat.size > MAX_EDIT_ASSET_BYTES) {
+    throw new Error(
+      `spritesheet in ${folder} is ${(spriteStat.size / (1024 * 1024)).toFixed(1)} MB; maximum is 8 MB`,
+    );
+  }
   const spritesheetBuffer = await readFile(spritePath);
+  if (spritesheetBuffer.length > MAX_EDIT_ASSET_BYTES) {
+    throw new Error(`spritesheet in ${folder} changed while it was being read`);
+  }
 
   const zip = new JSZip();
   zip.file("pet.json", petJson);
@@ -1141,8 +1280,21 @@ async function readFolderCandidate(folder: string): Promise<Candidate | null> {
 }
 
 async function readZipCandidate(zipPath: string): Promise<Candidate | null> {
+  const file = await stat(zipPath);
+  if (!file.isFile()) throw new Error(`not a file: ${zipPath}`);
+  if (file.size <= 0 || file.size > MAX_EDIT_ASSET_BYTES) {
+    throw new Error(
+      `zip is ${(file.size / (1024 * 1024)).toFixed(1)} MB; maximum is 8 MB`,
+    );
+  }
   const buf = await readFile(zipPath);
+  if (buf.length > MAX_EDIT_ASSET_BYTES) {
+    throw new Error("zip changed while it was being read");
+  }
   const zip = await JSZip.loadAsync(buf);
+  // Reject an archive that declares more than we will inflate before touching
+  // any entry, then read the two entries we need through a byte ceiling.
+  assertZipEntriesWithinLimits(zip);
   const petJsonEntry = zip.file("pet.json");
   const webpEntry = zip.file("spritesheet.webp");
   const pngEntry = zip.file("spritesheet.png");
@@ -1155,14 +1307,20 @@ async function readZipCandidate(zipPath: string): Promise<Candidate | null> {
     );
   }
 
-  const petJson = await petJsonEntry.async("string");
+  const petJson = (
+    await readZipEntryBuffer(petJsonEntry, MAX_EDIT_ASSET_BYTES, "zip pet.json")
+  ).toString("utf8");
   let petJsonObj: Record<string, unknown> = {};
   try {
     petJsonObj = JSON.parse(petJson);
   } catch {
     throw new Error(`pet.json in zip is not valid JSON`);
   }
-  const spritesheetBuffer = Buffer.from(await spriteEntry.async("uint8array"));
+  const spritesheetBuffer = await readZipEntryBuffer(
+    spriteEntry,
+    MAX_EDIT_ASSET_BYTES,
+    `zip spritesheet.${spritesheetExt}`,
+  );
 
   const baseName = path.basename(zipPath, ".zip");
   return {
@@ -1190,7 +1348,7 @@ async function submitOne(
     throw new Error("spritesheet dimensions could not be parsed");
   }
 
-  const presignRes = await fetch(`${PETDEX_URL}/api/cli/submit`, {
+  const presignRes = await apiRequest(`${PETDEX_URL}/api/cli/submit`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${bearer}`,
@@ -1237,7 +1395,7 @@ async function submitOne(
     ),
   ]);
 
-  const reg = await fetch(`${PETDEX_URL}/api/cli/submit/register`, {
+  const reg = await apiRequest(`${PETDEX_URL}/api/cli/submit/register`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${bearer}`,
@@ -1312,6 +1470,8 @@ async function putR2(
     method: "PUT",
     headers: { "Content-Type": contentType },
     body,
+    // A presigned PUT that never answers must not hang the CLI forever.
+    signal: AbortSignal.timeout(120_000),
   });
   if (!res.ok) {
     throw new Error(`R2 PUT ${res.status}`);
@@ -1348,13 +1508,26 @@ async function fetchOwnedSlugs(
       }),
       signal: AbortSignal.timeout(8000),
     });
-    if (!res.ok) return out; // older server: just skip dedup, don't block submit
+    // A 404 is an older server without the dedup endpoint — silently
+    // fall back, as before. Any other failure (5xx, network, timeout)
+    // means we could not tell whether these pets are already submitted,
+    // and staying quiet there lets the server mint a `-2` slug the user
+    // never agreed to. Say so instead of pretending there were no dupes.
+    if (res.status === 404) return out;
+    if (!res.ok) {
+      process.stderr.write(
+        `petdex: could not check for duplicate submissions (HTTP ${res.status}); submitting without the duplicate prompt.\n`,
+      );
+      return out;
+    }
     const data = (await res.json()) as { existing?: OwnedPet[] };
     for (const row of data.existing ?? []) {
       if (row && typeof row.slug === "string") out.set(row.slug, row);
     }
-  } catch {
-    /* server doesn't support dedup yet — fall back to old behavior */
+  } catch (err) {
+    process.stderr.write(
+      `petdex: could not check for duplicate submissions (${err instanceof Error ? err.message : String(err)}); submitting without the duplicate prompt.\n`,
+    );
   }
   return out;
 }

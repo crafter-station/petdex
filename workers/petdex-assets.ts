@@ -12,12 +12,22 @@ type Env = {
   PETDEX_PETS: R2BucketBinding;
 };
 
-const ALLOWED_REFERER_PREFIXES = [
-  "http://localhost",
-  "https://localhost",
-  "https://petdex.dev/",
-];
+// Hotlink gate, not access control: a `Referer` header is client-set, so
+// curl `-H 'Referer: https://petdex.dev/'` walks straight through. What this
+// buys is only that a third-party page cannot inline these assets.
+//
+// Parsed as URLs and matched on host, not with `startsWith`: the previous
+// prefix form carried `"http://localhost"`, which `http://localhost.evil.com/`
+// also prefixes. `hostname` (not `host`) keeps any port on localhost allowed —
+// the old prefix's intent, and what a dev server on :3000/:3100 sends — while
+// `localhost.evil.com` is now a different host and fails. URL parsing also
+// normalizes scheme/host case and rejects `https://petdex.dev@evil.com/`
+// (its hostname is evil.com).
+const ALLOWED_REFERER_HOSTS = new Set(["localhost", "petdex.dev"]);
 
+// CORS is a separate question from the Referer gate: the browser attaches
+// Origin on cross-site fetches, so an allowlisted origin gets a credentialed
+// read of anything the Referer gate lets through.
 const ALLOWED_ORIGINS = new Set([
   "http://localhost:3000",
   "https://petdex.dev",
@@ -26,8 +36,11 @@ const ALLOWED_ORIGINS = new Set([
 function isAllowedReferer(request: Request): boolean {
   const referer = request.headers.get("Referer");
   if (!referer) return false;
-  const value = referer.toLowerCase();
-  return ALLOWED_REFERER_PREFIXES.some((prefix) => value.startsWith(prefix));
+  try {
+    return ALLOWED_REFERER_HOSTS.has(new URL(referer).hostname);
+  } catch {
+    return false;
+  }
 }
 
 function corsHeaders(request: Request): Headers {
@@ -36,7 +49,10 @@ function corsHeaders(request: Request): Headers {
   if (origin && ALLOWED_ORIGINS.has(origin)) {
     headers.set("Access-Control-Allow-Origin", origin);
     headers.set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
-    headers.set("Access-Control-Allow-Headers", "Range");
+    // No Allow-Headers for Range: get() reads the whole object, so a Range
+    // request gets 200 with the full body, not 206. Advertising the header
+    // invited clients into resumable downloads this endpoint does not
+    // implement — re-advertise it if range support lands.
     headers.set("Vary", "Origin, Referer");
   } else {
     headers.set("Vary", "Referer");
@@ -52,9 +68,23 @@ function corsHeaders(request: Request): Headers {
 function errorResponse(body: string, status: number): Response {
   return new Response(body, {
     status,
-    headers: { "Cache-Control": "no-store" },
+    headers: {
+      "Cache-Control": "no-store",
+      // Errors never render (no sniffing to HTML from an image type), so
+      // they carry nosniff alone; the 200 path adds the sandbox CSP.
+      "X-Content-Type-Options": "nosniff",
+    },
   });
 }
+
+// Applied to every 200 too (see the fetch handler): responses carry whatever
+// Content-Type the upload wrote, and this bucket serves user uploads, so the
+// worker itself pins the two headers that stop a mislabeled body from
+// becoming an executable document on this origin.
+const SECURITY_HEADERS = {
+  "X-Content-Type-Options": "nosniff",
+  "Content-Security-Policy": "default-src 'none'; sandbox",
+} as const;
 
 function objectKey(request: Request): string | null {
   const url = new URL(request.url);
@@ -98,6 +128,9 @@ export default {
       "Cache-Control",
       headers.get("Cache-Control") ?? "public, max-age=31536000, immutable",
     );
+    for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
+      headers.set(name, value);
+    }
 
     if (request.method === "HEAD") {
       return new Response(null, { headers });

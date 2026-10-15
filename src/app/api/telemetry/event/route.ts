@@ -2,6 +2,7 @@ import { createHmac } from "node:crypto";
 
 import { normalizeCountry } from "@/lib/country-code";
 import { db, schema } from "@/lib/db/client";
+import { publicTrafficGuardKey } from "@/lib/public-traffic-guard";
 import { telemetryRatelimit } from "@/lib/ratelimit";
 
 export const runtime = "nodejs";
@@ -278,10 +279,10 @@ export async function POST(req: Request): Promise<Response> {
   // Redis key isn't a literal IP — the privacy page promises raw IPs
   // are never stored, and "stored in our rate-limit cache" still
   // counts as stored. With a per-deploy server secret the hash is
-  // also non-trivial to reverse via rainbow table.
-  const xff = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  const ip = xff ?? req.headers.get("x-real-ip") ?? "unknown-anonymous";
-  const rateLimitKey = hashIpForRateLimit(ip);
+  // also non-trivial to reverse via rainbow table. The key itself comes
+  // from the shared guard helper, which prefers the platform-set
+  // `x-real-ip` over a client-supplied `x-forwarded-for`.
+  const rateLimitKey = hashIpForRateLimit(publicTrafficGuardKey(req.headers));
 
   const rl = await telemetryRatelimit.limit(rateLimitKey);
   if (!rl.success) {

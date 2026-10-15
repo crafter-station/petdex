@@ -10,6 +10,12 @@ import { requireSameOrigin } from "@/lib/same-origin";
 
 export const runtime = "nodejs";
 
+// Per-user data on a URL that carries no user identity — the body holds the
+// caller's own `email` and `githubUrl` — so an intermediary must not reuse it.
+// The URL is the same for every signed-in user, which is exactly the case the
+// Cloudflare cache-everything rule in front of the deployment would fill in.
+const PRIVATE_HEADERS = { "Cache-Control": "private, no-store" };
+
 type ClaimIdentity = {
   email: string | null;
   githubUrl: string | null;
@@ -31,7 +37,7 @@ export async function GET(): Promise<Response> {
 
   const ident = await getClaimIdentity(userId);
   if (!ident.email && !ident.githubUrl) {
-    return NextResponse.json({ pets: [] });
+    return NextResponse.json({ pets: [] }, { headers: PRIVATE_HEADERS });
   }
 
   const filters = [];
@@ -66,11 +72,14 @@ export async function GET(): Promise<Response> {
       ),
     );
 
-  return NextResponse.json({
-    pets: rows,
-    email: ident.email,
-    githubUrl: ident.githubUrl,
-  });
+  return NextResponse.json(
+    {
+      pets: rows,
+      email: ident.email,
+      githubUrl: ident.githubUrl,
+    },
+    { headers: PRIVATE_HEADERS },
+  );
 }
 
 // POST — claim a single pet by id. Same checks as the listing query, plus
@@ -98,7 +107,12 @@ export async function POST(req: Request): Promise<Response> {
   } catch {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
-  const id = body.id?.trim();
+  // A literal `null` body parses fine and then `.id` throws; `{ id: 5 }`
+  // reaches `.trim` on a number. Require an object with a string id.
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    return NextResponse.json({ error: "invalid_json" }, { status: 400 });
+  }
+  const id = typeof body.id === "string" ? body.id.trim() : "";
   if (!id) {
     return NextResponse.json({ error: "missing_id" }, { status: 400 });
   }
@@ -143,14 +157,47 @@ export async function POST(req: Request): Promise<Response> {
   const update: Partial<typeof schema.submittedPets.$inferInsert> = {
     ownerId: userId,
   };
+  // 'discover' means an admin catalogued this pet on the author's behalf, and
+  // every reader filters those out — no dex number, no month-batch facet, no
+  // random pool, no leaderboard credit, and a permanent "Discovered" badge.
+  // Claiming is what promotes the row, but nothing ever wrote the 'claimed'
+  // state the enum and the dex filter are built around, so a claimed pet kept
+  // behaving like an unclaimed one. The update above is already the claim;
+  // this is the same write, so it cannot drift out of step with it.
+  if (row.source === "discover") {
+    update.source = "claimed";
+  }
   if (githubMatch && !emailMatch && ident.email) {
     update.ownerEmail = ident.email;
   }
 
-  await db
+  // Repeat the identity conditions the read above checked, and detect the
+  // no-match: the read is not in the same statement, so a concurrent takedown
+  // (row gone) or a `backfill-credits` rewrite of credit_url between the two
+  // would otherwise let the update ride on a stale row — or answer `ok:true`
+  // for a claim that never happened.
+  const claimed = await db
     .update(schema.submittedPets)
     .set(update)
-    .where(eq(schema.submittedPets.id, id));
+    .where(
+      and(
+        eq(schema.submittedPets.id, id),
+        // A row that was already ours is handled by the early return above;
+        // any row still matching here is one the guards still apply to.
+        eq(schema.submittedPets.ownerId, row.ownerId),
+        emailMatch
+          ? sql`lower(${schema.submittedPets.ownerEmail}) = ${ident.email}`
+          : sql`true`,
+        githubMatch
+          ? sql`lower(${schema.submittedPets.creditUrl}) = ${ident.githubUrl?.toLowerCase()}`
+          : sql`true`,
+      ),
+    )
+    .returning({ id: schema.submittedPets.id });
+  if (claimed.length === 0) {
+    // The row moved under us: someone else claimed it, or it was taken down.
+    return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
   // Claim rewrites ownerId/ownerEmail which feed the SubmittedBy
   // credit on /pets/[slug]. invalidatePetCaches flushes both Upstash
   // and Next page tags so the new owner's name shows up immediately.

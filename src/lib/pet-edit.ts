@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 
 import { and, eq, sql } from "drizzle-orm";
 
+import { findOversizedAsset } from "@/lib/asset-size-guard";
 import {
   AGGREGATE_KEYS,
   invalidateAggregates,
@@ -30,6 +31,7 @@ import {
 import { editRatelimit } from "@/lib/ratelimit";
 import { refreshSimilarityFor } from "@/lib/similarity";
 import { normalizeSpriteVersionNumber } from "@/lib/sprite-version";
+import { MIN_SPRITE_DIM } from "@/lib/submissions-validation";
 import { containsUrl, URL_BLOCKED_REASON } from "@/lib/url-blocklist";
 
 export type PatchBody = {
@@ -185,12 +187,21 @@ function applyAssetFields(
     );
     if (error) return error;
     if (patch.pendingSpritesheetUrl !== null) {
-      if (typeof body.spritesheetWidth === "number") {
+      // `typeof === "number"` alone let 1536.5, Infinity and 1e21 through to
+      // an `integer` column, where Postgres rejects them and the whole edit
+      // 500s instead of 400ing. The submit path validates the same fields
+      // with Number.isSafeInteger plus a floor (submissions-validation.ts);
+      // match it, and treat a bad value the same as a missing one.
+      const validDim = (value: unknown): value is number =>
+        typeof value === "number" &&
+        Number.isSafeInteger(value) &&
+        value >= MIN_SPRITE_DIM;
+      if (validDim(body.spritesheetWidth)) {
         patch.pendingSpritesheetWidth = body.spritesheetWidth;
       } else if (previousUrl !== patch.pendingSpritesheetUrl) {
         patch.pendingSpritesheetWidth = null;
       }
-      if (typeof body.spritesheetHeight === "number") {
+      if (validDim(body.spritesheetHeight)) {
         patch.pendingSpritesheetHeight = body.spritesheetHeight;
       } else if (previousUrl !== patch.pendingSpritesheetUrl) {
         patch.pendingSpritesheetHeight = null;
@@ -287,11 +298,81 @@ function hasAssetEdit(patch: PendingPatch): boolean {
   );
 }
 
-async function persistAutoAcceptedEdit(
-  id: string,
+/**
+ * Reject an edit whose newly uploaded assets are larger than the presign
+ * allowed.
+ *
+ * Same gap as the submission path — a presigned PUT does not bind the body to
+ * the declared size — but the stake is higher here: an oversized pending asset
+ * is promoted to the live row on approval, and the pending key is not what the
+ * public page serves until then, so a reviewer may never see the bytes that
+ * will actually ship. Runs before any row write, so a refused edit leaves the
+ * pet untouched rather than half-updated.
+ *
+ * Only assets this edit *changed* are checked. An unchanged pending URL was
+ * verified when it was written (the guard precedes every write), so re-HEADing
+ * it on a text-only edit would cost three requests — and could reject a
+ * description change for bytes the user never touched, if an asset queued
+ * before this guard existed were oversized.
+ */
+async function assertPendingAssetsWithinLimit(
   row: SubmittedPet,
   patch: PendingPatch,
-): Promise<void> {
+): Promise<Response | null> {
+  const candidates: Array<{
+    field: string;
+    label: string;
+    url: string | null;
+    current: string | null;
+  }> = [
+    {
+      field: "spritesheetUrl",
+      label: "sprite",
+      url: patch.pendingSpritesheetUrl,
+      current: row.pendingSpritesheetUrl ?? null,
+    },
+    {
+      field: "petJsonUrl",
+      label: "petjson",
+      url: patch.pendingPetJsonUrl,
+      current: row.pendingPetJsonUrl ?? null,
+    },
+    {
+      field: "zipUrl",
+      label: "zip",
+      url: patch.pendingZipUrl,
+      current: row.pendingZipUrl ?? null,
+    },
+  ];
+  const changed = candidates.filter((asset) => asset.url !== asset.current);
+  if (changed.length === 0) return null;
+
+  const violation = await findOversizedAsset(
+    changed.flatMap((asset) =>
+      asset.url
+        ? [{ field: asset.field, label: asset.label, url: asset.url }]
+        : [],
+    ),
+  );
+  if (!violation) return null;
+  return NextResponse.json(
+    {
+      error: "asset_too_large",
+      field: violation.field,
+      maxBytes: violation.maxBytes,
+      size: violation.bytes,
+      message: violation.message,
+    },
+    { status: 400 },
+  );
+}
+
+async function persistAutoAcceptedEdit(
+  id: string,
+  ownerId: string,
+  row: SubmittedPet,
+  patch: PendingPatch,
+): Promise<boolean> {
   const liveUpdate: Record<string, unknown> = {
     pendingDisplayName: null,
     pendingDescription: null,
@@ -311,10 +392,26 @@ async function persistAutoAcceptedEdit(
   }
   if (patch.pendingTags !== null) liveUpdate.tags = patch.pendingTags;
 
-  await db
+  const applied = await db
     .update(schema.submittedPets)
     .set(liveUpdate)
-    .where(eq(schema.submittedPets.id, id));
+    // The ownership check above is a separate statement: a claim moving the
+    // row to another owner between it and this write would still apply the
+    // edit. Repeating the guard here is the same TOCTOU close the withdraw
+    // and claim writes do — no row coming back means the row is no longer
+    // ours, and there is nothing to notify or invalidate about.
+    .where(
+      and(
+        eq(schema.submittedPets.id, id),
+        eq(schema.submittedPets.ownerId, ownerId),
+      ),
+    )
+    .returning({
+      slug: schema.submittedPets.slug,
+      ownerId: schema.submittedPets.ownerId,
+      displayName: schema.submittedPets.displayName,
+    });
+  if (applied.length === 0) return false;
 
   void refreshSimilarityFor(id).catch(() => {});
   await invalidateAggregates(AGGREGATE_KEYS.variantIndex);
@@ -329,11 +426,18 @@ async function persistAutoAcceptedEdit(
       auto: true,
     },
     href: `/pets/${row.slug}`,
-  }).catch(() => {});
+    // fire-and-forget, but a silent drop is indistinguishable from success —
+    // log so a missing notification is at least visible in the logs.
+  }).catch((err) =>
+    console.warn("[notify] edit_approved notification failed:", err),
+  );
+
+  return true;
 }
 
 async function tryAutoAccept(
   id: string,
+  userId: string,
   row: SubmittedPet,
   patch: PendingPatch,
   flags: EditFlags,
@@ -373,7 +477,11 @@ async function tryAutoAccept(
   });
   if (!decision.autoAccept) return null;
 
-  await persistAutoAcceptedEdit(id, row, patch);
+  // A row that moved to another owner between the read and this write is not
+  // ours to auto-apply: fall through to queueEdit, whose guarded write also
+  // matches nothing and answers 404 — instead of reporting an approval for an
+  // edit that never landed.
+  if (!(await persistAutoAcceptedEdit(id, userId, row, patch))) return null;
   return NextResponse.json({ status: "auto_approved" });
 }
 
@@ -385,7 +493,11 @@ type QueuedEditRow = Pick<
   | "pendingSubmittedAt"
 >;
 
-async function queueEdit(id: string, patch: PendingPatch): Promise<Response> {
+async function queueEdit(
+  id: string,
+  userId: string,
+  patch: PendingPatch,
+): Promise<Response> {
   const assetKeys = pendingAssetKeysFromUrls([
     patch.pendingSpritesheetUrl,
     patch.pendingPetJsonUrl,
@@ -393,11 +505,28 @@ async function queueEdit(id: string, patch: PendingPatch): Promise<Response> {
   ]);
   const hasAssetKeys = assetKeys.length > 0;
   const updated = hasAssetKeys
-    ? await queueAssetEditWithClaimGuard(id, patch, assetKeys)
-    : await queueTextEdit(id, patch);
+    ? await queueAssetEditWithClaimGuard(id, userId, patch, assetKeys)
+    : await queueTextEdit(id, userId, patch);
 
   if (!updated) {
     if (!hasAssetKeys) {
+      return NextResponse.json({ error: "not_found" }, { status: 404 });
+    }
+    // The asset-path update has two predicates — `owner_id = userId` and the
+    // GC-claim NOT EXISTS — and a miss could be either. Re-read ownership to
+    // tell them apart: a row that is gone or reassigned answers 404 like the
+    // text path and like `tryAutoAccept`'s comment promises, and only a row we
+    // still own falls through to the claim verdict. Reporting the claim's 409
+    // for a lost-ownership race told the caller an asset was unavailable when
+    // the pet was no longer theirs.
+    const stillOwned = await db.query.submittedPets.findFirst({
+      where: and(
+        eq(schema.submittedPets.id, id),
+        eq(schema.submittedPets.ownerId, userId),
+      ),
+      columns: { id: true },
+    });
+    if (!stillOwned) {
       return NextResponse.json({ error: "not_found" }, { status: 404 });
     }
     return NextResponse.json(
@@ -422,12 +551,21 @@ async function queueEdit(id: string, patch: PendingPatch): Promise<Response> {
 
 async function queueTextEdit(
   id: string,
+  ownerId: string,
   patch: PendingPatch,
 ): Promise<QueuedEditRow | null> {
   const [updated] = await db
     .update(schema.submittedPets)
     .set(patch)
-    .where(eq(schema.submittedPets.id, id))
+    // Repeat applyPetEdit's ownership read on the write: a claim reassigning
+    // the row between the two would otherwise queue an edit on a pet the
+    // caller no longer owns. 0 rows back = same 404 as a missing row.
+    .where(
+      and(
+        eq(schema.submittedPets.id, id),
+        eq(schema.submittedPets.ownerId, ownerId),
+      ),
+    )
     .returning({
       pendingDisplayName: schema.submittedPets.pendingDisplayName,
       pendingDescription: schema.submittedPets.pendingDescription,
@@ -439,6 +577,7 @@ async function queueTextEdit(
 
 async function queueAssetEditWithClaimGuard(
   id: string,
+  ownerId: string,
   patch: PendingPatch,
   assetKeys: string[],
 ): Promise<QueuedEditRow | null> {
@@ -469,6 +608,7 @@ async function queueAssetEditWithClaimGuard(
         pending_dhash = ${patch.pendingDhash},
         pending_review_id = ${patch.pendingReviewId}
     WHERE pet.id = ${id}
+      AND pet.owner_id = ${ownerId}
       AND NOT EXISTS (
         SELECT 1
         FROM pending_asset_gc_claims AS claim
@@ -555,9 +695,11 @@ export async function applyPetEdit(input: {
   if (pendingEditIsNoOp(row, patch)) {
     return NextResponse.json({ error: "nothing_changed" }, { status: 400 });
   }
+  const sizeError = await assertPendingAssetsWithinLimit(row, patch);
+  if (sizeError) return sizeError;
 
   patch.pendingSubmittedAt = new Date();
   patch.pendingRejectionReason = null;
-  const autoAccepted = await tryAutoAccept(id, row, patch, flags);
-  return autoAccepted ?? queueEdit(id, patch);
+  const autoAccepted = await tryAutoAccept(id, userId, row, patch, flags);
+  return autoAccepted ?? queueEdit(id, userId, patch);
 }

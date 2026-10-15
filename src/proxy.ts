@@ -8,6 +8,11 @@ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import createMiddleware from "next-intl/middleware";
 
 import { checkBurst } from "@/lib/burst-guard";
+import {
+  isResolvedLocaleRewrite,
+  LOCALE_REWRITE_MARKER,
+  markLocaleRewrite,
+} from "@/lib/locale-rewrite-guard";
 import { shouldBypassClerkMiddleware } from "@/lib/public-clerk-bypass";
 import {
   publicTrafficGuardKey,
@@ -39,9 +44,18 @@ const CANONICAL_URL = normalizeBaseUrl(
   process.env.PETDEX_URL,
   "https://petdex.dev",
 );
-const LEGACY_REDIRECT_HOSTS = new Set([
+// Hosts that must not serve the app in their own right. The `crafter.run`
+// pair is the old domain; `www.petdex.dev` is not legacy, it is the
+// conventional `www` alias of the canonical host, and it was the one host
+// left answering 200 with the whole site. That is worse than a duplicate:
+// every canonical, hreflang, `og:url`, and sitemap URL is absolute on
+// `petdex.dev`, so a `www` render advertises a different origin than the one
+// it is served from. `SITE_URL` in `src/lib/locale-routing.ts` pins the
+// canonical origin, so the alias can never be the one that is right.
+const REDIRECT_HOSTS = new Set([
   "petdex.crafter.run",
   "www.petdex.crafter.run",
+  "www.petdex.dev",
 ]);
 
 // The /api entries are unreachable while the /api early return above
@@ -60,12 +74,23 @@ const isProtected = createRouteMatcher([
   "/api/my-pets/(.*)",
 ]);
 
+// `alternateLinks: false` drops the `Link: rel="alternate"; hreflang=…`
+// response header. Every `Link` header would be emitted for the same URLs by
+// the `<link rel="alternate">` elements Next renders from `buildLocaleAlternates`
+// and by the sitemap, both of which say `zh-Hans` for the Chinese pages, and
+// the header is the only one that cannot: next-intl derives the hreflang from
+// the locale key itself and `alternateLinks` is a plain boolean with no
+// mapping hook, so it emitted `hreflang="zh"` — a different language tag for
+// the same pair. Google treats the three placements as equivalent and says
+// maintaining all three buys nothing, so the disagreeing third goes rather
+// than being rewritten by hand.
 const handleI18nRouting = createMiddleware({
   locales,
   defaultLocale,
   localePrefix: "as-needed",
   localeDetection: false,
   localeCookie: false,
+  alternateLinks: false,
 });
 
 // In mock auth mode the user is always signed in, so we skip
@@ -73,8 +98,8 @@ const handleI18nRouting = createMiddleware({
 // backend secret before our shims have a chance to short-circuit).
 // Everything else — next-intl routing, the shuffle cookie — keeps working.
 const baseMiddleware = async (req: NextRequest, event?: NextFetchEvent) => {
-  const legacyRedirect = legacyHostRedirect(req);
-  if (legacyRedirect) return legacyRedirect;
+  const hostRedirect = canonicalHostRedirect(req);
+  if (hostRedirect) return hostRedirect;
   const adminSurface = adminSurfaceResponse(req);
   if (adminSurface) return adminSurface;
   scheduleRouteCostSample(req, event);
@@ -89,8 +114,8 @@ const baseMiddleware = async (req: NextRequest, event?: NextFetchEvent) => {
 };
 
 const clerkBackedMiddleware = clerkMiddleware(async (auth, req, event) => {
-  const legacyRedirect = legacyHostRedirect(req);
-  if (legacyRedirect) return legacyRedirect;
+  const hostRedirect = canonicalHostRedirect(req);
+  if (hostRedirect) return hostRedirect;
   const adminSurface = adminSurfaceResponse(req);
   if (adminSurface) return adminSurface;
   scheduleRouteCostSample(req, event);
@@ -211,11 +236,20 @@ function adminSurfaceResponse(req: NextRequest): NextResponse | null {
   return NextResponse.redirect(url);
 }
 
-function legacyHostRedirect(req: NextRequest): NextResponse | null {
+function canonicalHostRedirect(req: NextRequest): NextResponse | null {
   const host = normalizeHost(req.headers.get("host"));
-  if (!LEGACY_REDIRECT_HOSTS.has(host)) return null;
+  if (!REDIRECT_HOSTS.has(host)) return null;
 
-  const url = new URL(req.nextUrl.pathname, CANONICAL_URL);
+  // Build the target from the path rather than `new URL(path, CANONICAL_URL)`.
+  // The two-argument form resolves a protocol-relative path: if `pathname`
+  // were ever `//evil.example/x`, the result is `https://evil.example/x` and
+  // the redirect becomes an open redirect. Next normalizes a leading `//`
+  // today (measured: `//evil.example/pwn` arrives as `/evil.example/pwn`), so
+  // it is not reachable on this version — but that is the framework's
+  // behaviour to keep, not this function's. Assigning `pathname` onto a URL
+  // built from the canonical origin pins the host and cannot escape it.
+  const url = new URL(CANONICAL_URL);
+  url.pathname = req.nextUrl.pathname;
   url.search = req.nextUrl.search;
   return NextResponse.redirect(url, 308);
 }
@@ -233,13 +267,26 @@ function normalizeBaseUrl(raw: string | null | undefined, fallback: string) {
 }
 
 function normalizeHost(raw: string | null): string {
-  return raw?.split(":")[0]?.toLowerCase() ?? "";
+  // The trailing dot is the root label, and a host is the same host with or
+  // without it — `www.petdex.dev.` resolves to the same address as
+  // `www.petdex.dev`. Browsers strip it, but curl, some crawlers, and a few
+  // resolvers send it as typed, and it made the `www` alias serve the whole
+  // site again: the set below holds the dotless spelling, so the lookup
+  // missed and every canonical/og:url/hreflang on the page advertised an
+  // origin the request had not come from. Stripped here so the redirect
+  // covers the spelling the DNS actually allows.
+  return (raw?.split(":")[0]?.toLowerCase() ?? "").replace(/\.$/, "");
 }
 
 function handleI18nRoutingWithoutLocaleCookie(
   req: Parameters<typeof handleI18nRouting>[0],
 ) {
-  const response = handleI18nRouting(req);
+  const response = isResolvedLocaleRewrite({
+    marker: req.headers.get(LOCALE_REWRITE_MARKER),
+    pathname: req.nextUrl.pathname,
+  })
+    ? NextResponse.next()
+    : markLocaleRewrite(handleI18nRouting(req));
   if (req.cookies.has("NEXT_LOCALE")) {
     response.cookies.delete("NEXT_LOCALE");
   }
@@ -264,7 +311,11 @@ function scheduleRouteCostSample(req: NextRequest, event?: NextFetchEvent) {
   event.waitUntil(
     signRouteCostPayload(body, secret)
       .then((signature) =>
-        fetch(new URL("/api/internal/route-cost", req.url), {
+        // Destination pinned to the configured public origin: `req.url`
+        // carries whatever Host the client sent, so a forged Host would
+        // have the app POST its signed sample to the attacker's server.
+        // Same reasoning that pins /api/pets/random's redirect above.
+        fetch(new URL("/api/internal/route-cost", CANONICAL_URL), {
           method: "POST",
           headers: {
             "content-type": "application/json",

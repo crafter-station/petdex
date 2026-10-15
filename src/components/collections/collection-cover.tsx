@@ -28,6 +28,11 @@ type CollectionCoverProps = {
   /** Base sprite scale; lead is rendered larger via the layout below. */
   scale?: number;
   className?: string;
+  /** Shown when the collection has no pets to draw. Required so the
+   *  placeholder cannot regress to an English literal on /es and /zh. */
+  emptyLabel: string;
+  /** Accessible name for each sprite. Required for the same reason. */
+  spriteLabel: (name: string) => string;
 };
 
 // Cheap deterministic hash so a given slug always lands at the same
@@ -51,6 +56,8 @@ export function CollectionCover({
   max = 5,
   scale = 0.55,
   className = "",
+  emptyLabel,
+  spriteLabel,
 }: CollectionCoverProps) {
   if (pets.length === 0) {
     return (
@@ -58,7 +65,7 @@ export function CollectionCover({
         className={`pet-sprite-stage relative grid aspect-[16/9] place-items-center overflow-hidden ${className}`}
       >
         <span className="font-mono text-xs tracking-[0.18em] text-muted-3 uppercase">
-          Collection
+          {emptyLabel}
         </span>
       </div>
     );
@@ -88,7 +95,7 @@ export function CollectionCover({
           state="idle"
           cycleStates={!previewSrc}
           scale={scale * 1.5}
-          label={`${pet.displayName} animated`}
+          label={spriteLabel(pet.displayName)}
         />
       </div>
     );
@@ -194,7 +201,7 @@ export function CollectionCover({
               state="idle"
               cycleStates={!previewSrc}
               scale={petScale}
-              label={`${pet.displayName} animated`}
+              label={spriteLabel(pet.displayName)}
             />
           </div>
         );

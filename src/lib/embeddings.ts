@@ -4,6 +4,10 @@ export const PETDEX_EMBEDDING_MODEL = "google/gemini-embedding-2";
 export const PETDEX_EMBEDDING_DIMENSIONS = 3072;
 
 const MAX_EMBEDDING_INPUT_CHARS = 8000;
+// The policy call already runs under a 15s ceiling; the embedding call sat
+// next to it with none, so a hung gateway could pin a serverless instance for
+// as long as the provider kept the socket open. Match the policy budget.
+const EMBEDDING_TIMEOUT_MS = 15_000;
 
 export async function embedTextValue(value: string): Promise<number[] | null> {
   const input = value.trim().slice(0, MAX_EMBEDDING_INPUT_CHARS);
@@ -13,6 +17,7 @@ export async function embedTextValue(value: string): Promise<number[] | null> {
     const result = await embed({
       model: PETDEX_EMBEDDING_MODEL,
       value: input,
+      abortSignal: AbortSignal.timeout(EMBEDDING_TIMEOUT_MS),
     });
     if (result.embedding.length !== PETDEX_EMBEDDING_DIMENSIONS) {
       console.warn(
@@ -49,7 +54,7 @@ export function buildPetEmbeddingText(args: {
 }
 
 export function embeddingVectorLiteral(vec: number[]): string {
-  return `[${vec.join(",")}]`;
+  return `[${vec.map((n) => (Number.isFinite(n) ? n : 0)).join(",")}]`;
 }
 
 export function hasCurrentEmbeddingDimensions(

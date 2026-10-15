@@ -26,8 +26,14 @@ export type CodexInstallPet = {
   displayName: string;
   description: string;
   spritesheetUrl: string;
-  /** Atlas layout, 1 or 2. Petdex ships v2 sheets; see the note below. */
-  spriteVersionNumber?: 1 | 2;
+  /**
+   * Atlas layout, 1 or 2. Required, not defaulted: the app's parser defaults
+   * a missing value to layout 1, so a wrong guess misreads every frame of the
+   * other layout, and Petdex ships both. The catalog is mostly v1 today
+   * (~4631 of 4876 approved pets), so the old `?? 2` fallback sent the wrong
+   * layout for the majority. Pass the pet's own `spriteVersionNumber`.
+   */
+  spriteVersionNumber: 1 | 2;
 };
 
 /**
@@ -59,10 +65,10 @@ export function buildCodexInstallUrl(pet: CodexInstallPet): string {
     name: pet.displayName,
     description: pet.description,
     imageUrl: pet.spritesheetUrl,
-    // Petdex atlases are the v2 layout (8x11 grid, 9 state rows), the same
-    // one ChatGPT's own shared pets use. Omitting this defaults the app to 1
-    // and misreads every frame.
-    spriteVersionNumber: String(pet.spriteVersionNumber ?? 2),
+    // Must be the pet's real layout. The app defaults a missing value to 1,
+    // and Petdex ships both layouts (v1 8x9, v2 8x11), so sending the wrong
+    // number misreads every frame. There is no safe default here.
+    spriteVersionNumber: String(pet.spriteVersionNumber),
   });
   return `codex://pets/install?${query.toString()}`;
 }

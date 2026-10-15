@@ -28,6 +28,7 @@ type StaticCollectionCardProps = {
     petCount: string;
     siteLink: string;
     byOwner: string | null;
+    spriteStill: (name: string) => string;
   };
 };
 
@@ -53,6 +54,7 @@ export function StaticCollectionCard({
           coverSlug={collection.coverPetSlug}
           max={5}
           scale={0.55}
+          spriteLabel={labels.spriteStill}
         />
       </Link>
       <div className="flex flex-1 flex-col gap-2 border-t border-border-base px-5 pt-4 pb-5">
@@ -108,12 +110,14 @@ function StaticCollectionCover({
   max = 5,
   scale = 0.55,
   className = "",
+  spriteLabel,
 }: {
   pets: CollectionCoverPet[];
   coverSlug: string | null;
   max?: number;
   scale?: number;
   className?: string;
+  spriteLabel: (name: string) => string;
 }) {
   if (pets.length === 0) {
     return (
@@ -145,7 +149,7 @@ function StaticCollectionCover({
           src={pet.spritesheetPath}
           state={petStates[hashSlug(pet.slug) % petStates.length].id}
           scale={scale * 1.5}
-          label={`${pet.displayName} sprite`}
+          label={spriteLabel(pet.displayName)}
         />
       </div>
     );
@@ -188,7 +192,7 @@ function StaticCollectionCover({
               src={pet.spritesheetPath}
               state={petStates[hash % petStates.length].id}
               scale={petScale}
-              label={`${pet.displayName} sprite`}
+              label={spriteLabel(pet.displayName)}
             />
           </div>
         );

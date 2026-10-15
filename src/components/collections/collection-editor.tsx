@@ -18,6 +18,8 @@ import {
   MAX_COLLECTION_PETS,
 } from "@/lib/collection-constants";
 
+import { collectionErrorKey } from "@/components/collections/collection-error-key";
+
 type PetOption = {
   slug: string;
   displayName: string;
@@ -43,6 +45,10 @@ export function CollectionEditor({
   profileHandle: string;
 }) {
   const t = useTranslations("collectionEditor");
+  // The server error codes this panel renders are the collection route's, shared
+  // with the create/edit manager — so the messages live under `ownerCollections`
+  // and are looked up through the same map, rather than rendered as a raw code.
+  const tCollection = useTranslations("ownerCollections");
   const fallbackTitle = `${profileHandle}'s collection`;
   const [title, setTitle] = useState(initial?.title ?? fallbackTitle);
   const [description, setDescription] = useState(initial?.description ?? "");
@@ -131,20 +137,25 @@ export function CollectionEditor({
           const data = (await res.json().catch(() => ({}))) as {
             error?: string;
           };
-          // Refused because applying an empty list would remove every member
-          // and report a member list the collection does not have. This editor
-          // does not require a selection to save, so the case is reachable and
-          // needs a sentence, not a code.
+          // The route answers with a code, never a sentence. Map every code it
+          // can send through the shared table so the panel shows a translated
+          // message; an unrecognised code keeps the raw code in the fallback
+          // sentence so a new server code is visible rather than swallowed.
+          const key = collectionErrorKey(data.error);
           setError(
-            data.error === "empty_pet_slugs"
-              ? t("emptyPetSlugs")
-              : (data.error ?? `save_failed_${res.status}`),
+            key
+              ? tCollection(key, { code: data.error ?? "" })
+              : tCollection("saveFailed", {
+                  code: data.error ?? `save_failed_${res.status}`,
+                }),
           );
           return;
         }
         setSaved(true);
       } catch {
-        setError("network_error");
+        // A fetch-level failure (offline, aborted): the route's code table does
+        // not cover it, so it goes through the same fallback-with-code sentence.
+        setError(tCollection("saveFailed", { code: "network_error" }));
       }
     });
   }
@@ -346,7 +357,7 @@ export function CollectionEditor({
       <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
         {error ? (
           <p className="mr-auto font-mono text-[10px] tracking-[0.12em] text-rose-600 uppercase">
-            {error.replace(/_/g, " ")}
+            {error}
           </p>
         ) : null}
         {saved ? (

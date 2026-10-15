@@ -1,3 +1,7 @@
+"use client";
+
+import { useRef } from "react";
+
 import { HeaderNavLink } from "@/components/site-header/header-nav-link";
 import { MobileHeaderSettings } from "@/components/site-header/mobile-header-settings";
 import { SubmitLink } from "@/components/site-header/submit-link";
@@ -23,8 +27,38 @@ export function MobileNav({
   openMenuLabel,
   hideSubmitCta,
 }: MobileNavProps) {
+  const detailsRef = useRef<HTMLDetailsElement>(null);
+
+  // A native <details> ignores Escape, so the open menu could only be closed
+  // by clicking the summary again, and focus was left wherever it was. Close
+  // it and hand focus back to the trigger.
+  function closeOnEscape(event: React.KeyboardEvent<HTMLDetailsElement>) {
+    const details = detailsRef.current;
+    if (event.key !== "Escape" || !details?.open) return;
+    event.stopPropagation();
+    details.open = false;
+    details.querySelector("summary")?.focus();
+  }
+
+  // HeaderNavLink navigates with next/link, which re-renders the page in
+  // place — the layout (and this <details>) survives, so the menu stayed
+  // open over the new page. Clicking anything inside the menu means
+  // "leave", so close it on capture before the router takes over.
+  function closeOnNavigate(event: React.MouseEvent<HTMLDetailsElement>) {
+    const details = detailsRef.current;
+    if (!details?.open) return;
+    const target = event.target as HTMLElement;
+    if (!target.closest("a[href]")) return;
+    details.open = false;
+  }
+
   return (
-    <details className="group relative xl:hidden">
+    <details
+      ref={detailsRef}
+      onKeyDown={closeOnEscape}
+      onClickCapture={closeOnNavigate}
+      className="group relative xl:hidden"
+    >
       <summary
         aria-label={openMenuLabel}
         className="grid size-10 cursor-pointer list-none place-items-center rounded-full border border-border-base bg-surface/70 text-muted-2 transition hover:bg-surface hover:text-foreground [&::-webkit-details-marker]:hidden"

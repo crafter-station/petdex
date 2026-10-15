@@ -28,6 +28,18 @@ const KILLSWITCH_PATH = path.join(
   "hooks-disabled",
 );
 const VERSION = "0.1.0";
+
+// An MCP request is a small JSON-RPC frame. Without a ceiling, a client that
+// never sends a newline (jsonl) or declares an oversized Content-Length
+// (framed) grows the read buffer without bound — the process reads stdin from
+// the editor/agent, so a runaway or hostile client could exhaust memory. This
+// is a memory guard, not a protocol limit: 16MB is far above any real request
+// and far below a fatal allocation.
+const MAX_FRAME_BYTES = 16 * 1024 * 1024;
+// The header block itself must be tiny; a framed client that never sends the
+// blank line would otherwise grow `buffer` while `findHeaderBoundary` returns
+// -1 forever.
+const MAX_HEADER_BYTES = 8 * 1024;
 type TransportMode = "framed" | "jsonl";
 let transportMode: TransportMode = "framed";
 
@@ -155,6 +167,14 @@ function sendMessage(msg: JsonRpcResponse): void {
   process.stdout.write(body);
 }
 
+/**
+ * Tell the client a frame was unusable and drop what we have buffered, so the
+ * stream can resync on the next frame instead of sitting at the ceiling.
+ */
+function rejectOversizedFrame(): void {
+  sendMessage(errorResponse(null, -32700, "Request frame too large."));
+}
+
 function errorResponse(
   id: string | number | null,
   code: number,
@@ -205,6 +225,32 @@ async function handleRequest(req: JsonRpcRequest): Promise<void> {
     case "tools/call": {
       const toolName = params?.name as string | undefined;
       const args = (params?.arguments ?? {}) as Record<string, unknown>;
+
+      // A malformed client can send a non-string name (or non-object
+      // arguments); without this, a missing name reports "-32601 Unknown
+      // tool: undefined" instead of an invalid-params error, and a string
+      // `arguments` is read as an object and silently produces garbage.
+      if (typeof params?.name !== "string") {
+        sendMessage(
+          errorResponse(id, -32602, "Invalid params: name must be a string"),
+        );
+        return;
+      }
+      if (
+        params?.arguments !== undefined &&
+        (typeof params.arguments !== "object" ||
+          params.arguments === null ||
+          Array.isArray(params.arguments))
+      ) {
+        sendMessage(
+          errorResponse(
+            id,
+            -32602,
+            "Invalid params: arguments must be an object",
+          ),
+        );
+        return;
+      }
 
       if (await killswitchActive()) {
         sendMessage({
@@ -356,7 +402,16 @@ export async function runMcpServer(): Promise<void> {
       const firstByte = firstNonWhitespaceByte(buffer);
       if (firstByte === 0x7b || firstByte === 0x5b) {
         const lineEnd = findSequence(buffer, new Uint8Array([0x0a]));
-        if (lineEnd === -1) break;
+        if (lineEnd === -1) {
+          // No newline yet. If the buffer has already grown past the ceiling,
+          // the client is not sending well-formed frames — refuse and reset
+          // rather than keep buffering.
+          if (buffer.length > MAX_FRAME_BYTES) {
+            buffer = new Uint8Array(0);
+            rejectOversizedFrame();
+          }
+          break;
+        }
         const lineBytes = trimTrailingCarriageReturn(buffer.slice(0, lineEnd));
         buffer = buffer.slice(lineEnd + 1);
         const line = decoder.decode(lineBytes).trim();
@@ -368,7 +423,15 @@ export async function runMcpServer(): Promise<void> {
 
       const headerBoundary = findHeaderBoundary(buffer);
       const headerEnd = headerBoundary.index;
-      if (headerEnd === -1) break;
+      if (headerEnd === -1) {
+        // No blank line yet; a real header is a few dozen bytes. Past the cap
+        // this is not a header, so refuse and reset.
+        if (buffer.length > MAX_HEADER_BYTES) {
+          buffer = new Uint8Array(0);
+          rejectOversizedFrame();
+        }
+        break;
+      }
 
       const headerSection = buffer.slice(0, headerEnd);
       const headerStr = decoder.decode(headerSection);
@@ -378,6 +441,16 @@ export async function runMcpServer(): Promise<void> {
         continue;
       }
       const contentLength = parseInt(contentLengthMatch[1], 10);
+      if (
+        !Number.isSafeInteger(contentLength) ||
+        contentLength > MAX_FRAME_BYTES
+      ) {
+        // A declared length past the ceiling is refused before we wait for it,
+        // so the client cannot make us buffer up to the declaration.
+        buffer = buffer.slice(headerEnd + headerBoundary.length);
+        rejectOversizedFrame();
+        continue;
+      }
       const bodyStart = headerEnd + headerBoundary.length;
       const frameEnd = bodyStart + contentLength;
 
@@ -402,6 +475,22 @@ export async function runMcpServer(): Promise<void> {
   function dispatchRequest(bodyStr: string) {
     try {
       const req = JSON.parse(bodyStr) as JsonRpcRequest;
+      // `JSON.parse("null")` succeeds and yields null, so the `.catch` below
+      // would read `req.id` off it and throw a second time — inside the
+      // handler, where the `finally` no longer runs, leaving `pending` stuck
+      // at 1 and tearing the process down as an unhandled rejection. Reject
+      // any non-object root the same way a parse error is rejected.
+      if (!req || typeof req !== "object" || Array.isArray(req)) {
+        sendMessage({
+          jsonrpc: "2.0",
+          id: null,
+          error: {
+            code: -32600,
+            message: "Invalid Request: not an object",
+          },
+        });
+        return;
+      }
       pending++;
       handleRequest(req)
         .catch((err) => {

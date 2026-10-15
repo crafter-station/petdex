@@ -71,7 +71,13 @@ export type CodexTheme = {
 
 function parseHex(hex: string): { r: number; g: number; b: number } {
   const clean = hex.replace("#", "").trim();
-  if (clean.length !== 6) return { r: 128, g: 128, b: 128 };
+  // Length-6 alone is not enough: "GGHHII" passes the check and parseInt
+  // answers NaN, which toHex then renders as "#NaNNaNNaN". Vibrant only
+  // ever writes `#rrggbb`, so this guards a hand-edited DB row, not a
+  // pipeline output.
+  if (!/^#[0-9a-fA-F]{6}$/.test(hex.trim())) {
+    return { r: 128, g: 128, b: 128 };
+  }
   return {
     r: parseInt(clean.slice(0, 2), 16),
     g: parseInt(clean.slice(2, 4), 16),

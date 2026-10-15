@@ -1,3 +1,5 @@
+import { fetchCapped } from "./fetch-capped.js";
+
 export type CollectionRecord = {
   id: string;
   slug: string;
@@ -341,19 +343,26 @@ export async function collectionRequest(
   query = "",
 ): Promise<unknown> {
   const url = `${baseUrl.replace(/\/+$/, "")}/api/cli/collections${id ? `/${encodeURIComponent(id)}` : ""}${query}`;
-  const res = await fetch(url, {
-    method,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
+  // A collection response is a small JSON document. Bounding the read keeps a
+  // captive portal or a hung proxy from streaming into memory or holding the
+  // CLI open; the status and body are still handled by the caller below.
+  const res = await fetchCapped(url, {
+    init: {
+      method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: body ? JSON.stringify(body) : undefined,
     },
-    body: body ? JSON.stringify(body) : undefined,
+    maxBytes: 4 * 1024 * 1024,
+    timeoutMs: 30_000,
   });
   // A non-JSON body is NOT the same as an empty object. A captive portal, a
   // misconfigured proxy, or a CDN error page answers with HTTP 200 and HTML;
   // collapsing that to {} made `delete` report success and `list` print
   // nothing, so the caller could not tell a real result from a proxy page.
-  const data = parseCollectionResponse(await res.text().catch(() => null));
+  const data = parseCollectionResponse(res.body.toString("utf8"));
   if (!data) {
     // Report the transport failure as itself. Deriving it from res.ok would
     // call a 200 with an unreadable body a success.

@@ -4,6 +4,7 @@ import { auth } from "@clerk/nextjs/server";
 
 import { db, schema } from "@/lib/db/client";
 import { createNeonRatelimit } from "@/lib/neon-ratelimit";
+import { publicTrafficGuardKey } from "@/lib/public-traffic-guard";
 import { requireSameOrigin } from "@/lib/same-origin";
 
 export const runtime = "nodejs";
@@ -22,10 +23,11 @@ export async function POST(req: Request): Promise<Response> {
   if (csrf) return csrf;
   const { userId } = await auth();
 
-  const ipHeader =
-    req.headers.get("x-forwarded-for") ?? req.headers.get("x-real-ip") ?? "";
-  const ip = ipHeader.split(",")[0]?.trim() || "anon";
-  const key = userId ?? ip;
+  // Same key helper the CLI collection routes and the proxy use: it prefers
+  // the platform-set `x-real-ip` over a client-supplied `x-forwarded-for`,
+  // so an anonymous caller cannot rotate the header and hand themselves a
+  // fresh bucket on every request. (Signed-in callers are keyed by userId.)
+  const key = userId ?? publicTrafficGuardKey(req.headers);
   const { success } = await ratelimit.limit(key);
   if (!success) {
     return NextResponse.json(
@@ -45,13 +47,31 @@ export async function POST(req: Request): Promise<Response> {
   } catch {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
+  // `req.json()` parses a literal `null` successfully — only malformed JSON
+  // throws — and the property reads below then 500'd this anonymous endpoint.
+  // Same boundary `notifications/read` and `pet-requests` carry.
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    return NextResponse.json({ error: "invalid_json" }, { status: 400 });
+  }
 
   const kind = VALID_KINDS.has(String(body.kind))
     ? (body.kind as "suggestion" | "bug" | "praise" | "other")
     : "suggestion";
   const message = String(body.message ?? "").trim();
-  const email = body.email?.trim() || null;
-  const pageUrl = body.pageUrl?.trim().slice(0, 500) || null;
+  // `?.` only guards null/undefined; a number or object here threw
+  // `.trim is not a function` and 500'd this anonymous endpoint. Coerce
+  // like `message`/`kind` above, then validate the coerced string.
+  // Bounded like its siblings: RFC 5321 caps an email at 254 octets, and
+  // the regex below would happily pass a megabyte-long otherwise-valid
+  // single block straight into the row.
+  const email =
+    String(body.email ?? "")
+      .trim()
+      .slice(0, 254) || null;
+  const pageUrl =
+    String(body.pageUrl ?? "")
+      .trim()
+      .slice(0, 500) || null;
   const userAgent = req.headers.get("user-agent")?.slice(0, 500) ?? null;
 
   if (message.length < 4) {
