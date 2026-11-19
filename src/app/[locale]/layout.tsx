@@ -35,6 +35,14 @@ type Props = {
 
 const SITE_URL = "https://petdex.dev";
 
+// og:locale uses underscore language_TERRITORY and zh needs the territory to
+// read as Simplified Chinese; mirrors the hreflang codes in locale-routing.
+const LOCALE_OG: Record<string, string> = {
+  en: "en_US",
+  es: "es_ES",
+  zh: "zh_CN",
+};
+
 export function generateStaticParams() {
   return locales.map((locale) => ({ locale }));
 }
@@ -78,7 +86,17 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     openGraph: {
       title: t("ogTitle"),
       description: t("description"),
-      url: SITE_URL,
+      // OG-only scrapers (WeChat, Slack) never read hreflang, so the locale
+      // has to ride the OG tags themselves.
+      locale: LOCALE_OG[locale] ?? "en_US",
+      alternateLocale: ["en_US", "es_ES", "zh_CN"].filter(
+        (l) => l !== (LOCALE_OG[locale] ?? "en_US"),
+      ),
+      // No `url` here: this layout is the metadata *base* for every route
+      // under it, and a hardcoded `SITE_URL` overrode each page's own og:url
+      // (a /zh page shared as the site root). Next omits og:url when unset,
+      // so scrapers fall back to the real page URL; pages that can set their
+      // locale-prefixed URL do so individually.
       siteName: "Petdex",
       type: "website",
       images: [
@@ -105,6 +123,7 @@ export default async function LocaleLayout({ children, params }: Props) {
   setRequestLocale(locale);
   const messages = await getMessages();
   const clientMessages = pickClientMessages(messages);
+  const t = await getTranslations({ locale, namespace: "common" });
 
   const isZh = locale === "zh";
 
@@ -115,6 +134,15 @@ export default async function LocaleLayout({ children, params }: Props) {
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-background text-foreground">
+        {/* First focusable element on the page: the header is tall and every
+            route repeats it, so keyboard users otherwise Tab through the whole
+            nav to reach the content. Every page's <main> carries id="main". */}
+        <a
+          href="#main"
+          className="sr-only focus:not-sr-only focus:absolute focus:top-3 focus:left-3 focus:z-[200] focus:rounded-full focus:bg-surface focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-foreground focus:shadow-lg focus:ring-2 focus:ring-brand focus:outline-none"
+        >
+          {t("skipToContent")}
+        </a>
         <NextIntlClientProvider messages={clientMessages}>
           <AppProviders>
             <ConditionalAuthProviders>

@@ -8,6 +8,7 @@ import { NextResponse } from "next/server";
 
 import { isAdmin } from "@/lib/admin";
 import { verifyCliBearer } from "@/lib/cli-auth";
+import { publicTrafficGuardKey } from "@/lib/public-traffic-guard";
 import { presignPut } from "@/lib/r2";
 import { cliPresignRatelimit, cliVerifyRatelimit } from "@/lib/ratelimit";
 import { deriveSlug } from "@/lib/slug";
@@ -25,16 +26,13 @@ type Body = {
   spritesheetExt?: "webp" | "png";
 };
 
-function clientIp(req: Request): string {
-  const xff = req.headers.get("x-forwarded-for") ?? "";
-  return xff.split(",")[0]?.trim() || "anon";
-}
-
 export async function POST(req: Request): Promise<Response> {
   // Pre-auth rate limit by IP. Without this a bash loop with random
   // bearer tokens forces /oauth/userinfo lookups that burn Clerk quota
   // even though every one is rejected as 401.
-  const verifyLim = await cliVerifyRatelimit.limit(clientIp(req));
+  const verifyLim = await cliVerifyRatelimit.limit(
+    publicTrafficGuardKey(req.headers),
+  );
   if (!verifyLim.success) {
     return NextResponse.json({ error: "rate_limited" }, { status: 429 });
   }
@@ -64,11 +62,17 @@ export async function POST(req: Request): Promise<Response> {
   } catch {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    return NextResponse.json({ error: "invalid_json" }, { status: 400 });
+  }
 
+  // Both fields are unchecked casts: a number reached `.toLowerCase` inside
+  // sanitizeSlug/deriveSlug and 500'd. Coerce at the boundary; the slug
+  // filters then normalize whatever survives.
+  const slugHintSource =
+    String(body.slugHint ?? "") || String(body.petId ?? "");
   const slugHint =
-    sanitizeSlug(body.slugHint || body.petId || "") ||
-    deriveSlug(body.petId || body.slugHint || "") ||
-    "pet";
+    sanitizeSlug(slugHintSource) || deriveSlug(slugHintSource) || "pet";
   const ext: "webp" | "png" = body.spritesheetExt === "png" ? "png" : "webp";
   const spriteCT = ext === "png" ? "image/png" : "image/webp";
 

@@ -6,6 +6,7 @@
 import { neon } from "@neondatabase/serverless";
 import { Resend } from "resend";
 
+import { emailEnv } from "../src/lib/email-send";
 import { renderDesktopLaunchEmail } from "../src/lib/email-templates/desktop-launch";
 import { requiredEnv } from "./env";
 
@@ -17,7 +18,7 @@ if (!TARGET_EMAIL) {
 
 const sql = neon(requiredEnv("DATABASE_URL"));
 const resend = new Resend(requiredEnv("RESEND_API_KEY"));
-const from = process.env.RESEND_FROM ?? "Petdex <hello@petdex.dev>";
+const from = emailEnv("RESEND_FROM", "Petdex <hello@petdex.dev>");
 
 const rows = (await sql`
   SELECT email, locale, unsubscribe_token

@@ -31,6 +31,9 @@ export async function POST(
   } catch {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    return NextResponse.json({ error: "invalid_json" }, { status: 400 });
+  }
 
   if (!body.petId || typeof body.petId !== "string") {
     return NextResponse.json({ error: "invalid_input" }, { status: 400 });

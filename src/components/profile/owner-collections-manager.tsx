@@ -12,6 +12,8 @@ import {
   MAX_COLLECTION_PETS,
 } from "@/lib/collection-constants";
 
+import { collectionErrorKey } from "@/components/collections/collection-error-key";
+
 type ApprovedPet = {
   slug: string;
   displayName: string;
@@ -58,7 +60,8 @@ export function OwnerCollectionsManager({
             {t("title")}
           </p>
           <p className="mt-1 text-sm text-muted-3">
-            {t("description")} {personalCount}/{maxCollections} used.
+            {t("description")}{" "}
+            {t("usedCount", { used: personalCount, max: maxCollections })}
           </p>
         </div>
         <button
@@ -68,13 +71,13 @@ export function OwnerCollectionsManager({
           className="inline-flex h-10 items-center gap-1.5 rounded-full bg-inverse px-4 text-sm font-medium text-on-inverse transition hover:bg-inverse-hover disabled:opacity-50"
         >
           <Plus className="size-4" />
-          New collection
+          {t("newCollection")}
         </button>
       </header>
 
       {approvedPets.length === 0 ? (
         <div className="rounded-3xl border border-dashed border-border-base bg-surface/60 p-8 text-center text-sm text-muted-2">
-          You need at least one approved pet to create a collection.
+          {t("needApprovedPet")}
         </div>
       ) : null}
 
@@ -90,8 +93,7 @@ export function OwnerCollectionsManager({
       <div className="space-y-3">
         {collections.length === 0 && !creating ? (
           <div className="rounded-3xl border border-dashed border-border-base bg-surface/60 p-8 text-center text-sm text-muted-2">
-            No collections yet. Group your pets into themed sets that show up on
-            your profile.
+            {t("emptyState")}
           </div>
         ) : null}
         {collections.map((c) => {
@@ -134,11 +136,7 @@ function CollectionCard({
 
   async function handleDelete() {
     if (collection.featured) return;
-    if (
-      !confirm(
-        `Delete "${collection.title}"? Your pets stay on your profile, only the collection card is removed.`,
-      )
-    ) {
+    if (!confirm(t("confirmDelete", { title: collection.title }))) {
       return;
     }
     setDeleting(true);
@@ -148,10 +146,19 @@ function CollectionCard({
       });
       if (!res.ok) {
         const j = (await res.json().catch(() => ({}))) as { error?: string };
-        alert(`Could not delete: ${j.error ?? res.statusText}`);
+        const key = collectionErrorKey(j.error);
+        alert(
+          key
+            ? t(key)
+            : t("deleteFailed", { code: j.error ?? `http_${res.status}` }),
+        );
         return;
       }
       startTransition(() => router.refresh());
+    } catch {
+      // Network failure: without this the click produced only an unhandled
+      // rejection and the card looked untouched.
+      alert(t("deleteFailed", { code: "network" }));
     } finally {
       setDeleting(false);
     }
@@ -164,15 +171,15 @@ function CollectionCard({
           {collection.featured ? (
             <span className="inline-flex items-center gap-1 rounded-full bg-brand-tint px-2 py-0.5 font-mono text-[9px] tracking-[0.18em] text-brand-deep uppercase dark:bg-brand-tint-dark dark:text-brand-light">
               <Lock className="size-2.5" />
-              Curated
+              {t("curated")}
             </span>
           ) : (
             <span className="inline-flex items-center rounded-full border border-border-base bg-surface px-2 py-0.5 font-mono text-[9px] tracking-[0.18em] text-muted-3 uppercase">
-              Personal
+              {t("personal")}
             </span>
           )}
           <span className="font-mono text-[10px] tracking-[0.18em] text-muted-3 uppercase">
-            {collection.petCount} pets
+            {t("petCount", { count: collection.petCount })}
           </span>
         </div>
         <h3 className="mt-2 text-lg font-semibold tracking-tight text-foreground">
@@ -309,12 +316,21 @@ function CollectionForm({
         setError(
           j.error === "empty_pet_slugs"
             ? t("emptyPetSlugs")
-            : (j.error ?? `Save failed (${res.status})`),
+            : (() => {
+                const key = collectionErrorKey(j.error);
+                return key
+                  ? t(key)
+                  : t("saveFailed", { code: j.error ?? `http_${res.status}` });
+              })(),
         );
         return;
       }
       onSaved();
       startTransition(() => router.refresh());
+    } catch {
+      // Network failure — keep the form open with a message instead of
+      // rejecting unhandled while the button quietly resets.
+      setError(t("saveFailed", { code: "network" }));
     } finally {
       setSaving(false);
     }
@@ -327,7 +343,7 @@ function CollectionForm({
     >
       <header className="flex items-center justify-between">
         <p className="font-mono text-[11px] tracking-[0.22em] text-brand-deep uppercase dark:text-brand-light">
-          {mode === "create" ? "New collection" : "Edit collection"}
+          {mode === "create" ? t("newCollection") : t("editCollection")}
         </p>
         <button
           type="button"
@@ -341,7 +357,7 @@ function CollectionForm({
 
       <label className="block">
         <span className="font-mono text-[10px] tracking-[0.18em] text-muted-3 uppercase">
-          Title
+          {t("fieldTitle")}
         </span>
         <input
           type="text"
@@ -357,14 +373,14 @@ function CollectionForm({
 
       <label className="block">
         <span className="font-mono text-[10px] tracking-[0.18em] text-muted-3 uppercase">
-          Description (optional)
+          {t("fieldDescription")}
         </span>
         <textarea
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           maxLength={280}
           rows={2}
-          placeholder="What ties them together?"
+          placeholder={t("descriptionPlaceholder")}
           className="mt-1 w-full rounded-2xl border border-border-base bg-surface px-4 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand"
         />
         <span className="mt-1 block text-right text-[10px] text-muted-3">
@@ -388,6 +404,7 @@ function CollectionForm({
               <button
                 key={pet.slug}
                 type="button"
+                aria-pressed={checked}
                 onClick={() => togglePet(pet.slug)}
                 disabled={selectionFull}
                 className={`relative flex flex-col items-center gap-1 rounded-xl border p-2 text-xs transition disabled:cursor-not-allowed disabled:opacity-45 ${
@@ -423,7 +440,7 @@ function CollectionForm({
           disabled={saving}
           className="inline-flex h-9 items-center rounded-full border border-border-base bg-surface px-4 text-xs font-medium text-muted-2 transition hover:border-border-strong hover:text-foreground disabled:opacity-50"
         >
-          Cancel
+          {t("cancel")}
         </button>
         <button
           type="submit"
@@ -431,7 +448,7 @@ function CollectionForm({
           className="inline-flex h-9 items-center gap-1.5 rounded-full bg-inverse px-4 text-xs font-medium text-on-inverse transition hover:bg-inverse-hover disabled:opacity-50"
         >
           {saving ? <Loader2 className="size-3.5 animate-spin" /> : null}
-          {mode === "create" ? "Create" : "Save"}
+          {mode === "create" ? t("create") : t("save")}
         </button>
       </div>
     </form>

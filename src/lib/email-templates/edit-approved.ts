@@ -2,6 +2,7 @@ import {
   normalizeLocale,
   p,
   petdexUrl,
+  sanitizeSubject,
   wrapEmail,
 } from "@/lib/email-templates/shared";
 
@@ -37,5 +38,5 @@ export function renderEditApprovedEmail(
   const text = [copy.intro, "", `Page: ${pageUrl}`, "", "Petdex"].join("\n");
   const html = wrapEmail(copy.subject, [p(copy.intro), p(`Page: ${pageUrl}`)]);
 
-  return { subject: copy.subject, html, text };
+  return { subject: sanitizeSubject(copy.subject), html, text };
 }

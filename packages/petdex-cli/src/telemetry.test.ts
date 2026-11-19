@@ -10,7 +10,12 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { ensureTelemetryConfig, isEnabled, setEnabled } from "./telemetry";
+import {
+  ensureTelemetryConfig,
+  getStatus,
+  isEnabled,
+  setEnabled,
+} from "./telemetry";
 
 // telemetry.ts looks up HOME lazily, so swapping process.env.HOME in
 // beforeEach is enough to redirect every read/write at runtime — no
@@ -27,6 +32,11 @@ function petdexConfigPath(): string {
 function writeCorruptConfig() {
   mkdirSync(join(tmpHome, ".petdex"), { recursive: true });
   writeFileSync(petdexConfigPath(), "{ corrupt", "utf8");
+}
+
+function writeConfig(raw: string) {
+  mkdirSync(join(tmpHome, ".petdex"), { recursive: true });
+  writeFileSync(petdexConfigPath(), raw, "utf8");
 }
 
 describe("telemetry config", () => {
@@ -78,5 +88,26 @@ describe("telemetry config", () => {
     expect(isEnabled()).toBe(true);
     expect(setEnabled(false)).toBe(true);
     expect(isEnabled()).toBe(false);
+  });
+
+  // A literal `null` parses fine as JSON, so it slipped past the old
+  // parse-only guard and took every caller down with
+  // `null is not an object` — including `petdex telemetry off`, which
+  // is supposed to be the recovery path for a corrupt config.
+  test("literal null config: every entry point fails closed, off still heals", () => {
+    writeConfig("null");
+    expect(isEnabled()).toBe(false);
+    expect(ensureTelemetryConfig()).toBeNull();
+    expect(getStatus()).toEqual({ enabled: false, install_id: null });
+    expect(setEnabled(false)).toBe(true);
+    expect(isEnabled()).toBe(false);
+  });
+
+  test("parseable config with an invalid shape is treated as corrupt", () => {
+    writeConfig(JSON.stringify({ enabled: "false", install_id: 42 }));
+    expect(isEnabled()).toBe(false);
+    expect(getStatus()).toEqual({ enabled: false, install_id: null });
+    expect(setEnabled(true)).toBe(true);
+    expect(isEnabled()).toBe(true);
   });
 });

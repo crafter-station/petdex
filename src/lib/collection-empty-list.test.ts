@@ -21,7 +21,14 @@ const { petCollections } = schema;
 // module would otherwise get undefined depending on load order. Every other
 // suite that stubs this module exports the real schema for that reason.
 mock.module("server-only", () => ({}));
-mock.module("@/lib/db/client", () => ({ db: {}, schema }));
+mock.module("@/lib/db/client", () => ({
+  db: {},
+  schema,
+  // Named here because mock.module is process-wide: a suite that
+  // links `executeAtomicReturning` fails with a SyntaxError otherwise.
+  executeAtomicReturning: async () => [],
+  rowsOf: () => [],
+}));
 
 const { collectionEmptyMemberListCondition } = await import(
   "@/lib/collection-access"

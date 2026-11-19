@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 
 import { useAuth, useClerk } from "@clerk/nextjs";
 import { Check, HandHeart, Loader2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -25,6 +26,13 @@ type ApprovedPet = {
   spritesheetUrl: string;
 };
 
+// The route answers with these codes; the dialog used to render the raw one.
+const CLAIM_ERROR_KEYS: Record<string, string> = {
+  exists: "exists",
+  request_not_open: "requestNotOpen",
+  pet_not_approved: "petNotApproved",
+};
+
 export function ClaimRequestButton({
   requestId,
   requestQuery,
@@ -32,6 +40,7 @@ export function ClaimRequestButton({
   requestId: string;
   requestQuery: string;
 }) {
+  const t = useTranslations("claimRequest");
   const { isLoaded, isSignedIn } = useAuth();
   const { openSignIn } = useClerk();
   const [open, setOpen] = useState(false);
@@ -51,12 +60,12 @@ export function ClaimRequestButton({
     void fetch("/api/my-pets/approved", { cache: "no-store" })
       .then(async (res) => {
         if (!res.ok) {
-          throw new Error(`Failed (${res.status})`);
+          throw new Error(`http_${res.status}`);
         }
         const data = (await res.json()) as { pets: ApprovedPet[] };
         setPets(data.pets);
       })
-      .catch((err) => setError(err.message))
+      .catch((err: Error) => setError(err.message))
       .finally(() => setLoading(false));
   }, [open, pets]);
 
@@ -82,11 +91,11 @@ export function ClaimRequestButton({
         const j = (await res.json().catch(() => null)) as {
           error?: string;
         } | null;
-        throw new Error(j?.error ?? `Failed (${res.status})`);
+        throw new Error(j?.error ?? `http_${res.status}`);
       }
       setDone(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
+      setError(err instanceof Error ? err.message : "unknown");
     } finally {
       setSubmitting(false);
     }
@@ -98,6 +107,10 @@ export function ClaimRequestButton({
       setSelected(null);
       setError(null);
       setDone(false);
+      // Drop the cached list: a pet claimed (or a new one approved) since
+      // the last open would otherwise keep being offered and be rejected
+      // server-side with `exists`. The next open refetches.
+      setPets(null);
     }, 200);
   }
 
@@ -110,7 +123,8 @@ export function ClaimRequestButton({
             onClick={handleTriggerClick}
             className="inline-flex items-center gap-1.5 rounded-full border border-border-base bg-surface-muted px-2.5 py-1 font-mono text-[11px] tracking-[0.04em] text-muted-2 transition hover:border-brand/30 hover:bg-brand-tint hover:text-brand-deep dark:hover:bg-brand-tint-dark"
           >
-            <HandHeart className="size-3" />I have a pet for this
+            <HandHeart className="size-3" />
+            {t("trigger")}
           </button>
         }
       />
@@ -120,12 +134,9 @@ export function ClaimRequestButton({
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 text-base">
                 <Check className="size-4 text-chip-success-fg" />
-                Submitted
+                {t("submittedTitle")}
               </DialogTitle>
-              <DialogDescription>
-                Your pet is now pending admin review for this request. You'll
-                get a notification if it's approved.
-              </DialogDescription>
+              <DialogDescription>{t("submittedBody")}</DialogDescription>
             </DialogHeader>
             <DialogFooter>
               <Button
@@ -134,7 +145,7 @@ export function ClaimRequestButton({
                 onClick={reset}
                 className="px-4 text-sm"
               >
-                Done
+                {t("done")}
               </Button>
             </DialogFooter>
           </>
@@ -142,12 +153,9 @@ export function ClaimRequestButton({
           <>
             <DialogHeader>
               <DialogTitle className="text-base">
-                Claim "{requestQuery}"
+                {t("title", { query: requestQuery })}
               </DialogTitle>
-              <DialogDescription>
-                Pick one of your approved pets. Admin will review and confirm
-                the match.
-              </DialogDescription>
+              <DialogDescription>{t("description")}</DialogDescription>
             </DialogHeader>
 
             <div className="max-h-72 overflow-y-auto">
@@ -157,12 +165,12 @@ export function ClaimRequestButton({
                 </div>
               ) : pets && pets.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-border-base p-4 text-center text-sm text-muted-2">
-                  You don't have any approved pets yet.
+                  {t("noApprovedPets")}
                   <a
                     href="/submit"
                     className="ml-1 font-medium text-brand-deep underline"
                   >
-                    Submit one →
+                    {t("submitOne")}
                   </a>
                 </div>
               ) : (
@@ -174,6 +182,7 @@ export function ClaimRequestButton({
                         <button
                           type="button"
                           onClick={() => setSelected(pet.id)}
+                          aria-pressed={active}
                           className={`flex w-full items-center gap-3 rounded-xl border p-2 text-left transition ${
                             active
                               ? "border-brand bg-brand-tint dark:bg-brand-tint-dark"
@@ -202,14 +211,17 @@ export function ClaimRequestButton({
             </div>
 
             {error ? (
-              <p className="rounded-lg bg-chip-danger-bg p-2 font-mono text-[10px] text-chip-danger-fg">
-                {error === "exists"
-                  ? "Already submitted as candidate."
-                  : error === "request_not_open"
-                    ? "This request is no longer open."
-                    : error === "pet_not_approved"
-                      ? "Pet must be approved first."
-                      : error}
+              <p
+                role="alert"
+                className="rounded-lg bg-chip-danger-bg p-2 font-mono text-[10px] text-chip-danger-fg"
+              >
+                {CLAIM_ERROR_KEYS[error]
+                  ? t(`errors.${CLAIM_ERROR_KEYS[error]}`)
+                  : error.startsWith("http_")
+                    ? t("errors.loadFailed", { status: error.slice(5) })
+                    : error === "unknown"
+                      ? t("errors.unknown")
+                      : t("errors.failed", { code: error })}
               </p>
             ) : null}
 
@@ -221,7 +233,7 @@ export function ClaimRequestButton({
                     variant="ghost"
                     className="text-sm text-muted-2"
                   >
-                    Cancel
+                    {t("cancel")}
                   </Button>
                 }
               />
@@ -235,7 +247,7 @@ export function ClaimRequestButton({
                 {submitting ? (
                   <Loader2 className="size-3 animate-spin" />
                 ) : null}
-                Submit candidate
+                {t("submitCandidate")}
               </Button>
             </DialogFooter>
           </>

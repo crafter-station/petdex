@@ -1,15 +1,15 @@
 import Link from "next/link";
 
 import { ArrowRight, MonitorSmartphone, Pointer, Zap } from "lucide-react";
-import { getLocale, getTranslations } from "next-intl/server";
+import { getTranslations, setRequestLocale } from "next-intl/server";
 
-import { buildLocaleAlternates } from "@/lib/locale-routing";
+import { buildLocaleAlternates, withLocale } from "@/lib/locale-routing";
 
 import { DownloadHero } from "@/components/download/download-hero";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 
-import { hasLocale } from "@/i18n/config";
+import { defaultLocale, hasLocale, type Locale } from "@/i18n/config";
 
 const SITE_URL = "https://petdex.dev";
 const _DEFAULT_PREVIEW_PET_SLUG = "boba";
@@ -35,25 +35,28 @@ export async function generateMetadata({
   params: Promise<{ locale: string }>;
 }) {
   const { locale } = await params;
+  // The page body is localized but this block was not, so /es/download and
+  // /zh/download served English titles and social cards while the page under
+  // them was translated.
+  const t = await getTranslations({ locale, namespace: "download.metadata" });
+  const alternates = buildLocaleAlternates(
+    "/download",
+    hasLocale(locale) ? locale : undefined,
+  );
   return {
-    title: "Download Petdex Desktop",
-    description:
-      "Download Petdex Desktop for macOS. Your pet, floating beside every coding agent.",
-    alternates: buildLocaleAlternates(
-      "/download",
-      hasLocale(locale) ? locale : undefined,
-    ),
+    title: t("title"),
+    description: t("description"),
+    alternates,
     openGraph: {
-      title: "Petdex Desktop",
-      description:
-        "Your pet, floating beside every coding agent. macOS native.",
-      url: `${SITE_URL}/download`,
+      title: t("ogTitle"),
+      description: t("ogDescription"),
+      url: alternates.canonical,
       images: [{ url: OG_IMAGE, width: 1200, height: 630 }],
     },
     twitter: {
       card: "summary_large_image",
-      title: "Petdex Desktop",
-      description: "Your pet, floating beside every coding agent.",
+      title: t("ogTitle"),
+      description: t("ogDescription"),
       images: [OG_IMAGE],
     },
   };
@@ -62,9 +65,21 @@ export async function generateMetadata({
 export const dynamic = "force-static";
 export const revalidate = 3600;
 
-export default async function DownloadPage() {
+export default async function DownloadPage({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}) {
+  // This page is prerendered, and its default export has to read `params`:
+  // with the signature above, /es and /zh each get a render in their own
+  // locale, and without it every locale prefix was served the one English
+  // render — header nav included. `setRequestLocale` pins the nested
+  // `getTranslations` below to that same locale.
+  const { locale: routeLocale } = await params;
+  const locale: Locale = hasLocale(routeLocale) ? routeLocale : defaultLocale;
+  setRequestLocale(locale);
+
   const t = await getTranslations("download");
-  const locale = await getLocale();
 
   const features = [
     {
@@ -85,61 +100,68 @@ export default async function DownloadPage() {
   ];
 
   return (
-    <main className="relative min-h-dvh bg-background text-foreground">
+    <>
       <SiteHeader />
-
-      <DownloadHero />
-
-      <section
-        id="what-it-does"
-        className="mx-auto w-full max-w-[1440px] px-5 py-16 md:px-8"
+      <main
+        id="main"
+        className="relative min-h-dvh bg-background text-foreground"
       >
-        <div className="text-center">
-          <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
-            {t("features.eyebrow")}
-          </p>
-          <h2 className="mt-3 text-3xl font-semibold tracking-tight md:text-4xl">
-            {t("features.title")}
-          </h2>
-        </div>
+        <DownloadHero />
 
-        <div className="mt-12 grid gap-6 md:grid-cols-3">
-          {features.map((feature) => {
-            const Icon = feature.icon;
-            return (
-              <div
-                key={feature.title}
-                className="flex flex-col gap-4 rounded-3xl border border-border-base bg-surface p-6"
-              >
-                <span className="grid size-10 shrink-0 place-items-center rounded-full bg-brand-tint text-brand ring-1 ring-brand/15 dark:bg-brand-tint-dark dark:ring-brand/25">
-                  <Icon className="size-5" />
-                </span>
-                <div>
-                  <h3 className="text-base font-semibold text-foreground">
-                    {feature.title}
-                  </h3>
-                  <p className="mt-1.5 text-sm leading-6 text-muted-2">
-                    {feature.description}
-                  </p>
+        <section
+          id="what-it-does"
+          className="mx-auto w-full max-w-[1440px] px-5 py-16 md:px-8"
+        >
+          <div className="text-center">
+            <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
+              {t("features.eyebrow")}
+            </p>
+            <h2 className="mt-3 text-3xl font-semibold tracking-tight md:text-4xl">
+              {t("features.title")}
+            </h2>
+          </div>
+
+          <div className="mt-12 grid gap-6 md:grid-cols-3">
+            {features.map((feature) => {
+              const Icon = feature.icon;
+              return (
+                <div
+                  key={feature.title}
+                  className="flex flex-col gap-4 rounded-3xl border border-border-base bg-surface p-6"
+                >
+                  <span className="grid size-10 shrink-0 place-items-center rounded-full bg-brand-tint text-brand ring-1 ring-brand/15 dark:bg-brand-tint-dark dark:ring-brand/25">
+                    <Icon className="size-5" />
+                  </span>
+                  <div>
+                    <h3 className="text-base font-semibold text-foreground">
+                      {feature.title}
+                    </h3>
+                    <p className="mt-1.5 text-sm leading-6 text-muted-2">
+                      {feature.description}
+                    </p>
+                  </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
-      </section>
-      <section className="mx-auto w-full max-w-[1440px] px-5 py-10 md:px-8">
-        <div className="mx-auto max-w-2xl">
-          <Link
-            href={`/${locale}/docs`}
-            className="inline-flex items-center gap-1.5 text-sm font-medium text-brand transition hover:text-brand-deep"
-          >
-            {t("docsLink")}
-            <ArrowRight className="size-4" />
-          </Link>
-        </div>
-      </section>
+              );
+            })}
+          </div>
+        </section>
+        <section className="mx-auto w-full max-w-[1440px] px-5 py-10 md:px-8">
+          <div className="mx-auto max-w-2xl">
+            <Link
+              // `withLocale`, not `/${locale}`: the default locale is
+              // unprefixed, so the literal form sent English readers to
+              // `/en/docs`, which only redirects back to `/docs`.
+              href={withLocale("/docs", locale)}
+              className="inline-flex items-center gap-1.5 text-sm font-medium text-brand transition hover:text-brand-deep"
+            >
+              {t("docsLink")}
+              <ArrowRight className="size-4" />
+            </Link>
+          </div>
+        </section>
 
-      <SiteFooter />
-    </main>
+        <SiteFooter />
+      </main>
+    </>
   );
 }

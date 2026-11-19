@@ -1,3 +1,5 @@
+// DEAD CODE (verified 2026-10): no file in src/ or scripts/ imports this module — its VIBE_COPY/KIND_COPY appear nowhere else. The facets render their copy from the i18n messages instead. Delete it (or wire it) in an upstream decision; do not extend it.
+
 // Per-vibe and per-kind copy. Each landing gets unique intro + title so it
 // doesn't look like one templated page repeated 15 times — that's what
 // Google flags as doorway / thin pages.

@@ -125,12 +125,12 @@ If the inventory shows the public catalog APIs (`/api/manifest*`, `/api/pets/sea
 
 ## Done criteria
 
-- [ ] Blocked UA gets `403` with no `x-vercel-id` (edge-blocked)
-- [ ] HTML page views trigger zero Upstash commands (verify via Upstash dashboard delta after deploy)
-- [ ] API categories still rate-limited (manual: hammer `/api/pets/random` past its limit from one IP → `429`)
-- [ ] `bun run check` + `bun test --env-file=.env.mock` + mock build all exit 0
-- [ ] Step 4 inventory documented (in PR description or commit message)
-- [ ] `plans/README.md` status row updated
+- [x] Blocked UA gets `403` with no `x-vercel-id` (edge-blocked)
+- [x] HTML page views trigger zero Upstash commands (verify via Upstash dashboard delta after deploy)
+- [x] API categories still rate-limited (manual: hammer `/api/pets/random` past its limit from one IP → `429`)
+- [x] `bun run check` + `bun test --env-file=.env.mock` + mock build all exit 0
+- [x] Step 4 inventory documented (in PR description or commit message)
+- [x] `plans/README.md` status row updated
 
 ## STOP conditions
 

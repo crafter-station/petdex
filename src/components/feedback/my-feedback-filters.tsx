@@ -48,6 +48,9 @@ export function MyFeedbackFilters({
           <Link
             key={f.value}
             href={href}
+            // aria-current is the screen-reader half of the `active` styling —
+            // color alone is the only other signal.
+            aria-current={active ? "page" : undefined}
             className={`inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition ${
               active
                 ? "border-inverse bg-inverse text-on-inverse"

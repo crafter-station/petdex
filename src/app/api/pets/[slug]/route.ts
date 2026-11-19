@@ -17,20 +17,18 @@ import { and, eq } from "drizzle-orm";
 
 import { verifyCliBearer } from "@/lib/cli-auth";
 import { db, schema } from "@/lib/db/client";
+import { publicTrafficGuardKey } from "@/lib/public-traffic-guard";
 import { cliVerifyRatelimit } from "@/lib/ratelimit";
 
 export const runtime = "nodejs";
-
-function clientIp(req: Request): string {
-  const xff = req.headers.get("x-forwarded-for") ?? "";
-  return xff.split(",")[0]?.trim() || "anon";
-}
 
 export async function GET(
   req: Request,
   ctx: { params: Promise<{ slug: string }> },
 ): Promise<Response> {
-  const limit = await cliVerifyRatelimit.limit(clientIp(req));
+  const limit = await cliVerifyRatelimit.limit(
+    publicTrafficGuardKey(req.headers),
+  );
   if (!limit.success) {
     return NextResponse.json({ error: "rate_limited" }, { status: 429 });
   }
@@ -59,10 +57,16 @@ export async function GET(
     return NextResponse.json({ error: "pet_not_found" }, { status: 404 });
   }
 
-  return NextResponse.json({
-    id: row.id,
-    slug: row.slug,
-    status: row.status,
-    displayName: row.displayName,
-  });
+  return NextResponse.json(
+    {
+      id: row.id,
+      slug: row.slug,
+      status: row.status,
+      displayName: row.displayName,
+    },
+    // Bearer-scoped data: never let a shared cache hold it. Cloudflare
+    // does not cache Authorization'd requests by default, but the header
+    // is the app's own guarantee, and the sibling private routes set it.
+    { headers: { "Cache-Control": "private, no-store" } },
+  );
 }

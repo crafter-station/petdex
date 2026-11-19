@@ -73,6 +73,18 @@ fi
     "$bun_bin" run check -- --vcs-enabled=false
 )
 
+# Message files are the one thing Biome cannot judge: a key that parses as a
+# rich-text tag is still valid JSON and still formatted correctly, and it only
+# shows up as the raw key rendered on a page. Run the parser only when one of
+# them is staged, so the common commit pays nothing for it.
+git diff --cached --name-only --diff-filter=ACMR -z -- 'src/i18n/messages/*.json' >"$staged_paths"
+if [ -s "$staged_paths" ]; then
+    (
+        cd "$staged_dir"
+        "$bun_bin" run i18n:check
+    )
+fi
+
 git diff --cached --name-only --diff-filter=ACMR -z -- '*.zig' >"$staged_paths"
 if [ -s "$staged_paths" ]; then
     command -v zig >/dev/null 2>&1 || {

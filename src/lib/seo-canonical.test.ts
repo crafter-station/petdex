@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   buildAbsoluteLocaleAlternates,
   buildAbsoluteUrl,
+  buildLocaleAlternates,
   SITE_URL,
 } from "@/lib/locale-routing";
 
@@ -35,9 +36,17 @@ const SEO_SOURCE_FILES = [
   "src/app/[locale]/collections/page.tsx",
   "src/app/[locale]/collections/[slug]/page.tsx",
   "src/app/[locale]/community/page.tsx",
+  "src/app/[locale]/create/page.tsx",
+  "src/app/[locale]/docs/page.tsx",
   "src/app/[locale]/download/page.tsx",
   "src/app/[locale]/kind/[kind]/page.tsx",
+  "src/app/[locale]/leaderboard/page.tsx",
+  "src/app/[locale]/legal/takedown/page.tsx",
+  "src/app/[locale]/legal/telemetry/page.tsx",
   "src/app/[locale]/pets/[slug]/page.tsx",
+  "src/app/[locale]/requests/page.tsx",
+  "src/app/[locale]/stickers/[collection]/page.tsx",
+  "src/app/[locale]/submit/page.tsx",
   "src/app/[locale]/u/[handle]/page.tsx",
   "src/app/[locale]/vibe/[vibe]/page.tsx",
   "src/app/[locale]/collections/[slug]/opengraph-image.tsx",
@@ -76,5 +85,75 @@ describe("SEO canonical domain", () => {
       if (source.includes(LEGACY_HOST)) offenders.push(rel);
     }
     expect(offenders).toEqual([]);
+  });
+  // hreflang has to be spelled one way. Two of the three placements Google
+  // accepts are built here — the `<link rel="alternate">` elements Next renders
+  // from `buildLocaleAlternates`, and the sitemap via
+  // `buildAbsoluteLocaleAlternates` — so both are pinned together.
+  it("spells the Chinese hreflang the script-qualified way", () => {
+    for (const languages of [
+      buildLocaleAlternates("/pets/cai-chao", "zh").languages,
+      buildAbsoluteLocaleAlternates("/pets/cai-chao").languages,
+    ]) {
+      expect(Object.keys(languages)).toEqual([
+        "en",
+        "es",
+        "zh-Hans",
+        "x-default",
+      ]);
+      // A bare `zh` is a different tag, and it is what next-intl derives from
+      // the locale key, so a regression to it is the failure this catches.
+      expect(Object.keys(languages)).not.toContain("zh");
+    }
+  });
+
+  // The third placement is next-intl's `Link` response header, which takes the
+  // hreflang straight from the locale key and so can only ever say `zh` —
+  // `alternateLinks` is a boolean with no mapping hook in next-intl 4.11. It
+  // is therefore switched off, leaving the two consistent placements above as
+  // the only ones that speak. Anchored on the `createMiddleware({…})` literal
+  // rather than the bare setting, so a comment naming it cannot satisfy this.
+  it("leaves next-intl's alternate-links header off in the proxy", () => {
+    const proxy = readFileSync(join(REPO_ROOT, "src/proxy.ts"), "utf8");
+    expect(proxy).toMatch(
+      /createMiddleware\(\{[^}]*alternateLinks:\s*false[^}]*\}\)/,
+    );
+  });
+});
+
+// The OG image routes that render a sprite pass the URL to a loader that
+// checks `isAllowedAssetUrl` first and only rewrites inside `fetchR2Asset`.
+// A row still stored on a retired host was therefore rejected before it could
+// be rewritten, and the sprite silently vanished from the collage.
+// `u/[handle]` read the raw `spritesheetUrl` column while every sibling read
+// the already-rewritten `spritesheetPath`, so it was the one route that hit
+// this. These pin the rewrite at the call site.
+describe("OG image routes rewrite sprite URLs before validating", () => {
+  const OG_ROUTES = [
+    "src/app/[locale]/pets/[slug]/opengraph-image.tsx",
+    "src/app/[locale]/collections/[slug]/opengraph-image.tsx",
+    "src/app/[locale]/u/[handle]/opengraph-image.tsx",
+  ];
+
+  for (const rel of OG_ROUTES) {
+    it(`${rel} does not hand a raw spritesheetUrl to the loader`, () => {
+      const source = readFileSync(join(REPO_ROOT, rel), "utf8");
+      // Reading the raw DB column is the shape that broke: the loader's
+      // guard rejects a legacy host before `fetchR2Asset` can rewrite it.
+      expect(source, "reads the raw column").not.toMatch(
+        /loadFirstFrameAsDataUrl\(\s*r\.spritesheetUrl\s*\)/,
+      );
+      expect(source).not.toMatch(
+        /loadFirstFrameAsDataUrl\(\s*r\.spritesheetUrl\s*,/,
+      );
+    });
+  }
+
+  it("the handle route rewrites the column it reads", () => {
+    const source = readFileSync(
+      join(REPO_ROOT, "src/app/[locale]/u/[handle]/opengraph-image.tsx"),
+      "utf8",
+    );
+    expect(source).toContain("toCurrentR2PublicUrl(r.spritesheetUrl)");
   });
 });

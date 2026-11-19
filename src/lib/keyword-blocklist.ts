@@ -54,8 +54,12 @@ export type BlockedKeywordHit = {
   source: "latin" | "chinese";
 };
 
+// Invisible characters split a keyword so neither pass below sees it; the
+// shared scrubber (and the measured evasions) live in invisible-characters.ts.
+import { stripInvisible } from "@/lib/invisible-characters";
+
 function normalizeLatin(value: string): string {
-  return value
+  return stripInvisible(value)
     .normalize("NFKD")
     .replace(/\p{Diacritic}/gu, "")
     .replace(/[_\-.]+/g, " ")
@@ -91,7 +95,9 @@ export function findBlockedKeyword(
   if (!joined) return null;
 
   // Chinese pass — substring match against the raw NFKC-normalized text.
-  const nfkc = joined.normalize("NFKC");
+  // Invisibles go first for the same reason as the latin pass: a `\p{Cf}`
+  // between two characters of a phrase defeats a plain `includes`.
+  const nfkc = stripInvisible(joined).normalize("NFKC");
   for (const phrase of chinesePhrases) {
     if (nfkc.includes(phrase)) {
       return { keyword: phrase, source: "chinese" };

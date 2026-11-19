@@ -4,9 +4,11 @@
 
 import Link from "next/link";
 
-import { getLocale } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 
+import { formatLocalizedNumber } from "@/lib/format-number";
 import type { SearchPet } from "@/lib/pet-search";
+import { PET_KINDS, PET_VIBES } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 import { StaticCommandLine } from "@/components/download/static-command-line";
@@ -36,10 +38,37 @@ export async function FacetPage({
   related,
 }: FacetPageProps) {
   const locale = await getLocale();
+  // The cards are rendered here rather than in the page, and they carry the
+  // install count, the featured badge, and the discovered/author lines. Those
+  // were English literals on /es and /zh until they moved into the
+  // `facetPages` messages and were threaded down as labels.
+  const t = await getTranslations("facetPages");
+  // The card's kind badge and `#vibe` chips render from `taxonomy`, which is
+  // also shipped to the client (the gallery's filter chips read it), so the
+  // labels live there rather than in `facetPages`.
+  const tTaxonomy = await getTranslations("taxonomy");
+  const cardLabels = {
+    installs: (count: number, formatted: string) =>
+      t("cardInstalls", { count, formatted }),
+    discovered: t("cardDiscovered"),
+    discoveredTitle: t("cardDiscoveredTitle"),
+    byAuthor: (name: string) => t("cardByAuthor", { name }),
+    featured: t("cardFeatured"),
+    dexNumber: (number: string) => t("cardDexNumber", { number }),
+    openPet: (name: string) => t("cardOpenPet", { name }),
+    spriteStill: (name: string) => t("cardSpriteStill", { name }),
+    batchLabel: (month: string) => t("cardBatchLabel", { month }),
+    kinds: Object.fromEntries(
+      PET_KINDS.map((kind) => [kind, tTaxonomy(`kinds.${kind}`)]),
+    ),
+    vibes: Object.fromEntries(
+      PET_VIBES.map((vibe) => [vibe, tTaxonomy(`vibes.${vibe}`)]),
+    ),
+  };
   const cmd = `npx petdex install ${exampleSlug ?? pets[0]?.slug ?? "boba"}`;
 
   return (
-    <main className="min-h-dvh bg-background text-foreground">
+    <main id="main" className="min-h-dvh bg-background text-foreground">
       <section className="petdex-hero relative overflow-hidden">
         <div className="relative mx-auto flex w-full max-w-7xl flex-col px-5 pt-5 pb-10 md:px-8">
           <SiteHeader />
@@ -74,6 +103,7 @@ export async function FacetPage({
               pet={pet}
               index={index}
               locale={locale}
+              labels={cardLabels}
             />
           ))}
         </div>
@@ -91,7 +121,9 @@ export async function FacetPage({
                   className="inline-flex h-9 items-center gap-2 rounded-full border border-border-base bg-surface px-3 font-mono text-[11px] tracking-[0.08em] capitalize text-muted-2 transition hover:border-border-strong"
                 >
                   <span>{r.label}</span>
-                  <span className="text-[10px] text-muted-4">{r.count}</span>
+                  <span className="text-[10px] text-muted-4">
+                    {formatLocalizedNumber(r.count, locale)}
+                  </span>
                 </Link>
               ))}
             </div>

@@ -17,6 +17,12 @@ const FACET_PAGE_LIMIT = 60;
 
 type Props = { params: Promise<{ locale: string; vibe: string }> };
 
+// Fully public: no auth, no cookies, no per-visitor data. The declaration is
+// also what gets every locale prerendered — without it Next builds the default
+// locale and leaves the others to be rendered on demand, so /zh and /es were
+// the only locales this page did not have a static copy for.
+export const dynamic = "force-static";
+
 export const revalidate = 86400;
 
 export function generateStaticParams() {
@@ -44,17 +50,18 @@ export async function generateMetadata({ params }: Props) {
   });
   const vibe = resolveVibe(raw);
   if (!vibe) return { title: t("notFound.vibe"), robots: { index: false } };
+  const alternates = buildLocaleAlternates(
+    `/vibe/${vibe}`,
+    hasLocale(locale) ? locale : undefined,
+  );
   return {
     title: t(`vibes.${vibe}.title`),
     description: t(`vibes.${vibe}.metaDescription`),
-    alternates: buildLocaleAlternates(
-      `/vibe/${vibe}`,
-      hasLocale(locale) ? locale : undefined,
-    ),
+    alternates,
     openGraph: {
       title: t(`vibes.${vibe}.title`),
       description: t(`vibes.${vibe}.metaDescription`),
-      url: `${SITE_URL}/vibe/${vibe}`,
+      url: alternates.canonical,
       type: "website",
     },
     twitter: {
@@ -81,15 +88,26 @@ export default async function VibePage({ params }: Props) {
 
   if (total === 0) notFound();
 
-  const related = PET_VIBES.map(
-    (v) => [v, results.facets.vibes[v] ?? 0] as const,
-  )
-    .filter(([v]) => v !== vibe)
-    .sort((a, b) => b[1] - a[1])
+  // The label moved from `facetPages.vibes.<v>.label` to the `taxonomy`
+  // namespace — same string the gallery filter chips render, shipped once.
+  const tTaxonomy = await getTranslations({
+    locale: hasLocale(locale) ? locale : "en",
+    namespace: "taxonomy",
+  });
+  const related = PET_VIBES.map((v) => {
+    const count = results.facets.vibes[v] ?? 0;
+    return [v, count] as const;
+  })
+    // Exclude the current vibe, then drop empty siblings: the page 404s at
+    // total === 0, and linking an empty facet hands the visitor that same
+    // 404. Ties break alphabetically so the chip order is deterministic
+    // (Array#sort is not guaranteed stable across engines).
+    .filter(([v, count]) => v !== vibe && count > 0)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
     .slice(0, 6)
     .map(([v, count]) => ({
       href: withLocale(`/vibe/${v}`, localeValue),
-      label: t(`vibes.${v}.label`),
+      label: tTaxonomy(`vibes.${v}`),
       count,
     }));
 
@@ -116,7 +134,7 @@ export default async function VibePage({ params }: Props) {
     <>
       <JsonLd data={jsonLd} />
       <FacetPage
-        eyebrow={t("vibeEyebrow", { vibe: t(`vibes.${vibe}.label`) })}
+        eyebrow={t("vibeEyebrow", { vibe: tTaxonomy(`vibes.${vibe}`) })}
         title={t(`vibes.${vibe}.title`)}
         intro={t(`vibes.${vibe}.intro`)}
         countLabel={t("count", { count: total })}

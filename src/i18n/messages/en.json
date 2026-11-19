@@ -5,7 +5,9 @@
     "submitPet": "Submit a pet",
     "browseGallery": "Browse gallery",
     "github": "GitHub",
-    "petdexHome": "Petdex home"
+    "petdexHome": "Petdex home",
+    "close": "Close",
+    "skipToContent": "Skip to content"
   },
   "metadata": {
     "root": {
@@ -33,6 +35,12 @@
         "aiCodingMascot": "AI coding mascot"
       }
     }
+  },
+  "ogImage": {
+    "featuredPet": "Featured Codex pet",
+    "codexPet": "Codex pet",
+    "featuredCollectionsLabel": "Featured collections",
+    "creatorLabel": "Petdex creator"
   },
   "header": {
     "gallery": "Gallery",
@@ -85,7 +93,8 @@
     "manageAccount": "Manage account",
     "signOut": "Sign out",
     "more": "More",
-    "explore": "Explore"
+    "explore": "Explore",
+    "userAvatar": "User avatar"
   },
   "stickers": {
     "eyebrow": "Reaction lab",
@@ -100,6 +109,7 @@
     "copy": "Copy sticker",
     "openExplorer": "Reactions",
     "copied": "Sticker copied",
+    "copyFailed": "Couldn't copy — please copy it manually.",
     "download": "Download WebP",
     "downloadWhatsApp": "WhatsApp WebP · 512px",
     "whatsappNote": "Animated WebP prepared to WhatsApp's media limits. This downloads one reaction, not an installable pack.",
@@ -122,7 +132,8 @@
       "waiting": "Waiting",
       "running": "Running",
       "review": "Review"
-    }
+    },
+    "remove": "Remove from deck"
   },
   "theme": {
     "toggle": "Toggle theme",
@@ -169,13 +180,15 @@
       "eyebrow": "Featured collections",
       "title": "Featured collections worth installing",
       "viewAll": "View all",
-      "petsCount": "{count, plural, =1 {1 pet} other {# pets}}"
+      "petsCount": "{count, plural, =1 {1 pet} other {# pets}}",
+      "coverEmpty": "Collection",
+      "spriteAnimated": "{name} animation"
     },
     "worksWith": "Works with"
   },
   "community": {
     "metadata": {
-      "title": "Petdex Community",
+      "title": "Community",
       "description": "Join creators, collectors, and the Petdex team for featured creator spotlights, work-in-progress feedback, and weekly builds."
     },
     "eyebrow": "Petdex Community",
@@ -224,14 +237,81 @@
     "clearAll": "Clear all",
     "matches": "{count, plural, =1 {1 match} other {# matches}}",
     "sortAria": "Sort pets",
+    "openPet": "Open {name}",
+    "spriteAnimated": "{name} animation",
+    "spriteStill": "{name} sprite",
     "filtersTitle": "Filters",
     "caughtTitle": "Caught",
-    "featuredTitle": "Featured"
+    "featuredTitle": "Featured",
+    "discovered": "Discovered",
+    "discoveredTitle": "Added on behalf of the original author. Not yet claimed.",
+    "filtersButton": "Filters",
+    "clear": "Clear",
+    "sortLabel": "Sort:",
+    "loadingMore": "Loading more",
+    "loadMore": "Load more",
+    "endOfGallery": "End of gallery · {total} shown",
+    "seeAllRequests": "See all requests",
+    "clearFilters": "Clear filters",
+    "batchLabel": "Class of {month}",
+    "errQueryLength": "Use 4-200 characters.",
+    "errQueryInvalidCharacters": "Use plain text.",
+    "errQueryNotSearchable": "Use words, not symbols.",
+    "errUrlInField": "Links and email addresses are not allowed.",
+    "errBlockedContent": "That text references something we can't accept.",
+    "errInvalidQuery": "That request isn't valid.",
+    "errInvalidImageUrl": "That image link isn't valid.",
+    "filterType": "Type",
+    "filterVersion": "Version",
+    "filterVibe": "Vibe",
+    "filterColor": "Color",
+    "filterEra": "Era",
+    "vibeMatch": "Showing pets that vibe with \"{query}\". Closer to the top means stronger match.",
+    "likePet": "Like {name}",
+    "unlikePet": "Unlike {name}",
+    "copyInstallFor": "Copy install for {name}",
+    "downloadPet": "Download {name}",
+    "sharePet": "Share {name}",
+    "playSoundFor": "Play sound for {name}",
+    "noMatchQuery": "No pets match \"{query}\".",
+    "noMatchView": "No pets match this view.",
+    "requestPrompt": "Want a pet that matches \"{query}\"? Request it and other people can upvote.",
+    "requestButton": "Request this pet",
+    "sendingButton": "Sending…",
+    "requestCreated": "Requested. We'll prioritize popular requests.",
+    "requestUpvoted": "Upvoted. {count} people want this pet.",
+    "errorSignIn": "Sign in to request a pet.",
+    "errorRequestFailed": "Request failed ({status}).",
+    "errorNetwork": "Network error, try again.",
+    "sortCurated": "Curated",
+    "sortRecent": "Newest",
+    "sortPopular": "Most liked",
+    "sortInstalled": "Most installed",
+    "sortAlpha": "Alphabetical",
+    "byAuthor": "by {name}",
+    "dexNumber": "No. {number}"
   },
   "suggestCollection": {
     "cta": "Suggest for a collection",
     "closeAria": "Close",
-    "notePlaceholder": "Optional: tell admins why this pet fits the collection"
+    "notePlaceholder": "Optional: tell admins why this pet fits the collection",
+    "heading": "Suggest {name} for…",
+    "pendingSuffix": " · pending",
+    "sending": "Sending…",
+    "sendForReview": "Send for review",
+    "footer": "Admins review every request. You'll see your pet in the collection once it's approved.",
+    "errors": {
+      "unauthorized": "Sign in before suggesting a pet.",
+      "rateLimited": "Too many suggestions. Try again in a few minutes.",
+      "invalidPetSlug": "That pet could not be found.",
+      "urlInField": "Links are not allowed here.",
+      "blockedContent": "That note contains language we cannot accept.",
+      "collectionNotFound": "That collection no longer exists.",
+      "petNotOwned": "That pet is not yours.",
+      "petNotApproved": "That pet must be approved first.",
+      "alreadyInCollection": "That pet is already in the collection.",
+      "failed": "The suggestion could not be sent: {code}"
+    }
   },
   "feedback": {
     "trigger": "Feedback",
@@ -262,12 +342,16 @@
     "errors": {
       "moreDetail": "Tell us a bit more (4+ chars).",
       "submitFailed": "Submit failed ({status}).",
-      "network": "Network error. Try again."
+      "network": "Network error. Try again.",
+      "rateLimited": "Too many messages. Try again in an hour.",
+      "tooLong": "That message is too long.",
+      "invalidEmail": "That email address is not valid.",
+      "generic": "Something went wrong. Try again."
     }
   },
   "submit": {
     "metadata": {
-      "title": "Submit a pet | Petdex",
+      "title": "Submit a pet",
       "description": "Upload and validate a pet package for Petdex."
     },
     "eyebrow": "Submit",
@@ -361,11 +445,13 @@
       },
       "errors": {
         "uploadFailed": "Upload failed: {reason}",
+        "uploadFailedGeneric": "Upload failed. Check the file and try again.",
         "submissionFailed": "Submission failed",
         "submissionFailedWithCode": "Submission failed: {code}",
         "rateLimited": "Limit reached: 10 submissions per 24 hours. Try again tomorrow.",
         "missingField": "The package is missing required submission data.",
         "invalidSpritesheet": "The spritesheet is too small or has invalid dimensions.",
+        "assetTooLarge": "The {role} is over the {max} upload limit. Reduce it and try again.",
         "invalidAssetUrl": "The uploaded assets did not pass the hosting check.",
         "invalidSlug": "Pet id could not become a valid URL slug.",
         "unauthorized": "Sign in before submitting.",
@@ -385,7 +471,9 @@
         "tooSmall": "Spritesheet seems too small ({width}×{height}). Use {classicWidth}×{classicHeight} (8×9) or {v2Width}×{v2Height} (v2 8×11).",
         "badGrid": "Spritesheet grid is {width}×{height}, which doesn't match the 8×9 (1536×1872) or v2 8×11 (1536×2288) frame grid, so frames would render misaligned.",
         "spriteVersionMismatch": "Spritesheet dimensions use v{detected}, but pet.json declares v{declared}. Update spriteVersionNumber before submitting.",
-        "spritesheetMissingPetInfo": "No pet.json found next to this spritesheet, so a placeholder name/description was generated. Fill in the pet name and description below before submitting."
+        "spritesheetMissingPetInfo": "No pet.json found next to this spritesheet, so a placeholder name/description was generated. Fill in the pet name and description below before submitting.",
+        "unreadable": "That package could not be read: {reason}",
+        "unreadableGeneric": "That package could not be read. Check the file and try again."
       }
     }
   },
@@ -460,13 +548,23 @@
         "networkRetry": "Network error, try again.",
         "signInUpvote": "Sign in to upvote.",
         "voteFailed": "Vote failed ({status})",
-        "network": "Network error"
+        "network": "Network error",
+        "queryLength": "Use 4-200 characters.",
+        "queryInvalidCharacters": "Use plain text.",
+        "queryNotSearchable": "Use words, not symbols.",
+        "requestWriteFailed": "That request could not be saved. Try again.",
+        "invalidImageUrl": "That image link is not allowed.",
+        "blockedContent": "That request contains language we cannot accept.",
+        "urlInField": "Links are not allowed here.",
+        "invalidJson": "That request could not be read.",
+        "generic": "Something went wrong. Try again.",
+        "rateLimited": "Too many requests. Try again in a few minutes."
       }
     }
   },
   "create": {
     "metadata": {
-      "title": "Create a pet | Petdex",
+      "title": "Create a pet",
       "description": "Hatch your own animated pet in 5 minutes, then share it on Petdex."
     },
     "eyebrow": "Make your own",
@@ -569,6 +667,7 @@
     "chapters": {
       "eyebrow": "The ecosystem field guide",
       "title": "Explore by chapter",
+      "label": "Chapter {number}",
       "description": "Browse the Petdex ecosystem by category. Each chapter highlights what builders ship and how they bring Petdex to life.",
       "viewAll": "View all ({count})"
     },
@@ -619,11 +718,12 @@
     "card": {
       "screenshotAlt": "{name} screenshot",
       "site": "Site"
-    }
+    },
+    "spritePreviewLabel": "{name} pet"
   },
   "brand": {
     "metadata": {
-      "title": "Petdex brand kit",
+      "title": "Brand kit",
       "description": "Download Petdex logos, icons, color tokens, and usage notes for press, projects, and community posts.",
       "ogTitle": "Petdex brand kit"
     },
@@ -706,7 +806,7 @@
   },
   "about": {
     "metadata": {
-      "title": "About Petdex: Animated pets for your coding agents",
+      "title": "About: Animated pets for your coding agents",
       "description": "Petdex is an open-source gallery of animated pets for coding agents like ChatGPT (Codex), Claude Code, Gemini, OpenCode, Qoder, Kimi Code, CodeBuddy, and OMP. Browse the catalog, install with one command, or submit your own.",
       "ogTitle": "About Petdex",
       "ogDescription": "An open-source gallery of animated pets for coding agents."
@@ -787,6 +887,7 @@
       "title": "My submissions",
       "description": "Track the status of every pet you've sent to Petdex, customize your profile, and edit live entries."
     },
+    "metadataTitle": "My pets",
     "edit": {
       "confirmWithdraw": "Withdraw this edit? Current approved values stay live.",
       "pendingReview": "Pending review",
@@ -819,7 +920,38 @@
       "invalidJson": "Invalid JSON file",
       "autoApproved": "Edit applied",
       "queuedForReview": "Edit submitted for review",
-      "uploading": "Uploading..."
+      "uploading": "Uploading...",
+      "errors": {
+        "unauthorized": "Sign in before editing this pet.",
+        "notFound": "That pet is no longer available.",
+        "invalidJsonFile": "That pet.json could not be read as JSON.",
+        "invalidSpriteVersion": "spriteVersionNumber must be omitted, 1, or 2.",
+        "presignFailed": "The upload could not be prepared.",
+        "missingSpriteSlot": "The upload could not be prepared: the sprite slot is missing.",
+        "spriteUploadFailed": "The spritesheet could not be uploaded.",
+        "missingPetJsonSlot": "The upload could not be prepared: the pet.json slot is missing.",
+        "metadataUploadFailed": "The pet.json could not be uploaded.",
+        "onlyApprovedEditable": "Only approved pets can be edited.",
+        "displayNameTooShort": "The display name needs at least 2 characters.",
+        "descriptionTooShort": "The description needs at least 10 characters.",
+        "descriptionTooLong": "The description can be at most 280 characters.",
+        "invalidTags": "Those tags are not valid.",
+        "invalidAssetUrl": "That file address is not allowed.",
+        "assetNoLongerAvailable": "One of the uploaded files is no longer available. Upload it again.",
+        "nothingChanged": "Nothing changed yet.",
+        "rateLimited": "Too many edits. Try again in a few minutes.",
+        "urlInField": "Links are not allowed in the name, description, or tags.",
+        "blockedContent": "That name or description contains blocked words.",
+        "petNotEditable": "This pet can only be edited while it is approved.",
+        "failed": "The edit could not be saved: {code}",
+        "unknown": "The edit could not be saved."
+      },
+      "spritePreviewAlt": "Sprite preview",
+      "a11y": {
+        "close": "Close",
+        "removeSprite": "Remove the selected spritesheet",
+        "removeMeta": "Remove the selected pet.json"
+      }
     },
     "eyebrow": "Dashboard",
     "submissionCount": "{count, plural, =0 {no submissions} =1 {1 submission} other {# submissions}}",
@@ -830,7 +962,33 @@
       "rejected": "Rejected"
     },
     "submitAnother": "Submit another",
-    "emptyState": "No submissions in this state."
+    "emptyState": "No submissions in this state.",
+    "claimBanner": {
+      "claimed": "Claimed. Refresh to see them in your list.",
+      "found": "We found {count, plural, =1 {1 pet} other {# pets}} that look like yours",
+      "matchedViaBoth": "Matched via <mono>{email}</mono> or <mono>{github}</mono>.",
+      "matchedViaEmail": "Matched via <mono>{email}</mono>.",
+      "matchedViaGithub": "Matched via <mono>{github}</mono>.",
+      "matchedHint": "Click claim to move each one to your current account so you can manage and re-submit edits.",
+      "claim": "Claim",
+      "claiming": "Claiming…",
+      "dismiss": "Not mine, dismiss",
+      "errors": {
+        "unauthorized": "Sign in to claim a pet.",
+        "rateLimited": "Too many claims. Try again in a few minutes.",
+        "notFound": "That pet is no longer available.",
+        "identityMismatch": "That pet is not linked to your email or GitHub account.",
+        "noVerifiedIdentity": "Add a verified email or connect GitHub before claiming.",
+        "network": "The request could not reach Petdex. Check your connection and try again.",
+        "failed": "The claim did not go through. Try again.",
+        "failedWithCode": "The claim did not go through: {code}"
+      }
+    },
+    "status": {
+      "pending": "Pending",
+      "approved": "Approved",
+      "rejected": "Rejected"
+    }
   },
   "myFeedback": {
     "metadata": {
@@ -884,7 +1042,7 @@
   },
   "leaderboard": {
     "metadata": {
-      "title": "Petdex leaderboard",
+      "title": "Leaderboard",
       "description": "Top creators on Petdex: most pets approved, most loved, most installed."
     },
     "eyebrow": "Top creators",
@@ -927,7 +1085,8 @@
         "blurb": "Collectors ranked by how many approved pets they have caught.",
         "empty": "No collectors yet."
       }
-    }
+    },
+    "anonymousCreator": "anonymous"
   },
   "claim": {
     "cta": "Sign in to claim",
@@ -957,7 +1116,9 @@
       "insideCodex": "inside the app to wake or tuck it away.",
       "andClick": "and click",
       "use": "Use",
-      "findPet": "Find <strong>{displayName}</strong> under"
+      "findPet": "Find <strong>{displayName}</strong> under",
+      "customPets": "Custom pets",
+      "select": "Select"
     }
   },
   "commandLine": {
@@ -1013,13 +1174,28 @@
     "withdrawSubmission": "Withdraw submission",
     "withdrawing": "Withdrawing…",
     "submitNewVersion": "Submit a new version",
-    "editDetails": "Edit name & description"
+    "editDetails": "Edit name & description",
+    "deleteConfirm": "Type \"{slug}\" to confirm. This permanently removes {pet} from Petdex and frees the slug. The pet's files and like history are deleted.",
+    "deleteMismatch": "Slug did not match. Pet was NOT removed.",
+    "withdrawConfirm": "Withdraw \"{pet}\"? Pending submissions can't be brought back. You'd have to resubmit.",
+    "errors": {
+      "unauthorized": "Sign in first.",
+      "rateLimited": "Too many actions. Try again in a few minutes.",
+      "notFound": "That pet is no longer available.",
+      "forbidden": "That pet is not yours to remove.",
+      "claimRequired": "This pet was added on your behalf. Claim it from your profile first, then delete it.",
+      "invalidSlug": "That pet id is not valid.",
+      "onlyPending": "Only pending submissions can be withdrawn.",
+      "network": "The request could not reach Petdex. Check your connection and try again.",
+      "failed": "The action did not go through: {code}"
+    }
   },
   "petStateViewer": {
     "eyebrow": "State viewer",
     "frames": "{count} frames",
     "rowFrames": "Row {row} - {count} frames",
     "animationLabel": "{petName} {state} animation",
+    "spriteLabel": "{petName} {state}",
     "states": {
       "idle": {
         "label": "Idle",
@@ -1062,7 +1238,8 @@
   "pet": {
     "navigation": {
       "ariaLabel": "Dex navigation",
-      "shuffleTitle": "Shuffle to a random pet (Space)"
+      "shuffleTitle": "Shuffle to a random pet (Space)",
+      "shuffle": "Shuffle"
     },
     "keyboardHint": {
       "tip": "Tip:",
@@ -1080,7 +1257,36 @@
     "variants": {
       "title": "Variants of this character",
       "description": "Other approved pets with closely matching sprite shapes."
-    }
+    },
+    "metadata": {
+      "title": "{name}: Animated Codex pet",
+      "description": "Install {name} for Codex: {description} One command, animated pixel art, {tags}.",
+      "tagsFallback": "open source",
+      "keywordCodexPet": "{name} Codex pet",
+      "keywordPixelPet": "{name} pixel pet",
+      "keywordCodexPetShort": "Codex pet"
+    },
+    "partOf": "Part of",
+    "counters": {
+      "installs": "{count} installs",
+      "downloads": "{count} downloads",
+      "skeleton": "— installs · — downloads"
+    },
+    "floater": {
+      "aria": "{name}: drag, click, or just watch",
+      "title": "{name}: drag me, click me",
+      "spriteLabel": "{name} interactive sprite"
+    },
+    "submission": {
+      "title": "Submission",
+      "curated": "Curated entry.",
+      "updated": "Updated {date}"
+    },
+    "animatedLabel": "{name} animated",
+    "spriteIdleLabel": "{name} idle",
+    "eyebrowFeatured": "Featured",
+    "eyebrowEntry": "Petdex entry",
+    "dexNumber": "No. {number}"
   },
   "collectionDetail": {
     "backToCollections": "← All collections",
@@ -1090,9 +1296,29 @@
     "noResults": "No pets match \"{query}\" in this collection.",
     "empty": "This collection has no approved pets yet.",
     "loadingMore": "Loading more pets…",
-    "endOfCollection": "End of collection · {count} pets"
+    "endOfCollection": "End of collection · {count} pets",
+    "metadata": {
+      "title": "{title} collection",
+      "ogTitle": "{title} on Petdex"
+    },
+    "featuredEyebrow": "Featured collection",
+    "viewCreator": "View creator",
+    "visitIpSite": "Visit IP site",
+    "petCount": "{count, plural, =1 {1 pet} other {# pets}}",
+    "installCount": "{count} installs",
+    "caught": "caught {caught}/{total}",
+    "setContents": "Set contents",
+    "catchFull": "Catch the full collection",
+    "allCollections": "All collections",
+    "animatedLabel": "{name} animated"
   },
   "download": {
+    "metadata": {
+      "title": "Download Petdex Desktop",
+      "description": "Download Petdex Desktop for macOS, Windows, and Linux. Your pet, floating beside every coding agent.",
+      "ogTitle": "Petdex Desktop",
+      "ogDescription": "Free desktop pet for macOS, Windows, and Linux — floating beside every coding agent."
+    },
     "eyebrow": "Terminal-first setup",
     "title": "Run one command. Petdex does the rest.",
     "subtitle": "Install the desktop app, wire your coding agents, and wake your pet from the terminal.",
@@ -1198,7 +1424,26 @@
   "installCompact": {
     "seeGuide": "See full install guide",
     "themeCodexLabel": "Theme my Codex",
-    "themeCodexHint": "Repaint Codex Desktop"
+    "themeCodexHint": "Repaint Codex Desktop",
+    "themeDialog": {
+      "title": "Codex theme from {name}",
+      "description": "Generated from the pet's dominant color. Codex Desktop has no deep link for theme install yet, so paste this into Settings to apply.",
+      "loading": "Building theme…",
+      "light": "Light",
+      "dark": "Dark",
+      "copied": "Copied",
+      "copy": "Copy {label}",
+      "stepAppearance": "Codex Desktop → Settings → Appearance.",
+      "stepImport": "Click <import>Import</import> on the Light theme, paste, then repeat for the Dark theme.",
+      "stepColor": "Both repaint from {color}.",
+      "errors": {
+        "notFound": "This pet is not published, so there is no theme to build yet.",
+        "noColor": "This pet has no dominant color yet, which is what the theme is derived from.",
+        "loadFailed": "The theme could not be built. Try again in a moment.",
+        "loadFailedWithCode": "The theme could not be built: {code}",
+        "clipboardBlocked": "Clipboard write blocked. Try again, or select the text and copy it manually."
+      }
+    }
   },
   "desktopAnnouncement": {
     "eyebrow": "New · Desktop App",
@@ -1246,6 +1491,7 @@
       "title": "Featured collections",
       "description": "Browse Petdex collections by franchise, category, or theme in a fast public catalog."
     },
+    "notFoundTitle": "Collection not found",
     "hero": {
       "eyebrow": "Featured collections",
       "title": "Find your set, install in one line",
@@ -1275,7 +1521,8 @@
     "card": {
       "petCount": "{count, plural, =1 {1 pet} other {# pets}}",
       "siteLink": "Site",
-      "byOwner": "by {name}"
+      "byOwner": "by {name}",
+      "spriteStill": "{name} sprite"
     },
     "kindLabel": {
       "franchise": "Franchise",
@@ -1286,6 +1533,7 @@
   },
   "profile": {
     "creatorBadge": "Petdex creator",
+    "notFoundTitle": "Profile not found",
     "creatorOfPetdex": "Creator of Petdex",
     "yourAlbum": "YOUR ALBUM: {caught}/{total} ({pct}%)",
     "editProfile": "Edit profile",
@@ -1297,14 +1545,61 @@
     "editOrder": "Edit order",
     "joined": "joined {date}",
     "installs": "{count} installs",
-    "petsCount": "{count, plural, =1 {1 pet} other {# pets}}"
+    "petsCount": "{count, plural, =1 {1 pet} other {# pets}}",
+    "metadata": {
+      "title": "{name}",
+      "description": "Pets created by {name} for Codex.",
+      "ogDescription": "Animated Codex pets created by {name}."
+    },
+    "pin": {
+      "capAlert": "You can pin up to {max} pets. Unpin one first.",
+      "failed": "The pin could not be saved: {code}",
+      "networkError": "The pin could not be saved. Check your connection and try again.",
+      "unavailable": "Pin controls are temporarily unavailable",
+      "unpin": "Unpin from profile",
+      "capReached": "Pin cap reached ({max})",
+      "pin": "Pin to profile"
+    },
+    "creatorOfPetdexTitle": "One of the people who built Petdex",
+    "dragAria": "Drag {name} to reorder",
+    "openPetAria": "Open {name}",
+    "rankTitle": "Ranked #{rank} of {total} by approved pets. See the full leaderboard",
+    "rankLabel": "#{rank} most pets"
   },
   "galleryReorder": {
-    "dragInstruction": "Drag any pet to reorder. Changes save when you click Done."
+    "dragInstruction": "Drag any pet to reorder. Changes save when you click Done.",
+    "cancel": "Cancel",
+    "saving": "Saving…",
+    "done": "Done",
+    "saveFailed": "Could not save the order: {code}",
+    "errors": {
+      "unauthorized": "Sign in before reordering.",
+      "rateLimited": "Too many changes. Try again in a few minutes.",
+      "invalidOrder": "That order could not be read.",
+      "tooManyItems": "There are too many pets to order.",
+      "emptyOrder": "The order cannot be empty.",
+      "noOwnedPets": "None of those pets are yours."
+    },
+    "spriteStill": "{name} sprite"
   },
   "pinnedReorder": {
     "reorderLabel": "Could not save order",
-    "saveError": "Could not save order: {error}"
+    "saveError": "Could not save order: {error}",
+    "heading": "★ Pinned",
+    "saving": "Saving...",
+    "saved": "Order updated",
+    "count": "{count} of {max}",
+    "retry": "Retry",
+    "restore": "Restore saved order",
+    "dragHint": "Drag a pet by its handle to reorder. Changes save when you drop.",
+    "errors": {
+      "unauthorized": "Sign in before reordering.",
+      "rateLimited": "Too many changes. Try again in a few minutes.",
+      "invalidOrder": "That order could not be read.",
+      "noOwnedPets": "None of those pets are yours.",
+      "tooManyItems": "You can pin at most 6 pets.",
+      "emptyOrder": "There is nothing to save."
+    }
   },
   "ownerCollections": {
     "title": "My collections",
@@ -1316,19 +1611,46 @@
     "petsSelected": "Pets ({selected} of {total} selected)",
     "petLimit": "Collections can include up to {max} pets. Remove members until you are below {max} to add another.",
     "petLimitHint": "You have more approved pets than fit in one collection. Pick up to {max}.",
-    "emptyPetSlugs": "That would remove every pet from this collection. Add a pet, or delete the collection instead."
+    "emptyPetSlugs": "That would remove every pet from this collection. Add a pet, or delete the collection instead.",
+    "usedCount": "{used}/{max} used.",
+    "newCollection": "New collection",
+    "editCollection": "Edit collection",
+    "needApprovedPet": "You need at least one approved pet to create a collection.",
+    "emptyState": "No collections yet. Group your pets into themed sets that show up on your profile.",
+    "confirmDelete": "Delete \"{title}\"? Your pets stay on your profile, only the collection card is removed.",
+    "deleteFailed": "Could not delete the collection: {code}",
+    "saveFailed": "Could not save the collection: {code}",
+    "curated": "Curated",
+    "personal": "Personal",
+    "petCount": "{count, plural, =1 {1 pet} other {# pets}}",
+    "fieldTitle": "Title",
+    "fieldDescription": "Description (optional)",
+    "descriptionPlaceholder": "What ties them together?",
+    "cancel": "Cancel",
+    "create": "Create",
+    "save": "Save",
+    "unauthorized": "Your session expired. Sign in again and retry.",
+    "forbidden": "That collection is not yours.",
+    "notFound": "That collection no longer exists.",
+    "featuredNotEditable": "Featured collections cannot be edited or deleted.",
+    "invalidUrl": "That link is not allowed.",
+    "collectionPetLimit": "That collection already has the maximum number of pets.",
+    "petNotOwnedOrApproved": "Every pet in a collection must be yours and approved.",
+    "collectionCapReached": "You have reached the maximum number of collections.",
+    "collectionSlugConflict": "A collection with that name already exists."
   },
   "collectionEditor": {
     "selectPetsFirst": "Select pets first",
     "petLimit": "Collections can include up to {max} pets. Remove members until you are below {max} to add another.",
-    "petLimitHint": "You have more approved pets than fit in one collection. Pick up to {max}.",
-    "emptyPetSlugs": "That would remove every pet from this collection. Add a pet, or delete the collection instead."
+    "petLimitHint": "You have more approved pets than fit in one collection. Pick up to {max}."
   },
   "onboarding": {
     "skip": "Skip tour"
   },
   "sticker": {
     "ctaWeChat": "Save for WeChat",
+    "reactionsTitle": "{name} reactions",
+    "reactionsDescription": "Pick a reaction, copy the sticker, or share a reaction deck.",
     "ctaGeneric": "Save for WhatsApp",
     "ctaShort": "Save as sticker",
     "hintWeChat": "Animated WebP · works in WeChat, WhatsApp, Discord",
@@ -1370,7 +1692,7 @@
   },
   "takedownPage": {
     "metadata": {
-      "title": "Takedown | Petdex",
+      "title": "Takedown",
       "description": "How to report a pet that infringes your rights."
     },
     "eyebrow": "Legal · Takedown",
@@ -1391,7 +1713,7 @@
   },
   "unsubscribePage": {
     "metadata": {
-      "title": "Unsubscribe | Petdex",
+      "title": "Unsubscribe",
       "description": "Manage your Petdex email preferences."
     },
     "eyebrow": "Email · Preferences",
@@ -1412,7 +1734,7 @@
   },
   "telemetryPage": {
     "metadata": {
-      "title": "Telemetry | Petdex",
+      "title": "Telemetry",
       "description": "What petdex CLI telemetry collects and how to opt out."
     },
     "eyebrow": "Legal · Telemetry",
@@ -1464,22 +1786,19 @@
     "vibeEyebrow": "Vibe: {vibe}",
     "relatedKinds": "Other kinds",
     "relatedVibes": "Related vibes",
-    "count": "{count, plural, =1 {1 pet in this collection} other {# pets in this collection}}",
+    "count": "{count, plural, =1 {1 pet} other {# pets}}",
     "kinds": {
       "creature": {
-        "label": "creature",
         "title": "Animated creature pets for coding agents",
         "intro": "Animals, critters, and made-up beasts. The biggest collection in the index. Most contributors start here: otters, capybaras, foxes, and things with too many legs.",
         "metaDescription": "Animated creature pets for coding agents like ChatGPT (Codex), Claude Code, and Gemini. Otters, capybaras, foxes and more, installable with one command."
       },
       "object": {
-        "label": "object",
         "title": "Animated object pets for coding agents",
         "intro": "Pets that aren't alive but absolutely have personality. Paperclips, mugs, ice cream scoops: everyday objects that earned a soul.",
         "metaDescription": "Object pets for coding agents. Animated pixel companions made from everyday objects, installable with one command."
       },
       "character": {
-        "label": "character",
         "title": "Animated character pets for coding agents",
         "intro": "Humanoids, mascots, fictional figures, original characters, and homages, all in 9-state pixel form.",
         "metaDescription": "Animated character pets for coding agents like ChatGPT (Codex), Claude Code, and Gemini. Humanoid pixel companions installable with one command."
@@ -1487,82 +1806,114 @@
     },
     "vibes": {
       "cozy": {
-        "label": "cozy",
         "title": "Cozy pets for coding agents",
         "intro": "Warm, soft companions with gentle poses, subtle blinks, and quiet idle states. Pick one to keep your terminal feeling easy to sit with.",
         "metaDescription": "Cozy animated pixel pets for coding agents. Soft, calming companions you can install with one command."
       },
       "calm": {
-        "label": "calm",
         "title": "Calm pets for coding agents",
         "intro": "Steady, low-key companions for focused sessions. Their idle animations breathe instead of bounce.",
         "metaDescription": "Calm pixel pets for coding agents. Low-motion animated companions for deep work."
       },
       "playful": {
-        "label": "playful",
         "title": "Playful pets for coding agents",
         "intro": "Bouncy companions that refuse to sit still. Expect tail wags, spins, and little interruptions beside your prompt.",
         "metaDescription": "Playful animated companions for coding agents. Bouncy pixel art you can install with one command."
       },
       "cheerful": {
-        "label": "cheerful",
         "title": "Cheerful pets for coding agents",
         "intro": "The optimists of the index. Bright palettes, smiling sprites, and idle states that seem glad you opened the terminal.",
         "metaDescription": "Cheerful pets for coding agents. Bright, smiling animated companions installable with one command."
       },
       "focused": {
-        "label": "focused",
         "title": "Focused pets for coding agents",
         "intro": "Companions in deep work mode. Headphones, monitors, concentrated stares, and ready-to-ship energy.",
         "metaDescription": "Focused pets for coding agents. Concentrated, deep-work companions for long sessions."
       },
       "mischievous": {
-        "label": "mischievous",
         "title": "Mischievous pets for coding agents",
         "intro": "Sneaky idle poses, side-eye, and the suspicion that your linter errors might be their fault.",
         "metaDescription": "Mischievous pets for coding agents. Sneaky animated pixel companions for your terminal."
       },
       "heroic": {
-        "label": "heroic",
         "title": "Heroic pets for coding agents",
         "intro": "Capes, stances, and saving-the-day energy. These pets believe in you and your unmerged PR.",
         "metaDescription": "Heroic pets for coding agents. Brave, animated pixel companions installable with one command."
       },
       "edgy": {
-        "label": "edgy",
         "title": "Edgy pets for coding agents",
         "intro": "Darker palettes, sharper silhouettes, and more attitude for terminals that need a little bite.",
         "metaDescription": "Edgy pets for coding agents. Bold, animated pixel companions for long sessions."
       },
       "mystical": {
-        "label": "mystical",
         "title": "Mystical pets for coding agents",
         "intro": "Moons, sparkles, robes, and the feeling that this companion knows the answer before the model does.",
         "metaDescription": "Mystical pets for coding agents. Magical animated pixel companions installable with one command."
       },
       "wholesome": {
-        "label": "wholesome",
         "title": "Wholesome pets for coding agents",
         "intro": "Pure-hearted companions with big eyes and small gestures. A little softness for your workspace.",
         "metaDescription": "Wholesome pets for coding agents. Sweet animated pixel companions installable with one command."
       },
       "chaotic": {
-        "label": "chaotic",
         "title": "Chaotic pets for coding agents",
         "intro": "Maximum energy, minimum predictability. Their states cycle a little strangely, in a good way.",
         "metaDescription": "Chaotic pets for coding agents. High-energy animated pixel companions for long sessions."
       },
       "melancholic": {
-        "label": "melancholic",
         "title": "Melancholic pets for coding agents",
         "intro": "Pensive, soft, and a little wistful. Companions for the part of the night when the build keeps failing.",
         "metaDescription": "Melancholic pets for coding agents. Pensive animated pixel companions installable with one command."
       }
+    },
+    "cardInstalls": "{count, plural, =1 {{formatted} install} other {{formatted} installs}}",
+    "cardDiscovered": "Discovered",
+    "cardDiscoveredTitle": "Added on behalf of the original author. Not yet claimed.",
+    "cardByAuthor": "by {name}",
+    "cardFeatured": "★ FEATURED",
+    "cardDexNumber": "No. {number}",
+    "cardOpenPet": "Open {name}",
+    "cardSpriteStill": "{name} sprite",
+    "cardBatchLabel": "Class of {month}"
+  },
+  "taxonomy": {
+    "kinds": {
+      "creature": "creature",
+      "object": "object",
+      "character": "character"
+    },
+    "vibes": {
+      "cozy": "cozy",
+      "calm": "calm",
+      "playful": "playful",
+      "cheerful": "cheerful",
+      "focused": "focused",
+      "mischievous": "mischievous",
+      "heroic": "heroic",
+      "edgy": "edgy",
+      "mystical": "mystical",
+      "wholesome": "wholesome",
+      "chaotic": "chaotic",
+      "melancholic": "melancholic"
+    },
+    "colors": {
+      "red": "red",
+      "orange": "orange",
+      "yellow": "yellow",
+      "lime": "lime",
+      "green": "green",
+      "teal": "teal",
+      "blue": "blue",
+      "indigo": "indigo",
+      "purple": "purple",
+      "pink": "pink",
+      "brown": "brown",
+      "neutral": "neutral"
     }
   },
   "docsPage": {
     "metadata": {
-      "title": "Docs · Petdex",
+      "title": "Docs",
       "description": "How to install, distribute, and automate pets with the Petdex CLI.",
       "ogTitle": "Petdex CLI · Docs"
     },
@@ -1584,7 +1935,7 @@
       "contribute": "Contribute"
     },
     "hero": {
-      "eyebrow": "Petdex CLI · v0.1",
+      "eyebrow": "Petdex CLI · v1",
       "title": "Docs",
       "description": "The Petdex CLI lets you install, browse, and submit pets from your terminal. Authentication uses OAuth 2.0 + PKCE through Clerk, and tokens persist in your OS keychain.",
       "npmCta": "npmjs.com/petdex",
@@ -1613,8 +1964,8 @@
           },
           "verify": {
             "title": "Verify the setup",
-            "body": "Run diagnostics if the pet does not appear, or type <code>/petdex status</code> inside a supported agent after hooks are installed.",
-            "result": "The doctor reports any missing binary, hook, token, or pet folder with a concrete fix."
+            "body": "If the pet does not appear, re-run the install command and check the printed folders. Petdex Desktop reads <code>~/.petdex/pets/</code>; Codex Desktop reads <code>~/.codex/pets/</code>.",
+            "result": "Both folders print on success — re-run the install command if one is missing."
           }
         },
         "callout": "Don't have a pet idea yet? <link>Hatch your own</link> with the Hatch Pet skill, then come back to <code>petdex submit</code>."
@@ -1636,9 +1987,9 @@
       },
       "commands": {
         "title": "Commands",
-        "intro": "The CLI covers the full lifecycle: discover, install, hatch, publish, plus the desktop app and agent hooks. All commands accept <code>--help</code>.",
+        "intro": "The CLI covers the full lifecycle: discover, install, and publish — the desktop app and agent hooks live in the desktop download. All commands accept <code>--help</code>.",
         "listBody": "Print every approved pet with credit. Useful for discovery before installing.",
-        "installBody": "Drop a pet into <code>~/.codex/pets/{petName}/</code>. Equivalent to <code>curl -sSf https://petdex.dev/install/{petName} | sh</code>.",
+        "installBody": "Drop a pet into <code>~/.codex/pets/{petName}/</code> and <code>~/.petdex/pets/{petName}/</code>. The <code>petdex install</code> CLI writes both locations; the <code>curl</code> one-liner only writes <code>~/.codex/pets/</code>, which the Codex Desktop picks up but the Petdex Desktop does not.",
         "submitIntro": "Publish your pet(s) to the gallery. The CLI accepts three shapes:",
         "submitSingle": "<strong>Single folder</strong>: <code>petdex submit ~/.codex/pets/boba</code>",
         "submitZip": "<strong>Single zip</strong>: <code>petdex submit ~/Downloads/boba.zip</code>",
@@ -1668,7 +2019,7 @@
         "settingsAgents": "<strong>Agents.</strong> Shows which coding agents are on this machine and whether their hooks are wired. Install or disconnect any of them in one click; the app writes the hook files itself, no terminal involved.",
         "settingsAppearance": "<strong>Appearance.</strong> Scale the sprite, and turn the activity bubble on or off if you would rather have the pet stay quiet.",
         "chatgptTitle": "ChatGPT pets",
-        "chatgptBody": "ChatGPT exports pets as a 1536x2288 spritesheet, which is exactly the atlas Petdex already reads: same nine state rows, same frame counts. A pet made there works here with no conversion.",
+        "chatgptBody": "ChatGPT exports pets as a 1536x2288 spritesheet, which is exactly the atlas Petdex already reads: the same 8×9 or 8×11 state-row grid, same frame counts. A pet made there works here with no conversion.",
         "chatgptImport": "<strong>Bringing one in.</strong> Download the spritesheet from ChatGPT, then drop the PNG on <submit>/submit</submit>. Petdex measures the grid, generates the pet.json the export does not include, and shows an animated preview before you name it.",
         "chatgptExport": "<strong>Taking one out.</strong> Every pet page has an Open in Codex button that installs it into the ChatGPT desktop app. Importing straight from a ChatGPT share link is not possible: those URLs are locked to the browser session that created them."
       },
@@ -1778,5 +2129,137 @@
       "windows": "Download for Windows",
       "linux": "Download for Linux"
     }
+  },
+  "profileTabs": {
+    "noPetsYet": "No pets yet",
+    "ownerEmptyBody": "Once you submit a pet and it gets approved, it shows up here.",
+    "visitorEmptyBody": "This creator has not shipped a public pet yet.",
+    "submitFirstPet": "Submit your first pet",
+    "pinSaving": "Pinned order is saving",
+    "pendingReviewHeading": "Pending review ({count})",
+    "pendingReviewHint": "Visible only to you until an admin approves.",
+    "rejectedHeading": "Rejected ({count})",
+    "rejectedHint": "Visible only to you. Submit a fresh version when ready.",
+    "likedIntro": "Pets caught with the heart, most recent first. Tap a card to revisit, install, or unlike.",
+    "noCollectionsYet": "No collections yet.",
+    "curated": "Curated",
+    "personal": "Personal",
+    "petCount": "{count, plural, =1 {1 pet} other {# pets}}",
+    "featuredCollection": "Featured collection",
+    "viewCollection": "View collection",
+    "legacyCollectionMeta": "{count, plural, =1 {1 pet} other {# pets}} · @{handle}",
+    "status": {
+      "pending": "Pending",
+      "rejected": "Rejected"
+    }
+  },
+  "profileEditor": {
+    "title": "Edit your profile",
+    "subtitle": "Lives at petdex.dev/u/{handle}. Changes go live instantly. No admin review.",
+    "displayName": "Display name",
+    "displayNamePlaceholder": "Kevin Wu",
+    "profileUrl": "Profile URL",
+    "handlePlaceholder": "kevwuzy",
+    "handleHint": "3-30 lowercase letters, numbers, dashes or underscores.",
+    "bio": "Bio",
+    "bioPlaceholder": "Pixel art, cozy creatures, and the occasional shrimp.",
+    "pinnedPets": "Pinned pets ({pinned}/{max})",
+    "noApprovedPets": "Once a pet is approved you can pin it here.",
+    "pinCapTitle": "Max {max} pinned. Unpin one first",
+    "clickToUnpin": "Click to unpin",
+    "clickToPin": "Click to pin",
+    "pinTip": "Tip: each pet card on your profile has a one-click Pin button too.",
+    "cancel": "Cancel",
+    "save": "Save",
+    "errors": {
+      "unauthorized": "Sign in before editing your profile.",
+      "rateLimited": "Too many edits. Try again in a few minutes.",
+      "invalidDisplayName": "That display name is not allowed.",
+      "invalidHandle": "That profile URL is not valid.",
+      "handleTooShort": "Profile URLs need at least 3 characters.",
+      "handleTooLong": "Profile URLs can be at most 30 characters.",
+      "handleReserved": "That profile URL is reserved.",
+      "handleTaken": "That profile URL is already taken.",
+      "invalidBio": "That bio is too long or contains unsupported characters.",
+      "invalidFeatured": "Those pinned pets could not be saved.",
+      "pinCapReached": "You can pin up to {max} pets. Unpin one first.",
+      "petNotOwned": "One of the pinned pets is not yours or is not approved.",
+      "nothingToUpdate": "Nothing changed.",
+      "failed": "Your profile could not be saved: {code}"
+    },
+    "a11y": {
+      "close": "Close"
+    }
+  },
+  "notifications": {
+    "title": "Notifications",
+    "markAllRead": "Mark all read",
+    "allCaughtUp": "You're all caught up.",
+    "relativeNow": "now",
+    "relativeMinutes": "{count}m",
+    "relativeHours": "{count}h",
+    "relativeDays": "{count}d",
+    "petApproved": "{pet} is live",
+    "petRejected": "{pet} needs changes",
+    "editApproved": "Edit to {pet} is live",
+    "editRejected": "Edit to {pet} was rejected",
+    "feedbackReplied": "{author} replied to your feedback",
+    "requestFulfilledByYou": "{pet} fulfilled \"{query}\"",
+    "requestFulfilledByYouSub": "The community asked, you delivered.",
+    "requestFulfilled": "Your request \"{query}\" was fulfilled",
+    "requestFulfilledSub": "Now live as {pet}",
+    "fallbackYourPet": "Your pet",
+    "fallbackYourSubmission": "Your submission",
+    "fallbackARequest": "a request",
+    "fallbackEllipsis": "...",
+    "unreadLabel": "Unread",
+    "bellAria": "Notifications",
+    "bellAriaUnread": "{count} unread notifications",
+    "loadFailed": "Notifications could not be loaded.",
+    "petTakenDown": "{pet} was taken down",
+    "petTakenDownSub": "It no longer appears on Petdex. You can edit and resubmit it."
+  },
+  "feedbackThread": {
+    "kindFallback": "Feedback",
+    "status": {
+      "pending": "Pending",
+      "addressed": "Addressed",
+      "archived": "Archived"
+    },
+    "notifyOn": "Email me on reply",
+    "notifyOff": "Email muted",
+    "noReplies": "No replies yet. Send a follow-up below to keep the thread going.",
+    "adminName": "Hunter",
+    "you": "You",
+    "replyPlaceholder": "Reply to the user… (⌘+Enter to send)",
+    "followUpPlaceholder": "Add a follow-up… (⌘+Enter to send)",
+    "send": "Send",
+    "sendFailed": "Your reply could not be sent: {code}"
+  },
+  "claimRequest": {
+    "trigger": "I have a pet for this",
+    "submittedTitle": "Submitted",
+    "submittedBody": "Your pet is now pending admin review for this request. You'll get a notification if it's approved.",
+    "done": "Done",
+    "title": "Claim \"{query}\"",
+    "description": "Pick one of your approved pets. Admin will review and confirm the match.",
+    "noApprovedPets": "You don't have any approved pets yet.",
+    "submitOne": "Submit one →",
+    "cancel": "Cancel",
+    "submitCandidate": "Submit candidate",
+    "errors": {
+      "exists": "Already submitted as candidate.",
+      "requestNotOpen": "This request is no longer open.",
+      "petNotApproved": "Pet must be approved first.",
+      "loadFailed": "Your approved pets could not be loaded ({status}).",
+      "failed": "The candidate could not be submitted: {code}",
+      "unknown": "The candidate could not be submitted."
+    }
+  },
+  "errorPage": {
+    "title": "Something went wrong",
+    "body": "That page could not be loaded. It is not you — try again, or head back to the gallery.",
+    "retry": "Try again",
+    "home": "Back to the gallery"
   }
 }

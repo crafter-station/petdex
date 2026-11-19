@@ -41,7 +41,19 @@ mock.module("@/lib/db/client", () => {
       return fn(tx);
     },
   };
-  return { db, schema };
+  return {
+    db,
+    schema,
+    // `mock.module` is process-wide, so whichever suite registers a
+    // `@/lib/db/client` factory first supplies the module to every later
+    // suite in the same process. Any factory that omits these two exports
+    // breaks a later suite that links them — `pet-requests/route.ts` imports
+    // `executeAtomicReturning` from this module, and it fails with
+    // `SyntaxError: Export named 'executeAtomicReturning' not found` rather
+    // than a test assertion. Running this file before that one reproduced it.
+    executeAtomicReturning: async () => [],
+    rowsOf: () => [],
+  };
 });
 
 const { runCollectionMutation } = await import("@/lib/collection-access");

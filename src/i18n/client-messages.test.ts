@@ -10,6 +10,12 @@ import en from "@/i18n/messages/en.json";
 import es from "@/i18n/messages/es.json";
 import zh from "@/i18n/messages/zh.json";
 
+// Anchored to this file, not `process.cwd()`: the same drift
+// `messages-parse.test.ts` documents — run from anywhere but the repo root,
+// a cwd-relative scan silently saw no files and the coverage assertion
+// passed for the wrong reason (or, worse, crashed on a missing directory).
+const REPO_ROOT = join(import.meta.dir, "..", "..");
+
 const messagesByLocale = { en, es, zh };
 
 describe("client messages", () => {
@@ -41,7 +47,7 @@ describe("client messages", () => {
 
 function clientTranslationNamespaces(): string[] {
   const namespaces = new Set<string>();
-  for (const file of sourceFiles(join(process.cwd(), "src"))) {
+  for (const file of sourceFiles(join(REPO_ROOT, "src"))) {
     if (file.endsWith(".test.ts") || file.endsWith(".test.tsx")) continue;
     const source = readFileSync(file, "utf8");
     for (const match of source.matchAll(/useTranslations\("([^"]+)"\)/g)) {

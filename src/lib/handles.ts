@@ -18,6 +18,19 @@ export function fallbackHandle(userId: string): string {
   return userId.slice(-FALLBACK_HANDLE_LENGTH).toLowerCase();
 }
 
+// A handle the reverse lookup's id-suffix sweep will accept: exactly
+// FALLBACK_HANDLE_LENGTH characters, lowercased. The character class has to
+// cover everything `fallbackHandle` can emit, or the /u/<handle> links built
+// from it 404 for the very user they were generated for. Clerk ids and the
+// seed/mock ids are alphanumeric plus `_` (`user_seed_dev` → `seed_dev`),
+// and profile handles additionally allow `-`; a narrower class here silently
+// rejects those tails.
+export function isFallbackHandleShape(handle: string): boolean {
+  return (
+    handle.length === FALLBACK_HANDLE_LENGTH && /^[a-z0-9_-]+$/.test(handle)
+  );
+}
+
 export function viewerIdForFallbackHandle(
   handle: string,
   viewerId: string | null,
@@ -30,6 +43,17 @@ export function viewerIdForFallbackHandle(
 
 // Forward: userId -> handle. Used to build /u/<handle> URLs from a
 // pet's ownerId (e.g. credit chip, /my-pets header).
+//
+// The fallback suffix is a best-effort link, not a reserved name: nothing
+// stops another user from registering a profile handle that equals someone
+// else's id tail, and that registration wins (profile/Clerk lookups run
+// before the suffix sweep). The displaced user's fallback link 404s until
+// they set a real handle. Closing this would mean reserving every current
+// suffix across registrations — a full-table check per handle save — which
+// the fallback's purpose (a link for users who never picked a handle) does
+// not justify. `userIdForHandle`'s ambiguity refusal keeps one squatted
+// name from hijacking resolution to the wrong user when several ids share
+// a tail.
 export async function handleForUser(userId: string): Promise<string> {
   const cached = await cachedAggregate(
     {
@@ -124,13 +148,10 @@ async function resolveUserIdForHandle(
   }
 
   // Fallback: id-suffix lookup. We accept the handle if it matches the
-  // FALLBACK_LENGTH and only contains safe characters, then sweep the
-  // tables that store userIds (pets, requests, feedback, profiles) for
-  // any id whose tail matches. Refuses ambiguous matches (>1 user).
-  if (
-    normalized.length === FALLBACK_HANDLE_LENGTH &&
-    /^[a-z0-9]+$/.test(normalized)
-  ) {
+  // fallback shape, then sweep the tables that store userIds (pets,
+  // requests, feedback, profiles) for any id whose tail matches. Refuses
+  // ambiguous matches (>1 user).
+  if (isFallbackHandleShape(normalized)) {
     try {
       const { db, schema } = await import("@/lib/db/client");
       const { sql } = await import("drizzle-orm");

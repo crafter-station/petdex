@@ -23,20 +23,34 @@ import { ClerkCliAuthError } from "./types.js";
 
 const DEFAULT_SCOPES = ["profile", "email", "openid", "offline_access"];
 
-function normalizeIssuer(issuer: string): string {
+// The issuer receives the refresh token and every authorization request, so it
+// has to be https: an `http://` issuer would put the refresh token on the wire
+// in clear text and let a network attacker answer as the identity provider.
+// The one exception is a loopback host, where a local development issuer
+// legitimately runs without TLS and the traffic never leaves the machine.
+export function normalizeIssuer(issuer: string): string {
   const normalized = issuer.trim().replace(/\/+$/, "");
+  let url: URL;
   try {
-    const url = new URL(normalized);
-    if (url.protocol !== "http:" && url.protocol !== "https:") {
-      throw new Error("issuer must use http or https");
-    }
-    return normalized;
+    url = new URL(normalized);
   } catch (error) {
     throw new ClerkCliAuthError(
       "config",
       `issuer must be a valid URL: ${(error as Error).message}`,
     );
   }
+  if (url.protocol !== "https:") {
+    const isLoopback =
+      url.protocol === "http:" &&
+      ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+    if (!isLoopback) {
+      throw new ClerkCliAuthError(
+        "config",
+        "issuer must use https (http is allowed only for localhost)",
+      );
+    }
+  }
+  return normalized;
 }
 
 function storageError(operation: string, error: unknown): ClerkCliAuthError {
@@ -45,13 +59,27 @@ function storageError(operation: string, error: unknown): ClerkCliAuthError {
   return new ClerkCliAuthError("storage", `Failed to ${operation}: ${detail}`);
 }
 
+// Windows: spawn the URL straight at the shell-less file-protocol handler
+// instead of routing it through cmd.exe. The old `cmd /c start "" <url>` ran
+// the URL through cmd's own parser, and libuv only quotes an argument that
+// contains a space, tab, or quote — the authorize URL contains none of those
+// but does contain `&` (the query separator), so cmd.exe split the command
+// there and ran whatever followed as a second command. That happened on every
+// normal login, not only a crafted URL. `explorer.exe` receives the URL as a
+// plain argv entry with no shell in between, so `&` stays part of the URL.
+export function browserOpenCommand(
+  platform: NodeJS.Platform,
+  url: string,
+): { command: string; args: string[] } {
+  if (platform === "darwin") return { command: "open", args: [url] };
+  if (platform === "win32") return { command: "explorer.exe", args: [url] };
+  return { command: "xdg-open", args: [url] };
+}
+
 async function openBrowserFallback(url: string): Promise<void> {
   console.log(`Open this URL to sign in:\n${url}`);
 
-  const platform = process.platform;
-  const command =
-    platform === "darwin" ? "open" : platform === "win32" ? "cmd" : "xdg-open";
-  const args = platform === "win32" ? ["/c", "start", "", url] : [url];
+  const { command, args } = browserOpenCommand(process.platform, url);
 
   await new Promise<void>((resolve) => {
     const child = spawn(command, args, { detached: true, stdio: "ignore" });

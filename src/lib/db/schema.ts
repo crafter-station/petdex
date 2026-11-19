@@ -1,6 +1,8 @@
 import { sql } from "drizzle-orm";
 import {
+  bigint,
   boolean,
+  check,
   index,
   integer,
   jsonb,
@@ -135,6 +137,16 @@ export const submittedPets = pgTable(
   (table) => ({
     statusIdx: index("submitted_pets_status_idx").on(table.status),
     ownerIdx: index("submitted_pets_owner_idx").on(table.ownerId),
+    // drizzle/0012_gallery_position.sql and scripts/apply-gallery-position.ts
+    // created this index, but it was never declared here — and `drizzle-kit
+    // push`, the only automated schema path this repo runs, drops indexes it
+    // does not recognize. A database that ran the migration lost the index on
+    // its next push; a fresh one never got it at all. Declared with the same
+    // shape the migration spelled out (`created_at DESC NULLS LAST` is what
+    // this drizzle version emits for `.desc()`).
+    ownerGalleryIdx: index("submitted_pets_owner_gallery_idx")
+      .on(table.ownerId, table.galleryPosition, table.createdAt.desc())
+      .where(sql`${table.status} = 'approved'`),
     licenseIdx: index("submitted_pets_license_idx").on(table.license),
     slugUnique: uniqueIndex("submitted_pets_slug_unique").on(table.slug),
     reviewDhashIdx: index("submitted_pets_review_dhash_idx")
@@ -161,11 +173,35 @@ export const submittedPets = pgTable(
     pendingEditIdx: index("submitted_pets_pending_edit_idx").on(
       table.pendingSubmittedAt,
     ),
+    // drizzle/0004 created these three sha indexes on columns schema.ts does
+    // declare, so push — the only automated schema path here — was silently
+    // dropping them on every run (a push-built database carried none). Declared
+    // with the same shape the migration spelled out: plain btree, no predicate.
+    // The two `embedding_model` indexes from 0005 stay out of schema.ts because
+    // their column is a raw pgvector column this file deliberately omits; those
+    // are restored by scripts/bootstrap-pgvector.ts instead.
+    spriteShaIdx: index("submitted_pets_sprite_sha_idx").on(table.spriteSha256),
+    petJsonShaIdx: index("submitted_pets_pet_json_sha_idx").on(
+      table.petJsonSha256,
+    ),
+    zipShaIdx: index("submitted_pets_zip_sha_idx").on(table.zipSha256),
     vibesGinIdx: index("submitted_pets_vibes_gin_idx").using(
       "gin",
       table.vibes,
     ),
     tagsGinIdx: index("submitted_pets_tags_gin_idx").using("gin", table.tags),
+    // drizzle/0018 added both checks; like the submission_reviews FK above,
+    // they only survive if schema.ts declares them, because push drops
+    // constraints the schema does not recognize. Measured: a push-built DB
+    // carried neither.
+    spriteVersionCheck: check(
+      "submitted_pets_sprite_version_number_check",
+      sql`${table.spriteVersionNumber} in (1, 2)`,
+    ),
+    pendingSpriteVersionCheck: check(
+      "submitted_pets_pending_sprite_version_number_check",
+      sql`${table.pendingSpriteVersionNumber} is null or ${table.pendingSpriteVersionNumber} in (1, 2)`,
+    ),
   }),
 );
 
@@ -188,7 +224,15 @@ export const submissionReviews = pgTable(
   "submission_reviews",
   {
     id: text("id").primaryKey(),
-    submittedPetId: text("submitted_pet_id").notNull(),
+    // drizzle/0004_submission_reviews.sql declared this FK ON DELETE cascade
+    // but schema.ts never did — `drizzle-kit push`, the only automated schema
+    // path this repo runs, does not recognize the migration's constraint and
+    // drops it (measured: push --force removed it from a DB that had it, and
+    // a push-built DB never gets it). Without the FK, deleting a pet orphans
+    // every review row. Declare the same relationship the migration spelled.
+    submittedPetId: text("submitted_pet_id")
+      .notNull()
+      .references(() => submittedPets.id, { onDelete: "cascade" }),
     status: text("status").$type<SubmissionReviewStatus>().notNull(),
     decision: text("decision").$type<SubmissionReviewDecision>().notNull(),
     reasonCode: text("reason_code"),
@@ -547,13 +591,14 @@ export const petCollectionRequests = pgTable(
       table.requestedBy,
     ),
     // Prevents the same owner from spamming the same pet/collection pair
-    // before admins decide. They can resubmit once a decision is made
-    // (the status flips, freeing the unique).
-    pendingPair: uniqueIndex("pet_collection_requests_pending_pair").on(
-      table.collectionId,
-      table.petSlug,
-      table.status,
-    ),
+    // before admins decide. The partial predicate is what frees the pair
+    // after a decision: with `status` as an index column instead, the slot
+    // freed by a 'pending' row is replaced by a 'rejected' one, so a
+    // resubmission that is rejected a second time collides with the first
+    // rejection and the UPDATE raises a duplicate-key error.
+    pendingPair: uniqueIndex("pet_collection_requests_pending_pair")
+      .on(table.collectionId, table.petSlug)
+      .where(sql`${table.status} = 'pending'`),
   }),
 );
 
@@ -891,6 +936,34 @@ export const routeCostSourceBuckets = pgTable(
 export type RouteCostSourceBucket = typeof routeCostSourceBuckets.$inferSelect;
 export type NewRouteCostSourceBucket =
   typeof routeCostSourceBuckets.$inferInsert;
+
+// Storage for the Neon-backed rate limiters (`@crafter/limit`'s neonHttp
+// adapter, wired in src/lib/neon-ratelimit.ts). The table shipped in
+// drizzle/0021_crafter_rate_limits.sql, but this repo's only automated
+// schema path is `drizzle-kit push`, which reconciles the database against
+// *this file* rather than the drizzle/*.sql history — a table that lives
+// only in a migration is invisible to it, and `push --force` drops it as
+// unrecognized. That is what happened: the local stack never had the table,
+// and every Neon-backed limiter (13 of them) failed open. Columns mirror the
+// migration exactly; the adapter's own DDL is byte-identical, so push and
+// the migration agree on the shape.
+export const crafterRateLimits = pgTable(
+  "crafter_rate_limits",
+  {
+    key: text("key").primaryKey(),
+    count: bigint("count", { mode: "number" }).notNull(),
+    windowStartedAt: bigint("window_started_at", { mode: "number" }).notNull(),
+    expiresAt: bigint("expires_at", { mode: "number" }).notNull(),
+  },
+  (table) => ({
+    expiresAtIdx: index("crafter_rate_limits_expires_at_idx").on(
+      table.expiresAt,
+    ),
+  }),
+);
+
+export type CrafterRateLimit = typeof crafterRateLimits.$inferSelect;
+export type NewCrafterRateLimit = typeof crafterRateLimits.$inferInsert;
 
 export const wechatQrUploads = pgTable(
   "wechat_qr_uploads",

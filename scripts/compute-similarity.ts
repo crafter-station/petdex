@@ -12,7 +12,6 @@
 // embeddings.
 
 import { neon } from "@neondatabase/serverless";
-import sharp from "sharp";
 
 import {
   buildPetEmbeddingText,
@@ -20,6 +19,8 @@ import {
   embedTextValue,
   PETDEX_EMBEDDING_MODEL,
 } from "../src/lib/embeddings";
+import { fetchR2AssetBuffer } from "../src/lib/r2-fetch";
+import { dhashFromSpriteBuffer } from "../src/lib/sprite-dhash";
 
 const args = new Set(process.argv.slice(2));
 const FORCE = args.has("--force");
@@ -32,28 +33,19 @@ function env(name: string): string {
 
 const sql = neon(env("DATABASE_URL")); // raw for vector inserts
 
-// dHash: 9x8 grayscale, compare adjacent columns. 64 bits = 16 hex.
+// Fetch the spritesheet and hash it with the SAME scale-aware helper the
+// review path uses (`dhashFromSpriteBuffer`). This script used to carry its own
+// copy that always cropped 192×208, so on an integer-scaled atlas (a legal
+// 3072×3744 v1 sheet) it sampled a quarter of the first frame and produced a
+// different hash than the review path — and a `--force` run rewrote the fixed
+// hashes back to the old format.
 async function dhash(spriteUrl: string): Promise<string | null> {
   try {
-    const res = await fetch(spriteUrl);
-    if (!res.ok) return null;
-    const buf = Buffer.from(await res.arrayBuffer());
-    // Crop the first idle frame (192×208) like the OG image does.
-    const frame = await sharp(buf)
-      .extract({ left: 0, top: 0, width: 192, height: 208 })
-      .resize(9, 8, { fit: "fill" })
-      .grayscale()
-      .raw()
-      .toBuffer();
-    let bits = "";
-    for (let row = 0; row < 8; row++) {
-      for (let col = 0; col < 8; col++) {
-        const left = frame[row * 9 + col];
-        const right = frame[row * 9 + col + 1];
-        bits += left < right ? "1" : "0";
-      }
-    }
-    return BigInt(`0b${bits}`).toString(16).padStart(16, "0");
+    // Bounded: the URL comes from a DB row, and a stalled or oversized
+    // upstream would otherwise hang the run or buffer without limit.
+    const buf = await fetchR2AssetBuffer(spriteUrl);
+    if (!buf) return null;
+    return await dhashFromSpriteBuffer(buf);
   } catch (err) {
     console.warn("  dhash fail:", (err as Error).message);
     return null;
@@ -74,6 +66,11 @@ async function main() {
 
   let processed = 0;
   let skipped = 0;
+  // A pet that needed a dhash or an embedding but got `null` back (R2 fetch
+  // miss, dead AI key, dimension mismatch) used to print OK and write nothing,
+  // so a full run with a misconfigured key read as complete. Count it and exit
+  // non-zero, matching the backfills' "counted failure → non-zero" convention.
+  let failed = 0;
   for (const row of rows) {
     const r = row as {
       id: string;
@@ -108,6 +105,8 @@ async function main() {
       const h = await dhash(r.spritesheet_url);
       if (h) {
         await sql`UPDATE submitted_pets SET dhash = ${h} WHERE id = ${r.id}`;
+      } else {
+        failed++;
       }
     }
 
@@ -130,6 +129,8 @@ async function main() {
               embedding_model = ${PETDEX_EMBEDDING_MODEL}
           WHERE id = ${r.id}
         `;
+      } else {
+        failed++;
       }
     }
 
@@ -137,7 +138,10 @@ async function main() {
     process.stdout.write("OK\n");
   }
 
-  console.log(`\nprocessed: ${processed}, skipped: ${skipped}`);
+  console.log(
+    `\nprocessed: ${processed}, skipped: ${skipped}, failed: ${failed}`,
+  );
+  if (failed > 0) process.exitCode = 1;
 }
 
 await main();

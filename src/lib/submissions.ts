@@ -9,8 +9,11 @@ import "server-only";
 import { eq } from "drizzle-orm";
 import { Resend } from "resend";
 
+import { findOversizedAsset } from "@/lib/asset-size-guard";
 import { db, schema } from "@/lib/db/client";
+import { isUniqueViolation } from "@/lib/db/pg-errors";
 import type { SubmissionReview, SubmittedPet } from "@/lib/db/schema";
+import { emailEnv, sendEmail } from "@/lib/email-send";
 import { renderNewSubmissionEmail } from "@/lib/email-templates/new-submission";
 import { fallbackHandle, handleForUser } from "@/lib/handles";
 import { normalizeSpriteVersionNumber } from "@/lib/sprite-version";
@@ -76,6 +79,57 @@ export type SubmissionResult =
       got?: unknown;
     };
 
+/**
+ * The three asset URLs a submission points at, with the role name the presign
+ * route uses. `validateSubmission` has already pinned each to the bucket and
+ * to a submission path namespace, so the key derived from it is the object
+ * the caller PUT to.
+ */
+const SUBMISSION_ASSET_FIELDS: ReadonlyArray<{
+  field: "spritesheetUrl" | "petJsonUrl" | "zipUrl";
+  label: string;
+}> = [
+  { field: "spritesheetUrl", label: "sprite" },
+  { field: "petJsonUrl", label: "petjson" },
+  { field: "zipUrl", label: "zip" },
+];
+
+/**
+ * Reject a submission whose uploaded assets are larger than the presign
+ * declared they would be.
+ *
+ * The presign route checks the declared size; a presigned PUT does not bind
+ * the body to that declaration, so the same URL signed for a 2 MB spritesheet
+ * accepts a 20 MB one. The bucket is public and the URL is stored on the row,
+ * so an oversized object is a permanent liability — every later fetch, and
+ * the OG/sticker renderers that pull it into sharp, pays for it. This check
+ * reads the object itself, so it cannot be skipped the way the presign route's
+ * can; what it cannot do is refuse when R2's HEAD fails for a transient
+ * reason, which it treats as "not oversized" (logged) rather than blocking
+ * legitimate submissions on an R2 hiccup. The pending-asset GC is the
+ * backstop for an object that slips through that way.
+ */
+async function assertUploadedAssetsWithinLimit(
+  body: SubmissionInput,
+): Promise<SubmissionResult | null> {
+  const violation = await findOversizedAsset(
+    SUBMISSION_ASSET_FIELDS.map(({ field, label }) => ({
+      field,
+      label,
+      url: body[field],
+    })),
+  );
+  if (!violation) return null;
+  return {
+    ok: false,
+    status: 400,
+    error: "asset_too_large",
+    field: violation.field,
+    got: { bytes: violation.bytes, maxBytes: violation.maxBytes },
+    message: violation.message,
+  };
+}
+
 /** Persist a submission. Caller is responsible for authn/ratelimit.
  *  Slug collisions get suffixed (boba -> boba-2) by resolveUniqueSlug.
  *  Re-claiming pets from a deleted account uses an opt-in flow at
@@ -89,7 +143,13 @@ export async function persistSubmission(
     return { ok: false, status: 400, error: "invalid_slug" };
   }
 
-  const slug = await resolveUniqueSlug(requestedSlug);
+  // Before the row exists: an oversized upload must not leave a pending
+  // submission behind, because the row is what makes the object reachable
+  // from the site. The presign route checks the declared size; this checks
+  // the bytes that actually landed.
+  const tooLarge = await assertUploadedAssetsWithinLimit(body);
+  if (tooLarge) return tooLarge;
+
   const profileHandlePromise = handleForUser(principal.userId).catch(() =>
     fallbackHandle(principal.userId),
   );
@@ -98,57 +158,77 @@ export async function persistSubmission(
   const credit = creditFromPrincipal(principal);
   const spriteVersion = normalizeSpriteVersionNumber(body.spriteVersionNumber);
 
-  await db.insert(schema.submittedPets).values({
+  // The stored window, computed once: the DB row and the admin email must
+  // agree. Sending the raw body into the email instead let a multi-KB display
+  // name or description reach the reviewer's inbox for text the record never
+  // kept.
+  const storedDisplayName = body.displayName.trim().slice(0, 60);
+  const storedDescription = body.description.trim().slice(0, 280);
+
+  const slug = await insertSubmissionWithUniqueSlug({
     id,
-    slug,
-    displayName: body.displayName.trim().slice(0, 60),
-    description: body.description.trim().slice(0, 280),
-    spritesheetUrl: body.spritesheetUrl,
-    petJsonUrl: body.petJsonUrl,
-    zipUrl: body.zipUrl,
-    spriteVersionNumber: spriteVersion.ok ? spriteVersion.version : 1,
-    kind: "creature",
-    vibes: [],
-    tags: [],
-    status: "pending",
-    ownerId: principal.userId,
-    ownerEmail: principal.email,
-    creditName: credit.name,
-    creditUrl: credit.url,
-    creditImage: credit.imageUrl,
-    license: body.license ?? "unspecified",
-    licenseDeclaredAt: body.license ? new Date() : null,
+    requestedSlug,
+    values: {
+      displayName: storedDisplayName,
+      description: storedDescription,
+      spritesheetUrl: body.spritesheetUrl,
+      petJsonUrl: body.petJsonUrl,
+      zipUrl: body.zipUrl,
+      spriteVersionNumber: spriteVersion.ok ? spriteVersion.version : 1,
+      kind: "creature",
+      vibes: [],
+      tags: [],
+      status: "pending",
+      ownerId: principal.userId,
+      ownerEmail: principal.email,
+      creditName: credit.name,
+      creditUrl: credit.url,
+      creditImage: credit.imageUrl,
+      license: body.license ?? "unspecified",
+      licenseDeclaredAt: body.license ? new Date() : null,
+    },
   });
 
   // Fire-and-forget admin notification.
   const resendKey = process.env.RESEND_API_KEY;
   const ownerNotify = process.env.PETDEX_OWNER_EMAIL;
   if (resendKey && ownerNotify) {
-    // SMTP header injection defense — strip control chars from anything
-    // that could end up in a header. The Resend SDK probably escapes, but
-    // we don't trust user-controlled fields anywhere near a header.
-    const safeName = body.displayName.replace(/[\r\n\t]+/g, " ").slice(0, 80);
     void (async () => {
       try {
         const resend = new Resend(resendKey);
         const locale = await getPreferredLocaleForUser(null);
         const email = renderNewSubmissionEmail(locale, {
-          displayName: body.displayName,
+          displayName: storedDisplayName,
           slug,
           from: principal.email ?? principal.userId,
-          description: body.description,
+          description: storedDescription,
           spritesheetUrl: body.spritesheetUrl,
           zipUrl: body.zipUrl,
         });
-        await resend.emails.send({
-          from: "Petdex <petdex@notifications.crafter.run>",
-          to: ownerNotify,
-          subject: email.subject.replace(body.displayName, safeName),
-          html: email.html,
-          text: email.text,
-        });
-      } catch {
-        /* silent */
+        // The subject is header-safe by construction: the template runs
+        // `sanitizeSubject` over the interpolated name. The previous defense
+        // here — `subject.replace(displayName, safeName)` — was bypassable,
+        // because a replacement string expands `$&` and a name containing it
+        // re-inserted the matched CRLF.
+        //
+        // `from` goes through RESEND_FROM like the other three senders; this
+        // one hardcoded a third domain that no env could override.
+        await sendEmail(
+          resend,
+          {
+            from: emailEnv("RESEND_FROM", "Petdex <petdex@updates.railly.dev>"),
+            to: ownerNotify,
+            subject: email.subject,
+            html: email.html,
+            text: email.text,
+          },
+          "new-submission admin notice",
+        );
+      } catch (error) {
+        console.error(
+          "[submission] admin notice failed:",
+          error instanceof Error ? error.message : String(error),
+        );
       }
     })();
   }
@@ -208,6 +288,54 @@ export async function resolveUniqueSlug(base: string): Promise<string> {
     if (!(await isTaken(candidate))) return candidate;
   }
   return `${base.slice(0, 32)}-${crypto.randomUUID().slice(0, 6)}`;
+}
+
+/**
+ * Whether an insert error is the slug unique-constraint violation.
+ *
+ * The check-then-insert in `resolveUniqueSlug` is a TOCTOU: two concurrent
+ * submissions can derive the same slug and both pass `isTaken`, and the
+ * later INSERT then died as an uncaught 23505 — a 500 for the user, after the
+ * request had already consumed a rate-limit slot. `submitted_pets_slug_unique`
+ * is the only unique index the insert can hit, so any 23505 here is the slug.
+ *
+ * The code has to be read off `.cause`: drizzle wraps the driver error in
+ * `DrizzleQueryError` and does not copy `code` onto the wrapper, so reading
+ * `error.code` never matched and the retry below was dead. Same unwrap as
+ * `isMissingStickerTableError` / `isMissingCollectionTableError`.
+ */
+export function isSlugUniqueViolation(error: unknown): boolean {
+  return isUniqueViolation(error);
+}
+
+/**
+ * Insert the row, re-resolving the slug on a concurrent collision. Bounded:
+ * after a few losses to other submissions the random-suffix fallback in
+ * `resolveUniqueSlug` makes another collision vanishingly unlikely.
+ *
+ * Exported for its test: the retry is unreachable through `persistSubmission`
+ * without a live database that can actually raise 23505, and the dead version
+ * of `isSlugUniqueViolation` is exactly what a test here would have caught.
+ */
+export async function insertSubmissionWithUniqueSlug(input: {
+  id: string;
+  requestedSlug: string;
+  values: Omit<typeof schema.submittedPets.$inferInsert, "id" | "slug">;
+}): Promise<string> {
+  let slug = await resolveUniqueSlug(input.requestedSlug);
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await db.insert(schema.submittedPets).values({
+        ...input.values,
+        id: input.id,
+        slug,
+      });
+      return slug;
+    } catch (error) {
+      if (!isSlugUniqueViolation(error) || attempt >= 4) throw error;
+      slug = await resolveUniqueSlug(input.requestedSlug);
+    }
+  }
 }
 
 async function reviewNewSubmission(

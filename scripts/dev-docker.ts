@@ -79,7 +79,7 @@ function failEngineReady(engine: Engine, r: CommandCheck): never {
     );
   }
   console.error(
-    `${startHintFor(engine)}After that, rerun:\n  pnpm run dev:docker`,
+    `${startHintFor(engine)}After that, rerun:\n  bun run dev:docker`,
   );
   process.exit(r.status ?? 1);
 }
@@ -97,7 +97,7 @@ function failNoReadyEngine(failures: EngineFailure[]): never {
       "Podman: start its VM with:\n" +
       "  podman machine start\n\n" +
       "After that, rerun:\n" +
-      "  pnpm run dev:docker",
+      "  bun run dev:docker",
   );
   process.exit(failures[0]?.result.status ?? 1);
 }
@@ -176,7 +176,7 @@ function loadEnvFile(path: string): Record<string, string> {
 function ensureDevLocalFile(path: string) {
   if (existsSync(path)) return false;
   const lines = [
-    "# Local overrides for `pnpm run dev:docker`.",
+    "# Local overrides for `bun run dev:docker`.",
     "# This file is ignored by git and is safe for personal dev values.",
     "",
     "# Optional: Clerk user id to receive seeded personal pets on docker boot.",

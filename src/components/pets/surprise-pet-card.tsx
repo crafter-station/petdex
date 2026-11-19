@@ -45,6 +45,9 @@ export function SurprisePetCard({ initialPet = null }: SurprisePetCardProps) {
       if (!response.ok) return;
       const next = (await response.json()) as SurprisePet;
       showPet(next);
+    } catch {
+      // A failed fetch (offline, aborted) must not surface as an unhandled
+      // rejection out of the Shuffle click; the button just stays idle.
     } finally {
       setLoading(false);
     }

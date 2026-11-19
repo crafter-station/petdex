@@ -3,6 +3,7 @@ import {
   normalizeLocale,
   p,
   petdexUrl,
+  sanitizeSubject,
   wrapEmail,
 } from "@/lib/email-templates/shared";
 
@@ -61,5 +62,5 @@ export function renderRequestFulfilledRequesterEmail(
     codeBlock(installCmd),
   ]);
 
-  return { subject: copy.subject, html, text };
+  return { subject: sanitizeSubject(copy.subject), html, text };
 }

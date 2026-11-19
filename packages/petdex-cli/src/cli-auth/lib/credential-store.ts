@@ -1,4 +1,4 @@
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -69,6 +69,18 @@ class FileCredentialStore implements CredentialStore {
       return result;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+      // Non-object JSON already returned {} above; a parse error means
+      // the file exists but is unreadable as JSON (half-written or
+      // hand-edited). Throwing here made every get/set/delete — and
+      // thus `petdex login` itself — fail forever with no way out.
+      // Treat it as "no stored credentials" so a fresh login rewrites
+      // the file, and say how to start clean by hand.
+      if (error instanceof SyntaxError) {
+        console.warn(
+          `petdex: ignoring corrupt credential file ${this.filePath}; run \`petdex login\` to recreate it, or delete the file first.`,
+        );
+        return {};
+      }
       throw storageError(
         `Failed to read credential file ${this.filePath}`,
         error,
@@ -79,9 +91,16 @@ class FileCredentialStore implements CredentialStore {
   private async writeAll(values: Record<string, string>): Promise<void> {
     try {
       await mkdir(dirname(this.filePath), { recursive: true });
-      await writeFile(this.filePath, `${JSON.stringify(values, null, 2)}\n`, {
+      // Write to a sibling temp file and rename over the target: a
+      // rename is atomic on the same filesystem, so a crash or a
+      // concurrent reader never observes a half-written file. Without
+      // this, a torn write is itself a way to produce the corrupt file
+      // readAll now has to tolerate.
+      const tmp = `${this.filePath}.${process.pid}.tmp`;
+      await writeFile(tmp, `${JSON.stringify(values, null, 2)}\n`, {
         mode: 0o600,
       });
+      await rename(tmp, this.filePath);
       await chmod(this.filePath, 0o600);
     } catch (error) {
       throw storageError(

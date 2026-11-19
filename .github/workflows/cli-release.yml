@@ -82,7 +82,11 @@ jobs:
 
       - name: Run tests
         if: steps.version.outputs.changed == 'true'
-        run: bun test
+        # The root script, not a bare `bun test`: this runs the whole suite
+        # from the repo root as the publish gate, and the per-test raise lives
+        # in that script. A bare invocation falls back to Bun's 5s default and
+        # aborts the specs that need longer, on the run that publishes.
+        run: bun run test
         working-directory: .
 
       - name: Build CLI

@@ -16,7 +16,14 @@ export function isTrustedAssetUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
     if (parsed.protocol !== "https:") return false;
-    return TRUSTED_ASSET_HOSTS.has(parsed.hostname);
+    // `host`, not `hostname`: the server checks `url.host` in
+    // `src/lib/url-allowlist.ts`, and `hostname` drops the port, so
+    // `https://assets.petdex.dev:8443/…` passed here and was refused there.
+    // The two lists were compared for membership by `asset-hosts.test.ts`
+    // but never for matching logic, so that divergence was invisible to the
+    // one test guarding the mirror. Assets are served on 443 only, so
+    // refusing every other port is the correct side to be wrong on.
+    return TRUSTED_ASSET_HOSTS.has(parsed.host);
   } catch {
     return false;
   }

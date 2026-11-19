@@ -11,6 +11,8 @@ import { CodexThemeDialog } from "@/components/download/codex-theme-dialog";
 import { CommandLine } from "@/components/download/command-line";
 import { Button } from "@/components/ui/button";
 
+import { localizePath } from "@/i18n/config";
+
 type InstallCommandCompactProps = {
   slug: string;
   displayName: string;
@@ -62,7 +64,7 @@ export function InstallCommandCompact({
         </Button>
       </div>
       <Link
-        href={`/${locale}/docs#install`}
+        href={localizePath(locale, "/docs#install")}
         prefetch={false}
         className="group inline-flex items-center gap-1 self-start text-muted-3 text-xs transition hover:text-foreground"
       >

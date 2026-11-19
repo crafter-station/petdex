@@ -42,6 +42,16 @@ type Props = {
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
+// The route answers with these codes; the panel used to render the raw one.
+const ERROR_KEYS: Record<string, string> = {
+  unauthorized: "unauthorized",
+  rate_limited: "rateLimited",
+  invalid_order: "invalidOrder",
+  too_many_items: "tooManyItems",
+  empty_order: "emptyOrder",
+  no_owned_pets_in_order: "noOwnedPets",
+};
+
 function move<T>(items: T[], from: number, to: number): T[] {
   if (from === to || from < 0 || to < 0) return items;
   if (from >= items.length || to >= items.length) return items;
@@ -119,7 +129,7 @@ export function GalleryReorderGrid({ pets, children }: Props) {
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error ?? `save failed (${res.status})`);
+        throw new Error(body.error ?? `http_${res.status}`);
       }
       setSaveState("saved");
       setEditing(false);
@@ -163,7 +173,11 @@ export function GalleryReorderGrid({ pets, children }: Props) {
         <p className="text-xs text-muted-2">{t("dragInstruction")}</p>
         <div className="flex items-center gap-2">
           {error ? (
-            <span className="text-xs text-destructive">{error}</span>
+            <span role="alert" className="text-xs text-destructive">
+              {ERROR_KEYS[error]
+                ? t(`errors.${ERROR_KEYS[error]}`)
+                : t("saveFailed", { code: error })}
+            </span>
           ) : null}
           <button
             type="button"
@@ -172,7 +186,7 @@ export function GalleryReorderGrid({ pets, children }: Props) {
             className="inline-flex h-8 items-center gap-1.5 rounded-full border border-border-base bg-surface/80 px-3 text-xs font-medium text-muted-2 transition hover:border-border-strong hover:text-foreground disabled:opacity-50"
           >
             <X className="size-3" />
-            Cancel
+            {t("cancel")}
           </button>
           <button
             type="button"
@@ -185,7 +199,7 @@ export function GalleryReorderGrid({ pets, children }: Props) {
             ) : (
               <Check className="size-3" />
             )}
-            {saveState === "saving" ? "Saving…" : "Done"}
+            {saveState === "saving" ? t("saving") : t("done")}
           </button>
         </div>
       </div>
@@ -232,6 +246,8 @@ function ReorderItem({
     transition,
     isDragging,
   } = useSortable({ id: pet.slug });
+  const tProfile = useTranslations("profile");
+  const t = useTranslations("galleryReorder");
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -250,7 +266,7 @@ function ReorderItem({
     >
       <button
         type="button"
-        aria-label={`Drag ${pet.displayName} to reorder`}
+        aria-label={tProfile("dragAria", { name: pet.displayName })}
         className="absolute top-2 right-2 inline-flex size-7 items-center justify-center rounded-full border border-border-base bg-surface text-muted-2 transition hover:border-border-strong hover:text-foreground"
         {...attributes}
         {...listeners}
@@ -261,7 +277,7 @@ function ReorderItem({
         <PetSprite
           src={pet.spritesheetPath}
           scale={0.7}
-          label={`${pet.displayName} sprite`}
+          label={t("spriteStill", { name: pet.displayName })}
         />
       </div>
       <p className="line-clamp-1 text-center text-xs font-medium text-muted-1">

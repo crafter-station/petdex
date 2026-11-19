@@ -76,6 +76,10 @@ export async function POST(
   } catch {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
+  // A literal `null` parses fine; `body.spritesheetExt` below would throw.
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    return NextResponse.json({ error: "invalid_json" }, { status: 400 });
+  }
 
   const ext: "webp" | "png" = body.spritesheetExt === "png" ? "png" : "webp";
   const spriteCT = ext === "png" ? "image/png" : "image/webp";

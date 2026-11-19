@@ -20,6 +20,7 @@ printf '%s\n' \
     '#!/bin/sh' \
     'printf "%s\\n" "$*" >> "$PETDEX_HOOK_TEST_BUN_LOG"' \
     'if [ "$1" = run ] && [ "$2" = check ] && grep -q BROKEN_BIOME sample.ts; then exit 1; fi' \
+    'if [ "$1" = run ] && [ "$2" = i18n:check ] && grep -rq BROKEN_ICU src/i18n/messages; then exit 1; fi' \
     >"$fixture/bin/bun"
 printf '%s\n' \
     '#!/bin/sh' \
@@ -41,9 +42,11 @@ printf '%s\n' '#!/bin/sh' 'exit 0' >"$fixture/sample space.sh"
 printf '%s\n' '#!/usr/bin/env bash' 'values=(one two)' '[[ ${#values[@]} -eq 2 ]]' >"$fixture/sample-bash.sh"
 printf '%s\n' 'value = 1' >"$fixture/sample.py"
 printf '%s\n' 'value = 2' >"$fixture/café.py"
+mkdir -p "$fixture/src/i18n/messages"
+printf '%s\n' '{"greeting": "hello"}' >"$fixture/src/i18n/messages/en.json"
 newline_shell=$(printf 'sample\nnewline.sh')
 printf '%s\n' '#!/bin/sh' 'exit 0' >"$fixture/$newline_shell"
-git -C "$fixture" add -- .githooks/pre-commit sample.ts sample.zig 'sample space.zig' sample.sh 'sample space.sh' sample-bash.sh sample.py 'café.py' "$newline_shell"
+git -C "$fixture" add -- .githooks/pre-commit sample.ts sample.zig 'sample space.zig' sample.sh 'sample space.sh' sample-bash.sh sample.py 'café.py' "$newline_shell" src/i18n/messages/en.json
 
 PETDEX_HOOK_TEST_BUN_LOG=$fixture/bun.log \
 PETDEX_HOOK_TEST_ZIG_LOG=$fixture/zig.log \
@@ -51,9 +54,29 @@ PATH=$fixture/bin:$PATH \
     sh -c 'cd "$1" && "$2"' sh "$fixture" "$root/.githooks/pre-commit"
 
 grep -qx 'run check -- --vcs-enabled=false' "$fixture/bun.log"
+grep -qx 'run i18n:check' "$fixture/bun.log"
 test "$(grep -c '^3$' "$fixture/zig.log")" -eq 2
 test "$(grep -c 'fmt --check .*sample.*\.zig$' "$fixture/zig.log")" -eq 2
 git -C "$fixture" commit -qm 'fixture baseline'
+
+# The message parser is gated on a message file being staged. A gate that never
+# closes would cost every commit a full parse of all three locales, so the
+# negative case is asserted with its own log: an ordinary TypeScript change must
+# run Biome and nothing else.
+printf '%s\n' 'const value = 2;' >"$fixture/sample.ts"
+git -C "$fixture" add sample.ts
+: >"$fixture/bun-ts-only.log"
+PETDEX_HOOK_TEST_BUN_LOG=$fixture/bun-ts-only.log \
+PETDEX_HOOK_TEST_ZIG_LOG=$fixture/zig.log \
+PATH=$fixture/bin:$PATH \
+    sh -c 'cd "$1" && "$2"' sh "$fixture" "$root/.githooks/pre-commit"
+grep -qx 'run check -- --vcs-enabled=false' "$fixture/bun-ts-only.log"
+if grep -qx 'run i18n:check' "$fixture/bun-ts-only.log"; then
+    echo "pre-commit self-test: i18n:check ran with no message file staged" >&2
+    exit 1
+fi
+printf '%s\n' 'const value = 1;' >"$fixture/sample.ts"
+git -C "$fixture" add sample.ts
 
 printf '%s\n' '#!/bin/sh' 'if then' >"$fixture/.githooks/pre-commit"
 git -C "$fixture" add .githooks/pre-commit
@@ -115,6 +138,18 @@ if PETDEX_HOOK_TEST_BUN_LOG=$fixture/bun.log \
 fi
 
 git -C "$fixture" add sample.zig
+printf '%s\n' '{"greeting": "BROKEN_ICU"}' >"$fixture/src/i18n/messages/en.json"
+git -C "$fixture" add src/i18n/messages/en.json
+printf '%s\n' '{"greeting": "hello"}' >"$fixture/src/i18n/messages/en.json"
+if PETDEX_HOOK_TEST_BUN_LOG=$fixture/bun.log \
+    PETDEX_HOOK_TEST_ZIG_LOG=$fixture/zig.log \
+    PATH=$fixture/bin:$PATH \
+    sh -c 'cd "$1" && "$2"' sh "$fixture" "$root/.githooks/pre-commit" >/dev/null 2>&1; then
+    echo "pre-commit self-test: unparsable message fixture unexpectedly passed" >&2
+    exit 1
+fi
+
+git -C "$fixture" add src/i18n/messages/en.json
 git -C "$fixture" rm -q .githooks/pre-commit
 PETDEX_HOOK_TEST_BUN_LOG=$fixture/bun.log \
 PETDEX_HOOK_TEST_ZIG_LOG=$fixture/zig.log \

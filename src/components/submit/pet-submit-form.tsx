@@ -24,6 +24,8 @@ import {
 } from "@/lib/sprite-atlas";
 import { parseSpriteVersionNumber } from "@/lib/sprite-version";
 import {
+  MAX_DESCRIPTION_LENGTH,
+  MAX_DISPLAY_NAME_LENGTH,
   PET_LICENSE_CHOICES,
   type PetLicenseChoice,
 } from "@/lib/submissions-validation";
@@ -55,9 +57,6 @@ type ParsedPet = {
 // trip, and so the message can name the file (#594 reported only the
 // bare error code with no way to tell which of the three was over).
 const MAX_UPLOAD_BYTES = PET_ASSET_MAX_BYTES;
-
-const MAX_DISPLAY_NAME_LENGTH = 60;
-const MAX_DESCRIPTION_LENGTH = 500;
 
 type SubmissionReviewOutcome = {
   decision: "approved" | "rejected" | "hold";
@@ -93,6 +92,13 @@ export function PetSubmitForm() {
   const { isSignedIn, isLoaded, user } = useUser();
   const [parsed, setParsed] = useState<ParsedPet | null>(null);
   const [isReading, setIsReading] = useState(false);
+  // A parse that rejected (corrupt zip, unreadable stream) leaves `parsed`
+  // null and would otherwise fall back to the generic "drop files" prompt —
+  // a silent failure the user cannot act on. The throw's `finally` sets
+  // isReading false in the same batch this is set in, so the panel renders
+  // this branch directly instead of flashing the prompt for a frame.
+  const [readError, setReadError] = useState<string | null>(null);
+  const parseSeqRef = useRef(0);
   const [isDragging, setIsDragging] = useState(false);
   const [submission, setSubmission] = useState<SubmissionResult>({
     kind: "idle",
@@ -121,6 +127,11 @@ export function PetSubmitForm() {
     setIsReading(true);
     setSubmission({ kind: "idle" });
     setParsed(null);
+    setReadError(null);
+    // A second parse that starts while the first is still reading wins the
+    // right to write state; the loser's late `setParsed` would otherwise
+    // replace the newer selection with an older one.
+    const seq = ++parseSeqRef.current;
 
     try {
       const items = [...files];
@@ -262,6 +273,10 @@ export function PetSubmitForm() {
         }
 
         const buf = await zipFile.arrayBuffer();
+        // JSZip.loadAsync rejects on a corrupt zip ("Can't find end of
+        // central directory"). Propagated to the catch below — the channel
+        // the rest of the parse uses for its localized issue text — instead
+        // of being silently swallowed.
         const zip = await JSZip.loadAsync(buf);
         const petJsonEntry = zip.file("pet.json");
         const webpEntry = zip.file("spritesheet.webp");
@@ -355,19 +370,31 @@ export function PetSubmitForm() {
         }
       }
 
-      const displayName =
+      // Slice to the same windows the server stores (60/280). Without this a
+      // long pet.json description prefills in full — the `maxLength` attribute
+      // only blocks new keystrokes — and the server's `trim().slice(0, 280)`
+      // then silently keeps the first 280 chars, so the author believed they
+      // had submitted what the form showed them.
+      const displayName = (
         typeof petJson.displayName === "string" && petJson.displayName.trim()
           ? petJson.displayName.trim()
-          : t("defaults.untitledPet");
-      const description =
+          : t("defaults.untitledPet")
+      ).slice(0, MAX_DISPLAY_NAME_LENGTH);
+      const description = (
         typeof petJson.description === "string" && petJson.description.trim()
           ? petJson.description.trim()
-          : t("defaults.description");
+          : t("defaults.description")
+      ).slice(0, MAX_DESCRIPTION_LENGTH);
       const petId =
         typeof petJson.id === "string" && petJson.id.trim()
           ? petJson.id.trim()
           : petIdFromName;
 
+      // Guarded like the catch below: a second selection taken while this
+      // parse was still reading bumps `parseSeqRef` at the top, and without
+      // this check the slower, older parse would still land and replace the
+      // newer package on screen — the race the catch's guard exists to stop.
+      if (seq !== parseSeqRef.current) return;
       setParsed({
         petId,
         displayName,
@@ -387,8 +414,18 @@ export function PetSubmitForm() {
       });
       setEditedDisplayName(displayName);
       setEditedDescription(description);
+    } catch (_err) {
+      // Every caller does `void handleFiles(...)`, so a rejection here was an
+      // unhandled promise rejection and an empty prompt. Surface it instead.
+      if (seq !== parseSeqRef.current) return;
+      // Third-party parse errors (zip stream, image decode) can carry file
+      // paths or browser-internal text; the generic copy keeps that off the
+      // user's screen the way every other error path here does.
+      setReadError(t("issues.unreadableGeneric"));
     } finally {
-      setIsReading(false);
+      // Only the still-current parse may flip this: an abandoned earlier
+      // attempt finishing late would otherwise hide the newer one's spinner.
+      if (seq === parseSeqRef.current) setIsReading(false);
     }
   }
 
@@ -421,10 +458,24 @@ export function PetSubmitForm() {
     const zip = new JSZip();
     zip.file("pet.json", petJsonString);
     zip.file(`spritesheet.${parsed.spritesheetExt}`, parsed.spritesheetBlob);
-    const zipBlob = await zip.generateAsync({
-      type: "blob",
-      compression: "DEFLATE",
-    });
+    // generateAsync can reject (compression worker / memory), and it sits
+    // before every other try/catch in this handler. Unhandled, the state
+    // stays on "uploading" with the button spinning and no error card.
+    let zipBlob: Blob;
+    try {
+      zipBlob = await zip.generateAsync({
+        type: "blob",
+        compression: "DEFLATE",
+      });
+    } catch (err) {
+      // Zip-library messages can embed file paths; keep them out of the copy.
+      void err;
+      setSubmission({
+        kind: "error",
+        message: t("errors.uploadFailedGeneric"),
+      });
+      return;
+    }
 
     const zipFile = new File([zipBlob], parsed.zipFileName, {
       type: "application/zip",
@@ -449,9 +500,14 @@ export function PetSubmitForm() {
       ] as const
     ).find(([, size]) => size > MAX_UPLOAD_BYTES);
     if (oversized) {
-      const [role, size] = oversized;
-      const mb = (n: number) => `${(n / (1024 * 1024)).toFixed(1)} MB`;
-      const message = `Your ${role} is ${mb(size)}, over the ${mb(MAX_UPLOAD_BYTES)} limit.`;
+      const [role] = oversized;
+      // `role` is the wire role ("zip"/"sprite"), which is also a readable
+      // filename noun; keep it, and localize the sentence around it rather
+      // than building an English one here.
+      const message = t("errors.assetTooLarge", {
+        role,
+        max: `${(MAX_UPLOAD_BYTES / (1024 * 1024)).toFixed(1)} MB`,
+      });
       uploadErrorRef.current = message;
       setUploadError(message);
       setSubmission({ kind: "error", message });
@@ -545,7 +601,7 @@ export function PetSubmitForm() {
         const res = await putToR2(slot.uploadUrl, body, ct);
         if (!res.ok) {
           throw new Error(
-            `R2 PUT ${role} ${res.status} ${res.statusText} (${body.size} bytes)`,
+            `R2 PUT ${role} http_${res.status} (${body.size} bytes)`,
           );
         }
       }
@@ -554,32 +610,50 @@ export function PetSubmitForm() {
       spritesheetUrl = spriteSlot.publicUrl;
       petJsonUrl = petJsonSlot.publicUrl;
     } catch (err) {
-      const reason = (err as Error).message ?? "unknown";
+      // Presign/upload failures surface as the generic copy: S3 and fetch
+      // errors carry URLs and protocol detail users can't act on.
+      void err;
       setSubmission({
         kind: "error",
-        message: t("errors.uploadFailed", { reason }),
+        message: t("errors.uploadFailedGeneric"),
       });
       return;
     }
 
     setSubmission({ kind: "uploading", step: "registering" });
 
-    const res = await fetch("/api/submit", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        zipUrl,
-        spritesheetUrl,
-        petJsonUrl,
-        displayName,
-        description,
-        petId: parsed.petId,
-        spritesheetWidth: parsed.spritesheetWidth,
-        spritesheetHeight: parsed.spritesheetHeight,
-        spriteVersionNumber: parsed.spriteVersionNumber,
-        license,
-      }),
-    });
+    // The fetch and the response parse are outside the upload try/catch above:
+    // a dropped connection, a 502 from the edge, or a body that is not JSON
+    // rejects here, and without this block the state stays on "registering"
+    // forever — the button keeps spinning on "Finalizing…" with no error card
+    // and no way to retry, while the three R2 objects are already uploaded.
+    let res: Response;
+    try {
+      res = await fetch("/api/submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          zipUrl,
+          spritesheetUrl,
+          petJsonUrl,
+          displayName,
+          description,
+          petId: parsed.petId,
+          spritesheetWidth: parsed.spritesheetWidth,
+          spritesheetHeight: parsed.spritesheetHeight,
+          spriteVersionNumber: parsed.spriteVersionNumber,
+          license,
+        }),
+      });
+    } catch (err) {
+      // Same boundary as the presign block above: no raw fetch text.
+      void err;
+      setSubmission({
+        kind: "error",
+        message: t("errors.uploadFailedGeneric"),
+      });
+      return;
+    }
 
     if (!res.ok) {
       const data = (await res.json().catch(() => ({}))) as {
@@ -594,7 +668,16 @@ export function PetSubmitForm() {
       return;
     }
 
-    const data = (await res.json()) as SubmitResponse;
+    let data: SubmitResponse;
+    try {
+      data = (await res.json()) as SubmitResponse;
+    } catch {
+      setSubmission({
+        kind: "error",
+        message: t("errors.submissionFailed"),
+      });
+      return;
+    }
     setSubmission({
       kind: "success",
       slug: data.slug,
@@ -630,9 +713,19 @@ export function PetSubmitForm() {
         onDrop={(event) => {
           event.preventDefault();
           setIsDragging(false);
-          void readDataTransfer(event.dataTransfer).then((files) => {
-            if (files.length > 0) void handleFiles(files);
-          });
+          void readDataTransfer(event.dataTransfer)
+            .then((files) => {
+              if (files.length > 0) return handleFiles(files);
+            })
+            .catch(() => {
+              // A dropped entry tree that cannot be read fails the same way
+              // a corrupt zip does: tell the user instead of vanishing.
+              parseSeqRef.current += 1;
+              setIsReading(false);
+              setParsed(null);
+              setSubmission({ kind: "idle" });
+              setReadError(t("issues.dropPetFolderOrZip"));
+            });
         }}
       >
         <legend className="sr-only">{t("drop.ariaLabel")}</legend>
@@ -671,12 +764,15 @@ export function PetSubmitForm() {
               {...({ directory: "" } as Record<string, string>)}
               multiple
               className="sr-only"
-              onChange={(event) =>
-                void handleFiles(event.target.files).then(() => {
-                  // Allow re-picking the same folder
-                  event.target.value = "";
-                })
-              }
+              onChange={(event) => {
+                const target = event.currentTarget;
+                void handleFiles(event.target.files)
+                  .catch(() => {}) // handleFiles reports its own errors now
+                  .finally(() => {
+                    // Allow re-picking the same folder
+                    target.value = "";
+                  });
+              }}
             />
           </label>
           <label className="inline-flex h-9 cursor-pointer items-center justify-center gap-1.5 rounded-full border border-border-base bg-surface/70 px-4 text-xs font-medium text-foreground transition hover:bg-surface">
@@ -686,11 +782,14 @@ export function PetSubmitForm() {
               type="file"
               accept=".zip"
               className="sr-only"
-              onChange={(event) =>
-                void handleFiles(event.target.files).then(() => {
-                  event.target.value = "";
-                })
-              }
+              onChange={(event) => {
+                const target = event.currentTarget;
+                void handleFiles(event.target.files)
+                  .catch(() => {}) // handleFiles reports its own errors now
+                  .finally(() => {
+                    target.value = "";
+                  });
+              }}
             />
           </label>
           <label className="inline-flex h-9 cursor-pointer items-center justify-center gap-1.5 rounded-full border border-border-base bg-surface/70 px-4 text-xs font-medium text-foreground transition hover:bg-surface">
@@ -700,11 +799,14 @@ export function PetSubmitForm() {
               type="file"
               accept=".png,.webp"
               className="sr-only"
-              onChange={(event) =>
-                void handleFiles(event.target.files).then(() => {
-                  event.target.value = "";
-                })
-              }
+              onChange={(event) => {
+                const target = event.currentTarget;
+                void handleFiles(event.target.files)
+                  .catch(() => {}) // handleFiles reports its own errors now
+                  .finally(() => {
+                    target.value = "";
+                  });
+              }}
             />
           </label>
         </div>
@@ -726,6 +828,13 @@ export function PetSubmitForm() {
           <p className="mt-6 inline-flex items-center gap-2 text-sm text-muted-2">
             <Loader2 className="size-3.5 animate-spin" />
             {t("check.reading")}
+          </p>
+        ) : readError ? (
+          <p
+            role="alert"
+            className="mt-6 rounded-xl bg-chip-danger-bg p-3 text-sm text-chip-danger-fg"
+          >
+            {readError}
           </p>
         ) : parsed ? (
           <div className="mt-6 space-y-5">
@@ -829,7 +938,10 @@ export function PetSubmitForm() {
             />
 
             {submission.kind === "error" ? (
-              <div className="space-y-2 rounded-2xl bg-chip-danger-bg p-3 text-sm text-chip-danger-fg">
+              <div
+                role="alert"
+                className="space-y-2 rounded-2xl bg-chip-danger-bg p-3 text-sm text-chip-danger-fg"
+              >
                 <p>{submission.message}</p>
                 <p className="text-xs leading-5 text-rose-800/80">
                   {t("fallback.beforeLink")}{" "}
@@ -890,7 +1002,7 @@ function SubmissionSuccessMessage({
         : "bg-chip-warning-bg text-chip-warning-fg";
 
   return (
-    <div className={`rounded-2xl p-3 text-sm ${tone}`}>
+    <div role="status" className={`rounded-2xl p-3 text-sm ${tone}`}>
       <p>{t(submission.review.decision, { name: submission.displayName })}</p>
       {explanation ? (
         <p className="mt-2 text-xs leading-5">{explanation}</p>

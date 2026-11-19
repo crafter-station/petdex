@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { auth } from "@clerk/nextjs/server";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 import { db, schema } from "@/lib/db/client";
 import { requireSameOrigin } from "@/lib/same-origin";
@@ -44,16 +44,27 @@ export async function PATCH(
   } catch {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
+  // A literal `null` body parses fine, then `body.notifyEmail` throws —
+  // match the 400 the sibling routes answer instead of a 500.
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+  }
 
   if (typeof body.notifyEmail !== "boolean") {
     return NextResponse.json({ error: "invalid_body" }, { status: 400 });
   }
 
+  // Re-state the ownership condition in the WHERE: the read above is not in
+  // the same transaction, so a between-the-two-writes change would otherwise
+  // let this update ride on a stale row.
   const [updated] = await db
     .update(schema.feedback)
     .set({ notifyEmail: body.notifyEmail })
-    .where(eq(schema.feedback.id, id))
+    .where(and(eq(schema.feedback.id, id), eq(schema.feedback.userId, userId)))
     .returning();
 
+  if (!updated) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
   return NextResponse.json({ ok: true, notifyEmail: updated.notifyEmail });
 }

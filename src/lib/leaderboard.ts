@@ -9,14 +9,16 @@
 import { sql } from "drizzle-orm";
 
 import { getAdminUserIds } from "@/lib/admin";
+import {
+  cachedAggregate,
+  type LeaderboardMetric,
+  leaderboardCacheKey,
+} from "@/lib/db/cached-aggregates";
 import { db } from "@/lib/db/client";
 
-export type LeaderboardMetric =
-  | "pets"
-  | "likes"
-  | "installs"
-  | "rising"
-  | "collectors";
+const LEADERBOARD_TTL_SECONDS = 300;
+
+export type { LeaderboardMetric };
 
 export type LeaderboardRow = {
   ownerId: string;
@@ -38,37 +40,58 @@ const TOP_LIMIT = 50;
 // with `0`. We don't want a "no signal yet" scoreboard on top of nothing.
 const MIN_VALUE = 1;
 
+// Raw row list, cached across requests in Upstash. The admin filter is
+// deliberately NOT applied here: getAdminUserIds() reads process.env on every
+// call, so filtering inside the cached value would defeat the cache (and bake
+// a changing admin list into a 5-minute TTL). Callers filter on their side.
+//
+// This is also what getOwnerRank uses: /u/[handle] is force-dynamic, so before
+// this cache every profile view ran the full GROUP BY over submitted_pets ⨝
+// pet_metrics for a single badge.
+export async function getRankRows(
+  metric: LeaderboardMetric,
+): Promise<LeaderboardRow[]> {
+  return cachedAggregate(
+    {
+      key: leaderboardCacheKey(metric),
+      ttlSeconds: LEADERBOARD_TTL_SECONDS,
+    },
+    async () => {
+      const result = (await db.execute(
+        metric === "rising"
+          ? risingQuery()
+          : metric === "collectors"
+            ? collectorsQuery()
+            : aggregateQuery(metric),
+      )) as unknown as {
+        rows: Array<{
+          owner_id: string;
+          value: string | number;
+          approved_count: string | number;
+          total_likes: string | number;
+          total_installs: string | number;
+          total_downloads: string | number;
+        }>;
+      };
+      return result.rows.map((row) => ({
+        ownerId: row.owner_id,
+        value: Number(row.value),
+        approvedCount: Number(row.approved_count),
+        totalLikes: Number(row.total_likes),
+        totalInstalls: Number(row.total_installs),
+        totalDownloads: Number(row.total_downloads),
+      }));
+    },
+  );
+}
+
 export async function getLeaderboard(
   metric: LeaderboardMetric,
 ): Promise<LeaderboardRow[]> {
-  const result = (await db.execute(
-    metric === "rising"
-      ? risingQuery()
-      : metric === "collectors"
-        ? collectorsQuery()
-        : aggregateQuery(metric),
-  )) as unknown as {
-    rows: Array<{
-      owner_id: string;
-      value: string | number;
-      approved_count: string | number;
-      total_likes: string | number;
-      total_installs: string | number;
-      total_downloads: string | number;
-    }>;
-  };
-
   const adminIds = getAdminUserIds();
-  return result.rows
-    .map((row) => ({
-      ownerId: row.owner_id,
-      value: Number(row.value),
-      approvedCount: Number(row.approved_count),
-      totalLikes: Number(row.total_likes),
-      totalInstalls: Number(row.total_installs),
-      totalDownloads: Number(row.total_downloads),
-    }))
-    .filter((r) => r.value >= MIN_VALUE && !adminIds.has(r.ownerId));
+  return (await getRankRows(metric)).filter(
+    (r) => r.value >= MIN_VALUE && !adminIds.has(r.ownerId),
+  );
 }
 
 function aggregateQuery(

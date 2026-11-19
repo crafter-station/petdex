@@ -148,7 +148,7 @@ function UserDropdown({ compact = false }: { compact?: boolean }) {
       >
         <Image
           src={avatarUrl}
-          alt={displayName ?? "User avatar"}
+          alt={displayName ?? t("userAvatar")}
           width={44}
           height={44}
           className="size-full object-cover"
@@ -156,7 +156,7 @@ function UserDropdown({ compact = false }: { compact?: boolean }) {
         {unread > 0 ? (
           <span
             aria-hidden
-            className="pointer-events-none absolute -top-0.5 -right-0.5 grid size-4 place-items-center rounded-full bg-brand font-mono text-[9px] font-semibold text-white ring-2 ring-surface"
+            className="pointer-events-none absolute -top-0.5 -right-0.5 grid size-4 place-items-center rounded-full bg-brand font-mono text-[9px] font-semibold text-on-inverse ring-2 ring-surface"
           >
             {unread > 9 ? "9+" : unread}
           </span>

@@ -18,6 +18,8 @@ import { drizzle } from "drizzle-orm/neon-http";
 import JSZip from "jszip";
 
 import * as schema from "../src/lib/db/schema";
+import { readResponseBodyBounded } from "../src/lib/response-body";
+import { PET_ASSET_MAX_BYTES } from "../src/lib/upload-limits";
 
 const ADMIN_OWNER_ID = "user_3DA3wOYrJh1UNufe2pgQpcF6GJ7";
 const ADMIN_OWNER_EMAIL = "railly@clerk.dev";
@@ -132,11 +134,22 @@ async function processIssue(issue: IssueRow): Promise<{
   const tmp = resolve(tmpdir(), `petdex-rescue-${issue.number}`);
   await mkdir(tmp, { recursive: true });
   const zipPath = resolve(tmp, "submission.zip");
-  const res = await fetch(zipUrl, { redirect: "follow" });
+  // The URL comes from an issue body, so it is attacker-controlled; a bare
+  // fetch + arrayBuffer would buffer an arbitrarily large (or endless) body.
+  // Cap it at the submission-asset ceiling and give it a deadline.
+  const res = await fetch(zipUrl, {
+    redirect: "follow",
+    signal: AbortSignal.timeout(30_000),
+  });
   if (!res.ok) {
     return { ok: false, reason: `download_${res.status}` };
   }
-  const zipBuf = Buffer.from(await res.arrayBuffer());
+  let zipBuf: Buffer;
+  try {
+    zipBuf = await readResponseBodyBounded(res, PET_ASSET_MAX_BYTES, 30_000);
+  } catch (err) {
+    return { ok: false, reason: `download_failed:${(err as Error).message}` };
+  }
   await writeFile(zipPath, zipBuf);
 
   const zip = await JSZip.loadAsync(zipBuf);
@@ -222,6 +235,24 @@ async function processIssue(issue: IssueRow): Promise<{
 }
 
 async function main() {
+  // Every other write script in this directory is dry by default; this one
+  // had no gate at all — a bare run uploaded to R2 and inserted pending
+  // rows for every issue whose title matches. Preview is now the default.
+  if (!process.argv.includes("--apply")) {
+    const all = listIssues();
+    const submitFails = all.filter((i) =>
+      i.title.toLowerCase().includes("[submit fail]"),
+    );
+    console.log(
+      `(dry run) ${submitFails.length} submit-fail issues would be rescued:`,
+    );
+    for (const issue of submitFails) {
+      console.log(`  #${issue.number} ${issue.title}`);
+    }
+    console.log("pass --apply to upload assets and insert rows");
+    return;
+  }
+
   const all = listIssues();
   const submitFails = all.filter((i) =>
     i.title.toLowerCase().includes("[submit fail]"),

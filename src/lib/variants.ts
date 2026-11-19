@@ -11,6 +11,12 @@ import { toCurrentR2PublicUrl } from "@/lib/r2-public-url";
 export const VARIANT_DISTANCE_THRESHOLD = 14;
 export const VARIANT_MAX_RESULTS = 6;
 
+// The shape `dhashFromSpriteBuffer` writes. A value that is not this (a legacy
+// or hand-edited row) must not reach `BigInt("0x…")`, which throws and would
+// turn a public page into a 500 — the same guard the review path applies in
+// `safeHammingDistance`.
+const DHASH_HEX_RE = /^[0-9a-f]{16}$/;
+
 export type Variant = {
   slug: string;
   displayName: string;
@@ -77,7 +83,7 @@ export const getVariantsFor = cache(
       return [];
     }
 
-    if (!currentPet.dhash) {
+    if (!currentPet.dhash || !DHASH_HEX_RE.test(currentPet.dhash)) {
       return [];
     }
 
@@ -89,7 +95,8 @@ export const getVariantsFor = cache(
         (row): row is VariantIndexRow & { dhash: string } =>
           row.source !== "discover" &&
           row.slug !== currentPet.slug &&
-          Boolean(row.dhash),
+          typeof row.dhash === "string" &&
+          DHASH_HEX_RE.test(row.dhash),
       )
       .map((row) => ({
         slug: row.slug,

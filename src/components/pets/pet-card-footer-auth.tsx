@@ -5,7 +5,7 @@ import { memo, useCallback, useEffect, useRef, useState } from "react";
 
 import { useClerk } from "@clerk/nextjs";
 import { Download, Heart, Share2, TerminalSquare } from "lucide-react";
-import { useLocale } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 
 import { downloadPetZip } from "@/lib/download-pet-zip";
 import { formatLocalizedNumber } from "@/lib/format-number";
@@ -43,6 +43,7 @@ function PetCardFooterImpl({
   const router = useRouter();
   const clerk = useClerk();
   const locale = useLocale();
+  const t = useTranslations("gallery");
   const { refresh } = useHeaderState();
 
   const [liked, setLiked] = useState(initialLiked ?? false);
@@ -159,8 +160,16 @@ function PetCardFooterImpl({
         <Button
           variant="ghost"
           onClick={toggleLike}
-          aria-label={`${liked ? "Unlike" : "Like"} ${displayName}`}
-          title={`${liked ? "Unlike" : "Like"} ${displayName}`}
+          aria-label={
+            liked
+              ? t("unlikePet", { name: displayName })
+              : t("likePet", { name: displayName })
+          }
+          title={
+            liked
+              ? t("unlikePet", { name: displayName })
+              : t("likePet", { name: displayName })
+          }
           className={cn(
             "h-8 gap-1 rounded-full px-2",
             liked
@@ -185,8 +194,8 @@ function PetCardFooterImpl({
         <Button
           variant="ghost"
           onClick={copyInstall}
-          aria-label={`Copy install for ${displayName}`}
-          title={`Copy install for ${displayName}`}
+          aria-label={t("copyInstallFor", { name: displayName })}
+          title={t("copyInstallFor", { name: displayName })}
           className={cn(
             "h-8 gap-1 rounded-full px-2",
             copied
@@ -206,8 +215,8 @@ function PetCardFooterImpl({
           <Button
             variant="ghost"
             onClick={download}
-            aria-label={`Download ${displayName}`}
-            title={`Download ${displayName}`}
+            aria-label={t("downloadPet", { name: displayName })}
+            title={t("downloadPet", { name: displayName })}
             className="h-8 gap-1 rounded-full px-2 text-stone-500 hover:bg-surface-muted hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-100"
           >
             <Download className="size-3.5" />
@@ -221,8 +230,8 @@ function PetCardFooterImpl({
         <Button
           variant="ghost"
           onClick={share}
-          aria-label={`Share ${displayName}`}
-          title={`Share ${displayName}`}
+          aria-label={t("sharePet", { name: displayName })}
+          title={t("sharePet", { name: displayName })}
           className="h-8 gap-1 rounded-full px-2 text-stone-500 hover:bg-surface-muted hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-100"
         >
           <Share2 className="size-3.5" />

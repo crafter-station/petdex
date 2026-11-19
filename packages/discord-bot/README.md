@@ -9,6 +9,8 @@ cd packages/discord-bot
 bun install
 cp .env.example .env
 # fill DISCORD_TOKEN, DISCORD_GUILD_ID, PETDEX_WEBHOOK_SECRET
+# DISCORD_GUILD_ID also scopes runtime channel lookup — without it the
+# webhook handler posts to whichever guild holds the first #showcase.
 bun run register   # uploads slash commands to the guild
 bun run start
 ```
@@ -22,6 +24,13 @@ bun run start
   - `pet_approved` → posts to `#showcase` with embed + image OG
   - `collection_featured` → posts to `#ip-spotlight`
   - HMAC-signed with `PETDEX_WEBHOOK_SECRET`.
+
+## Webhook producer (planned, not yet wired)
+
+The receiver at `:8086/webhook` exists, but nothing in the petdex.dev repo
+sends it events yet — there is no `/api/discord/webhook` route and no
+signature helper. Until one lands, the showcase/ip-spotlight posts never fire
+regardless of configuration.
 
 ## Auto-roles (planned, not yet wired)
 

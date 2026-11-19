@@ -9,7 +9,8 @@ import { ImageResponse } from "next/og";
 import sharp from "sharp";
 
 import { getPet } from "@/lib/pets";
-import { fetchR2Asset } from "@/lib/r2-fetch";
+import { fetchR2AssetBuffer } from "@/lib/r2-fetch";
+import { isDecodableSpriteSize } from "@/lib/sprite-atlas";
 import { isAllowedAssetUrl } from "@/lib/url-allowlist";
 
 import { defaultLocale, hasLocale } from "@/i18n/config";
@@ -52,12 +53,22 @@ export default async function Image({
 
   const spriteDataUrl = await loadFirstFrameAsDataUrl(pet.spritesheetPath);
 
+  // The fallbacks and the vibe chips used to draw the raw English slug
+  // ("object", "cozy") into the image on every locale. The route is already
+  // rendered per locale and loads that locale's messages, so the labels come
+  // from `taxonomy` like the on-page badges.
   const tagsLine =
     pet.tags
       .slice(0, 4)
       .map((t) => `#${t}`)
-      .join("  ") || `#${pet.kind}`;
-  const vibesLine = pet.vibes.slice(0, 3).join(" · ") || pet.kind;
+      .join("  ") || `#${copy.kinds[pet.kind] ?? pet.kind}`;
+  const vibesLine =
+    pet.vibes
+      .slice(0, 3)
+      .map((v) => copy.vibes[v] ?? v)
+      .join(" · ") ||
+    copy.kinds[pet.kind] ||
+    pet.kind;
 
   return new ImageResponse(
     <div
@@ -201,7 +212,11 @@ export default async function Image({
               marginBottom: 20,
             }}
           >
-            {pet.displayName}
+            {/* displayName is capped at 60 chars at submit time, which at
+                this font size wraps to 4+ lines and pushes the card past the
+                630px canvas. Bound it the way the sibling u/[handle] route
+                bounds its name. */}
+            {clip(pet.displayName, 24)}
           </div>
           <div
             style={{
@@ -276,15 +291,25 @@ async function getOgImageCopy(locale: string) {
   const messages = (await import(`@/i18n/messages/${resolvedLocale}.json`))
     .default as {
     ogImage?: { featuredPet?: string; codexPet?: string };
+    taxonomy?: {
+      kinds?: Record<string, string>;
+      vibes?: Record<string, string>;
+    };
   };
 
   return {
     featuredPet: messages.ogImage?.featuredPet ?? "Featured Codex pet",
     codexPet: messages.ogImage?.codexPet ?? "Codex pet",
+    kinds: messages.taxonomy?.kinds ?? {},
+    vibes: messages.taxonomy?.vibes ?? {},
   };
 }
 
-async function loadFirstFrameAsDataUrl(url: string): Promise<string | null> {
+// Exported for the gate test: the sprite-decode gate lives here, and a
+// refactor that drops the metadata check must turn this test red.
+export async function loadFirstFrameAsDataUrl(
+  url: string,
+): Promise<string | null> {
   // Defensive SSRF guard. Even though pet.spritesheetPath comes from the DB,
   // the row was originally populated from a user submission. A row predating
   // the validateSubmission allowlist could still have an external URL, and
@@ -297,10 +322,24 @@ async function loadFirstFrameAsDataUrl(url: string): Promise<string | null> {
   }
   try {
     // No `cache: "force-cache"` — sprites are >2MB and Next's data cache caps
-    // at 2MB. R2 + the route's own ISR handle caching at the CDN edge.
-    const res = await fetchR2Asset(url, { redirect: "error" });
-    if (!res.ok) return null;
-    const buf = Buffer.from(await res.arrayBuffer());
+    // at 2MB. R2 + the route's own ISR handle caching at the CDN edge. The
+    // bounded helper adds a deadline and the 8MB upload ceiling on top.
+    const buf = await fetchR2AssetBuffer(url);
+    if (!buf) return null;
+
+    // Decode-dimension gate: an 8MB flat-color PNG can declare ~16000x16000
+    // (inside sharp's default ~268MP ceiling), and these routes are public,
+    // cache-miss-refreshable URLs — the same gate pet-public-artifacts and
+    // the dhash path already apply, applied to the last four request paths
+    // that reached the decoder without it.
+    const meta = await sharp(buf).metadata();
+    if (
+      !meta.width ||
+      !meta.height ||
+      !isDecodableSpriteSize(meta.width, meta.height)
+    ) {
+      return null;
+    }
 
     // Crop the first idle frame (top-left cell of the 6×9 grid), upscale
     // with nearest-neighbor to keep crisp pixels, and encode as PNG so

@@ -152,11 +152,11 @@ No unit tests (infrastructure change). The production probes in Steps 2-4 are th
 
 ## Done criteria
 
-- [ ] Second consecutive request to a sprite under `assets.petdex.dev` returns `cf-cache-status: HIT`
-- [ ] Second request to `/manifests/petdex-v1.json` within 300s returns `cf-cache-status: HIT`
-- [ ] No-referer request returns `200`; foreign-referer request returns `403`; petdex.dev-referer returns `200`
-- [ ] Browser smoke on `https://petdex.dev/en`: sprites render, no CORS console errors
-- [ ] `plans/README.md` status row updated
+- [x] Second consecutive request to a sprite under `assets.petdex.dev` returns `cf-cache-status: HIT`
+- [x] Second request to `/manifests/petdex-v1.json` within 300s returns `cf-cache-status: HIT`
+- [x] No-referer request returns `200`; foreign-referer request returns `403`; petdex.dev-referer returns `200`
+- [x] Browser smoke on `https://petdex.dev/en`: sprites render, no CORS console errors
+- [x] `plans/README.md` status row updated
 
 ## STOP conditions
 

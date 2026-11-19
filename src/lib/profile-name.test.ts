@@ -29,4 +29,10 @@ test("saved profile names reach header, requests API and static page", async () 
     code: 0,
     output: "",
   });
-}, 60000);
+  // The child allows each of its five tests 30s, so it can legitimately run
+  // 150s plus a PGlite boot before any single test is over its own budget. A
+  // wrapper shorter than that fails the spec on the harness rather than on the
+  // work: the child would still be inside its limits when the wrapper cut it
+  // off. Sized just above the child's worst case rather than to a round number,
+  // so a failure here always means the child failed.
+}, 180000);

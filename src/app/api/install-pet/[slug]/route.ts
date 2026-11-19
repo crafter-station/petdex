@@ -10,6 +10,7 @@
  * style installs. This one is a typed JSON contract for programmatic clients.
  */
 import { resolveInstallablePet } from "@/lib/install-script";
+import { publicTrafficGuardKey } from "@/lib/public-traffic-guard";
 import { installCounterRatelimit } from "@/lib/ratelimit";
 
 export const runtime = "nodejs";
@@ -28,7 +29,6 @@ export async function GET(
   ctx: { params: Promise<Params> },
 ): Promise<Response> {
   const { slug } = await ctx.params;
-  const origin = new URL(req.url).origin;
 
   // Slug shape gate before hitting the DB. Defends against odd inputs and
   // gives a clean 400 instead of 404 for nonsense.
@@ -42,7 +42,7 @@ export async function GET(
     );
   }
 
-  const pet = await resolveInstallablePet(slug, origin);
+  const pet = await resolveInstallablePet(slug);
   if (!pet) {
     return Response.json(
       { ok: false, error: "not_found", slug },
@@ -55,9 +55,8 @@ export async function GET(
 
   // Rate-limited fire-and-forget metric (mirror the script endpoint).
   void (async () => {
-    const xff = req.headers.get("x-forwarded-for") ?? "";
-    const ip = xff.split(",")[0]?.trim() || "anon";
-    const { success } = await installCounterRatelimit.limit(ip);
+    const key = publicTrafficGuardKey(req.headers);
+    const { success } = await installCounterRatelimit.limit(key);
     if (success) {
       const { incrementInstallCount } = await import("@/lib/db/metrics");
       await incrementInstallCount(slug).catch(() => {});

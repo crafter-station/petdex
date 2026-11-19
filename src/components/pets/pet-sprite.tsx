@@ -10,7 +10,9 @@ type PetSpriteProps = {
   src: string;
   state?: PetStateId;
   scale?: number;
-  label?: string;
+  /** Required: the fallback used to be the English literal "Pet
+   *  animation", which every locale's screen reader heard. */
+  label: string;
   className?: string;
   /**
    * "atlas" reads a row out of the full spritesheet (the canonical asset).
@@ -113,7 +115,7 @@ function PetSpriteImpl({
     <div
       className={`pet-sprite-frame ${className}`}
       role="img"
-      aria-label={label ?? "Pet animation"}
+      aria-label={label}
       style={
         {
           "--pet-scale": scale,

@@ -23,6 +23,7 @@ import { db, schema } from "@/lib/db/client";
 import { getAvailableBatches } from "@/lib/dex-batch.server";
 import { PETDEX_EMBEDDING_MODEL } from "@/lib/embeddings";
 import { withNextDataCache } from "@/lib/next-data-cache";
+import { clampCursor, DEFAULT_LIMIT, MAX_LIMIT } from "@/lib/pet-search-cursor";
 import { rowToPet } from "@/lib/pets";
 import { embedQuery, looksLikeVibeQuery } from "@/lib/query-embed";
 import { toCurrentR2PublicUrl } from "@/lib/r2-public-url";
@@ -70,7 +71,10 @@ export type SearchFacets = {
   kinds: Record<string, number>;
   vibes: Record<string, number>;
   colors: Record<ColorFamily, number>;
-  batches: Array<{ key: string; label: string; count: number }>;
+  // `key` is "YYYY-MM"; the display label is derived from it at render time
+  // with the active locale, so this aggregate is the same for every visitor
+  // and can stay cached. See `formatBatchLabel`.
+  batches: Array<{ key: string; count: number }>;
   spriteVersions: Record<string, number>;
 };
 
@@ -120,9 +124,6 @@ export type SearchOptions = {
   includeFacets?: boolean;
 };
 
-const DEFAULT_LIMIT = 24;
-const MAX_LIMIT = 60;
-
 export async function searchPets(input: SearchInput): Promise<SearchOutput>;
 export async function searchPets(
   input: SearchInput,
@@ -134,7 +135,7 @@ export async function searchPets(
 ): Promise<SearchOutput | SearchPageOutput> {
   const sortKey = input.sort ?? "curated";
   const limit = clamp(input.limit ?? DEFAULT_LIMIT, 1, MAX_LIMIT);
-  const cursor = Math.max(0, input.cursor ?? 0);
+  const cursor = clampCursor(input.cursor);
   const q = input.q?.trim() ?? "";
   const includeTotal = options.includeTotal ?? true;
   const includeFacets = options.includeFacets ?? true;
@@ -202,7 +203,8 @@ export async function searchPets(
   }
 
   if (q) {
-    const like = `%${q}%`;
+    const cleanQ = stripNulBytes(q);
+    const like = `%${cleanQ}%`;
     // Tags are jsonb — cast to text so ILIKE can scan them. The substring
     // search on display_name + description is small enough to live without
     // a trigram index at our current scale.
@@ -333,6 +335,10 @@ async function vibeSearch(args: {
 }): Promise<SearchPageOutput | null> {
   const vec = await embedQuery(args.q);
   if (!vec) return null;
+  // Clamp once at the entry: LIMIT and slice below must agree, and a raw
+  // cursor past the cap made nextCursor walk past it and serve a repeat page
+  // before the hasNext check cut off.
+  const cursor = Math.min(args.cursor, VIBE_MAX_CURSOR);
   const literal = `[${vec.join(",")}]`;
 
   // pgvector cosine distance: <=> returns 0 (identical) -> 2 (opposite).
@@ -365,12 +371,12 @@ async function vibeSearch(args: {
       AND sp.embedding IS NOT NULL
       AND sp.embedding_model = ${PETDEX_EMBEDDING_MODEL}
     ORDER BY sp.embedding <=> ${literal}::vector
-    LIMIT ${args.limit + args.cursor + 1}
+    LIMIT ${args.limit + cursor + 1}
   `) as Array<Record<string, unknown> & { similarity: number }>;
 
   const ranked = rows.filter((r) => r.similarity >= MIN_VIBE_SCORE);
-  const slice = ranked.slice(args.cursor, args.cursor + args.limit);
-  const hasNext = ranked.length > args.cursor + args.limit;
+  const slice = ranked.slice(cursor, cursor + args.limit);
+  const hasNext = ranked.length > cursor + args.limit;
 
   const pets = slice.map((row) =>
     toSearchPet(rowToPet(rowToSchema(row)), {
@@ -383,10 +389,15 @@ async function vibeSearch(args: {
 
   const out: SearchPageOutput = {
     pets,
-    nextCursor: hasNext ? args.cursor + args.limit : null,
+    nextCursor: hasNext ? cursor + args.limit : null,
     searchMode: "vibe",
   };
-  if (args.includeTotal) out.total = ranked.length;
+  // ranked is a window, not the match universe: LIMIT = cursor + limit + 1,
+  // so its length grows with paging and publishing it as `total` told API
+  // consumers the match count rose as they scrolled. The gallery treats a
+  // missing total as "pets.length" and only surfaces it while filters are
+  // active, so vibe omits it past the first window rather than lie.
+  if (args.includeTotal && cursor === 0) out.total = ranked.length;
   if (args.includeFacets) out.facets = await loadFacets();
   return out;
 }
@@ -542,7 +553,12 @@ function rowToSchema(
   };
 }
 
-function orderForSort(
+// Exported for its test: the page cursor is a raw OFFSET, so every branch has
+// to end in a unique column or a tie lets a row be skipped or repeated across
+// pages. The same suite's "page order" cases render each sort and assert the
+// final clause is `slug`; nothing else pins that, and the bug (only `alpha`
+// was total) shipped once.
+export function orderForSort(
   key: SortKey,
   installCountSql: SQL<number>,
   likeCountSql: SQL<number>,
@@ -550,17 +566,35 @@ function orderForSort(
 ) {
   switch (key) {
     case "popular":
-      return [desc(likeCountSql), asc(schema.submittedPets.displayName)];
+      // slug is the final tiebreak in every branch below: displayName is not
+      // unique and the cursor is a raw OFFSET, so a non-total order lets a
+      // row be skipped or repeated across pages. Same reasoning as `alpha`.
+      return [
+        desc(likeCountSql),
+        asc(schema.submittedPets.displayName),
+        asc(schema.submittedPets.slug),
+      ];
     case "installed":
-      return [desc(installCountSql), asc(schema.submittedPets.displayName)];
+      return [
+        desc(installCountSql),
+        asc(schema.submittedPets.displayName),
+        asc(schema.submittedPets.slug),
+      ];
     case "alpha":
-      return [asc(schema.submittedPets.displayName)];
+      // displayName is not unique, and the cursor is a raw OFFSET — two pets
+      // sharing a name (nothing constrains it) would let a row be skipped or
+      // repeated across pages. slug is unique, so it makes the order total.
+      return [
+        asc(schema.submittedPets.displayName),
+        asc(schema.submittedPets.slug),
+      ];
     case "recent":
       // Newest approvals first. Falls back to displayName so two pets
       // approved in the same second still get a stable order.
       return [
         desc(schema.submittedPets.approvedAt),
         asc(schema.submittedPets.displayName),
+        asc(schema.submittedPets.slug),
       ];
     default: {
       // Per-visitor stable shuffle: featured pets keep their pinned
@@ -571,14 +605,19 @@ function orderForSort(
       // (e.g. cookies disabled, server-side debug calls).
       // See https://github.com/crafter-station/petdex/issues/82
       if (shuffleSeed) {
+        // md5(slug||seed) is already unique per slug, so it is total on its
+        // own; the featured tier is prepended and slug keeps it total when
+        // the hash collides.
         return [
           desc(schema.submittedPets.featured),
           sql`md5(${schema.submittedPets.slug} || ${shuffleSeed})`,
+          asc(schema.submittedPets.slug),
         ];
       }
       return [
         desc(schema.submittedPets.featured),
         asc(schema.submittedPets.displayName),
+        asc(schema.submittedPets.slug),
       ];
     }
   }
@@ -665,11 +704,49 @@ const loadFacets = (): Promise<SearchFacets> =>
     computeFacets,
   );
 
+/**
+ * Facet counts over the approved universe, for the sitemap.
+ *
+ * A vibe or kind with no pets calls `notFound()`, so listing it would
+ * advertise a 404 to crawlers, and the sitemap filters on these counts.
+ *
+ * This is `computeFacets` directly, without the Upstash layer `loadFacets`
+ * adds. The sitemap route is prerendered, and reaching Redis from it makes
+ * Next treat the route as dynamic: the build reported `/sitemap.xml` as `ƒ`
+ * instead of the static `○` it had been, and the response's `lastmod` became
+ * `new Date()` at request time rather than at regeneration time. The read it
+ * needs is already behind `unstable_cache`, so the Upstash tier buys the build
+ * nothing.
+ *
+ * Note the effective revalidation is 300s, not the route's declared 86400:
+ * Next takes the lowest `revalidate` across a route's fetches, and
+ * `computeFacets` is cached at 300 for the search routes. So `lastmod` still
+ * moves every regeneration rather than being frozen at build time — that is
+ * the pre-existing behaviour on `main`, and this route went from dynamic (every
+ * request) to static (every 300s). Raising it means giving the sitemap its own
+ * longer-lived cache entry, which would mean re-running the facet queries on a
+ * separate clock from the ones the search page reads.
+ */
+export const loadFacetsForSitemap = (): Promise<SearchFacets> =>
+  computeFacets();
+
+// A NUL byte in a query parameter makes Postgres reject the statement
+// outright (5F000), so `?q=%00` was a deterministic 500. Postgres text
+// cannot represent NUL, so no legitimate search term contains one — strip
+// rather than reject. Exported for the route contract test.
+export function stripNulBytes(raw: string): string {
+  return raw.replaceAll("\0", "");
+}
+
 function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n));
 }
 
-export const SEARCH_LIMITS = {
-  DEFAULT_LIMIT,
-  MAX_LIMIT,
-} as const;
+// The vibe path materializes LIMIT = cursor + limit rows (a similarity
+// ranking has no seekable offset, so it over-fetches and slices), and
+// clampCursor alone still let a hand-set cursor of 1e9 through — one request
+// asking Postgres to produce a billion-row result. A cosine ranking is only
+// meaningful for the first few pages, so the offset caps here.
+export const VIBE_MAX_CURSOR = 600;
+
+export { SEARCH_LIMITS } from "./pet-search-cursor";

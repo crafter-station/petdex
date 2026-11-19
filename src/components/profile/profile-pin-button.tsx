@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 
 import { Pin, PinOff } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 // One-click pin/unpin for an approved pet on the owner's /u/[handle]
 // page. Calls /api/profile with a pin or unpin action so the server
@@ -28,6 +29,7 @@ export function ProfilePinButton({
   disabledTitle?: string;
 }) {
   const router = useRouter();
+  const t = useTranslations("profile.pin");
   const [, startTransition] = useTransition();
   const [optimisticPinned, setOptimisticPinned] = useState(isPinned);
   const pinRequestSeq = useRef(0);
@@ -46,7 +48,7 @@ export function ProfilePinButton({
     e.stopPropagation();
     if (disabled) return;
     if (capReached) {
-      alert(`You can pin up to ${maxPins} pets. Unpin one first.`);
+      alert(t("capAlert", { max: maxPins }));
       return;
     }
     const previousPinned = optimisticPinned;
@@ -71,9 +73,9 @@ export function ProfilePinButton({
           error?: string;
         } | null;
         if (j?.error === "pin_cap_reached") {
-          alert(`You can pin up to ${maxPins} pets. Unpin one first.`);
+          alert(t("capAlert", { max: maxPins }));
         } else {
-          alert(`Failed: ${j?.error ?? res.statusText}`);
+          alert(t("failed", { code: j?.error ?? `http_${res.status}` }));
         }
         return;
       }
@@ -85,17 +87,17 @@ export function ProfilePinButton({
         setOptimisticPinned(previousPinned);
         onOptimisticChange?.(previousPinned);
       }
-      alert("Failed: network error");
+      alert(t("networkError"));
     }
   }
 
   const title = disabled
-    ? (disabledTitle ?? "Pin controls are temporarily unavailable")
+    ? (disabledTitle ?? t("unavailable"))
     : optimisticPinned
-      ? "Unpin from profile"
+      ? t("unpin")
       : capReached
-        ? `Pin cap reached (${maxPins})`
-        : "Pin to profile";
+        ? t("capReached", { max: maxPins })
+        : t("pin");
 
   return (
     <button
@@ -111,7 +113,7 @@ export function ProfilePinButton({
             ? "border-border-base bg-surface/90 text-brand hover:border-brand/30 hover:bg-brand-tint"
             : "border-black/10 bg-surface/90 text-muted-2 hover:border-border-strong hover:text-black"
           : optimisticPinned
-            ? "border-brand/40 bg-brand text-white hover:bg-brand-deep"
+            ? "border-brand/40 bg-brand text-on-inverse hover:bg-brand-deep"
             : "border-black/10 bg-surface/90 text-muted-2 hover:border-border-strong hover:text-black"
       }`}
     >

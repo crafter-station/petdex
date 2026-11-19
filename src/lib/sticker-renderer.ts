@@ -15,7 +15,12 @@ import sharp from "sharp";
 
 import { defaultPetState, type PetStateId, petStates } from "@/lib/pet-states";
 import type { PetStickerTreatment } from "@/lib/pet-sticker-artifacts";
-import { fetchR2Asset } from "@/lib/r2-fetch";
+import {
+  fetchR2Asset,
+  R2_ASSET_FETCH_TIMEOUT_MS,
+  R2_ASSET_MAX_BYTES,
+} from "@/lib/r2-fetch";
+import { readResponseBodyBounded } from "@/lib/response-body";
 
 const FRAME_W = 192;
 const FRAME_H = 208;
@@ -52,9 +57,18 @@ function getStateSpec(stateId?: PetStateId) {
 export async function fetchSpritesheet(
   spritesheetUrl: string,
 ): Promise<Buffer> {
-  const res = await fetchR2Asset(spritesheetUrl, { redirect: "error" });
+  const res = await fetchR2Asset(spritesheetUrl, {
+    redirect: "error",
+    signal: AbortSignal.timeout(R2_ASSET_FETCH_TIMEOUT_MS),
+  });
   if (!res.ok) throw new Error(`upstream ${res.status}`);
-  return Buffer.from(await res.arrayBuffer());
+  // Bounded, not `arrayBuffer()`: the sheet is user-supplied content, and the
+  // render pipeline holds it for the whole frame extraction.
+  return readResponseBodyBounded(
+    res,
+    R2_ASSET_MAX_BYTES,
+    R2_ASSET_FETCH_TIMEOUT_MS,
+  );
 }
 
 // Pull the N frames for a row out of the source sheet, each as a Buffer.

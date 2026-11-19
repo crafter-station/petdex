@@ -1,13 +1,15 @@
-import { eq } from "drizzle-orm";
+import { eq, getTableColumns, type SQLWrapper, sql } from "drizzle-orm";
 import { Resend } from "resend";
 
 import {
   AGGREGATE_KEYS,
   invalidateAggregates,
   invalidatePetCaches,
+  LEADERBOARD_CACHE_KEYS,
 } from "@/lib/db/cached-aggregates";
 import type { SubmittedPet } from "@/lib/db/schema";
 import * as schema from "@/lib/db/schema";
+import { emailEnv, sendEmail } from "@/lib/email-send";
 import { renderSubmissionApprovedEmail } from "@/lib/email-templates/submission-approved";
 import { renderSubmissionRejectedEmail } from "@/lib/email-templates/submission-rejected";
 
@@ -154,14 +156,76 @@ export async function applySubmissionAction(
     return { ok: false, status: 404, body: { error: "not_found" } };
   }
 
-  const [updated] = await db
-    .update(schema.submittedPets)
-    .set(update)
-    .where(eq(schema.submittedPets.id, id))
-    .returning();
-
+  // A rename must move the main row and every slug-keyed reference in one
+  // transaction. Issuing the pets UPDATE as its own statement first (as an
+  // earlier revision did) committed the rename before the reference
+  // migration ran: a failure past that point left the row renamed while
+  // collections/likes/metrics/requests still pointed at the old slug, and a
+  // collection holding both the old and the new slug tripped the
+  // (collection_id, pet_slug) primary key mid-migration. The main-row
+  // UPDATE is therefore the batch's first statement, followed by every
+  // table keyed by pet_slug — collection items, covers, likes, metrics,
+  // collection requests, fulfilled-request links, featured lists.
+  // Separate statements in one batch, per the executeAtomicReturning
+  // invariant; the cache revalidations below read the post-rename state.
+  const slugChanged =
+    Boolean(editPatch.slug) && current.slug !== editPatch.slug;
+  const newSlug = slugChanged ? (editPatch.slug as string) : current.slug;
+  // Column names must come from the schema's own mapping: the update keys
+  // are the TS property names (approvedAt, rejectionReason...), while the
+  // database columns are snake_case — sql.identifier("approvedAt") renders
+  // a quoted case-sensitive identifier the table does not have.
+  const petColumns = getTableColumns(schema.submittedPets);
+  const renameStatements: [SQLWrapper, ...SQLWrapper[]] = [
+    sql`UPDATE "submitted_pets" SET ${sql.join(
+      Object.entries(update).map(
+        ([col, value]) =>
+          sql`${sql.identifier(petColumns[col as keyof typeof petColumns].name)} = ${value}`,
+      ),
+      sql`, `,
+    )} WHERE "id" = ${id} RETURNING *`,
+  ];
+  if (slugChanged) {
+    const oldSlug = current.slug;
+    renameStatements.push(
+      sql`UPDATE "pet_collection_items" SET "pet_slug" = ${newSlug} WHERE "pet_slug" = ${oldSlug}`,
+      sql`UPDATE "pet_collections" SET "cover_pet_slug" = ${newSlug} WHERE "cover_pet_slug" = ${oldSlug}`,
+      sql`UPDATE "pet_likes" SET "pet_slug" = ${newSlug} WHERE "pet_slug" = ${oldSlug}`,
+      sql`UPDATE "pet_metrics" SET "pet_slug" = ${newSlug} WHERE "pet_slug" = ${oldSlug}`,
+      sql`UPDATE "pet_collection_requests" SET "pet_slug" = ${newSlug} WHERE "pet_slug" = ${oldSlug}`,
+      sql`UPDATE "pet_requests" SET "fulfilled_pet_slug" = ${newSlug} WHERE "fulfilled_pet_slug" = ${oldSlug}`,
+      sql`UPDATE "user_profiles" SET "featured_pet_slugs" = (
+        SELECT COALESCE(jsonb_agg(
+          CASE WHEN elem = to_jsonb(${oldSlug}::text) THEN to_jsonb(${newSlug}::text) ELSE elem END
+        ), '[]'::jsonb)
+        FROM jsonb_array_elements("featured_pet_slugs") AS elem
+      ) WHERE "featured_pet_slugs" @> to_jsonb(${oldSlug}::text)`,
+    );
+  }
+  const { executeAtomicReturning } = await import("@/lib/db/client");
+  await executeAtomicReturning(renameStatements);
+  // Re-read the row after the batch: RETURNING * yields snake_case keys the
+  // downstream code (and runPostApprovalEffects) cannot consume, and the
+  // batch's rows go unread — existence is decided by this fresh read. It is
+  // safe here: the batch has committed, so this snapshot sees the
+  // post-rename state.
+  const updated = await db.query.submittedPets.findFirst({
+    where: eq(schema.submittedPets.id, id),
+  });
   if (!updated) {
     return { ok: false, status: 404, body: { error: "not_found" } };
+  }
+  if (slugChanged) {
+    const oldSlug = current.slug;
+    const { revalidateCollectionTags } = await import(
+      "@/lib/db/cached-aggregates"
+    );
+    const covered = await db
+      .select({ slug: schema.petCollections.slug })
+      .from(schema.petCollections)
+      .where(eq(schema.petCollections.coverPetSlug, newSlug));
+    await revalidateCollectionTags(...covered.map((c) => c.slug));
+    await invalidatePetCaches(oldSlug, newSlug);
   }
 
   let row = updated;
@@ -204,6 +268,11 @@ export async function applySubmissionAction(
       AGGREGATE_KEYS.metricsSummary,
       AGGREGATE_KEYS.batches,
       AGGREGATE_KEYS.variantIndex,
+      // The rank badge on /u/[handle] and the five variants on /leaderboard
+      // rank by approved count and metrics, so a status flip makes all of them
+      // stale. Missing here meant an approved pet did not appear on the
+      // leaderboard (or move its owner's badge) for up to the 5-minute TTL.
+      ...LEADERBOARD_CACHE_KEYS,
     );
     await invalidatePetCaches(current.slug, row.slug);
   } else if (current.status === "approved" && body.action === "edit") {
@@ -350,14 +419,15 @@ async function notifySubmissionOwner(row: SubmittedPet): Promise<void> {
       slug: row.slug,
       status: row.status,
     }),
-  }).catch(() => {});
+  }).catch((err) =>
+    console.warn("[notify] submission decision notification failed:", err),
+  );
 
   if (!row.ownerEmail || !process.env.RESEND_API_KEY) return;
 
   try {
     const resend = new Resend(process.env.RESEND_API_KEY);
-    const from =
-      process.env.RESEND_FROM ?? "Petdex <petdex@updates.railly.dev>";
+    const from = emailEnv("RESEND_FROM", "Petdex <petdex@updates.railly.dev>");
     const { getPreferredLocaleForUser } = await import("@/lib/user-locale");
     const locale = await getPreferredLocaleForUser(row.ownerId);
 
@@ -366,28 +436,39 @@ async function notifySubmissionOwner(row: SubmittedPet): Promise<void> {
         petName: row.displayName,
         petSlug: row.slug,
       });
-      await resend.emails.send({
-        from,
-        to: row.ownerEmail,
-        subject: email.subject,
-        html: email.html,
-        text: email.text,
-      });
+      await sendEmail(
+        resend,
+        {
+          from,
+          to: row.ownerEmail,
+          subject: email.subject,
+          html: email.html,
+          text: email.text,
+        },
+        `submission ${row.status} notice`,
+      );
     } else if (row.status === "rejected") {
       const email = renderSubmissionRejectedEmail(locale, {
         petName: row.displayName,
         reason: row.rejectionReason,
       });
-      await resend.emails.send({
-        from,
-        to: row.ownerEmail,
-        subject: email.subject,
-        html: email.html,
-        text: email.text,
-      });
+      await sendEmail(
+        resend,
+        {
+          from,
+          to: row.ownerEmail,
+          subject: email.subject,
+          html: email.html,
+          text: email.text,
+        },
+        "submission rejected notice",
+      );
     }
-  } catch {
-    /* silent */
+  } catch (error) {
+    console.error(
+      "[submission-decision] owner notification failed:",
+      error instanceof Error ? error.message : String(error),
+    );
   }
 }
 

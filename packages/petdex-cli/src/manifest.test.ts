@@ -2,9 +2,11 @@ import { describe, expect, it } from "bun:test";
 
 import {
   fetchManifest,
+  isInstallSlug,
   parseCompactManifest,
   parseLegacyManifest,
   parseManifestPayload,
+  stripControlChars,
 } from "./manifest";
 
 const compact = {
@@ -50,6 +52,25 @@ const legacy = {
     },
   ],
 };
+
+describe("stripControlChars", () => {
+  it("drops control characters that would execute against the terminal", () => {
+    // Escapes come from submitter-controlled manifest fields echoed to the
+    // console: title rewrite (OSC), cursor hiding (CSI), bell, C1, DEL. The
+    // strip removes only the control bytes, so an OSC's leftover payload
+    // prints as inert text — the point is that no escape can execute.
+    expect(stripControlChars("\u001b]0;pwned\u0007plain")).toBe(
+      "]0;pwnedplain",
+    );
+    expect(stripControlChars("a\u001b[?25lb")).toBe("a[?25lb");
+    expect(stripControlChars("ok\u009bdark\u007f")).toBe("okdark");
+  });
+
+  it("leaves ordinary display names untouched", () => {
+    expect(stripControlChars("Boba · 波巴")).toBe("Boba · 波巴");
+    expect(stripControlChars("")).toBe("");
+  });
+});
 
 describe("manifest parsing", () => {
   it("parses compact v2 rows and resolves asset references", () => {
@@ -132,5 +153,53 @@ describe("manifest endpoint compatibility", () => {
         async () => new Response("", { status: 503 }),
       ),
     ).rejects.toThrow("manifest unavailable");
+  });
+
+  // The manifest was the one network read with no byte ceiling: a hostile
+  // or broken endpoint could stream an unbounded body into memory before
+  // the 15s timeout fired.
+  it("rejects a manifest body that exceeds the byte ceiling", async () => {
+    const huge = `{"v":2,"pad":"${"x".repeat(9 * 1024 * 1024)}"}`;
+    await expect(
+      fetchManifest(
+        "https://petdex.test",
+        async () =>
+          new Response(huge, {
+            headers: { "content-type": "application/json" },
+          }),
+      ),
+    ).rejects.toThrow("exceeds the");
+  });
+});
+
+// `petdex install` joins the manifest's slug into `~/.petdex/pets/<slug>` and
+// `~/.codex/pets/<slug>`. The server validates that shape on `/install/<slug>`
+// but the CLI did not, so a manifest carrying `../../../../tmp/pwned` made
+// `path.join` resolve outside the pets directory. The guard mirrors
+// `INSTALL_SLUG_RE` in the install routes.
+describe("isInstallSlug", () => {
+  it("accepts the shapes real slugs take", () => {
+    for (const slug of ["boba", "byte-bunny", "a", "x".repeat(63)]) {
+      expect(isInstallSlug(slug), slug).toBe(true);
+    }
+  });
+
+  it("refuses a path-traversal slug", () => {
+    // The regression: `path.join(homedir(), ".petdex", "pets", slug)` with
+    // this slug is `/tmp/pwned`, not a path under `~/.petdex/pets`.
+    expect(isInstallSlug("../../../../tmp/pwned")).toBe(false);
+    expect(isInstallSlug("..")).toBe(false);
+    expect(isInstallSlug("a/../../b")).toBe(false);
+    expect(isInstallSlug("a/b")).toBe(false);
+  });
+
+  it("refuses a slug with characters the install routes reject", () => {
+    for (const slug of ["Boba", "boba_", "boba.webp", "-boba", "", "a b"]) {
+      expect(isInstallSlug(slug), slug).toBe(false);
+    }
+  });
+
+  it("refuses a slug longer than the install routes accept", () => {
+    expect(isInstallSlug("x".repeat(64))).toBe(false);
   });
 });

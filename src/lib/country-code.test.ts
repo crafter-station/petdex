@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { normalizeCountry } from "./country-code";
+import { normalizeCountry, normalizeRegion } from "./country-code";
 
 // Country code normalization for the public telemetry endpoint and
 // any other surface that reads x-vercel-ip-country. Anything proxying
@@ -59,5 +59,35 @@ describe("normalizeCountry", () => {
     // dashboard with values that match no real country.
     expect(normalizeCountry("АА")).toBeNull();
     expect(normalizeCountry("ＵＳ")).toBeNull();
+  });
+});
+
+// No ISO list for subdivisions, so the region filter bounds the SHAPE: a short
+// run of [A-Z0-9-]. The column is unbounded `text`, and the same "any header can
+// be anything" argument applies, so a hostile or oversized value must fall back
+// to null rather than being stored raw.
+describe("normalizeRegion", () => {
+  test("accepts the codes Vercel actually sends", () => {
+    expect(normalizeRegion("CA")).toBe("CA");
+    expect(normalizeRegion("ENG")).toBe("ENG");
+    expect(normalizeRegion("13")).toBe("13");
+    expect(normalizeRegion("GB-ENG")).toBe("GB-ENG");
+  });
+
+  test("uppercases and trims", () => {
+    expect(normalizeRegion("eng")).toBe("ENG");
+    expect(normalizeRegion(" CA ")).toBe("CA");
+  });
+
+  test("returns null for null/undefined/empty", () => {
+    expect(normalizeRegion(null)).toBeNull();
+    expect(normalizeRegion(undefined)).toBeNull();
+    expect(normalizeRegion("   ")).toBeNull();
+  });
+
+  test("rejects a payload or an over-long value", () => {
+    expect(normalizeRegion("<script>")).toBeNull();
+    expect(normalizeRegion("A".repeat(9))).toBeNull();
+    expect(normalizeRegion("' OR 1=1")).toBeNull();
   });
 });

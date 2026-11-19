@@ -4,8 +4,11 @@ import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { renderToStaticMarkup } from "react-dom/server";
 
+import * as realR2Module from "@/lib/r2";
+
 import * as schema from "./db/schema";
 import { type HeaderState, normalizeHeaderState } from "./header-state";
+import * as realRatelimit from "./ratelimit";
 
 const client = new PGlite();
 const fixture = drizzle(client, { schema });
@@ -60,7 +63,11 @@ mock.module("@clerk/nextjs", () => ({
   }),
   SignInButton: () => null,
 }));
+// Spread the real module: `mock.module` is process-wide and
+// first-registration-wins, so replacing `@/lib/ratelimit` wholesale starves
+// whichever limiter another suite in the same process already stubbed.
 mock.module("@/lib/ratelimit", () => ({
+  ...realRatelimit,
   profileEditRatelimit: { limit: async () => ({ success: true }) },
   profilePinRatelimit: { limit: async () => ({ success: true }) },
   petRequestRatelimit: {},
@@ -75,11 +82,18 @@ mock.module("@/lib/db/cached-aggregates", () => ({
   invalidatePublicHandleCaches: async () => {},
 }));
 mock.module("@/lib/query-embed", () => ({ embedQuery: async () => [] }));
+// Spread the real module: a bare { R2_PUBLIC_BASE } replacement starves
+// whichever later module in this suite's import chain (submissions pulls
+// asset-size-guard, which needs checkR2ObjectSize) fails with
+// "Export named '...' not found" — mock.module is process-wide and first
+// registration wins.
 mock.module("@/lib/r2", () => ({
+  ...realR2Module,
   R2_PUBLIC_BASE: "https://assets.petdex.dev",
 }));
 mock.module("next-intl/server", () => ({
   getTranslations: async () => (key: string) => key,
+  setRequestLocale: () => {},
 }));
 mock.module("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -144,7 +158,9 @@ async function assertRequests(name: string, handle: string) {
   expect(payload.requests[0].requester.displayName).toBe(name);
   expect(payload.requests[0].requester.handle).toBe(handle);
   expect(payload.requests[0].voters[0].displayName).toBe("Saved voter");
-  renderToStaticMarkup(await RequestsPage());
+  renderToStaticMarkup(
+    await RequestsPage({ params: Promise.resolve({ locale: "en" }) }),
+  );
   expect(pageRequests[0].requester.displayName).toBe(name);
   expect(pageRequests[0].requester.handle).toBe(handle);
   expect(pageRequests[0].voters[0].displayName).toBe("Saved voter");

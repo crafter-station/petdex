@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, mock } from "bun:test";
 
 import { PgDialect } from "drizzle-orm/pg-core";
 
+import { rowsOf, runAtomicReturning } from "@/lib/db/atomic";
 import * as schema from "@/lib/db/schema";
 
 // takedownPet has two write paths, and only one of them runs in any given
@@ -104,7 +105,16 @@ mock.module("@/lib/db/client", () => {
   };
   // mock.module is process-wide for the whole run, and a suite that links a name
   // this factory omits fails with a SyntaxError. Export the real schema.
-  return { db, schema };
+  // A suite that links `executeAtomicReturning` — the helper every write goes
+  // through — fails with a SyntaxError if this factory omits it, so it is
+  // bound to this stand-in the way the real module binds it to the client.
+  return {
+    db,
+    schema,
+    executeAtomicReturning: (queries: never) =>
+      runAtomicReturning(db as never, queries),
+    rowsOf,
+  };
 });
 
 const { takedownPet } = await import("@/lib/takedown");
@@ -174,6 +184,35 @@ describe("takedownPet batch path", () => {
         .every((s) => s.includes("DELETE") || s.includes("UPDATE")),
     ).toBe(true);
     expect(submittedSql[submittedSql.length - 1]).toContain(DELETE_MARKER);
+  });
+
+  it("cleans the id-keyed tables by their real column names", async () => {
+    // `submission_reviews` (by submitted_pet_id) and `pet_request_candidates`
+    // (by pet_id) are keyed by id, so they cannot ride the slug cleanups. A
+    // typo'd column here would only surface at runtime, in production, on a
+    // takedown — this is the guard that fails first. Pinned by name on
+    // purpose: the PGlite suite runs the shapes, this pins what the module
+    // actually submits, so the two together catch a rename on either side.
+    rowsForMarkers = [{ marker: DELETE_MARKER, rows: [{ id: "pet_1" }] }];
+
+    await takedownPet({
+      pet: petFixture(),
+      source: "owner",
+      actorId: "user_owner",
+      silent: true,
+    });
+
+    const reviews = submittedSql.find((s) =>
+      s.includes('DELETE FROM "submission_reviews"'),
+    );
+    expect(reviews).toBeDefined();
+    expect(reviews).toContain('"submitted_pet_id"');
+
+    const candidates = submittedSql.find((s) =>
+      s.includes('DELETE FROM "pet_request_candidates"'),
+    );
+    expect(candidates).toBeDefined();
+    expect(candidates).toContain('"pet_id"');
   });
 
   it("reads the affected collection slugs from the third statement", async () => {

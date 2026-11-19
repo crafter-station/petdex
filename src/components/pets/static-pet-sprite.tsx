@@ -15,7 +15,10 @@ type StaticPetSpriteProps = {
   src: string;
   state?: PetStateId;
   scale?: number;
-  label?: string;
+  /** Required: the fallback used to be the English literal "Pet", which
+   *  every locale's screen reader heard. Call sites pass a translated
+   *  name. */
+  label: string;
   className?: string;
 };
 
@@ -33,7 +36,7 @@ export function StaticPetSprite({
     <div
       className={`pet-sprite-frame ${className}`}
       role="img"
-      aria-label={label ?? "Pet"}
+      aria-label={label}
       style={{ "--pet-scale": scale } as CSSProperties}
     >
       <div

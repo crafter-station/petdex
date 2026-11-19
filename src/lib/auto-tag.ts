@@ -6,12 +6,14 @@
 
 import { generateText } from "ai";
 
+import { containsBlockedKeyword } from "@/lib/keyword-blocklist";
 import { PET_KINDS, PET_VIBES, type PetKind, type PetVibe } from "@/lib/types";
 
 const VIBE_SET = new Set<string>(PET_VIBES);
 const KIND_SET = new Set<string>(PET_KINDS);
 
 const MODEL = "openai/gpt-5-mini";
+const CLASSIFY_TIMEOUT_MS = 15000;
 
 export type Classification = {
   kind: PetKind;
@@ -31,6 +33,11 @@ export async function classifyPet(
       system:
         "You are a strict JSON classifier. Output ONLY the requested JSON object, no prose, no markdown fences.",
       messages: [{ role: "user", content: prompt }],
+      // classifyPet runs synchronously inside the approval side-effects, so a
+      // stalled gateway would pin the whole decision. The other AI calls in
+      // this tree all carry a deadline (embeddings, edit-policy,
+      // submission-review); this one did not.
+      abortSignal: AbortSignal.timeout(CLASSIFY_TIMEOUT_MS),
     });
     const raw = result.text;
     const json = JSON.parse(raw);
@@ -98,6 +105,16 @@ function validate(obj: unknown): Classification | null {
       (t) =>
         t.length > 0 &&
         t.length <= 30 &&
+        // The repo's abuse blocklist too, not only the fixed list below. The
+        // model reads creator-controlled displayName/description, so a
+        // prompt-injection can steer it into emitting a blocklisted token as a
+        // tag — and tags are the one field this path writes that did not
+        // already go through `containsBlockedKeyword` at submit (the text
+        // fields do; the edit path re-runs it over tags at pet-edit.ts). Tags
+        // are rendered on the pet page, indexed for search, and scanned by
+        // neither the submit-time check nor `takedown-by-keyword`, so a word
+        // that lands here has no other net.
+        !containsBlockedKeyword(t) &&
         ![
           // Generic / redundant — every pet is one of these.
           "pet",

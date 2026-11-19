@@ -6,11 +6,14 @@ import { asc, eq } from "drizzle-orm";
 import { getTranslations } from "next-intl/server";
 
 import { db, schema } from "@/lib/db/client";
+import { withLocale } from "@/lib/locale-routing";
 
 import { FullAuthProviders } from "@/components/auth/auth-providers";
 import { FeedbackThread } from "@/components/feedback/feedback-thread";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
+
+import { hasLocale } from "@/i18n/config";
 
 export const dynamic = "force-dynamic";
 
@@ -39,10 +42,10 @@ export default async function MyFeedbackThreadPage({
   params: Promise<Params>;
 }) {
   const t = await getTranslations("myFeedbackThread");
+  const { id, locale } = await params;
   const { userId } = await auth();
-  if (!userId) redirect("/");
+  if (!userId) redirect(withLocale("/", hasLocale(locale) ? locale : "en"));
 
-  const { id } = await params;
   const row = await db.query.feedback.findFirst({
     where: eq(schema.feedback.id, id),
   });
@@ -63,7 +66,7 @@ export default async function MyFeedbackThreadPage({
   return (
     <FullAuthProviders>
       <SiteHeader />
-      <main className="min-h-dvh pb-20">
+      <main id="main" className="min-h-dvh pb-20">
         <section className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-5 pt-10 pb-12 md:px-8 md:pt-14">
           <Link
             href="/my-feedback"

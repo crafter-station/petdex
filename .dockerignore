@@ -1,0 +1,31 @@
+# Keep the build context small. `node_modules` alone is ~928M and `.next`
+# ~445M, and the builder installs its own dependencies from the lockfile —
+# copying either in would upload a gigabyte per build for nothing.
+node_modules
+.next
+.git
+.gitignore
+
+# The two packages under `packages/` are independent, have their own
+# lockfiles, and are not part of the app image.
+packages
+
+# Local env files. The image gets its configuration from the compose file's
+# `environment:` block. `.env*` is a catch-all rather than a list of names:
+# `next build` runs in production mode and `@next/env` auto-loads `.env`,
+# `.env.production`, and `.env.development` (plus their `.local` variants), so a
+# maintainer's real `.env.production` — gitignored, and therefore invisible to
+# `git status` — would otherwise ride `COPY . .` into the `source` stage and be
+# loaded, inlining any `NEXT_PUBLIC_*` it carries. `.env.example` is committed
+# documentation and stays.
+.env*
+!.env.example
+
+# Build and editor noise.
+npm-debug.log*
+yarn-error.log*
+.DS_Store
+*.swp
+.vscode
+.idea
+coverage

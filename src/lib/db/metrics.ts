@@ -150,12 +150,15 @@ const getMetricsIndexRows = cache(async (): Promise<MetricsIndexRow[]> => {
       ttlSeconds: METRICS_INDEX_TTL_SECONDS,
     },
     async () => {
-      let rows: Array<typeof schema.petMetrics.$inferSelect>;
-      try {
-        rows = await db.select().from(schema.petMetrics);
-      } catch {
-        return [];
-      }
+      // A failed read must not become a *cached* empty index. `cachedAggregate`
+      // writes any non-null result, and it caches `[]` as readily as real rows
+      // (measured: an empty array round-trips through Upstash and the next call
+      // is a hit), so returning `[]` here pinned "every pet has zero metrics"
+      // for the full TTL after a single transient DB error — a gallery or
+      // profile page then showed zeros for every pet until it expired. Let the
+      // error propagate instead: `cachedAggregate` skips the write on a throw,
+      // and the caller reads live on the next request.
+      const rows = await db.select().from(schema.petMetrics);
       return rows.map((row) => ({
         petSlug: row.petSlug,
         installCount: row.installCount,

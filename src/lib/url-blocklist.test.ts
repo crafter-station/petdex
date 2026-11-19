@@ -191,3 +191,96 @@ describe("containsUrl — email addresses", () => {
     expect(URL_BLOCKED_REASON.toLowerCase()).toContain("email");
   });
 });
+
+// An invisible character inside a token defeats a literal pattern, and the URL
+// detector's patterns are literal (`https?://`, `\bwww\.`, a bare domain). The
+// normalize step now scrubs them first. Measured before the fix: a ZWSP in
+// "https\u200b://evil.example" and a VS16 in "sponsor\ufe0f.xyz" both returned
+// null, while every plain spelling matched.
+describe("containsUrl — invisible-character evasion", () => {
+  it("still flags an explicit protocol with an invisible char inside it", () => {
+    expect(
+      containsUrl(["description", "https\u200b://evil.example"])?.pattern,
+    ).toBe("protocol_prefix");
+  });
+
+  it("still flags a bare domain with a variation selector inside it", () => {
+    expect(containsUrl(["description", "sponsor\ufe0f.xyz"])?.pattern).toBe(
+      "bare_domain",
+    );
+  });
+
+  it("does not turn benign text into a hit", () => {
+    // The scrub must not create matches: this has no URL at all.
+    expect(containsUrl(["description", "a cozy\u200b round cat"])).toBeNull();
+  });
+});
+
+describe("containsUrl — whitespace-torn and word-dot obfuscation", () => {
+  // The bare_domain regex requires the TLD to sit against the dot, so
+  // "evil. com" sailed through; dot_obfuscation only knew the parenthesized
+  // and doubled-dot spellings. These pin the forms the expanded patterns
+  // now catch.
+  it("blocks a domain torn across whitespace before the TLD", () => {
+    for (const text of ["evil. com", "evil . com", "evil. net", "node . com"]) {
+      const hit = containsUrl(["description", text]);
+      expect(hit).not.toBeNull();
+    }
+  });
+
+  it("blocks the word-dot form with surrounding whitespace", () => {
+    for (const text of [
+      "evil dot com",
+      "evil(dot) com",
+      "evil (dot)com",
+      "evil ( dot ) com",
+      "evil[ dot ]com",
+      "spamsite dot net",
+    ]) {
+      const hit = containsUrl(["description", text]);
+      expect(hit).not.toBeNull();
+    }
+  });
+
+  it("keeps prose uses of the phrase dot com clean", () => {
+    // The word "dot" is prose when it follows an everyday English word —
+    // gating only the delimiter-free form, because "(dot)"/"[dot]" is
+    // already deliberate obfuscation.
+    expect(
+      containsUrl(["description", "read the dot com intro chapter"]),
+    ).toBeNull();
+    expect(containsUrl(["description", "the dot com bubble era"])).toBeNull();
+  });
+
+  it("keeps the delimited forms obfuscation even after prose words", () => {
+    expect(
+      containsUrl(["description", "read the (dot) com thing"]),
+    ).not.toBeNull();
+  });
+});
+
+describe("containsUrl — spaced_tld sentence-boundary guard", () => {
+  // A sentence boundary ("yes. me too") has the same shape as a torn domain:
+  // word, period, space, TLD word. The prose gate keys on the sentence's
+  // last word; these pin the ordinary sentences measured as false positives
+  // before the gate existed.
+  it("keeps ordinary sentences that end before a TLD word", () => {
+    for (const text of [
+      "yes. me too",
+      "wait. io games are fun",
+      "he said no. app developers know",
+      "do. co ops fail",
+      "no. app here",
+      "number one. xyz site",
+      "i was. com pletely wrong",
+    ]) {
+      expect(containsUrl(["description", text])).toBeNull();
+    }
+  });
+
+  it("still catches a torn domain whose left half is a hostname", () => {
+    for (const text of ["evil. com", "spam. net", "site. info", "evil. me"]) {
+      expect(containsUrl(["description", text])).not.toBeNull();
+    }
+  });
+});

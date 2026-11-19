@@ -2,8 +2,10 @@ import { describe, expect, it } from "bun:test";
 
 import {
   buildPendingAssetKey,
+  isGcCandidateAssetKey,
   isPendingAssetKey,
   isPendingAssetUrl,
+  isSubmissionAssetKey,
 } from "@/lib/pending-asset";
 
 const SLUG = "sample-pet";
@@ -53,5 +55,43 @@ describe("pending asset keys", () => {
         "sprite",
       ),
     ).toBe(false);
+  });
+});
+
+describe("submission upload keys", () => {
+  it("matches the submit presign shape for every role", () => {
+    expect(isSubmissionAssetKey(`pets/boba-${UPLOAD_ID}/sprite.webp`)).toBe(
+      true,
+    );
+    expect(isSubmissionAssetKey(`pets/boba-${UPLOAD_ID}/sprite.png`)).toBe(
+      true,
+    );
+    expect(isSubmissionAssetKey(`pets/boba-${UPLOAD_ID}/petjson.json`)).toBe(
+      true,
+    );
+    expect(isSubmissionAssetKey(`pets/boba-${UPLOAD_ID}/zip.zip`)).toBe(true);
+  });
+
+  it("does not match live artifact keys or non-upload shapes", () => {
+    // `pets/<slug>/thumb.webp` is a live artifact, not an upload slot.
+    expect(isSubmissionAssetKey("pets/boba/thumb.webp")).toBe(false);
+    expect(isSubmissionAssetKey("pets/boba/preview.webp")).toBe(false);
+    expect(isSubmissionAssetKey(`pets/boba-${UPLOAD_ID}/notes.txt`)).toBe(
+      false,
+    );
+    expect(isSubmissionAssetKey(`curated/boba-${UPLOAD_ID}/zip.zip`)).toBe(
+      false,
+    );
+    // Upload id must be 12 hex chars.
+    expect(isSubmissionAssetKey("pets/boba-xyz/zip.zip")).toBe(false);
+  });
+
+  it("treats both GC shapes as candidates, and only those", () => {
+    expect(isGcCandidateAssetKey(`pets/boba-${UPLOAD_ID}/zip.zip`)).toBe(true);
+    expect(
+      isGcCandidateAssetKey(`pets/boba-pending-${UPLOAD_ID}/zip.zip`),
+    ).toBe(true);
+    expect(isGcCandidateAssetKey("pets/boba/thumb.webp")).toBe(false);
+    expect(isGcCandidateAssetKey("requests/user-1/img.webp")).toBe(false);
   });
 });

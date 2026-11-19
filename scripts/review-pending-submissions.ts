@@ -102,6 +102,13 @@ async function main() {
     for (const error of errors) {
       console.log(`- ${error.slug}: ${error.reason}`);
     }
+    // Each row here is decision-mutating (`reviewSubmission` can approve or
+    // reject through `applySubmissionAction`), so a partially-failed run left
+    // that many submissions unreviewed. A bare exit 0 hides it from any wrapper
+    // or operator reading the exit code, which is the same convention
+    // `takedown-by-keyword` and the backfill scripts follow.
+    console.error(`\nDone with ${errors.length} error(s).`);
+    process.exit(1);
   }
 }
 

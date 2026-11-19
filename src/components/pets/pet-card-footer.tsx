@@ -3,7 +3,7 @@
 import { memo, useCallback, useEffect, useState } from "react";
 
 import { Download, Heart, Share2, TerminalSquare } from "lucide-react";
-import { useLocale } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 
 import { downloadPetZip } from "@/lib/download-pet-zip";
 import { formatLocalizedNumber } from "@/lib/format-number";
@@ -32,9 +32,11 @@ function PetCardFooterImpl({
   soundUrl,
   installCount,
   likeCount,
+  initialLiked,
 }: PetCardFooterProps) {
   const { authActive, requestAuth } = useAuthIntent();
   const locale = useLocale();
+  const t = useTranslations("gallery");
   const [copied, setCopied] = useState(false);
   const [AuthPetCardFooter, setAuthPetCardFooter] =
     useState<PetCardFooterComponent | null>(null);
@@ -44,9 +46,14 @@ function PetCardFooterImpl({
   useEffect(() => {
     if (!authActive || AuthPetCardFooter) return;
     let cancelled = false;
-    void import("@/components/pets/pet-card-footer-auth").then((mod) => {
-      if (!cancelled) setAuthPetCardFooter(() => mod.PetCardFooter);
-    });
+    void import("@/components/pets/pet-card-footer-auth")
+      .then((mod) => {
+        if (!cancelled) setAuthPetCardFooter(() => mod.PetCardFooter);
+      })
+      .catch(() => {
+        // Chunk load failed — keep the anonymous footer instead of letting
+        // the rejection escape the effect.
+      });
     return () => {
       cancelled = true;
     };
@@ -112,6 +119,7 @@ function PetCardFooterImpl({
         soundUrl={soundUrl}
         installCount={installCount}
         likeCount={likeCount}
+        initialLiked={initialLiked}
       />
     );
   }
@@ -122,8 +130,8 @@ function PetCardFooterImpl({
         <Button
           variant="ghost"
           onClick={requestLikeAuth}
-          aria-label={`Like ${displayName}`}
-          title={`Like ${displayName}`}
+          aria-label={t("likePet", { name: displayName })}
+          title={t("likePet", { name: displayName })}
           className="h-8 gap-1 rounded-full px-2 text-stone-500 hover:bg-surface-muted hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-100"
         >
           <Heart className="size-3.5" />
@@ -137,8 +145,8 @@ function PetCardFooterImpl({
         <Button
           variant="ghost"
           onClick={copyInstall}
-          aria-label={`Copy install for ${displayName}`}
-          title={`Copy install for ${displayName}`}
+          aria-label={t("copyInstallFor", { name: displayName })}
+          title={t("copyInstallFor", { name: displayName })}
           className={cn(
             "h-8 gap-1 rounded-full px-2",
             copied
@@ -158,8 +166,8 @@ function PetCardFooterImpl({
           <Button
             variant="ghost"
             onClick={download}
-            aria-label={`Download ${displayName}`}
-            title={`Download ${displayName}`}
+            aria-label={t("downloadPet", { name: displayName })}
+            title={t("downloadPet", { name: displayName })}
             className="h-8 gap-1 rounded-full px-2 text-stone-500 hover:bg-surface-muted hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-100"
           >
             <Download className="size-3.5" />
@@ -173,8 +181,8 @@ function PetCardFooterImpl({
         <Button
           variant="ghost"
           onClick={share}
-          aria-label={`Share ${displayName}`}
-          title={`Share ${displayName}`}
+          aria-label={t("sharePet", { name: displayName })}
+          title={t("sharePet", { name: displayName })}
           className="h-8 gap-1 rounded-full px-2 text-stone-500 hover:bg-surface-muted hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-100"
         >
           <Share2 className="size-3.5" />

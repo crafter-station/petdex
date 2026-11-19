@@ -106,7 +106,11 @@ export function TopPromoStripClient({ items, intervalMs = 4000 }: Props) {
     );
   }
 
-  const current = items[index];
+  // The interval only advances modulo a *fresh* items.length, but between
+  // renders the index is whatever the last tick left behind — so a shorter
+  // list from a router.refresh() (an unapproved pet leaves the strip) must
+  // be re-wrapped here or items[index] reads past the array and throws.
+  const current = items[index % items.length];
   const copy = COPY[current.freshness];
   const href = withLocale(`/pets/${current.slug}`, "zh");
 

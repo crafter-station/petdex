@@ -110,7 +110,9 @@
   --text-muted-1: oklch(0.88 0.01 277); /* near-white body */
   --text-muted-2: oklch(0.76 0.012 280); /* secondary */
   --text-muted-3: oklch(0.64 0.015 274); /* dim */
-  --text-muted-4: oklch(0.56 0.014 277.5); /* very dim — nav inactive */
+  /* 0.56 measured 3.76:1 on --surface, under AA's 4.5 for normal text; 0.62
+     measures 4.80 and keeps the step below muted-3. */
+  --text-muted-4: oklch(0.62 0.014 277.5); /* very dim — nav inactive */
 
   /* Surface tokens flip to near-black variants. --surface is the base
      card bg, --surface-elev is the slightly lighter elevated panel,

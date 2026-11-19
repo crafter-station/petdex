@@ -44,11 +44,41 @@ export const AGGREGATE_KEYS = {
   approvedCatalog: "petdex:agg:approved-catalog:v2",
   slimManifest: "petdex:agg:slim-manifest:v2",
   metricsIndex: "petdex:agg:metrics-index:v1",
+  leaderboard: "petdex:agg:leaderboard:v1",
   featuredPets: "petdex:agg:featured-pets:v2",
   dexNumbers: "petdex:agg:dex-numbers:v2",
   randomPetPool: "petdex:agg:random-pet-pool:v2",
   latestApprovedPets: "petdex:agg:latest-approved-pets:v2",
 } as const;
+
+/**
+ * Every leaderboard variant's cache key, so a write that changes what the
+ * leaderboard ranks can invalidate all of them.
+ *
+ * `getRankRows` caches under `${AGGREGATE_KEYS.leaderboard}:${metric}`, so a
+ * bare `AGGREGATE_KEYS.leaderboard` DEL clears nothing — each suffix has to be
+ * named. Kept here rather than in `@/lib/leaderboard` so the approve/reject
+ * path (and this constant's test) can import it without pulling in
+ * `@/lib/db/client`, which needs a `DATABASE_URL` at module load.
+ */
+export const LEADERBOARD_METRICS = [
+  "pets",
+  "likes",
+  "installs",
+  "rising",
+  "collectors",
+] as const;
+
+export type LeaderboardMetric = (typeof LEADERBOARD_METRICS)[number];
+
+export const LEADERBOARD_CACHE_KEYS: readonly string[] =
+  LEADERBOARD_METRICS.map(
+    (metric) => `${AGGREGATE_KEYS.leaderboard}:${metric}`,
+  );
+
+export function leaderboardCacheKey(metric: LeaderboardMetric): string {
+  return `${AGGREGATE_KEYS.leaderboard}:${metric}`;
+}
 
 export function petCacheKey(slug: string): string {
   return `petdex:pet:${slug}:v2`;
@@ -128,6 +158,10 @@ export async function revalidateCollectionTags(
       revalidateTag(`collection:${slug}`, "max");
     }
     revalidateTag("collection:list", "max");
+    // The sticker sitemap reads under this tag too (getStickerSitemapEntries);
+    // without it a taken-down publication stayed advertised in sitemap.xml for
+    // its 24h revalidate window after the page itself already answered 404.
+    revalidateTag("sticker:collections", "max");
   } catch {
     /* next/cache unavailable in some runtime contexts (tests, scripts) */
   }

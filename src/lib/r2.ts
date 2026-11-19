@@ -1,6 +1,7 @@
 import {
   DeleteObjectsCommand,
   type DeleteObjectsCommandOutput,
+  HeadObjectCommand,
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
@@ -75,6 +76,63 @@ export async function presignPut(
 // URLs) returns null so callers can skip cleanly.
 export function keyFromR2Url(url: string | null | undefined): string | null {
   return keyFromR2PublicUrl(url);
+}
+
+export type R2ObjectSizeCheck =
+  | { ok: true; bytes: number | null; missing: boolean }
+  | { ok: false; bytes: number; maxBytes: number; missing: false };
+
+/**
+ * Confirm an already-uploaded object is within `maxBytes` before its URL is
+ * written into a row.
+ *
+ * A presigned PUT pins the key and content-type but NOT the body size, so the
+ * `size` a caller declares at presign time is unbound: a submission can
+ * declare a small file and PUT a larger one. The bucket is public, so an
+ * oversized object is a permanent liability — every later fetch (and the
+ * OG/sticker renderers, which pull it into sharp) pays for it. This HEAD
+ * reads the size that actually landed.
+ *
+ * `bytes: null` means R2 returned no ContentLength; the caller lets it
+ * through, because every object R2 stores carries a length and refusing on a
+ * stripped header would reject an upload the presign already bounded. A
+ * missing object (NotFound) is also not oversized, so it answers ok — but
+ * it sets `missing`, so a caller whose contract needs the object to exist
+ * (a reference image a request row will point at) can refuse it without
+ * re-running the HEAD.
+ */
+export async function checkR2ObjectSize(
+  key: string,
+  maxBytes: number,
+): Promise<R2ObjectSizeCheck> {
+  let contentLength: number | null = null;
+  try {
+    const head = await r2.send(
+      new HeadObjectCommand({ Bucket: BUCKET, Key: key }),
+    );
+    contentLength =
+      typeof head.ContentLength === "number" ? head.ContentLength : null;
+  } catch (error) {
+    if (isR2MissingObjectError(error)) {
+      return { ok: true, bytes: null, missing: true };
+    }
+    throw error;
+  }
+  if (contentLength !== null && contentLength > maxBytes) {
+    return { ok: false, bytes: contentLength, maxBytes, missing: false };
+  }
+  return { ok: true, bytes: contentLength, missing: false };
+}
+
+function isR2MissingObjectError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const name = "name" in error ? (error as { name?: unknown }).name : null;
+  const httpStatus =
+    "$metadata" in error
+      ? (error as { $metadata?: { httpStatusCode?: number } }).$metadata
+          ?.httpStatusCode
+      : null;
+  return name === "NotFound" || httpStatus === 404;
 }
 
 export type R2DeleteFailure = {

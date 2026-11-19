@@ -5,14 +5,16 @@
 // cat. Updates description + replaces "shrimp" tag with "cat".
 //
 // Usage:
-//   bun scripts/fix-shrimpy-issue-81.ts --dry   # preview
-//   bun scripts/fix-shrimpy-issue-81.ts          # apply
+//   bun scripts/fix-shrimpy-issue-81.ts           # preview (no writes)
+//   bun scripts/fix-shrimpy-issue-81.ts --apply   # write
+// Same dry-by-default gate as every other write script here; this one
+// originally defaulted to applying, the only inversion in the directory.
 
 import { eq } from "drizzle-orm";
 
 import { db, schema } from "../src/lib/db/client";
 
-const DRY = process.argv.includes("--dry");
+const APPLY = process.argv.includes("--apply");
 
 const SLUG = "shrimpy";
 
@@ -49,8 +51,8 @@ async function main() {
   console.log("  tags:", newTags);
   console.log("");
 
-  if (DRY) {
-    console.log("(--dry) no changes written");
+  if (!APPLY) {
+    console.log("(dry run) no changes written; pass --apply to write");
     return;
   }
 

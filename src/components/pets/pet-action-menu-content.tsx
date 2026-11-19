@@ -49,6 +49,32 @@ export type PetActionMenuContentProps = {
   ownerActions?: PetActionMenuOwnerActions;
 };
 
+// The routes answer with these codes; the menu used to print whatever
+// `message` or `error` came back, which is English prose or an internal code.
+/**
+ * Maps a route's error code to a message, falling back to one that carries the
+ * code so an unmapped failure is still legible and still diagnosable.
+ */
+function actionErrorMessage(
+  te: ReturnType<typeof useTranslations<"petActions.errors">>,
+  code: string | undefined,
+  status: number,
+) {
+  return code && ACTION_ERROR_KEYS[code]
+    ? te(ACTION_ERROR_KEYS[code])
+    : te("failed", { code: code ?? `http_${status}` });
+}
+
+const ACTION_ERROR_KEYS: Record<string, string> = {
+  unauthorized: "unauthorized",
+  rate_limited: "rateLimited",
+  not_found: "notFound",
+  forbidden: "forbidden",
+  claim_required: "claimRequired",
+  invalid_slug: "invalidSlug",
+  only_pending_can_be_withdrawn: "onlyPending",
+};
+
 export function PetActionMenuContent({
   onOpenChange,
   open,
@@ -56,6 +82,7 @@ export function PetActionMenuContent({
   ownerActions,
 }: PetActionMenuContentProps) {
   const t = useTranslations("petActions");
+  const te = useTranslations("petActions.errors");
   const router = useRouter();
   const [copied, setCopied] = useState<"install" | "link" | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -155,11 +182,11 @@ export function PetActionMenuContent({
     // clicks wiping a pet you actually still want. Same pattern the
     // admin takedown uses.
     const typed = window.prompt(
-      `Type "${pet.slug}" to confirm. This permanently removes ${pet.displayName} from Petdex and frees the slug. The pet's files and like history are deleted.`,
+      t("deleteConfirm", { slug: pet.slug, pet: pet.displayName }),
     );
     if (typed === null) return;
     if (typed.trim() !== pet.slug) {
-      window.alert("Slug did not match. Pet was NOT removed.");
+      window.alert(t("deleteMismatch"));
       return;
     }
     setDeleting(true);
@@ -175,27 +202,21 @@ export function PetActionMenuContent({
           error?: string;
           message?: string;
         };
-        setDeleteError(
-          data.message ?? data.error ?? `Request failed (${res.status})`,
-        );
+        setDeleteError(actionErrorMessage(te, data.error, res.status));
         setDeleting(false);
         return;
       }
       onOpenChange(false);
       router.refresh();
     } catch {
-      setDeleteError("network_error");
+      setDeleteError(te("network"));
       setDeleting(false);
     }
-  }, [deleting, pet.slug, pet.displayName, router, onOpenChange]);
+  }, [deleting, pet.slug, pet.displayName, router, onOpenChange, t, te]);
 
   const onWithdraw = useCallback(async () => {
     if (withdrawing || !ownerActions) return;
-    if (
-      !window.confirm(
-        `Withdraw "${pet.displayName}"? Pending submissions can't be brought back. You'd have to resubmit.`,
-      )
-    ) {
+    if (!window.confirm(t("withdrawConfirm", { pet: pet.displayName }))) {
       return;
     }
     setWithdrawing(true);
@@ -210,19 +231,17 @@ export function PetActionMenuContent({
           error?: string;
           message?: string;
         };
-        setWithdrawError(
-          data.message ?? data.error ?? `Request failed (${res.status})`,
-        );
+        setWithdrawError(actionErrorMessage(te, data.error, res.status));
         setWithdrawing(false);
         return;
       }
       onOpenChange(false);
       router.refresh();
     } catch {
-      setWithdrawError("network_error");
+      setWithdrawError(te("network"));
       setWithdrawing(false);
     }
-  }, [withdrawing, ownerActions, pet.displayName, router, onOpenChange]);
+  }, [withdrawing, ownerActions, pet.displayName, router, onOpenChange, t, te]);
 
   return (
     <>

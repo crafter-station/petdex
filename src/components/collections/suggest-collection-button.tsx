@@ -12,6 +12,19 @@ import { useTranslations } from "next-intl";
 
 type Collection = { slug: string; title: string };
 
+// The route answers with these codes; the panel used to render the raw one.
+const SUGGEST_ERROR_KEYS: Record<string, string> = {
+  unauthorized: "unauthorized",
+  rate_limited: "rateLimited",
+  invalid_pet_slug: "invalidPetSlug",
+  url_in_field: "urlInField",
+  blocked_content: "blockedContent",
+  collection_not_found: "collectionNotFound",
+  pet_not_owned: "petNotOwned",
+  pet_not_approved: "petNotApproved",
+  already_in_collection: "alreadyInCollection",
+};
+
 type SuggestCollectionButtonProps = {
   petSlug: string;
   petDisplayName: string;
@@ -52,11 +65,15 @@ export function SuggestCollectionButton({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ petSlug, note: note || undefined }),
         });
-        if (!res.ok && res.status !== 409) {
+        // A 409 here means already_in_collection (the route answers the
+        // idempotent already-pending case with a 200). The old condition
+        // treated every 409 as success, so a pet already in the collection
+        // got marked "pending" instead of surfacing the real reason.
+        if (!res.ok) {
           const body = (await res.json().catch(() => ({}))) as {
             error?: string;
           };
-          throw new Error(body.error ?? `submit failed (${res.status})`);
+          throw new Error(body.error ?? `http_${res.status}`);
         }
         setSubmitted((prev) => new Set(prev).add(collectionSlug));
         setTarget(null);
@@ -82,7 +99,7 @@ export function SuggestCollectionButton({
         <div className="flex flex-col gap-3 rounded-2xl border border-border-base bg-surface/80 p-4">
           <div className="flex items-center justify-between gap-2">
             <p className="font-mono text-[11px] tracking-[0.18em] text-muted-3 uppercase">
-              Suggest {petDisplayName} for…
+              {t("heading", { name: petDisplayName })}
             </p>
             <button
               type="button"
@@ -107,6 +124,7 @@ export function SuggestCollectionButton({
                   key={c.slug}
                   type="button"
                   disabled={requested}
+                  aria-pressed={isTarget}
                   onClick={() => setTarget(isTarget ? null : c.slug)}
                   className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
                     requested
@@ -117,25 +135,33 @@ export function SuggestCollectionButton({
                   } disabled:cursor-not-allowed`}
                 >
                   {c.title}
-                  {requested ? " · pending" : ""}
+                  {requested ? t("pendingSuffix") : ""}
                 </button>
               );
             })}
           </div>
 
           {target ? (
+            // aria-label because the placeholder is the field's only name
+            // otherwise, and it disappears on the first keystroke.
             <textarea
               value={note}
               onChange={(e) => setNote(e.target.value.slice(0, 500))}
               placeholder={t("notePlaceholder")}
+              aria-label={t("notePlaceholder")}
               rows={2}
               className="w-full rounded-2xl border border-border-base bg-surface p-3 text-sm text-foreground placeholder:text-muted-3 focus:border-border-strong focus:outline-none"
             />
           ) : null}
 
           {error ? (
-            <p className="rounded-2xl border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
-              {error}
+            <p
+              role="alert"
+              className="rounded-2xl border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300"
+            >
+              {SUGGEST_ERROR_KEYS[error]
+                ? t(`errors.${SUGGEST_ERROR_KEYS[error]}`)
+                : t("errors.failed", { code: error })}
             </p>
           ) : null}
 
@@ -146,14 +172,11 @@ export function SuggestCollectionButton({
               disabled={!target || isSaving}
               className="inline-flex h-9 items-center justify-center rounded-full bg-inverse px-4 text-xs font-medium text-on-inverse transition hover:bg-inverse-hover disabled:opacity-50"
             >
-              {isSaving ? "Sending…" : "Send for review"}
+              {isSaving ? t("sending") : t("sendForReview")}
             </button>
           </div>
 
-          <p className="text-[11px] text-muted-3">
-            Admins review every request. You'll see your pet in the collection
-            once it's approved.
-          </p>
+          <p className="text-[11px] text-muted-3">{t("footer")}</p>
         </div>
       )}
     </div>

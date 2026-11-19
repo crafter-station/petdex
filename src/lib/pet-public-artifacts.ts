@@ -28,8 +28,10 @@ import {
   petThumbnailKey,
 } from "@/lib/pet-thumbnail";
 import { R2_BUCKET, r2 } from "@/lib/r2";
-import { keyFromR2PublicUrl } from "@/lib/r2-public-url";
+import { keyFromR2PublicUrl, toCurrentR2PublicUrl } from "@/lib/r2-public-url";
+import { isDecodableSpriteSize } from "@/lib/sprite-atlas";
 import { renderSticker } from "@/lib/sticker-renderer";
+import { PET_ASSET_MAX_BYTES } from "@/lib/upload-limits";
 import { isAllowedAssetUrl } from "@/lib/url-allowlist";
 
 export type PetPublicArtifactResult = {
@@ -43,8 +45,15 @@ export async function publishPetPublicArtifacts(input: {
   slug: string;
   spritesheetUrl: string;
 }): Promise<PetPublicArtifactResult> {
-  const sourceKey = keyFromR2PublicUrl(input.spritesheetUrl);
-  if (!sourceKey || !isAllowedAssetUrl(input.spritesheetUrl)) {
+  // Rewrite before validating, the way `install-script.ts` does. A pet whose
+  // spritesheet is stored under a legacy public host is readable — the key
+  // resolves and the object still exists — but the stored URL is deliberately
+  // absent from the asset allowlist, so checking it as stored answered
+  // `unsupported_source` and the pet got no thumbnail, preview, or sticker.
+  // The value that is validated has to be the value that gets fetched.
+  const spritesheetUrl = toCurrentR2PublicUrl(input.spritesheetUrl);
+  const sourceKey = keyFromR2PublicUrl(spritesheetUrl);
+  if (!sourceKey || !isAllowedAssetUrl(spritesheetUrl)) {
     return {
       ok: false,
       published: [],
@@ -64,18 +73,59 @@ export async function publishPetPublicArtifacts(input: {
     { key: petPreviewKey(input.slug), kind: "preview" as const },
     { key: petStickerKey(input.slug), kind: "sticker" as const },
   ];
+
+  // Fetch the source first: whether an existing artifact can be skipped
+  // depends on WHICH spritesheet it was rendered from, not just that it
+  // exists. Approving new art under an unchanged slug used to leave the old
+  // preview/thumb/sticker live forever (#590) because existence was the only
+  // check — republish planned by `planPublicArtifacts` then no-opped here.
+  const source = await getR2ObjectBuffer(sourceKey);
+  // The decode ceiling the audit pipeline shares with color-extract and the
+  // dHash: an 8MB-capped object can still declare 16000x16000 (256MP), which
+  // sharp's default ~268MP limit accepts and decodes to ~200MB of RGBA
+  // (measured). `sharp(source)` below never checks dimensions on its own, so
+  // gate the bytes once here, before any renderer in this file or
+  // sticker-renderer.ts sees them. Every later decode in the pipeline is
+  // bounded by this single check.
+  try {
+    const metadata = await sharp(source).metadata();
+    if (!isDecodableSpriteSize(metadata.width, metadata.height)) {
+      return {
+        ok: false,
+        published: [],
+        skipped: [],
+        failed: [
+          {
+            key: input.spritesheetUrl,
+            reason: `spritesheet_dimensions_out_of_range:${metadata.width}x${metadata.height}`,
+          },
+        ],
+      };
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      published: [],
+      skipped: [],
+      failed: [
+        {
+          key: input.spritesheetUrl,
+          reason: `spritesheet_unreadable:${errorReason(error)}`,
+        },
+      ],
+    };
+  }
+  const sourceSha256 = createHash("sha256").update(source).digest("hex");
+
   const pending = [];
   for (const ref of refs) {
-    if (await r2ObjectExists(ref.key)) {
+    if (await r2ObjectMatchesSource(ref.key, sourceSha256)) {
       result.skipped.push(ref.key);
     } else {
       pending.push(ref);
     }
   }
   if (pending.length === 0) return result;
-
-  const source = await getR2ObjectBuffer(sourceKey);
-  const sourceSha256 = createHash("sha256").update(source).digest("hex");
 
   for (const ref of pending) {
     try {
@@ -230,13 +280,35 @@ async function getR2ObjectBuffer(key: string): Promise<Buffer> {
     new GetObjectCommand({ Bucket: R2_BUCKET, Key: key }),
   );
   if (!response.Body) throw new Error("missing body");
+  // The presign-time 8MB cap binds uploads, but objects written by other
+  // paths (rescues, legacy imports) are not bound by it. Enforce it here so
+  // one oversized object cannot decide how much this process buffers.
+  if (
+    typeof response.ContentLength === "number" &&
+    response.ContentLength > PET_ASSET_MAX_BYTES
+  ) {
+    throw new Error(
+      `spritesheet_too_large:${response.ContentLength}>${PET_ASSET_MAX_BYTES}`,
+    );
+  }
   return Buffer.from(await response.Body.transformToByteArray());
 }
 
-async function r2ObjectExists(key: string): Promise<boolean> {
+/**
+ * Whether an existing artifact was rendered from the current spritesheet.
+ * The `petdex-source-sha256` metadata is stamped on every publish below; a
+ * HEAD tells us if the object exists AND still matches, so approving new art
+ * under an unchanged slug republishes instead of leaving stale bytes live.
+ */
+async function r2ObjectMatchesSource(
+  key: string,
+  sourceSha256: string,
+): Promise<boolean> {
   try {
-    await r2.send(new HeadObjectCommand({ Bucket: R2_BUCKET, Key: key }));
-    return true;
+    const head = await r2.send(
+      new HeadObjectCommand({ Bucket: R2_BUCKET, Key: key }),
+    );
+    return head.Metadata?.["petdex-source-sha256"] === sourceSha256;
   } catch (error) {
     if (isMissingObjectError(error)) return false;
     throw error;

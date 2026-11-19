@@ -67,6 +67,10 @@ export function rememberSessionTitle(
     writeFileSync(
       join(dir, `${sessionId}.json`),
       JSON.stringify({ title, at: Date.now() }),
+      // 0600 like the rest of ~/.petdex/runtime: the title is the first
+      // line of the user's prompt and can carry secrets or paths, so it
+      // must not be world-readable under the default umask.
+      { mode: 0o600 },
     );
   } catch {
     // Hot path: a failed title write must never stain the agent.

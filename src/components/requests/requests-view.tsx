@@ -21,7 +21,7 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 
 import { useAuthIntent } from "@/components/auth/auth-intent";
 import { ClaimRequestButton } from "@/components/auth/claim-request-button";
@@ -56,6 +56,23 @@ export type RequestRow = {
 const MIN_LEN = 4;
 const MAX_LEN = 200;
 const COLLECTION_PREFIX = "Collection:";
+
+// Server error code → localized message key. The route answers with an English
+// `message` for several rejections ("Use 4-200 characters."), and the client
+// used to render it verbatim, so a zh/es user read an English sentence. Map the
+// code instead and fall back to a generic line — the convention every other
+// error surface in this repo follows.
+const REQUEST_ERROR_KEYS: Record<string, string> = {
+  rate_limited: "rateLimited",
+  query_length: "queryLength",
+  query_invalid_characters: "queryInvalidCharacters",
+  query_not_searchable: "queryNotSearchable",
+  request_write_failed: "requestWriteFailed",
+  invalid_image_url: "invalidImageUrl",
+  blocked_content: "blockedContent",
+  url_in_field: "urlInField",
+  invalid_json: "invalidJson",
+};
 
 type Sort = "top" | "new" | "fulfilled";
 type RequestKind = "pet" | "collection";
@@ -193,11 +210,15 @@ export function RequestsView({ initial }: { initial: RequestRow[] }) {
   });
 
   async function uploadImage(file: File): Promise<string> {
+    // Localized error markers: fetch itself can also throw (offline, CORS),
+    // and its raw message ("Failed to fetch") must not leak into formError —
+    // the outer catch falls back to the generic retry copy for anything that
+    // does not start with this prefix.
     if (!["image/png", "image/webp", "image/jpeg"].includes(file.type)) {
-      throw new Error(t("errors.imageType"));
+      throw new Error(`localized:${t("errors.imageType")}`);
     }
     if (file.size > 4 * 1024 * 1024) {
-      throw new Error(t("errors.imageTooLarge"));
+      throw new Error(`localized:${t("errors.imageTooLarge")}`);
     }
     const presign = await fetch("/api/pet-requests/image", {
       method: "POST",
@@ -205,7 +226,7 @@ export function RequestsView({ initial }: { initial: RequestRow[] }) {
       body: JSON.stringify({ contentType: file.type, size: file.size }),
     });
     if (!presign.ok) {
-      throw new Error(t("errors.imageUpload"));
+      throw new Error(`localized:${t("errors.imageUpload")}`);
     }
     const data = (await presign.json()) as {
       uploadUrl: string;
@@ -217,7 +238,7 @@ export function RequestsView({ initial }: { initial: RequestRow[] }) {
       body: file,
     });
     if (!upload.ok) {
-      throw new Error(t("errors.imageUpload"));
+      throw new Error(`localized:${t("errors.imageUpload")}`);
     }
     return data.publicUrl;
   }
@@ -250,9 +271,9 @@ export function RequestsView({ initial }: { initial: RequestRow[] }) {
           error?: string;
         };
         setFormError(
-          data.message ??
-            data.error ??
-            t("errors.submitFailed", { status: res.status }),
+          data.error
+            ? t(`errors.${REQUEST_ERROR_KEYS[data.error] ?? "generic"}`)
+            : t("errors.submitFailed", { status: res.status }),
         );
         return;
       }
@@ -280,8 +301,14 @@ export function RequestsView({ initial }: { initial: RequestRow[] }) {
         /* ignore */
       }
     } catch (err) {
+      // Only uploadImage's `localized:`-prefixed throws carry user-facing
+      // copy; every other error here (network, abort) reads like "Failed
+      // to fetch" and falls back to the generic retry text.
+      const message = err instanceof Error ? err.message : null;
       setFormError(
-        err instanceof Error ? err.message : t("errors.networkRetry"),
+        message?.startsWith("localized:")
+          ? message.slice("localized:".length)
+          : t("errors.networkRetry"),
       );
     } finally {
       setSubmitting(false);
@@ -308,9 +335,9 @@ export function RequestsView({ initial }: { initial: RequestRow[] }) {
           error?: string;
         };
         setError(
-          data.message ??
-            data.error ??
-            t("errors.voteFailed", { status: res.status }),
+          data.error
+            ? t(`errors.${REQUEST_ERROR_KEYS[data.error] ?? "generic"}`)
+            : t("errors.voteFailed", { status: res.status }),
         );
         return;
       }
@@ -393,6 +420,11 @@ export function RequestsView({ initial }: { initial: RequestRow[] }) {
                   ? t("form.placeholderCollection")
                   : t("form.placeholderPet")
               }
+              aria-label={
+                requestKind === "collection"
+                  ? t("form.titleCollection")
+                  : t("form.titlePet")
+              }
               maxLength={MAX_LEN}
               className="h-11 w-full rounded-full border border-border-base bg-background px-4 text-sm text-foreground outline-none transition placeholder:text-muted-4 focus:border-brand/60 focus:ring-2 focus:ring-brand/15"
             />
@@ -446,12 +478,18 @@ export function RequestsView({ initial }: { initial: RequestRow[] }) {
           ) : null}
         </div>
         {formError ? (
-          <p className="rounded-xl border border-chip-danger-fg/25 bg-chip-danger-bg px-3 py-2 text-xs font-medium text-chip-danger-fg">
+          <p
+            role="alert"
+            className="rounded-xl border border-chip-danger-fg/25 bg-chip-danger-bg px-3 py-2 text-xs font-medium text-chip-danger-fg"
+          >
             {formError}
           </p>
         ) : null}
         {lastResult ? (
-          <p className="rounded-xl border border-emerald-200 bg-chip-success-bg px-3 py-2 text-xs font-medium text-chip-success-fg dark:border-emerald-800/60">
+          <p
+            role="status"
+            className="rounded-xl border border-emerald-200 bg-chip-success-bg px-3 py-2 text-xs font-medium text-chip-success-fg dark:border-emerald-800/60"
+          >
             <Check className="-mt-0.5 mr-1 inline-block size-3.5" />
             {lastResult.mode === "created"
               ? t("success.created", { query: lastResult.query })
@@ -493,6 +531,7 @@ export function RequestsView({ initial }: { initial: RequestRow[] }) {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder={t("sort.searchPlaceholder")}
+              aria-label={t("sort.searchPlaceholder")}
               className="h-9 w-full rounded-full border border-border-base bg-surface pr-3 pl-8 text-xs text-foreground outline-none placeholder:text-muted-4 focus:border-brand/60"
             />
           </label>
@@ -501,7 +540,10 @@ export function RequestsView({ initial }: { initial: RequestRow[] }) {
 
       {/* List */}
       {error ? (
-        <p className="rounded-xl border border-chip-danger-fg/25 bg-chip-danger-bg px-3 py-2 text-xs font-medium text-chip-danger-fg">
+        <p
+          role="alert"
+          className="rounded-xl border border-chip-danger-fg/25 bg-chip-danger-bg px-3 py-2 text-xs font-medium text-chip-danger-fg"
+        >
           {error}
         </p>
       ) : null}
@@ -547,6 +589,7 @@ function SortTab({
     <button
       type="button"
       onClick={onClick}
+      aria-pressed={active}
       className={`inline-flex h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-medium backdrop-blur transition ${
         active
           ? "border-brand/40 bg-brand/15 text-brand"
@@ -581,6 +624,7 @@ function RequestKindButton({
     <button
       type="button"
       onClick={onClick}
+      aria-pressed={active}
       className={`rounded-2xl border px-3 py-2 text-left transition ${
         active
           ? "border-brand/40 bg-brand/10 text-foreground"
@@ -616,6 +660,7 @@ function RequestCard({
   t: ReturnType<typeof useTranslations>;
   itemRef: (node: HTMLLIElement | null) => void;
 }) {
+  const locale = useLocale();
   const fulfilled = request.status === "fulfilled";
   const top3 = request.voters.slice(0, 3);
   const moreVoters = Math.max(0, request.upvoteCount - top3.length);
@@ -686,7 +731,7 @@ function RequestCard({
               </span>
             ) : null}
             <span className="ml-auto font-mono text-[10px] tracking-[0.12em] text-muted-4 uppercase">
-              {new Date(request.createdAt).toLocaleDateString(undefined, {
+              {new Date(request.createdAt).toLocaleDateString(locale, {
                 month: "short",
                 day: "numeric",
               })}

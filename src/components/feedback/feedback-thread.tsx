@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 
 import { Bell, BellOff, Loader2, Send } from "lucide-react";
+import { useLocale, useTranslations } from "next-intl";
 
 import { useHeaderState } from "@/components/layout/header-state-provider";
 
@@ -20,13 +21,6 @@ type Feedback = {
   message: string;
   createdAt: string;
   notifyEmail: boolean;
-};
-
-const KIND_LABEL: Record<string, string> = {
-  suggestion: "Suggestion",
-  bug: "Bug",
-  praise: "Praise",
-  other: "Other",
 };
 
 const STATUS_TONE: Record<string, string> = {
@@ -49,10 +43,15 @@ export function FeedbackThread({
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [notify, setNotify] = useState(feedback.notifyEmail);
+  const notifyVersionRef = useRef(0);
   const [, startTransition] = useTransition();
   const endRef = useRef<HTMLDivElement | null>(null);
   const { refresh } = useHeaderState();
   const feedbackId = feedback.id;
+  const locale = useLocale();
+  const t = useTranslations("feedbackThread");
+  const tKinds = useTranslations("feedback.kinds");
+  const tStatus = useTranslations("feedbackThread.status");
 
   useEffect(() => {
     if (replies.length === 0) return;
@@ -78,13 +77,18 @@ export function FeedbackThread({
         const j = (await res.json().catch(() => null)) as {
           error?: string;
         } | null;
-        alert(`Failed: ${j?.error ?? res.statusText}`);
+        alert(t("sendFailed", { code: j?.error ?? `http_${res.status}` }));
         return;
       }
       const data = (await res.json()) as { reply: Reply };
       setReplies((prev) => [...prev, data.reply]);
       setDraft("");
       void refresh({ force: true });
+    } catch {
+      // A dropped connection rejects before `res.ok` exists, so the branch
+      // above never runs and the rejection used to escape unhandled — the
+      // button re-enabled and the user saw nothing. The draft stays put.
+      alert(t("sendFailed", { code: "network" }));
     } finally {
       setBusy(false);
     }
@@ -93,17 +97,25 @@ export function FeedbackThread({
   async function toggleNotify() {
     if (viewerKind !== "user") return;
     const next = !notify;
+    // Rapid clicks fire overlapping PATCHes; without a version guard a
+    // late failure from an earlier click rolls the switch back past the
+    // newest intent, leaving the UI the opposite of what the user last
+    // chose. Only the latest click may roll back.
+    const version = notifyVersionRef.current + 1;
+    notifyVersionRef.current = version;
     setNotify(next);
+    let failed = false;
     try {
       const res = await fetch(`/api/feedback/${feedbackId}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ notifyEmail: next }),
       });
-      if (!res.ok) {
-        setNotify(!next);
-      }
+      failed = !res.ok;
     } catch {
+      failed = true;
+    }
+    if (failed && notifyVersionRef.current === version) {
       setNotify(!next);
     }
   }
@@ -114,17 +126,26 @@ export function FeedbackThread({
       <div className="rounded-2xl border border-border-base bg-surface/80 p-4 backdrop-blur">
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-mono text-[10px] tracking-[0.12em] text-muted-3 uppercase">
-            {KIND_LABEL[feedback.kind] ?? "Feedback"}
+            {feedback.kind === "suggestion" ||
+            feedback.kind === "bug" ||
+            feedback.kind === "praise" ||
+            feedback.kind === "other"
+              ? tKinds(feedback.kind)
+              : t("kindFallback")}
           </span>
           <span
             className={`inline-flex items-center rounded-full px-2 py-0.5 font-mono text-[10px] tracking-[0.12em] uppercase ring-1 ${
               STATUS_TONE[feedback.status] ?? STATUS_TONE.pending
             }`}
           >
-            {feedback.status}
+            {feedback.status === "pending" ||
+            feedback.status === "addressed" ||
+            feedback.status === "archived"
+              ? tStatus(feedback.status)
+              : feedback.status}
           </span>
           <span className="ml-auto font-mono text-[10px] tracking-[0.12em] text-muted-4 uppercase">
-            {new Date(feedback.createdAt).toLocaleString()}
+            {new Date(feedback.createdAt).toLocaleString(locale)}
           </span>
         </div>
         <p className="mt-3 text-sm leading-6 whitespace-pre-wrap text-foreground">
@@ -141,16 +162,20 @@ export function FeedbackThread({
             ) : (
               <BellOff className="size-3.5" />
             )}
-            {notify ? "Email me on reply" : "Email muted"}
+            {notify ? t("notifyOn") : t("notifyOff")}
           </button>
         ) : null}
       </div>
 
       {/* Replies */}
-      <ol className="space-y-2">
+      {/* aria-live: a sent reply appends below the fold, and a screen reader
+          announces nothing when React adds it — the bubble carries the
+          confirmation. The empty-state list item is present on mount, so it
+          is not re-announced. */}
+      <ol aria-live="polite" className="space-y-2">
         {replies.length === 0 ? (
           <li className="rounded-2xl border border-dashed border-border-base bg-surface/60 p-6 text-center text-xs text-muted-3">
-            No replies yet. Send a follow-up below to keep the thread going.
+            {t("noReplies")}
           </li>
         ) : (
           replies.map((r) => {
@@ -164,7 +189,7 @@ export function FeedbackThread({
                   className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm leading-6 ring-1 ${
                     fromAdmin
                       ? "bg-surface-elev text-foreground ring-border-base"
-                      : "bg-brand text-white ring-brand/30"
+                      : "bg-brand text-on-inverse ring-brand/30"
                   }`}
                 >
                   <div
@@ -172,11 +197,14 @@ export function FeedbackThread({
                       fromAdmin ? "text-muted-3" : "text-white/70"
                     }`}
                   >
-                    <span>{fromAdmin ? "Hunter" : "You"}</span>
+                    <span>{fromAdmin ? t("adminName") : t("you")}</span>
                     <span>·</span>
-                    <span>{new Date(r.createdAt).toLocaleString()}</span>
+                    <span>{new Date(r.createdAt).toLocaleString(locale)}</span>
                   </div>
-                  <p className="whitespace-pre-wrap">{r.body}</p>
+                  {/* break-words: `pre-wrap` keeps the author's line breaks but
+                      does not break a long unspaced run (a URL, a pasted pet
+                      name), which pushed the bubble past the viewport. */}
+                  <p className="whitespace-pre-wrap break-words">{r.body}</p>
                 </div>
               </li>
             );
@@ -195,6 +223,8 @@ export function FeedbackThread({
         }}
         className="rounded-2xl border border-border-base bg-surface/80 p-3 backdrop-blur"
       >
+        {/* aria-label not placeholder: the placeholder vanishes the moment
+            someone types, and it is the field's only name otherwise. */}
         <textarea
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
@@ -208,8 +238,13 @@ export function FeedbackThread({
           maxLength={2000}
           placeholder={
             viewerKind === "admin"
-              ? "Reply to the user… (⌘+Enter to send)"
-              : "Add a follow-up… (⌘+Enter to send)"
+              ? t("replyPlaceholder")
+              : t("followUpPlaceholder")
+          }
+          aria-label={
+            viewerKind === "admin"
+              ? t("replyPlaceholder")
+              : t("followUpPlaceholder")
           }
           className="w-full resize-none bg-transparent text-sm leading-6 text-stone-900 placeholder:text-muted-4 focus:outline-none dark:text-stone-100"
         />
@@ -227,7 +262,7 @@ export function FeedbackThread({
             ) : (
               <Send className="size-3.5" />
             )}
-            Send
+            {t("send")}
           </button>
         </div>
       </form>

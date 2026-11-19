@@ -31,6 +31,34 @@ export function isAllowedAssetUrl(raw: string | null | undefined): boolean {
   return ALLOWED_HOSTS.has(url.host);
 }
 
+// Path namespaces a *submission* may point at. `isAllowedAssetUrl` pins the
+// host; this pins where on that host the bytes can live. Without it a
+// submission's spritesheet URL could be `requests/<other-user>-<id>/...` —
+// the per-user reference uploads made through /api/pet-requests/image — so
+// one submission could carry another user's upload as its own asset (the
+// bucket is public, so there is no confidentiality loss, but the provenance
+// claim is false). The namespaces that exist on the bucket, by census of
+// every key builder in src/ and scripts/: `pets/` (presign writes
+// `pets/<slugHint>-<uploadId>/...`), `curated/` (imported catalogue, older
+// rows still reference it), and `community/` (the rescue script's recovery
+// uploads). `requests/` and everything else is refused here on purpose.
+const SUBMISSION_ASSET_PATH_PREFIXES = ["/pets/", "/curated/", "/community/"];
+
+export function isAllowedSubmissionAssetUrl(
+  raw: string | null | undefined,
+): boolean {
+  if (!isAllowedAssetUrl(raw)) return false;
+  let pathname: string;
+  try {
+    pathname = new URL(raw as string).pathname;
+  } catch {
+    return false;
+  }
+  return SUBMISSION_ASSET_PATH_PREFIXES.some((prefix) =>
+    pathname.startsWith(prefix),
+  );
+}
+
 export function assertAllowedAssetUrl(
   raw: string | null | undefined,
   field = "url",

@@ -12,6 +12,7 @@ import { auth } from "@clerk/nextjs/server";
 import { and, eq } from "drizzle-orm";
 
 import { db, schema } from "@/lib/db/client";
+import { isUniqueViolation } from "@/lib/db/pg-errors";
 import {
   BLOCKED_KEYWORD_REASON,
   containsBlockedKeyword,
@@ -52,6 +53,11 @@ export async function POST(
   } catch {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
+  // `req.json()` accepts a literal `null`; the property reads below would
+  // otherwise throw and 500. Same boundary as `notifications/read`.
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    return NextResponse.json({ error: "invalid_json" }, { status: 400 });
+  }
   const petSlug = body.petSlug?.toString().trim().toLowerCase();
   if (!petSlug) {
     return NextResponse.json({ error: "invalid_pet_slug" }, { status: 400 });
@@ -81,8 +87,11 @@ export async function POST(
   // collections — the community surface might let users vote on
   // unofficial sets later, and this endpoint already gates on
   // ownership of the pet.
+  // Stored slugs are lowercase; the read path lowercases too, so a mixed-case
+  // URL like /collections/Franchise-Pokemon/request must match or the page
+  // works while its request action 404s.
   const collection = await db.query.petCollections.findFirst({
-    where: eq(schema.petCollections.slug, slug),
+    where: eq(schema.petCollections.slug, slug.toLowerCase()),
   });
   if (!collection) {
     return NextResponse.json(
@@ -137,13 +146,34 @@ export async function POST(
   }
 
   const id = `pcr_${crypto.randomUUID().replace(/-/g, "").slice(0, 22)}`;
-  await db.insert(schema.petCollectionRequests).values({
-    id,
-    collectionId: collection.id,
-    petSlug,
-    requestedBy: userId,
-    note,
-  });
+  try {
+    await db.insert(schema.petCollectionRequests).values({
+      id,
+      collectionId: collection.id,
+      petSlug,
+      requestedBy: userId,
+      note,
+    });
+  } catch (error) {
+    // The pending check above is a separate statement, so two concurrent
+    // requests (double-click, retry) both pass it and the second INSERT
+    // hits `pet_collection_requests_pending_pair`. Answer the same
+    // alreadyPending body the check would have instead of a 500.
+    if (isUniqueViolation(error)) {
+      const pending = await db.query.petCollectionRequests.findFirst({
+        where: and(
+          eq(schema.petCollectionRequests.collectionId, collection.id),
+          eq(schema.petCollectionRequests.petSlug, petSlug),
+          eq(schema.petCollectionRequests.status, "pending"),
+        ),
+      });
+      return NextResponse.json(
+        { ok: true, alreadyPending: true, id: pending?.id ?? null },
+        { status: 200 },
+      );
+    }
+    throw error;
+  }
 
   return NextResponse.json({ ok: true, id }, { status: 201 });
 }

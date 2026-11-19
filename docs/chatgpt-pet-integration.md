@@ -34,8 +34,13 @@ codex://pets/install?name=…&description=…&imageUrl=…&spriteVersionNumber=�
 | `imageUrl` | required, must parse as a URL with protocol `https:` |
 | `spriteVersionNumber` | must coerce to `1` or `2`; defaults to `1` |
 
-`spriteVersionNumber` is the one that bit us: Petdex ships v2 atlases, and
-omitting it defaults the app to layout 1, which misreads every frame. It was
+`spriteVersionNumber` is the one that bit us: it has to match the atlas, and
+omitting it defaults the app to layout 1, which misreads every frame of a v2
+sheet. Petdex ships **both** layouts — v1 (8x9) is actually the majority of the
+approved catalog (measured 2026-10-10: 4631 of 4876), v2 (8x11) the rest — so
+the number must come from the pet's own `spriteVersionNumber`, never a fixed
+guess. (An earlier revision of this doc said "Petdex ships v2 atlases" and the
+builder hardcoded `?? 2`, which sent the wrong layout for every v1 pet.) It was
 absent from the original builder because that was inferred from a JSON-LD
 `InstallAction` on `chatgpt.com/s/sharepet_<id>`, which does not carry it.
 
@@ -137,8 +142,9 @@ find ~/Library -iname "*.webp" -newermt "-5 minutes" 2>/dev/null | grep -i opena
 
 ## The reverse direction already works
 
-Petdex reads ChatGPT's pets with no conversion: same atlas, same 9 state rows,
-same frame counts, measured cell by cell. `~/.codex/pets/` is a root the desktop
+Petdex reads ChatGPT's pets with no conversion: same atlas, same frame counts,
+measured cell by cell — 9 state rows at 8×9 for v1 pets, 11 at 8×11 for the v2
+exports. `~/.codex/pets/` is a root the desktop
 app scans directly, and the CLI writes both roots on install. So a pet acquired
 either way shows up in both places, and `petdex://<slug>` is the path that
 actually works today.

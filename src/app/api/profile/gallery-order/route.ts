@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { auth } from "@clerk/nextjs/server";
-import { and, sql as dsql, eq, inArray } from "drizzle-orm";
+import { and, sql as dsql, eq } from "drizzle-orm";
 
 import { db, schema } from "@/lib/db/client";
 import { profileEditRatelimit } from "@/lib/ratelimit";
@@ -10,8 +10,8 @@ import { requireSameOrigin } from "@/lib/same-origin";
 export const runtime = "nodejs";
 
 type Body = {
-  // Owner-defined slug order. First slug = position 0, etc. Slugs not
-  // included are pushed to the end with their existing relative order.
+  // Owner-defined slug order. First slug = position 1, etc. Slugs not
+  // included are pushed to the end, keeping their existing relative order.
   order: string[];
 };
 
@@ -40,6 +40,11 @@ export async function PATCH(req: Request): Promise<Response> {
   } catch {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
+  // A literal `null`/array body parses fine and the `.order` read below
+  // throws on it. Refuse non-objects as a 400.
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    return NextResponse.json({ error: "invalid_json" }, { status: 400 });
+  }
 
   if (!Array.isArray(body.order)) {
     return NextResponse.json({ error: "invalid_order" }, { status: 400 });
@@ -65,15 +70,20 @@ export async function PATCH(req: Request): Promise<Response> {
     return NextResponse.json({ error: "empty_order" }, { status: 400 });
   }
 
-  // Verify every slug belongs to this owner AND is approved.
+  // Verify every slug belongs to this owner AND is approved. The fetch is
+  // deliberately NOT narrowed to the requested slugs: positions are assigned
+  // across the owner's whole approved gallery, so unlisted pets must also be
+  // read to be pushed behind the ordered ones.
   const owned = await db
-    .select({ slug: schema.submittedPets.slug })
+    .select({
+      slug: schema.submittedPets.slug,
+      galleryPosition: schema.submittedPets.galleryPosition,
+    })
     .from(schema.submittedPets)
     .where(
       and(
         eq(schema.submittedPets.ownerId, userId),
         eq(schema.submittedPets.status, "approved"),
-        inArray(schema.submittedPets.slug, orderedUnique),
       ),
     );
   const ownedSet = new Set(owned.map((r) => r.slug));
@@ -86,10 +96,25 @@ export async function PATCH(req: Request): Promise<Response> {
     );
   }
 
-  // Single UPDATE with CASE WHEN — one round trip, atomic.
-  const cases = validOrder
-    .map((slug, idx) => dsql`WHEN ${slug} THEN ${idx + 1}`)
-    .reduce((acc, frag) => dsql`${acc} ${frag}`);
+  // Single UPDATE with CASE WHEN — one round trip, atomic. The old version
+  // only touched the listed slugs: the CASE's ELSE was dead (the WHERE
+  // excluded every row it could fire on), so unlisted pets kept their old
+  // position and sorted ahead of the new 1..n block. Positions now cover the
+  // whole approved gallery: listed slugs take 1..n in request order, unlisted
+  // ones follow after max(existing)+n so their prior relative order survives.
+  const base =
+    owned.reduce((m, r) => Math.max(m, r.galleryPosition), 0) +
+    validOrder.length;
+  const unlisted = owned
+    .filter((r) => !validOrder.includes(r.slug))
+    .sort(
+      (a, b) =>
+        a.galleryPosition - b.galleryPosition || a.slug.localeCompare(b.slug),
+    );
+  const cases = [
+    ...validOrder.map((slug, idx) => dsql`WHEN ${slug} THEN ${idx + 1}`),
+    ...unlisted.map((r, idx) => dsql`WHEN ${r.slug} THEN ${base + idx + 1}`),
+  ].reduce((acc, frag) => dsql`${acc} ${frag}`);
 
   await db
     .update(schema.submittedPets)
@@ -99,7 +124,7 @@ export async function PATCH(req: Request): Promise<Response> {
     .where(
       and(
         eq(schema.submittedPets.ownerId, userId),
-        inArray(schema.submittedPets.slug, validOrder),
+        eq(schema.submittedPets.status, "approved"),
       ),
     );
 

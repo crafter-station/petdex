@@ -98,3 +98,27 @@ export function isPendingAssetUrl(
     return isPendingAssetKey(url.pathname.slice(prefix.length), slug, role);
   });
 }
+
+// Submission uploads (`/api/cli/submit`, `/api/r2/presign`) write
+// `pets/<slugHint>-<uploadId>/<role>.<ext>` — same bucket, same shape as a
+// pending-edit key but WITHOUT the `-pending-` marker, so `isPendingAssetKey`
+// never matched them and the GC never considered them. A caller that presigns
+// and then never registers the submission (or withdraws it) leaves objects no
+// sweep would ever collect.
+//
+// Note this also matches pending keys (`pets/<slug>-pending-<id>/…`, where the
+// slug part absorbs the `-pending` segment); that is harmless because both
+// shapes are GC candidates. The dangerous half is the reference side: any
+// sweep that treats these as candidates MUST also count them as referenced
+// when a live row points at them, or it deletes live pets' assets.
+export function isSubmissionAssetKey(key: string | null | undefined): boolean {
+  if (!key) return false;
+  return /^pets\/[a-z0-9]+(?:-[a-z0-9]+)*-[0-9a-f]{12}\/(?:sprite\.(?:webp|png)|petjson\.json|zip\.zip)$/.test(
+    key,
+  );
+}
+
+/** Either GC-eligible key shape (pending-edit or submission upload). */
+export function isGcCandidateAssetKey(key: string | null | undefined): boolean {
+  return isPendingAssetKey(key) || isSubmissionAssetKey(key);
+}

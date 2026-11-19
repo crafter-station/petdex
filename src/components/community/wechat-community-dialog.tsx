@@ -3,7 +3,7 @@
 import Image from "next/image";
 import { useState } from "react";
 
-import { Loader2 } from "lucide-react";
+import { Loader2, TriangleAlert } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -23,6 +23,7 @@ const WECHAT_QR_URL = "/api/wechat-qr";
 
 function WechatQrImage({ className }: { className?: string }) {
   const [imageLoaded, setImageLoaded] = useState(false);
+  const [imageFailed, setImageFailed] = useState(false);
 
   return (
     <div
@@ -31,7 +32,18 @@ function WechatQrImage({ className }: { className?: string }) {
         className,
       )}
     >
-      {imageLoaded ? null : (
+      {/* The proxy answers 503 when ALIYUN_OSS_* is unset (any self-hosted
+          or preview deployment) and 502 when upstream is down. Without the
+          error branch the overlay spun forever and the reader could not tell
+          a slow load from a QR that will never arrive. */}
+      {imageFailed ? (
+        <div className="absolute inset-3 grid place-items-center rounded-xl bg-surface-muted text-muted-2">
+          <div className="flex flex-col items-center gap-2 px-4 text-center text-sm">
+            <TriangleAlert className="size-4" />
+            二维码暂时无法加载，请稍后再试或通过 GitHub / Discord 联系我们。
+          </div>
+        </div>
+      ) : imageLoaded ? null : (
         <div className="absolute inset-3 grid place-items-center rounded-xl bg-surface-muted text-muted-2">
           <div className="flex items-center gap-2 text-sm">
             <Loader2 className="size-4 animate-spin" />
@@ -46,9 +58,10 @@ function WechatQrImage({ className }: { className?: string }) {
         height={320}
         unoptimized
         className={`mx-auto aspect-square w-full max-w-72 rounded-xl object-contain transition-opacity duration-200 ${
-          imageLoaded ? "opacity-100" : "opacity-0"
+          imageLoaded && !imageFailed ? "opacity-100" : "opacity-0"
         }`}
         onLoad={() => setImageLoaded(true)}
+        onError={() => setImageFailed(true)}
       />
     </div>
   );

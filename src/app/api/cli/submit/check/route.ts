@@ -12,6 +12,7 @@ import { and, eq, inArray } from "drizzle-orm";
 
 import { verifyCliBearer } from "@/lib/cli-auth";
 import { db, schema } from "@/lib/db/client";
+import { publicTrafficGuardKey } from "@/lib/public-traffic-guard";
 import { cliVerifyRatelimit } from "@/lib/ratelimit";
 import { deriveSlug } from "@/lib/submissions";
 
@@ -22,13 +23,10 @@ const MAX_CANDIDATES = 100;
 type Candidate = { petId?: string; slugHint?: string };
 type Body = { candidates?: Candidate[] };
 
-function clientIp(req: Request): string {
-  const xff = req.headers.get("x-forwarded-for") ?? "";
-  return xff.split(",")[0]?.trim() || "anon";
-}
-
 export async function POST(req: Request): Promise<Response> {
-  const verifyLim = await cliVerifyRatelimit.limit(clientIp(req));
+  const verifyLim = await cliVerifyRatelimit.limit(
+    publicTrafficGuardKey(req.headers),
+  );
   if (!verifyLim.success) {
     return NextResponse.json({ error: "rate_limited" }, { status: 429 });
   }
@@ -44,8 +42,15 @@ export async function POST(req: Request): Promise<Response> {
   } catch {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
+  // `req.json()` resolves `null` without throwing; the property reads below
+  // would TypeError on it. Refuse non-objects as a 400.
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    return NextResponse.json({ error: "invalid_json" }, { status: 400 });
+  }
 
-  const candidates = Array.isArray(body.candidates) ? body.candidates : [];
+  const candidates: unknown[] = Array.isArray(body.candidates)
+    ? (body.candidates as unknown[])
+    : [];
   if (candidates.length === 0) {
     return NextResponse.json({ ok: true, existing: [] });
   }
@@ -58,7 +63,11 @@ export async function POST(req: Request): Promise<Response> {
 
   const slugSet = new Set<string>();
   for (const c of candidates) {
-    const raw = (c.petId ?? c.slugHint ?? "").toString();
+    // Elements are untrusted too: `[null]` used to throw on `c.petId` and
+    // 500 this endpoint.
+    if (c === null || typeof c !== "object") continue;
+    const { petId, slugHint } = c as Candidate;
+    const raw = (petId ?? slugHint ?? "").toString();
     const s = deriveSlug(raw);
     if (s) slugSet.add(s);
   }

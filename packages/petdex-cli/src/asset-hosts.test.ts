@@ -68,6 +68,19 @@ describe("isTrustedAssetUrl", () => {
     expect(isTrustedAssetUrl("")).toBe(false);
   });
 
+  test("rejects a non-default port on an allowlisted host", () => {
+    // The set comparison above cannot see how each side *matches* a URL, and
+    // the two sides matched differently: this file read `hostname` (port
+    // dropped) while `src/lib/url-allowlist.ts` reads `host`, so
+    // `https://assets.petdex.dev:8443/…` was trusted here and refused there.
+    // Assets are served on 443 only, so the port must not be ignored.
+    expect(
+      isTrustedAssetUrl(
+        "https://assets.petdex.dev:8443/pets/boba/spritesheet.webp",
+      ),
+    ).toBe(false);
+  });
+
   test("rejects subdomain spoof attempts", () => {
     expect(isTrustedAssetUrl("https://attacker.r2.dev/x")).toBe(false);
     // A hostname suffix attack must not slip through a substring match.

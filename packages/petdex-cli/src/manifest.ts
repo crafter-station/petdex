@@ -1,6 +1,11 @@
 import { isTrustedAssetUrl } from "./asset-hosts.js";
+import { fetchCapped } from "./fetch-capped.js";
 
 const MANIFEST_TIMEOUT_MS = 15_000;
+// Every other network read in this package goes through fetchCapped's
+// byte ceiling; the manifest is the largest of them, so give it its own
+// (still generous) limit rather than an unbounded response.json().
+const MANIFEST_MAX_BYTES = 8 * 1024 * 1024;
 const COMPACT_FIELDS = [
   "slug",
   "displayName",
@@ -35,6 +40,25 @@ function isNullableString(value: unknown): value is string | null {
 
 function isSpriteVersion(value: unknown): value is 1 | 2 {
   return value === 1 || value === 2;
+}
+
+/**
+ * The slug shape the install paths are built from.
+ *
+ * `petdex install` joins the slug into `~/.petdex/pets/<slug>` and
+ * `~/.codex/pets/<slug>`, so a slug like `../../../../tmp/pwned` escapes the
+ * pets directory — `path.join` resolves it to `/tmp/pwned`. The server
+ * enforces this shape on `/install/<slug>`; the CLI did not, so a manifest
+ * carrying such a slug (a tampered snapshot, or a row that slipped past
+ * `deriveSlug`) wrote outside the pets directory. Mirrors
+ * `INSTALL_SLUG_RE` in the install routes.
+ *
+ * Exported for the install path to check, rather than thrown from the
+ * manifest parse: a single bad slug would otherwise fail the whole manifest
+ * and take every pet down with it, when only that one pet is unusable.
+ */
+export function isInstallSlug(value: string): boolean {
+  return /^[a-z0-9][a-z0-9-]{0,62}$/.test(value);
 }
 
 function requireTrustedAssetUrl(raw: string, assetBase?: string): string {
@@ -100,9 +124,9 @@ export function parseCompactManifest(input: unknown): ManifestPet[] {
     }
     return {
       slug: rawPet[0],
-      displayName: rawPet[1],
+      displayName: stripControlChars(rawPet[1]),
       kind: rawPet[2],
-      submittedBy: rawPet[3],
+      submittedBy: rawPet[3] === null ? null : stripControlChars(rawPet[3]),
       spritesheetUrl: requireTrustedAssetUrl(rawPet[4], assetBase),
       petJsonUrl: requireTrustedAssetUrl(rawPet[5], assetBase),
       zipUrl: rawPet[6] ? requireTrustedAssetUrl(rawPet[6], assetBase) : null,
@@ -134,9 +158,12 @@ export function parseLegacyManifest(input: unknown): ManifestPet[] {
     }
     return {
       slug: rawPet.slug,
-      displayName: rawPet.displayName,
+      displayName: stripControlChars(rawPet.displayName),
       kind: rawPet.kind,
-      submittedBy: rawPet.submittedBy,
+      submittedBy:
+        rawPet.submittedBy === null
+          ? null
+          : stripControlChars(rawPet.submittedBy),
       spritesheetUrl: requireTrustedAssetUrl(rawPet.spritesheetUrl),
       petJsonUrl: requireTrustedAssetUrl(rawPet.petJsonUrl),
       zipUrl: rawPet.zipUrl ? requireTrustedAssetUrl(rawPet.zipUrl) : null,
@@ -150,17 +177,35 @@ export function parseManifestPayload(input: unknown): ManifestPet[] {
   return parseLegacyManifest(input);
 }
 
+// displayName and submittedBy come from submitter profiles and are echoed
+// straight back to the terminal (`petdex list`, install notes). A field
+// holding `\x1b]0;pwned\x07` (title rewrite) or cursor-mode escapes would
+// execute against whichever display width the terminal applies — strip every
+// C0/C1 control character and the DEL before the text can reach a console.
+// Printable Unicode survives; only controls are dropped.
+const CONTROL_CHARS = /[\p{Cc}]/gu;
+
+export function stripControlChars(raw: string): string {
+  return raw.replace(CONTROL_CHARS, "");
+}
+
 async function requestJson(
   fetchImpl: FetchJson,
   url: string,
 ): Promise<unknown> {
-  const response = await fetchImpl(url, {
-    headers: { Accept: "application/json" },
-    signal: AbortSignal.timeout(MANIFEST_TIMEOUT_MS),
+  const result = await fetchCapped(url, {
+    init: {
+      headers: { Accept: "application/json" },
+    },
+    maxBytes: MANIFEST_MAX_BYTES,
+    timeoutMs: MANIFEST_TIMEOUT_MS,
+    // FetchJson is the narrow seam tests stub; fetchCapped accepts the
+    // full `typeof fetch`, which the real fetch satisfies.
+    fetchImpl: fetchImpl as typeof fetch,
   });
-  if (!response.ok) throw new Error(`manifest fetch ${response.status}`);
+  if (!result.ok) throw new Error(`manifest fetch ${result.status}`);
   try {
-    return await response.json();
+    return JSON.parse(result.body.toString("utf8"));
   } catch {
     throw new Error("manifest response was not valid JSON");
   }

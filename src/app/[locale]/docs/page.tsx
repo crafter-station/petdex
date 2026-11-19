@@ -30,6 +30,12 @@ const DOC_SECTIONS = [
   ["contribute", "contribute"],
 ] as const;
 
+// Fully public: no auth, no cookies, no per-visitor data. The declaration is
+// also what gets every locale prerendered — without it Next builds the default
+// locale and leaves the others to be rendered on demand, so /zh and /es were
+// the only locales this page did not have a static copy for.
+export const dynamic = "force-static";
+
 export async function generateMetadata({
   params,
 }: {
@@ -69,9 +75,13 @@ export default async function DocsPage({
   const placeholder = {
     desktopAction: "<start | stop | status>",
     collectionRef: "id-or-slug",
-    path: t("placeholders.path"),
-    petName: t("placeholders.petName"),
-    yourPetName: t("placeholders.yourPetName"),
+    // Raw: these are literal `<slug>`-style placeholders, and ICU reads an
+    // angle-bracketed name as a rich-text tag. Interpolating them into another
+    // message passes them through untouched, but reading one on its own would
+    // otherwise throw UNCLOSED_TAG in development.
+    path: t.raw("placeholders.path"),
+    petName: t.raw("placeholders.petName"),
+    yourPetName: t.raw("placeholders.yourPetName"),
   };
   const rich = {
     code: (chunks: React.ReactNode) => <code>{chunks}</code>,
@@ -86,317 +96,128 @@ export default async function DocsPage({
   };
 
   return (
-    <main className="min-h-dvh bg-background text-foreground">
+    <>
       <SiteHeader />
-      <section className="mx-auto grid w-full max-w-6xl gap-12 px-5 pt-8 pb-12 md:grid-cols-[220px_1fr] md:px-8 md:pb-16">
-        <aside className="hidden md:block">
-          <nav className="sticky top-24 flex flex-col gap-1.5 text-sm">
-            <NavHeader>{t("nav.getStarted")}</NavHeader>
-            {DOC_SECTIONS.slice(0, 3).map(([id, label]) => (
-              <NavLink key={id} href={`#${id}`}>
-                {t(`nav.${label}`)}
-              </NavLink>
-            ))}
-            <NavHeader>{t("nav.cli")}</NavHeader>
-            {DOC_SECTIONS.slice(3, 8).map(([id, label]) => (
-              <NavLink key={id} href={`#${id}`}>
-                {t(`nav.${label}`)}
-              </NavLink>
-            ))}
-            <NavHeader>{t("nav.agents")}</NavHeader>
-            <NavLink href="#agents">{t("nav.agentUsage")}</NavLink>
-            <NavHeader>{t("nav.reference")}</NavHeader>
-            {DOC_SECTIONS.slice(9).map(([id, label]) => (
-              <NavLink key={id} href={`#${id}`}>
-                {t(`nav.${label}`)}
-              </NavLink>
-            ))}
-          </nav>
-        </aside>
+      <main id="main" className="min-h-dvh bg-background text-foreground">
+        <section className="mx-auto grid w-full max-w-6xl gap-12 px-5 pt-8 pb-12 md:grid-cols-[220px_1fr] md:px-8 md:pb-16">
+          <aside className="hidden md:block">
+            <nav className="sticky top-24 flex flex-col gap-1.5 text-sm">
+              <NavHeader>{t("nav.getStarted")}</NavHeader>
+              {DOC_SECTIONS.slice(0, 3).map(([id, label]) => (
+                <NavLink key={id} href={`#${id}`}>
+                  {t(`nav.${label}`)}
+                </NavLink>
+              ))}
+              <NavHeader>{t("nav.cli")}</NavHeader>
+              {DOC_SECTIONS.slice(3, 8).map(([id, label]) => (
+                <NavLink key={id} href={`#${id}`}>
+                  {t(`nav.${label}`)}
+                </NavLink>
+              ))}
+              <NavHeader>{t("nav.agents")}</NavHeader>
+              <NavLink href="#agents">{t("nav.agentUsage")}</NavLink>
+              <NavHeader>{t("nav.reference")}</NavHeader>
+              {DOC_SECTIONS.slice(9).map(([id, label]) => (
+                <NavLink key={id} href={`#${id}`}>
+                  {t(`nav.${label}`)}
+                </NavLink>
+              ))}
+            </nav>
+          </aside>
 
-        <article className="min-w-0 space-y-14">
-          <header className="space-y-3">
-            <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
-              {t("hero.eyebrow")}
-            </p>
-            <h1 className="text-5xl font-medium tracking-tight md:text-6xl">
-              {t("hero.title")}
-            </h1>
-            <p className="max-w-2xl text-lg leading-8 text-muted-2">
-              {t("hero.description")}
-            </p>
-            <div className="flex flex-wrap items-center gap-3 pt-2">
-              <a
-                href={NPM_URL}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex h-10 items-center gap-2 rounded-full border border-border-base bg-surface px-4 text-sm font-medium transition hover:border-border-strong"
-              >
-                {t("hero.npmCta")}
-                <ArrowRight className="size-4" />
-              </a>
-              <a
-                href={REPO_URL}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex h-10 items-center gap-2 rounded-full border border-border-base bg-surface px-4 text-sm font-medium transition hover:border-border-strong"
-              >
-                <GithubIcon className="size-4" />
-                {t("hero.repoCta")}
-              </a>
-            </div>
-          </header>
-
-          <Section id="quick-start" title={t("sections.quickStart.title")}>
-            <p>{t("sections.quickStart.intro")}</p>
-            <ol className="grid gap-3">
-              <QuickStartStep
-                number="1"
-                title={t("sections.quickStart.steps.install.title")}
-                body={t.rich("sections.quickStart.steps.install.body", rich)}
-                result={t.rich(
-                  "sections.quickStart.steps.install.result",
-                  rich,
-                )}
-              >
-                <CommandLine
-                  command="npx petdex install boba"
-                  source="docs-quickstart-install"
-                  className="w-full max-w-xl"
-                />
-              </QuickStartStep>
-              <QuickStartStep
-                number="2"
-                title={t("sections.quickStart.steps.desktop.title")}
-                body={t.rich("sections.quickStart.steps.desktop.body", rich)}
-                result={t.rich(
-                  "sections.quickStart.steps.desktop.result",
-                  rich,
-                )}
-              >
-                <Link
-                  href={`/${locale}/download`}
-                  className="text-brand underline underline-offset-4"
+          <article className="min-w-0 space-y-14">
+            <header className="space-y-3">
+              <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
+                {t("hero.eyebrow")}
+              </p>
+              <h1 className="text-5xl font-medium tracking-tight md:text-6xl">
+                {t("hero.title")}
+              </h1>
+              <p className="max-w-2xl text-lg leading-8 text-muted-2">
+                {t("hero.description")}
+              </p>
+              <div className="flex flex-wrap items-center gap-3 pt-2">
+                <a
+                  href={NPM_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex h-10 items-center gap-2 rounded-full border border-border-base bg-surface px-4 text-sm font-medium transition hover:border-border-strong"
                 >
-                  {t("sections.quickStart.steps.desktop.link")}
-                </Link>
-              </QuickStartStep>
-              <QuickStartStep
-                number="3"
-                title={t("sections.quickStart.steps.select.title")}
-                body={t.rich("sections.quickStart.steps.select.body", rich)}
-                result={t.rich("sections.quickStart.steps.select.result", rich)}
-              />
-              <QuickStartStep
-                number="4"
-                title={t("sections.quickStart.steps.verify.title")}
-                body={t.rich("sections.quickStart.steps.verify.body", rich)}
-                result={t.rich("sections.quickStart.steps.verify.result", rich)}
-              />
-            </ol>
-            <Callout>
-              {t.rich("sections.quickStart.callout", {
-                code: (chunks) => <code>{chunks}</code>,
-                link: (chunks) => (
+                  {t("hero.npmCta")}
+                  <ArrowRight className="size-4" />
+                </a>
+                <a
+                  href={REPO_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex h-10 items-center gap-2 rounded-full border border-border-base bg-surface px-4 text-sm font-medium transition hover:border-border-strong"
+                >
+                  <GithubIcon className="size-4" />
+                  {t("hero.repoCta")}
+                </a>
+              </div>
+            </header>
+
+            <Section id="quick-start" title={t("sections.quickStart.title")}>
+              <p>{t("sections.quickStart.intro")}</p>
+              <ol className="grid gap-3">
+                <QuickStartStep
+                  number="1"
+                  title={t("sections.quickStart.steps.install.title")}
+                  body={t.rich("sections.quickStart.steps.install.body", rich)}
+                  result={t.rich(
+                    "sections.quickStart.steps.install.result",
+                    rich,
+                  )}
+                >
+                  <CommandLine
+                    command="npx petdex install boba"
+                    source="docs-quickstart-install"
+                    className="w-full max-w-xl"
+                  />
+                </QuickStartStep>
+                <QuickStartStep
+                  number="2"
+                  title={t("sections.quickStart.steps.desktop.title")}
+                  body={t.rich("sections.quickStart.steps.desktop.body", rich)}
+                  result={t.rich(
+                    "sections.quickStart.steps.desktop.result",
+                    rich,
+                  )}
+                >
                   <Link
-                    href={withLocale("/create", localeValue)}
-                    className="font-medium underline underline-offset-4"
-                  >
-                    {chunks}
-                  </Link>
-                ),
-              })}
-            </Callout>
-          </Section>
-
-          <Section id="install" title={t("sections.install.title")}>
-            <p>{t("sections.install.intro")}</p>
-
-            <h3 className="font-semibold">
-              {t("sections.install.casualTitle")}
-            </h3>
-            <p>
-              {t.rich("sections.install.casualBody", {
-                code: (chunks) => <code>{chunks}</code>,
-              })}
-            </p>
-            <CommandLine
-              command="npx petdex install boba"
-              source="docs-install-npx"
-              className="w-full max-w-xl"
-            />
-
-            <h3 className="font-semibold">
-              {t("sections.install.powerTitle")}
-            </h3>
-            <p>{t("sections.install.powerBody")}</p>
-            <CommandLine
-              command="npm install -g petdex"
-              source="docs-install-global"
-              className="w-full max-w-xl"
-            />
-
-            <p>
-              {t.rich("sections.install.persistence", {
-                code: (chunks) => <code>{chunks}</code>,
-                strong: (chunks) => <strong>{chunks}</strong>,
-              })}
-            </p>
-          </Section>
-
-          <Section id="authenticate" title={t("sections.authenticate.title")}>
-            <p>{t("sections.authenticate.intro")}</p>
-            <CommandLine
-              command="npx petdex login"
-              source="docs-auth-login"
-              className="w-full max-w-xl"
-            />
-            <p className="text-sm text-muted-2">
-              {t.rich("sections.authenticate.flow", rich)}
-            </p>
-            <p>{t("sections.authenticate.otherCommands")}</p>
-            <CommandLine
-              command="npx petdex whoami"
-              source="docs-auth-whoami"
-              className="w-full max-w-xl"
-            />
-            <CommandLine
-              command="npx petdex logout"
-              source="docs-auth-logout"
-              className="w-full max-w-xl"
-            />
-          </Section>
-
-          <Section id="commands" title={t("sections.commands.title")}>
-            <p>{t.rich("sections.commands.intro", rich)}</p>
-
-            <h3 className="mt-6 font-semibold">
-              <code>petdex list</code>
-            </h3>
-            <p>{t("sections.commands.listBody")}</p>
-            <CommandLine
-              command="npx petdex list"
-              source="docs-cmd-list"
-              className="w-full max-w-xl"
-            />
-
-            <h3 className="mt-6 font-semibold">
-              <code>{t("sections.commands.installSyntax", placeholder)}</code>
-            </h3>
-            <p>{t.rich("sections.commands.installBody", rich)}</p>
-            <CommandLine
-              command="npx petdex install kebo"
-              source="docs-cmd-install"
-              className="w-full max-w-xl"
-            />
-
-            <h3 className="mt-6 font-semibold">
-              <code>{t("sections.commands.submitSyntax", placeholder)}</code>
-            </h3>
-            <p>{t("sections.commands.submitIntro")}</p>
-            <ul className="ml-6 list-disc space-y-1 text-muted-2">
-              <li>{t.rich("sections.commands.submitSingle", rich)}</li>
-              <li>{t.rich("sections.commands.submitZip", rich)}</li>
-              <li>{t.rich("sections.commands.submitBulk", rich)}</li>
-            </ul>
-            <p>{t("sections.commands.bulkNote")}</p>
-
-            <h3 className="mt-6 font-semibold">
-              <code>{t("sections.commands.collectionSyntax")}</code>
-            </h3>
-            <p>{t.rich("sections.commands.collectionBody", rich)}</p>
-            <ul className="ml-6 list-disc space-y-1 text-muted-2">
-              <li>{t.rich("sections.commands.collectionList", rich)}</li>
-              <li>{t.rich("sections.commands.collectionCreate", rich)}</li>
-              <li>{t.rich("sections.commands.collectionEdit", rich)}</li>
-              <li>{t.rich("sections.commands.collectionDelete", rich)}</li>
-            </ul>
-            <p>{t.rich("sections.commands.collectionLimits", rich)}</p>
-
-            <h3 className="mt-6 font-semibold">
-              <code>petdex login / logout / whoami</code>
-            </h3>
-            <p>{t("sections.commands.authBody")}</p>
-          </Section>
-
-          <Section id="desktop" title={t("sections.desktop.title")}>
-            <p>
-              {t.rich("sections.desktop.intro", {
-                ...rich,
-                download: (chunks) => (
-                  <Link
+                    // `withLocale`, like the other links on this page: the
+                    // default locale is unprefixed, so `/${locale}` sent
+                    // English readers through a 307 from `/en/download`.
                     href={withLocale("/download", localeValue)}
-                    prefetch={false}
-                    className="font-medium underline underline-offset-4"
+                    className="text-brand underline underline-offset-4"
                   >
-                    {chunks}
+                    {t("sections.quickStart.steps.desktop.link")}
                   </Link>
-                ),
-              })}
-            </p>
-
-            <Callout>
-              {t.rich("sections.desktop.sidecarCallout", rich)}
-              <pre className="mt-3 overflow-x-auto rounded-lg bg-surface-muted p-3 font-mono text-xs leading-relaxed">
-                {[
-                  `T="$(cat "$HOME/.petdex/runtime/update-token")"`,
-                  `curl -X POST http://127.0.0.1:7777/state \\`,
-                  `  -H "Content-Type: application/json" \\`,
-                  `  -H "X-Petdex-Update-Token: $T" \\`,
-                  `  --data-raw '{"state":"waving"}'`,
-                ].join("\n")}
-              </pre>
-            </Callout>
-
-            <h3 className="mt-8 font-semibold">
-              {t("sections.desktop.windowTitle")}
-            </h3>
-            <p>{t("sections.desktop.windowBody")}</p>
-
-            <h3 className="mt-6 font-semibold">
-              {t("sections.desktop.shortcutsTitle")}
-            </h3>
-            <p>{t.rich("sections.desktop.shortcutsBody", rich)}</p>
-
-            <h3 className="mt-6 font-semibold">
-              {t("sections.desktop.settingsTitle")}
-            </h3>
-            <ul className="ml-6 list-disc space-y-1 text-muted-2">
-              <li>{t.rich("sections.desktop.settingsPets", rich)}</li>
-              <li>{t.rich("sections.desktop.settingsAgents", rich)}</li>
-              <li>{t.rich("sections.desktop.settingsAppearance", rich)}</li>
-            </ul>
-
-            <h3 className="mt-8 font-semibold">
-              {t("sections.desktop.chatgptTitle")}
-            </h3>
-            <p>{t("sections.desktop.chatgptBody")}</p>
-            <ul className="mt-3 ml-6 list-disc space-y-2 text-muted-2">
-              <li>
-                {t.rich("sections.desktop.chatgptImport", {
-                  ...rich,
-                  submit: (chunks) => (
-                    <Link
-                      href={`/${locale}/submit`}
-                      className="text-brand underline underline-offset-4"
-                    >
-                      {chunks}
-                    </Link>
-                  ),
-                })}
-              </li>
-              <li>{t.rich("sections.desktop.chatgptExport", rich)}</li>
-            </ul>
-          </Section>
-
-          <Section id="distribute" title={t("sections.distribute.title")}>
-            <p>{t("sections.distribute.intro")}</p>
-
-            <ol className="ml-6 list-decimal space-y-3 text-muted-2">
-              <li>
-                {t.rich("sections.distribute.create", {
-                  ...rich,
-                  create: (chunks) => (
+                </QuickStartStep>
+                <QuickStartStep
+                  number="3"
+                  title={t("sections.quickStart.steps.select.title")}
+                  body={t.rich("sections.quickStart.steps.select.body", rich)}
+                  result={t.rich(
+                    "sections.quickStart.steps.select.result",
+                    rich,
+                  )}
+                />
+                <QuickStartStep
+                  number="4"
+                  title={t("sections.quickStart.steps.verify.title")}
+                  body={t.rich("sections.quickStart.steps.verify.body", rich)}
+                  result={t.rich(
+                    "sections.quickStart.steps.verify.result",
+                    rich,
+                  )}
+                />
+              </ol>
+              <Callout>
+                {t.rich("sections.quickStart.callout", {
+                  code: (chunks) => <code>{chunks}</code>,
+                  link: (chunks) => (
                     <Link
                       href={withLocale("/create", localeValue)}
                       className="font-medium underline underline-offset-4"
@@ -405,203 +226,405 @@ export default async function DocsPage({
                     </Link>
                   ),
                 })}
-              </li>
-              <li>{t.rich("sections.distribute.signIn", rich)}</li>
-              <li>{t.rich("sections.distribute.submit", rich)}</li>
-              <li>{t.rich("sections.distribute.review", rich)}</li>
-              <li>{t.rich("sections.distribute.install", rich)}</li>
-            </ol>
+              </Callout>
+            </Section>
 
-            <Callout>
-              {t.rich("sections.distribute.callout", {
-                ...rich,
-                takedown: (chunks) => (
-                  <Link
-                    href={withLocale("/legal/takedown", localeValue)}
-                    className="font-medium underline underline-offset-4"
-                  >
-                    {chunks}
-                  </Link>
-                ),
-              })}
-            </Callout>
-          </Section>
+            <Section id="install" title={t("sections.install.title")}>
+              <p>{t("sections.install.intro")}</p>
 
-          <Section id="validation" title={t("sections.validation.title")}>
-            <p>{t("sections.validation.intro")}</p>
-            <ul className="ml-6 list-disc space-y-1 text-muted-2">
-              <li>{t.rich("sections.validation.files", rich)}</li>
-              <li>{t.rich("sections.validation.spritesheet", rich)}</li>
-              <li>{t.rich("sections.validation.rateLimit", rich)}</li>
-              <li>{t.rich("sections.validation.slugs", rich)}</li>
-              <li>{t.rich("sections.validation.identity", rich)}</li>
-            </ul>
-          </Section>
+              <h3 className="font-semibold">
+                {t("sections.install.casualTitle")}
+              </h3>
+              <p>
+                {t.rich("sections.install.casualBody", {
+                  code: (chunks) => <code>{chunks}</code>,
+                })}
+              </p>
+              <CommandLine
+                command="npx petdex install boba"
+                source="docs-install-npx"
+                className="w-full max-w-xl"
+              />
 
-          <Section id="failure" title={t("sections.failure.title")}>
-            <div className="overflow-x-auto rounded-2xl border border-border-base bg-surface">
-              <table className="w-full min-w-[520px] text-sm">
-                <thead className="border-b border-border-base bg-surface-muted">
-                  <tr>
-                    <Th>{t("sections.failure.headers.symptom")}</Th>
-                    <Th>{t("sections.failure.headers.cause")}</Th>
-                    <Th>{t("sections.failure.headers.fix")}</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <Tr
-                    sym={t("sections.failure.rows.notSignedIn.symptom")}
-                    cause={t("sections.failure.rows.notSignedIn.cause")}
-                    fix={<code>petdex login</code>}
-                  />
-                  <Tr
-                    sym="presign 401"
-                    cause={t("sections.failure.rows.presign401.cause")}
-                    fix={
-                      <>
-                        <code>petdex logout</code> {t("sections.failure.then")}{" "}
-                        <code>petdex login</code>
-                      </>
-                    }
-                  />
-                  <Tr
-                    sym="presign 429"
-                    cause={t("sections.failure.rows.presign429.cause")}
-                    fix={
-                      <>
-                        {t("sections.failure.rows.presign429.fixBefore")}{" "}
-                        <a
-                          href={`${REPO_URL}/issues/new?labels=submit-fallback`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="underline underline-offset-4"
-                        >
-                          {t("sections.failure.rows.presign429.fixLink")}
-                        </a>
-                      </>
-                    }
-                  />
-                  <Tr
-                    sym="register 400 invalid_spritesheet"
-                    cause={t("sections.failure.rows.invalidSpritesheet.cause")}
-                    fix={t("sections.failure.rows.invalidSpritesheet.fix")}
-                  />
-                  <Tr
-                    sym="register 400 missing_field"
-                    cause={t("sections.failure.rows.missingField.cause")}
-                    fix={t("sections.failure.rows.missingField.fix")}
-                  />
-                  <Tr
-                    sym="R2 PUT 403"
-                    cause={t("sections.failure.rows.r2Put403.cause")}
-                    fix={t("sections.failure.rows.r2Put403.fix")}
-                  />
-                </tbody>
-              </table>
-            </div>
-          </Section>
+              <h3 className="font-semibold">
+                {t("sections.install.powerTitle")}
+              </h3>
+              <p>{t("sections.install.powerBody")}</p>
+              <CommandLine
+                command="npm install -g petdex"
+                source="docs-install-global"
+                className="w-full max-w-xl"
+              />
 
-          <Section id="agents" title={t("sections.agents.title")}>
-            <p>{t.rich("sections.agents.intro", rich)}</p>
+              <p>
+                {t.rich("sections.install.persistence", {
+                  code: (chunks) => <code>{chunks}</code>,
+                  strong: (chunks) => <strong>{chunks}</strong>,
+                })}
+              </p>
+            </Section>
 
-            <h3 className="mt-6 font-semibold">
-              {t("sections.agents.enablesTitle")}
-            </h3>
-            <ul className="ml-6 list-disc space-y-1 text-muted-2">
-              <li>{t.rich("sections.agents.enableCozy", rich)}</li>
-              <li>{t.rich("sections.agents.enableShare", rich)}</li>
-              <li>{t.rich("sections.agents.enableMake", rich)}</li>
-            </ul>
+            <Section id="authenticate" title={t("sections.authenticate.title")}>
+              <p>{t("sections.authenticate.intro")}</p>
+              <CommandLine
+                command="npx petdex login"
+                source="docs-auth-login"
+                className="w-full max-w-xl"
+              />
+              <p className="text-sm text-muted-2">
+                {t.rich("sections.authenticate.flow", rich)}
+              </p>
+              <p>{t("sections.authenticate.otherCommands")}</p>
+              <CommandLine
+                command="npx petdex whoami"
+                source="docs-auth-whoami"
+                className="w-full max-w-xl"
+              />
+              <CommandLine
+                command="npx petdex logout"
+                source="docs-auth-logout"
+                className="w-full max-w-xl"
+              />
+            </Section>
 
-            <h3 className="mt-6 font-semibold">
-              {t("sections.agents.enableTitle")}
-            </h3>
-            <p>{t("sections.agents.enableIntro")}</p>
-            <CommandLine
-              command={`mkdir -p ~/.claude/skills/petdex && curl -fsSL ${SKILL_URL.replace("/blob/", "/raw/")} -o ~/.claude/skills/petdex/SKILL.md`}
-              source="docs-agents-install"
-              className="w-full max-w-xl"
-            />
-            <p>{t.rich("sections.agents.enableOther", rich)}</p>
+            <Section id="commands" title={t("sections.commands.title")}>
+              <p>{t.rich("sections.commands.intro", rich)}</p>
 
-            <h3 className="mt-6 font-semibold">
-              {t("sections.agents.buildTitle")}
-            </h3>
-            <p>{t("sections.agents.buildBody")}</p>
-            <p>
-              <a
-                href={SKILL_URL}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1.5 font-medium underline underline-offset-4"
-              >
-                <GithubIcon className="size-4" />
-                .claude/skills/petdex/SKILL.md
-              </a>
-            </p>
-          </Section>
+              <h3 className="mt-6 font-semibold">
+                <code>petdex list</code>
+              </h3>
+              <p>{t("sections.commands.listBody")}</p>
+              <CommandLine
+                command="npx petdex list"
+                source="docs-cmd-list"
+                className="w-full max-w-xl"
+              />
 
-          <Section id="config" title={t("sections.config.title")}>
-            <p>{t("sections.config.intro")}</p>
-            <ul className="ml-6 list-disc space-y-1 text-muted-2">
-              <li>{t.rich("sections.config.petdexUrl", rich)}</li>
-              <li>{t.rich("sections.config.clerkIssuer", rich)}</li>
-              <li>{t.rich("sections.config.clerkClientId", rich)}</li>
-            </ul>
-          </Section>
+              <h3 className="mt-6 font-semibold">
+                <code>{t("sections.commands.installSyntax", placeholder)}</code>
+              </h3>
+              <p>{t.rich("sections.commands.installBody", rich)}</p>
+              <CommandLine
+                command="npx petdex install kebo"
+                source="docs-cmd-install"
+                className="w-full max-w-xl"
+              />
 
-          <Section id="contribute" title={t("sections.contribute.title")}>
-            <ul className="space-y-3 text-muted-2">
-              <li className="flex items-start gap-2">
-                <Check className="mt-1 size-4 shrink-0 text-muted-3" />
-                <span>
-                  {t("sections.contribute.prBefore")}{" "}
-                  <a
-                    href={REPO_URL}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="font-medium underline underline-offset-4"
-                  >
-                    crafter-station/petdex
-                  </a>
-                </span>
-              </li>
-              <li className="flex items-start gap-2">
-                <Check className="mt-1 size-4 shrink-0 text-muted-3" />
-                <span>
-                  {t("sections.contribute.issuesBefore")}{" "}
-                  <a
-                    href={`${REPO_URL}/issues`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="font-medium underline underline-offset-4"
-                  >
-                    {t("sections.contribute.issueLink")}
-                  </a>
-                </span>
-              </li>
-              <li className="flex items-start gap-2">
-                <Check className="mt-1 size-4 shrink-0 text-muted-3" />
-                <span>
-                  {t("sections.contribute.sponsorBefore")}{" "}
-                  <a
-                    href="https://github.com/sponsors/Railly"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="font-medium underline underline-offset-4"
-                  >
-                    GitHub Sponsors
-                  </a>{" "}
-                  {t("sections.contribute.sponsorAfter")}
-                </span>
-              </li>
-            </ul>
-          </Section>
-        </article>
-      </section>
+              <h3 className="mt-6 font-semibold">
+                <code>{t("sections.commands.submitSyntax", placeholder)}</code>
+              </h3>
+              <p>{t("sections.commands.submitIntro")}</p>
+              <ul className="ml-6 list-disc space-y-1 text-muted-2">
+                <li>{t.rich("sections.commands.submitSingle", rich)}</li>
+                <li>{t.rich("sections.commands.submitZip", rich)}</li>
+                <li>{t.rich("sections.commands.submitBulk", rich)}</li>
+              </ul>
+              <p>{t("sections.commands.bulkNote")}</p>
 
-      <SiteFooter />
-    </main>
+              <h3 className="mt-6 font-semibold">
+                <code>{t("sections.commands.collectionSyntax")}</code>
+              </h3>
+              <p>{t.rich("sections.commands.collectionBody", rich)}</p>
+              <ul className="ml-6 list-disc space-y-1 text-muted-2">
+                <li>{t.rich("sections.commands.collectionList", rich)}</li>
+                <li>{t.rich("sections.commands.collectionCreate", rich)}</li>
+                <li>{t.rich("sections.commands.collectionEdit", rich)}</li>
+                <li>{t.rich("sections.commands.collectionDelete", rich)}</li>
+              </ul>
+              <p>{t.rich("sections.commands.collectionLimits", rich)}</p>
+
+              <h3 className="mt-6 font-semibold">
+                <code>petdex login / logout / whoami</code>
+              </h3>
+              <p>{t("sections.commands.authBody")}</p>
+            </Section>
+
+            <Section id="desktop" title={t("sections.desktop.title")}>
+              <p>
+                {t.rich("sections.desktop.intro", {
+                  ...rich,
+                  download: (chunks) => (
+                    <Link
+                      href={withLocale("/download", localeValue)}
+                      prefetch={false}
+                      className="font-medium underline underline-offset-4"
+                    >
+                      {chunks}
+                    </Link>
+                  ),
+                })}
+              </p>
+
+              <Callout>
+                {t.rich("sections.desktop.sidecarCallout", rich)}
+                <pre className="mt-3 overflow-x-auto rounded-lg bg-surface-muted p-3 font-mono text-xs leading-relaxed">
+                  {[
+                    `T="$(cat "$HOME/.petdex/runtime/update-token")"`,
+                    `curl -X POST http://127.0.0.1:7777/state \\`,
+                    `  -H "Content-Type: application/json" \\`,
+                    `  -H "X-Petdex-Update-Token: $T" \\`,
+                    `  --data-raw '{"state":"waving"}'`,
+                  ].join("\n")}
+                </pre>
+              </Callout>
+
+              <h3 className="mt-8 font-semibold">
+                {t("sections.desktop.windowTitle")}
+              </h3>
+              <p>{t("sections.desktop.windowBody")}</p>
+
+              <h3 className="mt-6 font-semibold">
+                {t("sections.desktop.shortcutsTitle")}
+              </h3>
+              <p>{t.rich("sections.desktop.shortcutsBody", rich)}</p>
+
+              <h3 className="mt-6 font-semibold">
+                {t("sections.desktop.settingsTitle")}
+              </h3>
+              <ul className="ml-6 list-disc space-y-1 text-muted-2">
+                <li>{t.rich("sections.desktop.settingsPets", rich)}</li>
+                <li>{t.rich("sections.desktop.settingsAgents", rich)}</li>
+                <li>{t.rich("sections.desktop.settingsAppearance", rich)}</li>
+              </ul>
+
+              <h3 className="mt-8 font-semibold">
+                {t("sections.desktop.chatgptTitle")}
+              </h3>
+              <p>{t("sections.desktop.chatgptBody")}</p>
+              <ul className="mt-3 ml-6 list-disc space-y-2 text-muted-2">
+                <li>
+                  {t.rich("sections.desktop.chatgptImport", {
+                    ...rich,
+                    submit: (chunks) => (
+                      <Link
+                        href={withLocale("/submit", localeValue)}
+                        className="text-brand underline underline-offset-4"
+                      >
+                        {chunks}
+                      </Link>
+                    ),
+                  })}
+                </li>
+                <li>{t.rich("sections.desktop.chatgptExport", rich)}</li>
+              </ul>
+            </Section>
+
+            <Section id="distribute" title={t("sections.distribute.title")}>
+              <p>{t("sections.distribute.intro")}</p>
+
+              <ol className="ml-6 list-decimal space-y-3 text-muted-2">
+                <li>
+                  {t.rich("sections.distribute.create", {
+                    ...rich,
+                    create: (chunks) => (
+                      <Link
+                        href={withLocale("/create", localeValue)}
+                        className="font-medium underline underline-offset-4"
+                      >
+                        {chunks}
+                      </Link>
+                    ),
+                  })}
+                </li>
+                <li>{t.rich("sections.distribute.signIn", rich)}</li>
+                <li>{t.rich("sections.distribute.submit", rich)}</li>
+                <li>{t.rich("sections.distribute.review", rich)}</li>
+                <li>{t.rich("sections.distribute.install", rich)}</li>
+              </ol>
+
+              <Callout>
+                {t.rich("sections.distribute.callout", {
+                  ...rich,
+                  takedown: (chunks) => (
+                    <Link
+                      href={withLocale("/legal/takedown", localeValue)}
+                      className="font-medium underline underline-offset-4"
+                    >
+                      {chunks}
+                    </Link>
+                  ),
+                })}
+              </Callout>
+            </Section>
+
+            <Section id="validation" title={t("sections.validation.title")}>
+              <p>{t("sections.validation.intro")}</p>
+              <ul className="ml-6 list-disc space-y-1 text-muted-2">
+                <li>{t.rich("sections.validation.files", rich)}</li>
+                <li>{t.rich("sections.validation.spritesheet", rich)}</li>
+                <li>{t.rich("sections.validation.rateLimit", rich)}</li>
+                <li>{t.rich("sections.validation.slugs", rich)}</li>
+                <li>{t.rich("sections.validation.identity", rich)}</li>
+              </ul>
+            </Section>
+
+            <Section id="failure" title={t("sections.failure.title")}>
+              <div className="overflow-x-auto rounded-2xl border border-border-base bg-surface">
+                <table className="w-full min-w-[520px] text-sm">
+                  <thead className="border-b border-border-base bg-surface-muted">
+                    <tr>
+                      <Th>{t("sections.failure.headers.symptom")}</Th>
+                      <Th>{t("sections.failure.headers.cause")}</Th>
+                      <Th>{t("sections.failure.headers.fix")}</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <Tr
+                      sym={t("sections.failure.rows.notSignedIn.symptom")}
+                      cause={t("sections.failure.rows.notSignedIn.cause")}
+                      fix={<code>petdex login</code>}
+                    />
+                    <Tr
+                      sym="presign 401"
+                      cause={t("sections.failure.rows.presign401.cause")}
+                      fix={
+                        <>
+                          <code>petdex logout</code>{" "}
+                          {t("sections.failure.then")} <code>petdex login</code>
+                        </>
+                      }
+                    />
+                    <Tr
+                      sym="presign 429"
+                      cause={t("sections.failure.rows.presign429.cause")}
+                      fix={
+                        <>
+                          {t("sections.failure.rows.presign429.fixBefore")}{" "}
+                          <a
+                            href={`${REPO_URL}/issues/new?labels=submit-fallback`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="underline underline-offset-4"
+                          >
+                            {t("sections.failure.rows.presign429.fixLink")}
+                          </a>
+                        </>
+                      }
+                    />
+                    <Tr
+                      sym="register 400 invalid_spritesheet"
+                      cause={t(
+                        "sections.failure.rows.invalidSpritesheet.cause",
+                      )}
+                      fix={t("sections.failure.rows.invalidSpritesheet.fix")}
+                    />
+                    <Tr
+                      sym="register 400 missing_field"
+                      cause={t("sections.failure.rows.missingField.cause")}
+                      fix={t("sections.failure.rows.missingField.fix")}
+                    />
+                    <Tr
+                      sym="R2 PUT 403"
+                      cause={t("sections.failure.rows.r2Put403.cause")}
+                      fix={t("sections.failure.rows.r2Put403.fix")}
+                    />
+                  </tbody>
+                </table>
+              </div>
+            </Section>
+
+            <Section id="agents" title={t("sections.agents.title")}>
+              <p>{t.rich("sections.agents.intro", rich)}</p>
+
+              <h3 className="mt-6 font-semibold">
+                {t("sections.agents.enablesTitle")}
+              </h3>
+              <ul className="ml-6 list-disc space-y-1 text-muted-2">
+                <li>{t.rich("sections.agents.enableCozy", rich)}</li>
+                <li>{t.rich("sections.agents.enableShare", rich)}</li>
+                <li>{t.rich("sections.agents.enableMake", rich)}</li>
+              </ul>
+
+              <h3 className="mt-6 font-semibold">
+                {t("sections.agents.enableTitle")}
+              </h3>
+              <p>{t("sections.agents.enableIntro")}</p>
+              <CommandLine
+                command={`mkdir -p ~/.claude/skills/petdex && curl -fsSL ${SKILL_URL.replace("/blob/", "/raw/")} -o ~/.claude/skills/petdex/SKILL.md`}
+                source="docs-agents-install"
+                className="w-full max-w-xl"
+              />
+              <p>{t.rich("sections.agents.enableOther", rich)}</p>
+
+              <h3 className="mt-6 font-semibold">
+                {t("sections.agents.buildTitle")}
+              </h3>
+              <p>{t("sections.agents.buildBody")}</p>
+              <p>
+                <a
+                  href={SKILL_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 font-medium underline underline-offset-4"
+                >
+                  <GithubIcon className="size-4" />
+                  .claude/skills/petdex/SKILL.md
+                </a>
+              </p>
+            </Section>
+
+            <Section id="config" title={t("sections.config.title")}>
+              <p>{t("sections.config.intro")}</p>
+              <ul className="ml-6 list-disc space-y-1 text-muted-2">
+                <li>{t.rich("sections.config.petdexUrl", rich)}</li>
+                <li>{t.rich("sections.config.clerkIssuer", rich)}</li>
+                <li>{t.rich("sections.config.clerkClientId", rich)}</li>
+              </ul>
+            </Section>
+
+            <Section id="contribute" title={t("sections.contribute.title")}>
+              <ul className="space-y-3 text-muted-2">
+                <li className="flex items-start gap-2">
+                  <Check className="mt-1 size-4 shrink-0 text-muted-3" />
+                  <span>
+                    {t("sections.contribute.prBefore")}{" "}
+                    <a
+                      href={REPO_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-medium underline underline-offset-4"
+                    >
+                      crafter-station/petdex
+                    </a>
+                  </span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <Check className="mt-1 size-4 shrink-0 text-muted-3" />
+                  <span>
+                    {t("sections.contribute.issuesBefore")}{" "}
+                    <a
+                      href={`${REPO_URL}/issues`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-medium underline underline-offset-4"
+                    >
+                      {t("sections.contribute.issueLink")}
+                    </a>
+                  </span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <Check className="mt-1 size-4 shrink-0 text-muted-3" />
+                  <span>
+                    {t("sections.contribute.sponsorBefore")}{" "}
+                    <a
+                      href="https://github.com/sponsors/Railly"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-medium underline underline-offset-4"
+                    >
+                      GitHub Sponsors
+                    </a>{" "}
+                    {t("sections.contribute.sponsorAfter")}
+                  </span>
+                </li>
+              </ul>
+            </Section>
+          </article>
+        </section>
+
+        <SiteFooter />
+      </main>
+    </>
   );
 }
 

@@ -25,7 +25,9 @@ import sharp from "sharp";
 
 import { invalidatePetCaches } from "@/lib/db/cached-aggregates";
 import { db, schema } from "@/lib/db/client";
+import { gateImportText } from "@/lib/import-gate";
 import { R2_BUCKET, R2_PUBLIC_BASE, r2 } from "@/lib/r2";
+import { URL_BLOCKED_REASON } from "@/lib/url-blocklist";
 
 type Args = {
   folder?: string;
@@ -33,11 +35,12 @@ type Args = {
   creditUrl?: string;
   ownerId?: string;
   apply: boolean;
+  skipBlocklist: boolean;
   approve: boolean;
 };
 
 function parseArgs(): Args {
-  const out: Args = { apply: false, approve: false };
+  const out: Args = { apply: false, approve: false, skipBlocklist: false };
   const argv = process.argv.slice(2);
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -46,11 +49,12 @@ function parseArgs(): Args {
     else if (a === "--credit-url") out.creditUrl = argv[++i];
     else if (a === "--owner-id") out.ownerId = argv[++i];
     else if (a === "--apply") out.apply = true;
+    else if (a === "--skip-blocklist") out.skipBlocklist = true;
     else if (a === "--approve") out.approve = true;
   }
   if (!out.folder) {
     console.error(
-      "usage: --folder <dir> [--credit-name X --credit-url Y] [--owner-id user_xxx] [--apply] [--approve]",
+      "usage: --folder <dir> [--credit-name X --credit-url Y] [--owner-id user_xxx] [--apply] [--approve] [--skip-blocklist]",
     );
     process.exit(2);
   }
@@ -126,8 +130,15 @@ async function main() {
   console.log(`  - ${spriteKey}`);
   console.log(`  - ${petJsonKey}`);
   console.log(`  - ${zipKey}`);
-  console.log(`credit name  : ${args.creditName ?? "(none)"}`);
-  console.log(`credit url   : ${args.creditUrl ?? "(none)"}`);
+  // Shown as passed, with the rule that decides whether they survive: with an
+  // explicit --owner-id the pet belongs to a real account, so the insert forces
+  // both credit fields to null (the author is the owner, not a credit). Printing
+  // the flags bare read as if they would be applied.
+  const creditNote = args.ownerId?.trim()
+    ? " (ignored: --owner-id owns it)"
+    : "";
+  console.log(`credit name  : ${args.creditName ?? "(none)"}${creditNote}`);
+  console.log(`credit url   : ${args.creditUrl ?? "(none)"}${creditNote}`);
   console.log(
     `owner id     : ${args.ownerId ?? process.env.PETDEX_ADMIN_USER_IDS?.split(",")[0]?.trim() ?? "(missing)"}`,
   );
@@ -155,6 +166,31 @@ async function main() {
   const source: "submit" | "discover" = importedAsRealOwner
     ? "submit"
     : "discover";
+
+  // The submission path runs every pet through the keyword and URL
+  // blocklists; an admin import skipped both, so content the normal path
+  // would reject went live pre-approved from one command. The check is not
+  // an approval step — --approve still skips human review — but the
+  // blocklists are the security baseline the keyword-sweep script later
+  // re-runs, so bypassing them needs the explicit escape hatch.
+  if (!args.skipBlocklist) {
+    const rejection = gateImportText({
+      displayName: petJson.displayName.trim().slice(0, 60),
+      description: petJson.description.trim().slice(0, 280),
+      creditName: args.creditName,
+      creditUrl: args.creditUrl,
+    });
+    if (rejection) {
+      console.error(
+        rejection.kind === "keyword"
+          ? `blocked keyword "${rejection.keyword}"; ` +
+              "import refused. Pass --skip-blocklist to override."
+          : `URL-like content in ${rejection.field}; import refused. ` +
+              `Pass --skip-blocklist to override. ${URL_BLOCKED_REASON}`,
+      );
+      process.exit(1);
+    }
+  }
 
   console.log("\nUploading to R2…");
   await r2.send(

@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   rmSync,
+  statSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
@@ -548,6 +549,17 @@ describe("session titles", () => {
     const dir = `${process.env.TMPDIR ?? "/tmp"}/petdex-title-test-${Date.now()}`;
     rememberSessionTitle(dir, "abc-123", "  arregla   el login\n con oauth  ");
     expect(sessionTitle(dir, "abc-123")).toBe("arregla el login con oauth");
+  });
+
+  // The title is the first line of the user's prompt, which can carry
+  // secrets or paths; it must not be world-readable under the default
+  // umask. The rest of ~/.petdex/runtime writes 0600 for the same reason.
+  test("session title file is written 0600", () => {
+    const dir = `${process.env.TMPDIR ?? "/tmp"}/petdex-title-test-mode-${Date.now()}`;
+    rememberSessionTitle(dir, "abc-123", "ship the fix");
+    if (process.platform === "win32") return;
+    const mode = statSync(join(dir, "abc-123.json")).mode & 0o777;
+    expect(mode).toBe(0o600);
   });
 
   test("missing session reads null", () => {

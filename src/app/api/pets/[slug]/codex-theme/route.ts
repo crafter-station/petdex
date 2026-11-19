@@ -27,15 +27,24 @@ export async function GET(_req: Request, { params }: Params) {
     .limit(1);
 
   if (!pet || pet.status !== "approved") {
-    return NextResponse.json({ error: "not_found" }, { status: 404 });
+    // The success path caches per-slug at the edge for 24h. A not-yet-
+    // approved slug must not be cached as a 404 for that window — the
+    // sibling thumb/wastickers/variants routes carry the same header so
+    // approval flips the endpoint from 404 to 200 immediately.
+    return NextResponse.json(
+      { error: "not_found" },
+      { status: 404, headers: { "Cache-Control": "no-store" } },
+    );
   }
   if (!pet.dominantColor) {
+    // Same reasoning: `no_color` is transient — it clears as soon as the
+    // colour extraction lands, so it must not stick at the edge.
     return NextResponse.json(
       {
         error: "no_color",
         message: "Pet has no extracted dominant color yet.",
       },
-      { status: 422 },
+      { status: 422, headers: { "Cache-Control": "no-store" } },
     );
   }
 

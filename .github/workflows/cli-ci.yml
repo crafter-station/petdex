@@ -53,7 +53,10 @@ jobs:
 
       - name: Run CLI tests
         if: runner.os != 'Windows'
-        run: bun test
+        # `bun run test`, not a bare `bun test`: the suite's 30s per-test
+        # timeout lives in the package script, and the spawn-a-CLI specs
+        # brush Bun's 5s default on a loaded runner.
+        run: bun run test
 
       - name: Skip POSIX-only CLI tests on Windows
         if: runner.os == 'Windows'

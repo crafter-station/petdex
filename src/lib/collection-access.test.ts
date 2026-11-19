@@ -5,7 +5,14 @@ import { PgDialect } from "drizzle-orm/pg-core";
 import * as schema from "@/lib/db/schema";
 
 mock.module("server-only", () => ({}));
-mock.module("@/lib/db/client", () => ({ db: {}, schema }));
+mock.module("@/lib/db/client", () => ({
+  db: {},
+  schema,
+  // Named here because mock.module is process-wide: a suite that
+  // links `executeAtomicReturning` fails with a SyntaxError otherwise.
+  executeAtomicReturning: async () => [],
+  rowsOf: () => [],
+}));
 
 const {
   collectionApprovedPetsCondition,

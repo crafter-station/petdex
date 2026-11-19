@@ -9,6 +9,7 @@ import {
   invalidatePublicProfileCaches,
 } from "@/lib/db/cached-aggregates";
 import { db, schema } from "@/lib/db/client";
+import { isUniqueViolation } from "@/lib/db/pg-errors";
 import {
   dedupePins,
   isPinOnlyProfilePatch,
@@ -51,6 +52,9 @@ export async function PATCH(req: Request): Promise<Response> {
   } catch {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    return NextResponse.json({ error: "invalid_json" }, { status: 400 });
+  }
 
   const limiter = isPinOnlyProfilePatch(body)
     ? profilePinRatelimit
@@ -90,30 +94,42 @@ export async function PATCH(req: Request): Promise<Response> {
     if (body.handle !== null && typeof body.handle !== "string") {
       return NextResponse.json({ error: "invalid_handle" }, { status: 400 });
     }
-    const normalized = normalizeProfileHandle(body.handle);
-    if (normalized === null) {
-      return NextResponse.json({ error: "handle_too_short" }, { status: 400 });
-    }
-    const validation = validateProfileHandle(normalized);
-    if (validation !== "ok") {
-      return NextResponse.json(
-        { error: `handle_${validation}` },
-        { status: 400 },
-      );
-    }
-    if (normalized) {
-      const existing = await db.query.userProfiles.findFirst({
-        columns: { userId: true },
-        where: and(
-          eq(schema.userProfiles.handle, normalized),
-          ne(schema.userProfiles.userId, userId),
-        ),
-      });
-      if (existing) {
-        return NextResponse.json({ error: "handle_taken" }, { status: 409 });
+    // Clearing the handle is a legal edit — the column is nullable and
+    // `validateProfileHandle(null)` answers "ok" — and both web editors
+    // send `handle.trim() || null`. Rejecting it here 400'd the whole
+    // PATCH, so clearing the field also blocked a bio-only save. Mirror
+    // the displayName/bio blocks: null means "clear".
+    if (body.handle === null || body.handle === "") {
+      patch.handle = null;
+    } else {
+      const normalized = normalizeProfileHandle(body.handle);
+      if (normalized === null) {
+        return NextResponse.json(
+          { error: "handle_too_short" },
+          { status: 400 },
+        );
       }
+      const validation = validateProfileHandle(normalized);
+      if (validation !== "ok") {
+        return NextResponse.json(
+          { error: `handle_${validation}` },
+          { status: 400 },
+        );
+      }
+      if (normalized) {
+        const existing = await db.query.userProfiles.findFirst({
+          columns: { userId: true },
+          where: and(
+            eq(schema.userProfiles.handle, normalized),
+            ne(schema.userProfiles.userId, userId),
+          ),
+        });
+        if (existing) {
+          return NextResponse.json({ error: "handle_taken" }, { status: 409 });
+        }
+      }
+      patch.handle = normalized;
     }
-    patch.handle = normalized;
   }
 
   if (body.bio !== undefined) {
@@ -153,6 +169,18 @@ export async function PATCH(req: Request): Promise<Response> {
   }
 
   if (body.pin || body.unpin) {
+    // `pin`/`unpin` are typed as `{ slug: string }` but the body is an
+    // unchecked cast: `{pin:{slug:5}}` made `.trim` throw and 500 the route.
+    // The sibling fields above validate their shape; do the same here.
+    const slugOf = (value: unknown): string | null =>
+      typeof (value as { slug?: unknown })?.slug === "string"
+        ? (value as { slug: string }).slug.trim().toLowerCase()
+        : null;
+    const pinSlug = slugOf(body.pin);
+    const unpinSlug = slugOf(body.unpin);
+    if ((body.pin && pinSlug === null) || (body.unpin && unpinSlug === null)) {
+      return NextResponse.json({ error: "invalid_featured" }, { status: 400 });
+    }
     // Read current set if the caller didn't override via featuredPetSlugs.
     if (nextSlugs === null) {
       const current = await db.query.userProfiles.findFirst({
@@ -160,8 +188,8 @@ export async function PATCH(req: Request): Promise<Response> {
       });
       nextSlugs = (current?.featuredPetSlugs as string[] | undefined) ?? [];
     }
-    if (body.pin?.slug) {
-      const slug = body.pin.slug.trim().toLowerCase();
+    if (pinSlug) {
+      const slug = pinSlug;
       if (!nextSlugs.includes(slug)) {
         if (nextSlugs.length >= MAX_PINNED_PETS) {
           return NextResponse.json(
@@ -172,8 +200,8 @@ export async function PATCH(req: Request): Promise<Response> {
         nextSlugs = [...nextSlugs, slug];
       }
     }
-    if (body.unpin?.slug) {
-      const slug = body.unpin.slug.trim().toLowerCase();
+    if (unpinSlug) {
+      const slug = unpinSlug;
       nextSlugs = nextSlugs.filter((s) => s !== slug);
     }
   }
@@ -218,24 +246,36 @@ export async function PATCH(req: Request): Promise<Response> {
     previousHandle = current?.handle ?? null;
   }
 
-  await db
-    .insert(schema.userProfiles)
-    .values({
-      userId,
-      displayName: patch.displayName ?? null,
-      handle: patch.handle ?? null,
-      bio: patch.bio ?? null,
-      preferredLocale: patch.preferredLocale ?? defaultLocale,
-      featuredPetSlugs: patch.featuredPetSlugs ?? [],
-      updatedAt: new Date(),
-    })
-    .onConflictDoUpdate({
-      target: schema.userProfiles.userId,
-      set: {
-        ...patch,
+  try {
+    await db
+      .insert(schema.userProfiles)
+      .values({
+        userId,
+        displayName: patch.displayName ?? null,
+        handle: patch.handle ?? null,
+        bio: patch.bio ?? null,
+        preferredLocale: patch.preferredLocale ?? defaultLocale,
+        featuredPetSlugs: patch.featuredPetSlugs ?? [],
         updatedAt: new Date(),
-      },
-    });
+      })
+      .onConflictDoUpdate({
+        target: schema.userProfiles.userId,
+        set: {
+          ...patch,
+          updatedAt: new Date(),
+        },
+      });
+  } catch (error) {
+    // The handle check above is a not-in-the-same-statement read, so two
+    // accounts taking the same handle at once both pass it and the second
+    // INSERT hits `user_profiles_handle_unique`. Answer the 409 the check
+    // would have, instead of an uncaught 23505 → 500. Same-shape race as
+    // `isSlugUniqueViolation` covers for submission slugs.
+    if (isUniqueViolation(error)) {
+      return NextResponse.json({ error: "handle_taken" }, { status: 409 });
+    }
+    throw error;
+  }
   await Promise.all([
     invalidatePublicProfileCaches(userId),
     invalidatePublicHandleCaches(previousHandle, patch.handle),

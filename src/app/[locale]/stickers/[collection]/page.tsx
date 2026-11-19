@@ -29,9 +29,14 @@ type PageProps = {
 
 export async function generateMetadata({ params }: PageProps) {
   const { collection, locale } = await params;
+  const t = await getTranslations({
+    locale: hasLocale(locale) ? locale : "en",
+    namespace: "sticker",
+  });
+  const name = collection === "claude" ? "Claude" : collection;
   return {
-    title: `${collection === "claude" ? "Claude" : collection} reactions`,
-    description: "Pick a reaction, copy the sticker, or share a reaction deck.",
+    title: t("reactionsTitle", { name }),
+    description: t("reactionsDescription"),
     alternates: buildLocaleAlternates(
       `/stickers/${collection}`,
       hasLocale(locale) ? locale : undefined,
@@ -73,6 +78,7 @@ export default async function StickerCollectionPage({
     outline: t("outline"),
     copy: t("copy"),
     copied: t("copied"),
+    copyFailed: t("copyFailed"),
     download: t("download"),
     downloadWhatsApp: t("downloadWhatsApp"),
     whatsappNote: t("whatsappNote"),
@@ -80,6 +86,7 @@ export default async function StickerCollectionPage({
     addToDeck: t("addToDeck"),
     deck: t("deck"),
     emptyDeck: t("emptyDeck"),
+    remove: t("remove"),
     shareReaction: t("shareReaction"),
     reactionShared: t("reactionShared"),
     shareDeck: t("shareDeck"),
@@ -91,34 +98,36 @@ export default async function StickerCollectionPage({
   };
 
   return (
-    <main className="min-h-dvh bg-background text-foreground">
+    <>
       <SiteHeader />
-      <section className="mx-auto w-full max-w-[1440px] px-5 py-10 md:px-8 md:py-16">
-        <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
-          {t("eyebrow")}
-        </p>
-        <div className="mt-3 mb-8 flex flex-col justify-between gap-4 md:flex-row md:items-end">
-          <div>
-            <h1 className="text-balance text-4xl font-semibold tracking-tight md:text-6xl">
-              {t("title", { collection: collection.title })}
-            </h1>
-            <p className="mt-3 max-w-2xl text-base leading-7 text-muted-1 md:text-lg">
-              {t("description")}
+      <main id="main" className="min-h-dvh bg-background text-foreground">
+        <section className="mx-auto w-full max-w-[1440px] px-5 py-10 md:px-8 md:py-16">
+          <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
+            {t("eyebrow")}
+          </p>
+          <div className="mt-3 mb-8 flex flex-col justify-between gap-4 md:flex-row md:items-end">
+            <div>
+              <h1 className="text-balance text-4xl font-semibold tracking-tight md:text-6xl">
+                {t("title", { collection: collection.title })}
+              </h1>
+              <p className="mt-3 max-w-2xl text-base leading-7 text-muted-1 md:text-lg">
+                {t("description")}
+              </p>
+            </div>
+            <p className="font-mono text-xs text-muted-2">
+              {t("count", { count: collection.pets.length })}
             </p>
           </div>
-          <p className="font-mono text-xs text-muted-2">
-            {t("count", { count: collection.pets.length })}
-          </p>
-        </div>
-        <StickerExplorer
-          collection={collection}
-          initialQuery={initialQuery}
-          labels={labels}
-          demo={demo}
-        />
-      </section>
-      <SiteFooter />
-    </main>
+          <StickerExplorer
+            collection={collection}
+            initialQuery={initialQuery}
+            labels={labels}
+            demo={demo}
+          />
+        </section>
+        <SiteFooter />
+      </main>
+    </>
   );
 }
 

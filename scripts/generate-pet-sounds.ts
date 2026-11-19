@@ -65,6 +65,11 @@ async function main() {
     for (const error of errors) {
       console.log(`- ${error.slug}: ${error.reason}`);
     }
+    // Non-zero so a scripted run is not read as complete when pets were left
+    // without a sound — the same convention `review-pending-submissions` and
+    // the backfills follow. In DRY mode a "failure" is still a real render
+    // error worth surfacing, so the exit is unconditional.
+    process.exitCode = 1;
   }
 }
 

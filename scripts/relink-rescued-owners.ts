@@ -11,6 +11,12 @@
 // verified GitHub external account matches, and reassigns owner_id +
 // owner_email. Pets without a matching Clerk user stay on admin (they
 // can still claim later via /my-pets > banner).
+//
+// Usage:
+//   bun --env-file .env.local scripts/relink-rescued-owners.ts           # preview
+//   bun --env-file .env.local scripts/relink-rescued-owners.ts --apply   # write
+//
+// Ownership is rewritten in place, so writing is opt-in.
 
 // Use the Clerk CLI (`clerk api`) so we don't have to handle a sk_live in
 // the script's environment. The CLI authenticates from your local
@@ -145,6 +151,8 @@ async function main() {
 
   console.log(`scanning ${rows.length} admin-owned, github-credited pets`);
 
+  const apply = process.argv.includes("--apply");
+
   // Cache GitHub login -> clerk lookup so we don't re-walk Clerk pages
   // for the same author across multiple pets.
   const cache = new Map<
@@ -184,6 +192,10 @@ async function main() {
       continue;
     }
 
+    if (!apply) {
+      console.log(`    would relink: ${row.slug} (${row.status}) → ${ghLogin}`);
+      continue;
+    }
     await db
       .update(schema.submittedPets)
       .set({
@@ -196,6 +208,7 @@ async function main() {
   }
 
   console.log(`\nrelinked: ${relinked}`);
+  if (!apply) console.log("(dry run — pass --apply to write)");
   console.log(
     `unmatched: ${unmatched} (no Clerk account with that github yet — they can still claim via /my-pets after sign-in)`,
   );

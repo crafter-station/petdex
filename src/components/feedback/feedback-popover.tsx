@@ -21,6 +21,14 @@ import {
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 
+// Server error code → localized message key. See requests-view.tsx for why the
+// code is mapped rather than the route's English `message`.
+const FEEDBACK_ERROR_KEYS: Record<string, string> = {
+  rate_limited: "rateLimited",
+  message_too_long: "tooLong",
+  invalid_email: "invalidEmail",
+};
+
 export type FeedbackKind = "suggestion" | "bug" | "praise" | "other";
 
 export type FeedbackSubmitState =
@@ -128,12 +136,15 @@ export function FeedbackPopover({
             error?: string;
             message?: string;
           };
+          // The route answers with an English `message` for several
+          // rejections ("Try again in an hour."); rendering it verbatim showed
+          // a zh/es user an English sentence. Map the code, fall back to a
+          // generic line.
           setState({
             tag: "error",
-            reason:
-              data.message ??
-              data.error ??
-              t("errors.submitFailed", { status: res.status }),
+            reason: data.error
+              ? t(`errors.${FEEDBACK_ERROR_KEYS[data.error] ?? "generic"}`)
+              : t("errors.submitFailed", { status: res.status }),
           });
           return;
         }
@@ -144,6 +155,17 @@ export function FeedbackPopover({
     },
     [state.tag, message, email, kind, t, setState],
   );
+
+  // The textarea has no visible label; the kind-specific prompt doubles as
+  // its accessible name so screen readers announce the same guidance.
+  const messagePrompt =
+    kind === "bug"
+      ? t("placeholders.bug")
+      : kind === "suggestion"
+        ? t("placeholders.suggestion")
+        : kind === "praise"
+          ? t("placeholders.praise")
+          : t("placeholders.other");
 
   return (
     <div
@@ -170,7 +192,10 @@ export function FeedbackPopover({
       </div>
 
       {state.tag === "ok" ? (
-        <div className="flex flex-col items-center gap-3 px-6 py-10 text-center">
+        <div
+          role="status"
+          className="flex flex-col items-center gap-3 px-6 py-10 text-center"
+        >
           <span className="grid size-12 place-items-center rounded-full bg-chip-success-bg text-chip-success-fg ring-1 ring-chip-success-fg/20">
             <Check className="size-5" />
           </span>
@@ -210,15 +235,8 @@ export function FeedbackPopover({
               setMessage(e.target.value);
               if (state.tag === "error") setState({ tag: "idle" });
             }}
-            placeholder={
-              kind === "bug"
-                ? t("placeholders.bug")
-                : kind === "suggestion"
-                  ? t("placeholders.suggestion")
-                  : kind === "praise"
-                    ? t("placeholders.praise")
-                    : t("placeholders.other")
-            }
+            aria-label={messagePrompt}
+            placeholder={messagePrompt}
             rows={4}
             maxLength={4000}
             className="w-full resize-none rounded-2xl border border-border-base bg-surface px-3 py-2.5 text-sm text-foreground outline-none transition placeholder:text-muted-4 focus:border-border-strong"
@@ -228,12 +246,15 @@ export function FeedbackPopover({
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
+            aria-label={t("emailPlaceholder")}
             placeholder={t("emailPlaceholder")}
             className="h-10 w-full rounded-full border border-border-base bg-surface px-3.5 text-sm text-foreground outline-none transition placeholder:text-muted-4 focus:border-border-strong"
           />
 
           {state.tag === "error" ? (
-            <p className="text-xs text-chip-danger-fg">{state.reason}</p>
+            <p role="alert" className="text-xs text-chip-danger-fg">
+              {state.reason}
+            </p>
           ) : null}
 
           <div className="flex items-center justify-between gap-2">

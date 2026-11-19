@@ -3,6 +3,7 @@ import {
   normalizeLocale,
   p,
   petdexUrl,
+  sanitizeSubject,
   wrapEmail,
 } from "@/lib/email-templates/shared";
 
@@ -79,5 +80,5 @@ export function renderSubmissionApprovedEmail(
     p(`Profile: ${homeUrl}`),
   ]);
 
-  return { subject: copy.subject, html, text };
+  return { subject: sanitizeSubject(copy.subject), html, text };
 }
