@@ -49,17 +49,23 @@ try:
             "PWD": directory,
         }
 
-        def send(phase, payload):
+        def send(phase, payload, expect=frozenset()):
             before = len(requests)
             subprocess.run(
                 [str(binary), "bubble", phase, "codex"],
                 input=json.dumps(payload), text=True, env=environment,
                 cwd=directory, check=True, timeout=5, capture_output=True,
             )
-            # The runner exits once the request is written, without reading
-            # a response, so the handler thread may append after it returns.
+            # The runner exits once its posts are written, without reading a
+            # response, and /bubble and /state go out on separate threads, so
+            # either may be appended after it returns. Wait for every expected
+            # path, or for any request when none is expected.
+            def arrived():
+                paths = {path for path, _ in requests[before:]}
+                return expect <= paths if expect else bool(paths)
+
             deadline = time.monotonic() + 2
-            while len(requests) == before and time.monotonic() < deadline:
+            while not arrived() and time.monotonic() < deadline:
                 time.sleep(0.02)
             return requests[before:]
 
@@ -79,14 +85,15 @@ try:
 
         assert not journal_events()
 
+        visible = frozenset({"/bubble", "/state"})
         for session, cwd in (("projectless", ""), ("workspace", "/project")):
-            events = send("user-prompt", {"session_id": session, "cwd": cwd, "prompt": "Help me plan"})
+            events = send("user-prompt", {"session_id": session, "cwd": cwd, "prompt": "Help me plan"}, visible)
             assert any(path == "/bubble" and body["session_id"] == session for path, body in events)
             assert (runtime / "sessions" / f"{session}.json").is_file()
 
         assert not send("user-prompt", {"session_id": "internal", "thread_source": "ambient_suggestions", "prompt": "Internal"})
         assert {event["session_id"] for event in journal_events()} == {"projectless", "workspace"}
-        assert send("user-prompt", {"session_id": "hidden", "thread_source": "user", "prompt": "My visible task"})
+        assert send("user-prompt", {"session_id": "hidden", "thread_source": "user", "prompt": "My visible task"}, visible)
         assert not (runtime / "sessions" / "hidden.codex-hidden.json").exists()
         (runtime / "update-token").unlink()
         before = journal_events()
