@@ -99,7 +99,7 @@ impl Default for AttentionConfig {
             completed_dwell_ms: 8_000,
             failed_dwell_ms: 12_000,
             running_stale_ms: 15 * 60 * 1_000,
-            max_bubbles: 8,
+            max_bubbles: 12,
         }
     }
 }

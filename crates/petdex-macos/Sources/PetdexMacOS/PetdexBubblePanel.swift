@@ -206,33 +206,129 @@ private struct PetdexBubbleCardView: View {
 private struct PetdexBubbleStackView: View {
     let bubbles: [ActiveBubble]
     let showAllSessions: Bool
+    let isExpanded: Bool
+    let onToggleExpand: () -> Void
     let onDismiss: (ActiveBubble) -> Void
 
-    private var visibleBubbles: [ActiveBubble] {
-        if showAllSessions {
-            return Array(bubbles.prefix(4))
-        }
-        return Array(bubbles.prefix(1))
-    }
+    private let cobaltRim = Color(red: 0.231, green: 0.349, blue: 0.949)
+    private let navyInk = Color(red: 0.082, green: 0.118, blue: 0.278)
+    private let pearlTop = Color.white
+    private let pearlBottom = Color(red: 0.949, green: 0.961, blue: 0.996)
+    private let lipTint = Color(red: 0.835, green: 0.867, blue: 0.961)
 
-    private var extraCount: Int {
-        if !showAllSessions && bubbles.count > 1 {
-            return bubbles.count - 1
-        }
-        return 0
+    private var peekingLayers: Int {
+        min(2, max(0, bubbles.count - 1))
     }
 
     var body: some View {
-        VStack(spacing: 6) {
-            ForEach(Array(visibleBubbles.enumerated()), id: \.element.sessionId) { index, bubble in
-                PetdexBubbleCardView(
-                    bubble: bubble,
-                    showTail: index == visibleBubbles.count - 1,
-                    extraCount: index == 0 ? extraCount : 0,
-                    onDismiss: {
-                        onDismiss(bubble)
+        Group {
+            if bubbles.count > 1 && isExpanded {
+                VStack(spacing: 6) {
+                    HStack {
+                        Text("\(bubbles.count) SESSIONS")
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Capsule().fill(cobaltRim))
+
+                        Spacer(minLength: 4)
+
+                        Button(action: onToggleExpand) {
+                            HStack(spacing: 3) {
+                                Image(systemName: "rectangle.stack")
+                                    .font(.system(size: 9, weight: .bold))
+                                Text("Stack")
+                                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                            }
+                            .foregroundColor(navyInk)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(
+                                Capsule()
+                                    .fill(pearlTop.opacity(0.95))
+                                    .overlay(Capsule().stroke(cobaltRim.opacity(0.22), lineWidth: 1))
+                            )
+                        }
+                        .buttonStyle(.plain)
                     }
-                )
+                    .frame(minWidth: 204, maxWidth: 276)
+
+                    ScrollView(.vertical, showsIndicators: false) {
+                        VStack(spacing: 6) {
+                            ForEach(Array(bubbles.prefix(12).enumerated()), id: \.element.sessionId) { index, bubble in
+                                PetdexBubbleCardView(
+                                    bubble: bubble,
+                                    showTail: index == min(bubbles.count, 12) - 1,
+                                    extraCount: 0,
+                                    onDismiss: {
+                                        onDismiss(bubble)
+                                    }
+                                )
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                    .frame(maxHeight: 300)
+                }
+            } else if let front = bubbles.first {
+                ZStack(alignment: .top) {
+                    if bubbles.count >= 3 && showAllSessions {
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [pearlTop.opacity(0.86), pearlBottom.opacity(0.82)],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                    .strokeBorder(cobaltRim.opacity(0.14), lineWidth: 1)
+                            )
+                            .frame(width: 224, height: 52)
+                            .scaleEffect(0.90)
+                            .offset(y: -14)
+                            .shadow(color: navyInk.opacity(0.08), radius: 4, x: 0, y: 2)
+                            .onTapGesture(perform: onToggleExpand)
+                    }
+
+                    if bubbles.count >= 2 && showAllSessions {
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [pearlTop.opacity(0.94), pearlBottom.opacity(0.92)],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                    .strokeBorder(cobaltRim.opacity(0.16), lineWidth: 1.1)
+                            )
+                            .frame(width: 244, height: 56)
+                            .scaleEffect(0.95)
+                            .offset(y: -7)
+                            .shadow(color: navyInk.opacity(0.10), radius: 5, x: 0, y: 2)
+                            .onTapGesture(perform: onToggleExpand)
+                    }
+
+                    PetdexBubbleCardView(
+                        bubble: front,
+                        showTail: true,
+                        extraCount: bubbles.count > 1 ? bubbles.count - 1 : 0,
+                        onDismiss: {
+                            onDismiss(front)
+                        }
+                    )
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        if bubbles.count > 1 {
+                            onToggleExpand()
+                        }
+                    }
+                }
+                .padding(.top, CGFloat(showAllSessions ? peekingLayers * 8 : 0))
             }
         }
         .padding(.horizontal, 10)
@@ -249,6 +345,7 @@ final class PetdexBubblePanel: NSPanel {
     private var currentBubbles: [ActiveBubble] = []
     private var currentShowAllSessions = true
     private var bubblesEnabled = true
+    private var isExpanded = false
     var onDismiss: ((ActiveBubble) -> Void)?
 
     init() {
@@ -292,8 +389,12 @@ final class PetdexBubblePanel: NSPanel {
         level = enabled ? .statusBar : .normal
     }
 
-    func update(bubbles: [ActiveBubble], showAllSessions: Bool, enabled: Bool, anchorVisible: Bool) {
-        let unchanged = (bubbles == currentBubbles)
+    func update(bubbles: [ActiveBubble], showAllSessions: Bool, enabled: Bool, anchorVisible: Bool, forceRender: Bool = false) {
+        if bubbles.count <= 1 {
+            isExpanded = false
+        }
+        let unchanged = !forceRender
+            && (bubbles == currentBubbles)
             && (showAllSessions == currentShowAllSessions)
             && (enabled == bubblesEnabled)
         currentBubbles = bubbles
@@ -314,10 +415,23 @@ final class PetdexBubblePanel: NSPanel {
 
         let stack = PetdexBubbleStackView(
             bubbles: bubbles,
-            showAllSessions: showAllSessions
-        ) { [weak self] bubble in
-            self?.onDismiss?(bubble)
-        }
+            showAllSessions: showAllSessions,
+            isExpanded: isExpanded,
+            onToggleExpand: { [weak self] in
+                guard let self else { return }
+                self.isExpanded.toggle()
+                self.update(
+                    bubbles: self.currentBubbles,
+                    showAllSessions: self.currentShowAllSessions,
+                    enabled: self.bubblesEnabled,
+                    anchorVisible: self.anchorWindow?.isVisible ?? true,
+                    forceRender: true
+                )
+            },
+            onDismiss: { [weak self] bubble in
+                self?.onDismiss?(bubble)
+            }
+        )
         let wrapped = AnyView(stack)
 
         if let hostingView {
