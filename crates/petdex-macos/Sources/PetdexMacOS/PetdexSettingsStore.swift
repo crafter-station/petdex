@@ -1,6 +1,7 @@
 import AppKit
 import CPetdexCore
 import Foundation
+import ServiceManagement
 import SwiftUI
 
 struct ActiveBubble: Equatable, Decodable {
@@ -142,6 +143,7 @@ final class PetdexSettingsStore: ObservableObject {
         var bubblesEnabled: Bool
         var showAllSessions: Bool?
         var alwaysOnTop: Bool
+        var launchAtLogin: Bool?
         var panelX: Double?
         var panelY: Double?
     }
@@ -173,6 +175,12 @@ final class PetdexSettingsStore: ObservableObject {
         didSet { persistIfReady() }
     }
 
+    @Published var launchAtLogin: Bool {
+        didSet { persistIfReady() }
+    }
+
+    @Published var launchAtLoginStatus: String? = nil
+
     @Published var panelX: Double? {
         didSet { persistIfReady() }
     }
@@ -202,6 +210,7 @@ final class PetdexSettingsStore: ObservableObject {
         self.bubblesEnabled = true
         self.showAllSessions = true
         self.alwaysOnTop = true
+        self.launchAtLogin = false
         self.panelX = nil
         self.panelY = nil
         load()
@@ -241,6 +250,21 @@ final class PetdexSettingsStore: ObservableObject {
         return ok
     }
 
+    func setLaunchAtLogin(_ enabled: Bool) {
+        launchAtLoginStatus = nil
+        do {
+            if enabled {
+                try SMAppService.mainApp.register()
+            } else {
+                try SMAppService.mainApp.unregister()
+            }
+            launchAtLogin = enabled
+        } catch {
+            launchAtLogin = SMAppService.mainApp.status == .enabled
+            launchAtLoginStatus = "Launch at login requires a bundled .app (\(error.localizedDescription))."
+        }
+    }
+
     func updatePanelOrigin(_ origin: NSPoint) {
         let nextX = Double(origin.x.rounded())
         let nextY = Double(origin.y.rounded())
@@ -264,6 +288,7 @@ final class PetdexSettingsStore: ObservableObject {
         bubblesEnabled = decoded.bubblesEnabled
         showAllSessions = decoded.showAllSessions ?? true
         alwaysOnTop = decoded.alwaysOnTop
+        launchAtLogin = decoded.launchAtLogin ?? false
         panelX = decoded.panelX
         panelY = decoded.panelY
     }
@@ -280,6 +305,7 @@ final class PetdexSettingsStore: ObservableObject {
             bubblesEnabled: bubblesEnabled,
             showAllSessions: showAllSessions,
             alwaysOnTop: alwaysOnTop,
+            launchAtLogin: launchAtLogin,
             panelX: panelX,
             panelY: panelY
         )

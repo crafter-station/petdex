@@ -94,6 +94,10 @@ bool petdex_engine_dismiss_session(
     PetdexEngine *engine,
     const char *session_id_ptr
 );
+size_t petdex_engine_reconcile_local(
+    PetdexEngine *engine,
+    uint64_t now_ms
+);
 bool petdex_write_runtime_token(const char *token_ptr);
 uint8_t petdex_agent_status(uint8_t agent);
 bool petdex_agent_connect(uint8_t agent);

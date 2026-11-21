@@ -457,6 +457,9 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
         let bubblePanel = PetdexBubblePanel()
         bubblePanel.setAlwaysOnTop(settingsStore.alwaysOnTop)
         bubblePanel.attach(to: panel)
+        bubblePanel.onSelectBubble = { [weak self] bubble in
+            self?.focusCodingApplication(for: bubble)
+        }
         bubblePanel.onDismiss = { [weak self] bubble in
             self?.canvasView?.dismissBubble(bubble)
         }
@@ -729,6 +732,60 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
         settingsWindow?.makeKeyAndOrderFront(nil)
         settingsWindow?.orderFrontRegardless()
+    }
+
+    private func focusCodingApplication(for bubble: ActiveBubble) {
+        let runningApps = NSWorkspace.shared.runningApplications.filter {
+            !$0.isTerminated && $0.activationPolicy == .regular
+        }
+
+        var preferredBundleIds = [
+            "com.mitchellh.ghostty",
+            "com.googlecode.iterm2",
+            "com.apple.Terminal",
+            "dev.warp.Warp-Stable",
+            "com.todesktop.230313mzl4w4u92",
+            "com.microsoft.VSCode",
+            "com.openai.chat",
+        ]
+
+        let agent = bubble.agent.lowercased()
+        if agent == "cursor" {
+            preferredBundleIds.removeAll { $0 == "com.todesktop.230313mzl4w4u92" }
+            preferredBundleIds.insert("com.todesktop.230313mzl4w4u92", at: 0)
+        } else if agent == "vscode" {
+            preferredBundleIds.removeAll { $0 == "com.microsoft.VSCode" }
+            preferredBundleIds.insert("com.microsoft.VSCode", at: 0)
+        }
+
+        for bundleId in preferredBundleIds {
+            if let app = runningApps.first(where: {
+                $0.bundleIdentifier?.caseInsensitiveCompare(bundleId) == .orderedSame
+            }) {
+                app.activate(options: [.activateIgnoringOtherApps])
+                return
+            }
+        }
+
+        let preferredNames = [
+            "Ghostty",
+            "iTerm2",
+            "Terminal",
+            "Warp",
+            "Cursor",
+            "Visual Studio Code",
+            "ChatGPT",
+            "Codex",
+        ]
+
+        for name in preferredNames {
+            if let app = runningApps.first(where: {
+                $0.localizedName?.caseInsensitiveCompare(name) == .orderedSame
+            }) {
+                app.activate(options: [.activateIgnoringOtherApps])
+                return
+            }
+        }
     }
 
     private func openPetsFolder() {

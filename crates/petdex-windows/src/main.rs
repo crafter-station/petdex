@@ -1,3 +1,5 @@
+mod bubble_window;
+mod sprite_loader;
 mod win32_host;
 
 use petdex_core::DEFAULT_HOOK_PORT;
@@ -10,6 +12,10 @@ fn main() -> std::io::Result<()> {
         .ok()
         .and_then(|v| v.parse::<u16>().ok())
         .unwrap_or(DEFAULT_HOOK_PORT);
+
+    if let Err(err) = petdex_core::runtime_token::write_runtime_token(&token) {
+        eprintln!("petdex-windows: failed to write runtime update token: {err}");
+    }
 
     let config = Win32HostConfig {
         hook_port: port,

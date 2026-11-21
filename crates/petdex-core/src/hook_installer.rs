@@ -30,6 +30,50 @@ fn hook_runner_path(home: &Path) -> PathBuf {
     home.join(".petdex").join("bin").join("petdex-hook")
 }
 
+fn windows_hook_runner_path(home: &Path) -> PathBuf {
+    home.join(".petdex").join("bin").join("petdex-hook.cmd")
+}
+
+pub fn ensure_windows_hook_runner_script(home: &Path) -> io::Result<PathBuf> {
+    let script_path = windows_hook_runner_path(home);
+    if let Some(parent) = script_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let script = format!(
+        "@echo off\r\n\
+setlocal\r\n\
+set \"PETDEX_TOKEN_FILE=%USERPROFILE%\\.petdex\\runtime\\update-token\"\r\n\
+if not exist \"%PETDEX_TOKEN_FILE%\" exit /b 0\r\n\
+set \"PETDEX_AGENT=%~1\"\r\n\
+if \"%PETDEX_AGENT%\"==\"\" set \"PETDEX_AGENT=claude-code\"\r\n\
+set \"PETDEX_STATUS=%~2\"\r\n\
+if \"%PETDEX_STATUS%\"==\"\" set \"PETDEX_STATUS=running\"\r\n\
+set \"PETDEX_SUMMARY=%~3\"\r\n\
+set \"PETDEX_SESSION_ID=%~4\"\r\n\
+if \"%PETDEX_SESSION_ID%\"==\"\" set \"PETDEX_SESSION_ID=%PETDEX_AGENT%-default\"\r\n\
+if \"%PETDEX_HOOK_PORT%\"==\"\" (set \"PETDEX_URL=http://127.0.0.1:{port}/bubble\") else (set \"PETDEX_URL=http://127.0.0.1:%PETDEX_HOOK_PORT%/bubble\")\r\n\
+powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"$t=(Get-Content -Raw -LiteralPath $env:PETDEX_TOKEN_FILE -ErrorAction SilentlyContinue).Trim(); if(-not $t){{exit 0}}; $b=@{{session_id=$env:PETDEX_SESSION_ID;agent=$env:PETDEX_AGENT;status=$env:PETDEX_STATUS;summary=$env:PETDEX_SUMMARY}}|ConvertTo-Json -Compress; try{{Invoke-RestMethod -Method Post -Uri $env:PETDEX_URL -Headers @{{'{token_header}'=$t}} -ContentType 'application/json' -Body $b -TimeoutSec 2|Out-Null}}catch{{}}\" >nul 2>&1\r\n\
+exit /b 0\r\n",
+        port = DEFAULT_HOOK_PORT,
+        token_header = UPDATE_TOKEN_HEADER,
+    );
+
+    fs::write(&script_path, script)?;
+    Ok(script_path)
+}
+
+fn ensure_platform_hook_runner_script(home: &Path) -> io::Result<PathBuf> {
+    #[cfg(windows)]
+    {
+        ensure_windows_hook_runner_script(home)
+    }
+    #[cfg(not(windows))]
+    {
+        ensure_hook_runner_script(home)
+    }
+}
+
 pub fn ensure_hook_runner_script(home: &Path) -> io::Result<PathBuf> {
     let script_path = hook_runner_path(home);
     if let Some(parent) = script_path.parent() {
@@ -224,7 +268,7 @@ fn connect_json_settings(
     agent_slug: &str,
     events: &[(&str, &str)],
 ) -> io::Result<bool> {
-    let runner = ensure_hook_runner_script(home)?;
+    let runner = ensure_platform_hook_runner_script(home)?;
     let runner_str = runner.to_string_lossy().to_string();
 
     if let Some(parent) = settings_path.parent() {
@@ -370,7 +414,7 @@ fn escape_toml_str(input: &str) -> String {
 }
 
 fn connect_codex(home: &Path) -> io::Result<bool> {
-    let runner = ensure_hook_runner_script(home)?;
+    let runner = ensure_platform_hook_runner_script(home)?;
     let config_path = home.join(".codex").join("config.toml");
     if let Some(parent) = config_path.parent() {
         fs::create_dir_all(parent)?;
@@ -416,7 +460,7 @@ fn disconnect_codex(home: &Path) -> io::Result<bool> {
 }
 
 fn connect_opencode(home: &Path) -> io::Result<bool> {
-    let runner = ensure_hook_runner_script(home)?;
+    let runner = ensure_platform_hook_runner_script(home)?;
     let plugin_path = home
         .join(".config")
         .join("opencode")
@@ -476,7 +520,7 @@ fn disconnect_opencode(home: &Path) -> io::Result<bool> {
 }
 
 fn connect_hermes(home: &Path) -> io::Result<bool> {
-    let runner = ensure_hook_runner_script(home)?;
+    let runner = ensure_platform_hook_runner_script(home)?;
     let hook_path = home.join(".hermes").join("hooks").join("petdex-hook.sh");
     if let Some(parent) = hook_path.parent() {
         fs::create_dir_all(parent)?;
@@ -963,6 +1007,25 @@ mod tests {
             detect_agent_status_in(home.path(), CodingAgent::Hermes),
             AgentInstallStatus::Detected
         );
+    }
+
+    #[test]
+    fn ensure_windows_hook_runner_script_creates_batch_script() {
+        let home = TempHome::new("win-runner");
+        let script_path =
+            ensure_windows_hook_runner_script(home.path()).expect("create windows hook runner");
+
+        assert_eq!(
+            script_path,
+            home.path().join(".petdex").join("bin").join("petdex-hook.cmd")
+        );
+        let content = fs::read_to_string(&script_path).expect("read windows script");
+        assert!(content.starts_with("@echo off"));
+        assert!(content.contains("%USERPROFILE%\\.petdex\\runtime\\update-token"));
+        assert!(content.contains("http://127.0.0.1:7777/bubble"));
+        assert!(content.contains("x-petdex-update-token"));
+        assert!(content.contains("powershell"));
+        assert!(content.contains("exit /b 0"));
     }
 
     #[test]

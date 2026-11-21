@@ -636,6 +636,12 @@ struct PetdexSettingsView: View {
                 actions.onShowAllSessionsChanged(newValue)
             }
         )
+        let launchAtLoginBinding = Binding<Bool>(
+            get: { store.launchAtLogin },
+            set: { newValue in
+                store.setLaunchAtLogin(newValue)
+            }
+        )
         let stateBinding = Binding<UInt8>(
             get: { store.currentState },
             set: { newValue in
@@ -643,9 +649,9 @@ struct PetdexSettingsView: View {
             }
         )
 
-        return VStack(alignment: .leading, spacing: 14) {
+        return VStack(alignment: .leading, spacing: 12) {
             GroupBox("Pet Window") {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 10) {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
                             Text("Scale")
@@ -665,6 +671,16 @@ struct PetdexSettingsView: View {
                     Toggle("Always on top", isOn: alwaysOnTopBinding)
                     Toggle("Speech bubbles", isOn: bubblesBinding)
                     Toggle("Stack all active sessions", isOn: showAllSessionsBinding)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Toggle("Launch at login", isOn: launchAtLoginBinding)
+                        if let statusNote = store.launchAtLoginStatus {
+                            Text(statusNote)
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
                 }
                 .padding(8)
             }

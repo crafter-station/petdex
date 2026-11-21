@@ -54,3 +54,15 @@ jobs:
         run: |
           cargo test
           cargo build --release
+
+      - name: Package Windows release binary
+        shell: pwsh
+        run: |
+          Compress-Archive -Path crates/petdex-windows/target/release/petdex-windows.exe -DestinationPath petdex-windows-x86_64.zip -Force
+
+      - name: Upload Windows release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: petdex-windows-x86_64
+          path: petdex-windows-x86_64.zip
+          if-no-files-found: error

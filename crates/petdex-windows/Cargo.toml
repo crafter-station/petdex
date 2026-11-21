@@ -6,3 +6,4 @@ description = "Native Windows desktop shell for Petdex backed by petdex-core"
 
 [dependencies]
 petdex-core = { path = "../petdex-core" }
+image = { version = "0.25", default-features = false, features = ["webp", "png"] }

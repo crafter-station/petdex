@@ -43,6 +43,7 @@ let package = Package(
                 .linkedFramework("CoreGraphics"),
                 .linkedFramework("ImageIO"),
                 .linkedFramework("QuartzCore"),
+                .linkedFramework("ServiceManagement"),
                 .linkedFramework("SwiftUI"),
             ]
         ),

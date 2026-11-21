@@ -2,8 +2,13 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use petdex_core::{
-    AttentionCoordinator, FrameOutput, HookServer, HookServerConfig, PetAnimationEngine, PetState,
-    DEFAULT_HOOK_PORT,
+    AttentionCoordinator, CodingAgent, FrameOutput, HookServer, HookServerConfig,
+    PetAnimationEngine, PetState, DEFAULT_HOOK_PORT,
+};
+
+use crate::bubble_window::{BubbleContent, BubbleWindow};
+use crate::sprite_loader::{
+    discover_pets, DecodedFrame, InstalledWindowsPet, SpriteAtlas,
 };
 
 pub const WS_EX_TOPMOST: u32 = 0x0000_0008;
@@ -19,8 +24,6 @@ pub const DEFAULT_WINDOW_WIDTH: i32 = 160;
 pub const DEFAULT_WINDOW_HEIGHT: i32 = 160;
 pub const DEFAULT_SCREEN_MARGIN: i32 = 24;
 pub const DEFAULT_TICK_INTERVAL_MS: u32 = 16;
-#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-pub const TRANSPARENT_COLOR_KEY: u32 = 0x0000_0000;
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub const CMD_CYCLE_STATE: usize = 1001;
@@ -30,6 +33,10 @@ pub const CMD_TOGGLE_TOPMOST: usize = 1002;
 pub const CMD_RESET_POSITION: usize = 1003;
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub const CMD_QUIT: usize = 1004;
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub const CMD_PET_BASE: usize = 2000;
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub const CMD_AGENT_BASE: usize = 3000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AtlasRect {
@@ -266,10 +273,15 @@ pub struct Win32PetHost {
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     topmost: bool,
     last_frame: FrameOutput,
+    installed_pets: Vec<InstalledWindowsPet>,
+    active_pet_index: Option<usize>,
+    atlas: Option<SpriteAtlas>,
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    bubble_window: BubbleWindow,
 }
 
 impl Win32PetHost {
-    pub fn start(config: Win32HostConfig, update_token: impl Into<String>) -> std::io::Result<Self> {
+    pub fn start(mut config: Win32HostConfig, update_token: impl Into<String>) -> std::io::Result<Self> {
         let coordinator = Arc::new(Mutex::new(AttentionCoordinator::new()));
         let server = HookServer::start(
             HookServerConfig::new(config.hook_port, update_token),
@@ -278,6 +290,21 @@ impl Win32PetHost {
         let engine = PetAnimationEngine::new();
         let last_frame = engine.current_frame();
         let topmost = (config.ex_style & WS_EX_TOPMOST) != 0;
+
+        let installed_pets = discover_pets();
+        let mut active_pet_index = None;
+        let mut atlas = None;
+        for (idx, pet) in installed_pets.iter().enumerate() {
+            if let Ok(loaded) = SpriteAtlas::from_file(&pet.spritesheet_path) {
+                let (sw, sh) = loaded.sheet_dimensions();
+                config.atlas.sheet_width = sw;
+                config.atlas.sheet_height = sh;
+                active_pet_index = Some(idx);
+                atlas = Some(loaded);
+                break;
+            }
+        }
+
         Ok(Self {
             config,
             coordinator,
@@ -286,6 +313,10 @@ impl Win32PetHost {
             manual_override: None,
             topmost,
             last_frame,
+            installed_pets,
+            active_pet_index,
+            atlas,
+            bubble_window: BubbleWindow::new(),
         })
     }
 
@@ -314,6 +345,81 @@ impl Win32PetHost {
 
     pub fn current_frame_rect(&self) -> AtlasRect {
         self.config.atlas.frame_rect(self.last_frame)
+    }
+
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn installed_pets(&self) -> &[InstalledWindowsPet] {
+        &self.installed_pets
+    }
+
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn active_pet_index(&self) -> Option<usize> {
+        self.active_pet_index
+    }
+
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn select_pet(&mut self, index: usize) -> bool {
+        let Some(pet) = self.installed_pets.get(index) else {
+            return false;
+        };
+        match SpriteAtlas::from_file(&pet.spritesheet_path) {
+            Ok(loaded) => {
+                let (sw, sh) = loaded.sheet_dimensions();
+                self.config.atlas.sheet_width = sw;
+                self.config.atlas.sheet_height = sh;
+                self.atlas = Some(loaded);
+                self.active_pet_index = Some(index);
+                true
+            }
+            Err(err) => {
+                eprintln!(
+                    "petdex-windows: failed to load pet '{}': {err}",
+                    pet.display_name
+                );
+                false
+            }
+        }
+    }
+
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn current_decoded_frame(&mut self) -> DecodedFrame {
+        let target_w = self.config.width.max(1) as u32;
+        let target_h = self.config.height.max(1) as u32;
+        if let Some(atlas) = self.atlas.as_mut() {
+            atlas.frame_scaled(self.last_frame.row, self.last_frame.col, target_w, target_h)
+        } else {
+            SpriteAtlas::cobalt_squircle_fallback(
+                target_w,
+                target_h,
+                self.last_frame.state,
+                self.last_frame.frame_index,
+            )
+        }
+    }
+
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn active_bubble_content(&self) -> Option<BubbleContent> {
+        let now = now_ms();
+        let bubbles = {
+            let guard = self.coordinator.lock().unwrap_or_else(|e| e.into_inner());
+            guard.active_bubbles(now)
+        };
+        BubbleContent::from_active_bubbles(&bubbles)
+    }
+
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn toggle_agent_hook(&self, agent: CodingAgent) -> std::io::Result<bool> {
+        let status = petdex_core::hook_installer::detect_agent_status(agent);
+        if status == petdex_core::hook_installer::AgentInstallStatus::Connected {
+            petdex_core::hook_installer::disconnect_agent(agent)
+        } else {
+            petdex_core::hook_installer::connect_agent(agent)
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    pub(crate) fn bubble_window_mut(&mut self) -> &mut BubbleWindow {
+        &mut self.bubble_window
     }
 
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
@@ -360,11 +466,14 @@ fn now_ms() -> u64 {
 mod platform {
     use std::ffi::c_void;
     use std::mem::{size_of, zeroed};
-    use std::ptr::{null, null_mut};
+    use std::ptr::{copy_nonoverlapping, null, null_mut};
+
+    use petdex_core::hook_installer::{detect_agent_status, AgentInstallStatus};
+    use petdex_core::CodingAgent;
 
     use super::{
-        compute_bottom_right_placement, Win32PetHost, WorkArea, CMD_CYCLE_STATE, CMD_QUIT,
-        CMD_RESET_POSITION, CMD_TOGGLE_TOPMOST, TRANSPARENT_COLOR_KEY,
+        compute_bottom_right_placement, Win32PetHost, WindowPlacement, WorkArea, CMD_AGENT_BASE,
+        CMD_CYCLE_STATE, CMD_PET_BASE, CMD_QUIT, CMD_RESET_POSITION, CMD_TOGGLE_TOPMOST,
     };
 
     type Handle = *mut c_void;
@@ -375,6 +484,7 @@ mod platform {
     type Hbrush = Handle;
     type Hdc = Handle;
     type Hmenu = Handle;
+    type Hbitmap = Handle;
     type WndProc = unsafe extern "system" fn(Hwnd, u32, usize, isize) -> isize;
 
     const CS_HREDRAW: u32 = 0x0002;
@@ -386,7 +496,7 @@ mod platform {
     const WM_NULL: u32 = 0x0000;
     const WM_CREATE: u32 = 0x0001;
     const WM_DESTROY: u32 = 0x0002;
-    const WM_PAINT: u32 = 0x000F;
+    const WM_MOVE: u32 = 0x0003;
     const WM_NCCREATE: u32 = 0x0081;
     const WM_NCHITTEST: u32 = 0x0084;
     const WM_NCRBUTTONUP: u32 = 0x00A5;
@@ -399,12 +509,17 @@ mod platform {
     const HTCAPTION: isize = 2;
     const GWLP_USERDATA: i32 = -21;
 
-    const LWA_COLORKEY: u32 = 0x0000_0001;
-    const LWA_ALPHA: u32 = 0x0000_0002;
+    const ULW_ALPHA: u32 = 0x0000_0002;
+    const AC_SRC_OVER: u8 = 0x00;
+    const AC_SRC_ALPHA: u8 = 0x01;
+    const BI_RGB: u32 = 0;
+    const DIB_RGB_COLORS: u32 = 0;
 
     const MF_STRING: u32 = 0x0000_0000;
-    const MF_SEPARATOR: u32 = 0x0000_0800;
+    const MF_GRAYED: u32 = 0x0000_0001;
     const MF_CHECKED: u32 = 0x0000_0008;
+    const MF_POPUP: u32 = 0x0000_0010;
+    const MF_SEPARATOR: u32 = 0x0000_0800;
     const TPM_RIGHTBUTTON: u32 = 0x0002;
 
     const NIM_ADD: u32 = 0x0000_0000;
@@ -424,13 +539,16 @@ mod platform {
     const IDC_ARROW: *const u16 = 32512usize as *const u16;
     const IDI_APPLICATION: *const u16 = 32512usize as *const u16;
 
-    const TRANSPARENT_BK: i32 = 1;
-    const DT_CENTER: u32 = 0x0000_0001;
-    const DT_VCENTER: u32 = 0x0000_0004;
-    const DT_SINGLELINE: u32 = 0x0000_0020;
-
     const TIMER_ID: usize = 1;
     const TRAY_ICON_ID: u32 = 1;
+
+    const HOOKABLE_AGENTS: [CodingAgent; 5] = [
+        CodingAgent::ClaudeCode,
+        CodingAgent::Codex,
+        CodingAgent::Gemini,
+        CodingAgent::OpenCode,
+        CodingAgent::Hermes,
+    ];
 
     #[repr(C)]
     #[derive(Clone, Copy)]
@@ -441,11 +559,48 @@ mod platform {
 
     #[repr(C)]
     #[derive(Clone, Copy)]
+    struct Size {
+        cx: i32,
+        cy: i32,
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
     struct Rect {
         left: i32,
         top: i32,
         right: i32,
         bottom: i32,
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct BlendFunction {
+        blend_op: u8,
+        blend_flags: u8,
+        source_constant_alpha: u8,
+        alpha_format: u8,
+    }
+
+    #[repr(C)]
+    struct BitmapInfoHeader {
+        bi_size: u32,
+        bi_width: i32,
+        bi_height: i32,
+        bi_planes: u16,
+        bi_bit_count: u16,
+        bi_compression: u32,
+        bi_size_image: u32,
+        bi_x_pels_per_meter: i32,
+        bi_y_pels_per_meter: i32,
+        bi_clr_used: u32,
+        bi_clr_important: u32,
+    }
+
+    #[repr(C)]
+    struct BitmapInfo {
+        bmi_header: BitmapInfoHeader,
+        bmi_colors: [u32; 1],
     }
 
     #[allow(dead_code)]
@@ -494,17 +649,6 @@ mod platform {
 
     #[allow(dead_code)]
     #[repr(C)]
-    struct PaintStruct {
-        hdc: Hdc,
-        f_erase: i32,
-        rc_paint: Rect,
-        f_restore: i32,
-        f_inc_update: i32,
-        rgb_reserved: [u8; 32],
-    }
-
-    #[allow(dead_code)]
-    #[repr(C)]
     struct NotifyIconDataW {
         cb_size: u32,
         hwnd: Hwnd,
@@ -548,8 +692,6 @@ mod platform {
         ) -> Hwnd;
         fn DestroyWindow(hwnd: Hwnd) -> i32;
         fn ShowWindow(hwnd: Hwnd, n_cmd_show: i32) -> i32;
-        fn UpdateWindow(hwnd: Hwnd) -> i32;
-        fn SetLayeredWindowAttributes(hwnd: Hwnd, cr_key: u32, b_alpha: u8, dw_flags: u32) -> i32;
         fn DefWindowProcW(hwnd: Hwnd, msg: u32, wparam: usize, lparam: isize) -> isize;
         fn GetMessageW(
             lp_msg: *mut Msg,
@@ -568,18 +710,7 @@ mod platform {
             lp_timer_func: *const c_void,
         ) -> usize;
         fn KillTimer(hwnd: Hwnd, u_id_event: usize) -> i32;
-        fn InvalidateRect(hwnd: Hwnd, lp_rect: *const Rect, b_erase: i32) -> i32;
-        fn BeginPaint(hwnd: Hwnd, lp_paint: *mut PaintStruct) -> Hdc;
-        fn EndPaint(hwnd: Hwnd, lp_paint: *const PaintStruct) -> i32;
-        fn FillRect(hdc: Hdc, lprc: *const Rect, hbr: Hbrush) -> i32;
-        fn DrawTextW(
-            hdc: Hdc,
-            lpch_text: *const u16,
-            cch_text: i32,
-            lprc: *mut Rect,
-            format: u32,
-        ) -> i32;
-        fn GetClientRect(hwnd: Hwnd, lp_rect: *mut Rect) -> i32;
+        fn GetWindowRect(hwnd: Hwnd, lp_rect: *mut Rect) -> i32;
         fn GetCursorPos(lp_point: *mut Point) -> i32;
         fn SetForegroundWindow(hwnd: Hwnd) -> i32;
         fn SetWindowPos(
@@ -616,6 +747,19 @@ mod platform {
         fn DestroyMenu(h_menu: Hmenu) -> i32;
         fn LoadCursorW(h_instance: Hinstance, lp_cursor_name: *const u16) -> Hcursor;
         fn LoadIconW(h_instance: Hinstance, lp_icon_name: *const u16) -> Hicon;
+        fn GetDC(hwnd: Hwnd) -> Hdc;
+        fn ReleaseDC(hwnd: Hwnd, hdc: Hdc) -> i32;
+        fn UpdateLayeredWindow(
+            hwnd: Hwnd,
+            hdc_dst: Hdc,
+            ppt_dst: *const Point,
+            psize: *const Size,
+            hdc_src: Hdc,
+            ppt_src: *const Point,
+            cr_key: u32,
+            pblend: *const BlendFunction,
+            dw_flags: u32,
+        ) -> i32;
     }
 
     #[cfg(target_pointer_width = "64")]
@@ -634,10 +778,18 @@ mod platform {
 
     #[link(name = "gdi32")]
     extern "system" {
-        fn CreateSolidBrush(color: u32) -> Hbrush;
+        fn CreateCompatibleDC(hdc: Hdc) -> Hdc;
+        fn DeleteDC(hdc: Hdc) -> i32;
+        fn SelectObject(hdc: Hdc, h: Handle) -> Handle;
         fn DeleteObject(ho: Handle) -> i32;
-        fn SetBkMode(hdc: Hdc, mode: i32) -> i32;
-        fn SetTextColor(hdc: Hdc, color: u32) -> u32;
+        fn CreateDIBSection(
+            hdc: Hdc,
+            pbmi: *const BitmapInfo,
+            usage: u32,
+            ppv_bits: *mut *mut c_void,
+            h_section: Handle,
+            offset: u32,
+        ) -> Hbitmap;
     }
 
     #[link(name = "shell32")]
@@ -691,6 +843,103 @@ mod platform {
         }
     }
 
+    unsafe fn query_pet_placement(hwnd: Hwnd, host: &Win32PetHost) -> WindowPlacement {
+        let mut rect = Rect {
+            left: 0,
+            top: 0,
+            right: host.config().width,
+            bottom: host.config().height,
+        };
+        GetWindowRect(hwnd, &mut rect);
+        WindowPlacement {
+            x: rect.left,
+            y: rect.top,
+            width: (rect.right - rect.left).max(1),
+            height: (rect.bottom - rect.top).max(1),
+        }
+    }
+
+    unsafe fn sync_bubble(hwnd: Hwnd, host: &mut Win32PetHost) {
+        let pet_placement = query_pet_placement(hwnd, host);
+        let work_area = query_work_area();
+        let content = host.active_bubble_content();
+        let topmost = host.is_topmost();
+        host.bubble_window_mut()
+            .sync(pet_placement, work_area, content.as_ref(), topmost);
+    }
+
+    unsafe fn present_pet_frame(hwnd: Hwnd, host: &mut Win32PetHost) {
+        let frame = host.current_decoded_frame();
+        if frame.width == 0 || frame.height == 0 {
+            return;
+        }
+
+        let screen_dc = GetDC(null_mut());
+        if screen_dc.is_null() {
+            return;
+        }
+        let mem_dc = CreateCompatibleDC(screen_dc);
+        if mem_dc.is_null() {
+            ReleaseDC(null_mut(), screen_dc);
+            return;
+        }
+
+        let mut bmi: BitmapInfo = zeroed();
+        bmi.bmi_header.bi_size = size_of::<BitmapInfoHeader>() as u32;
+        bmi.bmi_header.bi_width = frame.width as i32;
+        bmi.bmi_header.bi_height = -(frame.height as i32);
+        bmi.bmi_header.bi_planes = 1;
+        bmi.bmi_header.bi_bit_count = 32;
+        bmi.bmi_header.bi_compression = BI_RGB;
+
+        let mut bits: *mut c_void = null_mut();
+        let hbitmap = CreateDIBSection(
+            screen_dc,
+            &bmi,
+            DIB_RGB_COLORS,
+            &mut bits,
+            null_mut(),
+            0,
+        );
+        if hbitmap.is_null() || bits.is_null() {
+            DeleteDC(mem_dc);
+            ReleaseDC(null_mut(), screen_dc);
+            return;
+        }
+
+        copy_nonoverlapping(frame.bgra.as_ptr(), bits.cast::<u8>(), frame.bgra.len());
+        let old_bmp = SelectObject(mem_dc, hbitmap);
+
+        let pt_src = Point { x: 0, y: 0 };
+        let size = Size {
+            cx: frame.width as i32,
+            cy: frame.height as i32,
+        };
+        let blend = BlendFunction {
+            blend_op: AC_SRC_OVER,
+            blend_flags: 0,
+            source_constant_alpha: 255,
+            alpha_format: AC_SRC_ALPHA,
+        };
+
+        UpdateLayeredWindow(
+            hwnd,
+            screen_dc,
+            null(),
+            &size,
+            mem_dc,
+            &pt_src,
+            0,
+            &blend,
+            ULW_ALPHA,
+        );
+
+        SelectObject(mem_dc, old_bmp);
+        DeleteObject(hbitmap);
+        DeleteDC(mem_dc);
+        ReleaseDC(null_mut(), screen_dc);
+    }
+
     unsafe fn add_tray_icon(hwnd: Hwnd) {
         let mut nid: NotifyIconDataW = zeroed();
         nid.cb_size = size_of::<NotifyIconDataW>() as u32;
@@ -721,6 +970,58 @@ mod platform {
             return;
         }
 
+        let pets_menu = CreatePopupMenu();
+        if !pets_menu.is_null() {
+            if host.installed_pets().is_empty() {
+                let empty_label = wide_null("Cobalt Fallback (No pets installed)");
+                AppendMenuW(pets_menu, MF_STRING | MF_GRAYED, 0, empty_label.as_ptr());
+            } else {
+                for (idx, pet) in host.installed_pets().iter().enumerate() {
+                    let flags = if host.active_pet_index() == Some(idx) {
+                        MF_STRING | MF_CHECKED
+                    } else {
+                        MF_STRING
+                    };
+                    let label = wide_null(&pet.display_name);
+                    AppendMenuW(pets_menu, flags, CMD_PET_BASE + idx, label.as_ptr());
+                }
+            }
+            let pets_title = wide_null("Pets");
+            AppendMenuW(menu, MF_POPUP, pets_menu as usize, pets_title.as_ptr());
+        }
+
+        let agents_menu = CreatePopupMenu();
+        if !agents_menu.is_null() {
+            for agent in HOOKABLE_AGENTS {
+                let spec = agent.spec();
+                let status = detect_agent_status(agent);
+                let (flags, text) = match status {
+                    AgentInstallStatus::Connected => (
+                        MF_STRING | MF_CHECKED,
+                        format!("{}: Disconnect", spec.display_name),
+                    ),
+                    AgentInstallStatus::Detected => {
+                        (MF_STRING, format!("{}: Connect", spec.display_name))
+                    }
+                    AgentInstallStatus::NotFound => (
+                        MF_STRING,
+                        format!("{}: Connect (Not detected)", spec.display_name),
+                    ),
+                };
+                let label = wide_null(&text);
+                AppendMenuW(
+                    agents_menu,
+                    flags,
+                    CMD_AGENT_BASE + (agent as usize),
+                    label.as_ptr(),
+                );
+            }
+            let agents_title = wide_null("Agents");
+            AppendMenuW(menu, MF_POPUP, agents_menu as usize, agents_title.as_ptr());
+        }
+
+        AppendMenuW(menu, MF_SEPARATOR, 0, null());
+
         let cycle_label = wide_null("Cycle Pet State");
         let topmost_label = wide_null("Always on Top");
         let reset_label = wide_null("Reset Position");
@@ -743,64 +1044,6 @@ mod platform {
         TrackPopupMenu(menu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, null());
         PostMessageW(hwnd, WM_NULL, 0, 0);
         DestroyMenu(menu);
-    }
-
-    unsafe fn paint_pet(hwnd: Hwnd, host: &Win32PetHost) {
-        let mut ps: PaintStruct = zeroed();
-        let hdc = BeginPaint(hwnd, &mut ps);
-        if hdc.is_null() {
-            return;
-        }
-
-        let mut client = Rect {
-            left: 0,
-            top: 0,
-            right: 0,
-            bottom: 0,
-        };
-        GetClientRect(hwnd, &mut client);
-
-        let key_brush = CreateSolidBrush(TRANSPARENT_COLOR_KEY);
-        if !key_brush.is_null() {
-            FillRect(hdc, &client, key_brush);
-            DeleteObject(key_brush);
-        }
-
-        let badge = Rect {
-            left: client.left + 8,
-            top: client.top + 8,
-            right: client.right - 8,
-            bottom: client.bottom - 8,
-        };
-        let badge_brush = CreateSolidBrush(0x0024_1E18);
-        if !badge_brush.is_null() {
-            FillRect(hdc, &badge, badge_brush);
-            DeleteObject(badge_brush);
-        }
-
-        let frame = host.last_frame();
-        let rect = host.current_frame_rect();
-        let label = format!(
-            "{} [{},{}]\n{}x{}",
-            frame.state.slug(),
-            frame.row,
-            frame.col,
-            rect.width,
-            rect.height
-        );
-        let wide = wide_null(&label);
-        SetBkMode(hdc, TRANSPARENT_BK);
-        SetTextColor(hdc, 0x00F5_F5F5);
-        let mut text_rect = badge;
-        DrawTextW(
-            hdc,
-            wide.as_ptr(),
-            (wide.len().saturating_sub(1)) as i32,
-            &mut text_rect,
-            DT_CENTER | DT_VCENTER | DT_SINGLELINE,
-        );
-
-        EndPaint(hwnd, &ps);
     }
 
     unsafe extern "system" fn wnd_proc(
@@ -829,6 +1072,12 @@ mod platform {
                 0
             }
             WM_NCHITTEST => HTCAPTION,
+            WM_MOVE => {
+                if !host_ptr.is_null() {
+                    sync_bubble(hwnd, &mut *host_ptr);
+                }
+                0
+            }
             WM_RBUTTONUP | WM_NCRBUTTONUP => {
                 if !host_ptr.is_null() {
                     show_context_menu(hwnd, &*host_ptr);
@@ -849,7 +1098,7 @@ mod platform {
                     match cmd_id {
                         CMD_CYCLE_STATE => {
                             host.cycle_state();
-                            InvalidateRect(hwnd, null(), 0);
+                            present_pet_frame(hwnd, host);
                         }
                         CMD_TOGGLE_TOPMOST => {
                             let insert_after = if host.toggle_topmost() {
@@ -866,6 +1115,7 @@ mod platform {
                                 0,
                                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
                             );
+                            sync_bubble(hwnd, host);
                         }
                         CMD_RESET_POSITION => {
                             let work_area = query_work_area();
@@ -884,9 +1134,26 @@ mod platform {
                                 placement.height,
                                 SWP_NOZORDER | SWP_NOACTIVATE,
                             );
+                            sync_bubble(hwnd, host);
                         }
                         CMD_QUIT => {
                             DestroyWindow(hwnd);
+                        }
+                        id if (CMD_PET_BASE..CMD_AGENT_BASE).contains(&id) => {
+                            let pet_index = id - CMD_PET_BASE;
+                            if host.select_pet(pet_index) {
+                                present_pet_frame(hwnd, host);
+                            }
+                        }
+                        id if (CMD_AGENT_BASE..CMD_AGENT_BASE + CodingAgent::COUNT).contains(&id) => {
+                            if let Some(agent) = CodingAgent::from_u8((id - CMD_AGENT_BASE) as u8) {
+                                if let Err(err) = host.toggle_agent_hook(agent) {
+                                    eprintln!(
+                                        "petdex-windows: failed to toggle hook for {}: {err}",
+                                        agent.spec().display_name
+                                    );
+                                }
+                            }
                         }
                         _ => {}
                     }
@@ -899,19 +1166,16 @@ mod platform {
                     let prev = host.last_frame();
                     let next = host.step(host.config().tick_interval_ms);
                     if next != prev {
-                        InvalidateRect(hwnd, null(), 0);
+                        present_pet_frame(hwnd, host);
                     }
+                    sync_bubble(hwnd, host);
                 }
                 0
             }
-            WM_PAINT => {
-                if !host_ptr.is_null() {
-                    paint_pet(hwnd, &*host_ptr);
-                    return 0;
-                }
-                DefWindowProcW(hwnd, msg, wparam, lparam)
-            }
             WM_DESTROY => {
+                if !host_ptr.is_null() {
+                    (*host_ptr).bubble_window_mut().destroy();
+                }
                 KillTimer(hwnd, TIMER_ID);
                 remove_tray_icon(hwnd);
                 PostQuitMessage(0);
@@ -976,12 +1240,12 @@ mod platform {
                 return;
             }
 
-            SetLayeredWindowAttributes(hwnd, TRANSPARENT_COLOR_KEY, 255, LWA_COLORKEY | LWA_ALPHA);
+            present_pet_frame(hwnd, host);
+            sync_bubble(hwnd, host);
             ShowWindow(hwnd, SW_SHOW);
-            UpdateWindow(hwnd);
 
             eprintln!(
-                "petdex-windows: Win32 host ready (ex_style=0x{:08x}, pos={},{} size={}x{}, hook=127.0.0.1:{}, state={})",
+                "petdex-windows: Win32 host ready (ex_style=0x{:08x}, pos={},{} size={}x{}, hook=127.0.0.1:{}, state={}, pets={})",
                 host.config().ex_style,
                 placement.x,
                 placement.y,
@@ -989,6 +1253,7 @@ mod platform {
                 placement.height,
                 host.port(),
                 host.last_frame().state.slug(),
+                host.installed_pets().len(),
             );
 
             let mut msg: Msg = zeroed();
@@ -1219,9 +1484,21 @@ mod tests {
         assert_eq!(frame.state, PetState::Waiting);
         assert_eq!(frame.row, 6);
         let rect = host.current_frame_rect();
-        assert_eq!(rect.y, 6 * 128);
-        assert_eq!(rect.width, 128);
-        assert_eq!(rect.height, 128);
+        assert_eq!(rect.y, 6 * rect.height);
+        assert!(rect.width > 0);
+        assert!(rect.height > 0);
+
+        let bubble = host.active_bubble_content().expect("active bubble");
+        assert_eq!(bubble.agent_name, "Claude Code");
+        assert_eq!(bubble.summary, "approve tool");
+
+        let decoded = host.current_decoded_frame();
+        assert_eq!(decoded.width, DEFAULT_WINDOW_WIDTH as u32);
+        assert_eq!(decoded.height, DEFAULT_WINDOW_HEIGHT as u32);
+        assert_eq!(
+            decoded.bgra.len(),
+            (DEFAULT_WINDOW_WIDTH as usize) * (DEFAULT_WINDOW_HEIGHT as usize) * 4
+        );
 
         assert!(!host.toggle_topmost());
         assert!(host.toggle_topmost());
@@ -1242,6 +1519,7 @@ mod tests {
 
         let stepped = host.step(16);
         assert_eq!(stepped.state, PetState::RunningRight);
-        assert_eq!(host.current_frame_rect().y, 128);
+        let rect = host.current_frame_rect();
+        assert_eq!(rect.y, rect.height);
     }
 }

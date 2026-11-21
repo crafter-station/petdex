@@ -1,12 +1,16 @@
 use std::fmt;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use crate::agents::CodingAgent;
 use crate::attention::{AgentEvent, SessionStatus};
 use crate::json::{parse_json, JsonValue};
 
 const HERMES_NEEDS_INPUT_PREFIX: &str = "petdex:needs-input:";
+const MAX_SCAN_DEPTH: usize = 6;
+const MAX_ENTRIES_PER_ROOT: usize = 512;
+const MAX_SESSION_FILE_BYTES: u64 = 4 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReconciledSession {
@@ -58,6 +62,106 @@ pub fn reconcile_file(agent: CodingAgent, path: &Path) -> Result<ReconciledSessi
         CodingAgent::Hermes => parse_hermes_json(&content),
         other => Err(ReconcileError::UnsupportedAgent(other)),
     }
+}
+
+pub fn reconcile_local_sessions(home: &Path) -> Vec<AgentEvent> {
+    let targets: [(CodingAgent, PathBuf, &str); 4] = [
+        (
+            CodingAgent::ClaudeCode,
+            home.join(".claude").join("projects"),
+            "jsonl",
+        ),
+        (
+            CodingAgent::Gemini,
+            home.join(".gemini").join("tmp"),
+            "jsonl",
+        ),
+        (CodingAgent::Omp, home.join(".omp"), "jsonl"),
+        (CodingAgent::Hermes, home.join(".hermes"), "json"),
+    ];
+
+    let mut events = Vec::new();
+    for (agent, root, ext) in targets {
+        let Some(latest_path) = find_most_recent_session_file(&root, ext) else {
+            continue;
+        };
+        if let Ok(session) = reconcile_file(agent, &latest_path) {
+            if session.status != SessionStatus::Idle {
+                events.push(session.into_agent_event());
+            }
+        }
+    }
+    events
+}
+
+fn find_most_recent_session_file(root: &Path, expected_ext: &str) -> Option<PathBuf> {
+    let meta = fs::symlink_metadata(root).ok()?;
+    if !meta.is_dir() {
+        return None;
+    }
+
+    let mut stack: Vec<(PathBuf, usize)> = vec![(root.to_path_buf(), 0)];
+    let mut visited: usize = 0;
+    let mut best: Option<(SystemTime, PathBuf)> = None;
+
+    while let Some((dir, depth)) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry_res in entries {
+            if visited >= MAX_ENTRIES_PER_ROOT {
+                return best.map(|(_, p)| p);
+            }
+            visited += 1;
+
+            let Ok(entry) = entry_res else {
+                continue;
+            };
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            let path = entry.path();
+
+            if file_type.is_dir() {
+                if depth < MAX_SCAN_DEPTH {
+                    stack.push((path, depth + 1));
+                }
+                continue;
+            }
+
+            if !file_type.is_file() {
+                continue;
+            }
+
+            let ext_matches = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| e.eq_ignore_ascii_case(expected_ext));
+            if !ext_matches {
+                continue;
+            }
+
+            let Ok(metadata) = entry.metadata() else {
+                continue;
+            };
+            if metadata.len() > MAX_SESSION_FILE_BYTES {
+                continue;
+            }
+            let Ok(modified) = metadata.modified() else {
+                continue;
+            };
+
+            let replace = match &best {
+                None => true,
+                Some((best_time, _)) => modified > *best_time,
+            };
+            if replace {
+                best = Some((modified, path));
+            }
+        }
+    }
+
+    best.map(|(_, p)| p)
 }
 
 pub fn parse_claude_jsonl(input: &str) -> Result<ReconciledSession, ReconcileError> {
@@ -395,5 +499,129 @@ mod tests {
         let event = session.into_agent_event();
         assert_eq!(event.status, SessionStatus::NeedsInput);
         assert_eq!(event.summary, "Choose a deployment target");
+    }
+
+    struct TempDir {
+        path: PathBuf,
+    }
+
+    impl TempDir {
+        fn new(label: &str) -> Self {
+            use std::sync::atomic::{AtomicU64, Ordering};
+            use std::time::UNIX_EPOCH;
+            static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+            let nonce = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "petdex-reconcile-{label}-{}-{nonce}-{seq}",
+                std::process::id()
+            ));
+            fs::create_dir_all(&path).expect("create temp dir");
+            Self { path }
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    #[test]
+    fn reconcile_local_sessions_fails_closed_on_missing_dirs() {
+        let temp = TempDir::new("missing");
+        let events = reconcile_local_sessions(temp.path());
+        assert!(events.is_empty());
+
+        let nonexistent = temp.path().join("does-not-exist");
+        assert!(reconcile_local_sessions(&nonexistent).is_empty());
+    }
+
+    #[test]
+    fn reconcile_local_sessions_picks_most_recent_and_filters_idle_and_corrupt() {
+        let temp = TempDir::new("multi-agent");
+
+        let claude_proj = temp.path().join(".claude").join("projects").join("proj-a");
+        fs::create_dir_all(&claude_proj).expect("create claude dir");
+        let older_claude = claude_proj.join("older.jsonl");
+        fs::write(
+            &older_claude,
+            r#"{"sessionId":"claude-old","type":"user","message":{"role":"user","content":"Old task"}}"#,
+        )
+        .expect("write older claude");
+        std::thread::sleep(std::time::Duration::from_millis(25));
+        let newer_claude = claude_proj.join("newer.jsonl");
+        fs::write(
+            &newer_claude,
+            r#"{"sessionId":"claude-new","type":"assistant","message":{"role":"assistant","stop_reason":"end_turn","content":"Finished task"}}"#,
+        )
+        .expect("write newer claude");
+
+        let gemini_dir = temp.path().join(".gemini").join("tmp").join("hash1");
+        fs::create_dir_all(&gemini_dir).expect("create gemini dir");
+        fs::write(
+            gemini_dir.join("session.jsonl"),
+            r#"{"sessionId":"gemini-1","summary":"Gemini title"}
+{"type":"user","content":"Investigating issue"}"#,
+        )
+        .expect("write gemini");
+
+        let omp_dir = temp.path().join(".omp").join("sessions");
+        fs::create_dir_all(&omp_dir).expect("create omp dir");
+        fs::write(
+            omp_dir.join("idle.jsonl"),
+            r#"{"type":"session","id":"omp-idle"}"#,
+        )
+        .expect("write idle omp");
+
+        let hermes_dir = temp.path().join(".hermes").join("sessions");
+        fs::create_dir_all(&hermes_dir).expect("create hermes dir");
+        fs::write(hermes_dir.join("broken.json"), "{ not valid json")
+            .expect("write broken hermes");
+
+        let events = reconcile_local_sessions(temp.path());
+        assert_eq!(events.len(), 2);
+
+        let claude_ev = events
+            .iter()
+            .find(|e| e.agent == CodingAgent::ClaudeCode)
+            .expect("claude event");
+        assert_eq!(claude_ev.session_id, "claude-new");
+        assert_eq!(claude_ev.status, SessionStatus::Completed);
+        assert_eq!(claude_ev.summary, "Finished task");
+
+        let gemini_ev = events
+            .iter()
+            .find(|e| e.agent == CodingAgent::Gemini)
+            .expect("gemini event");
+        assert_eq!(gemini_ev.session_id, "gemini-1");
+        assert_eq!(gemini_ev.status, SessionStatus::Running);
+        assert_eq!(gemini_ev.summary, "Investigating issue");
+    }
+
+    #[test]
+    fn reconcile_local_sessions_enforces_bounded_depth() {
+        let temp = TempDir::new("bounded-depth");
+        let mut deep = temp.path().join(".claude").join("projects");
+        for i in 0..=(MAX_SCAN_DEPTH + 2) {
+            deep = deep.join(format!("d{i}"));
+        }
+        fs::create_dir_all(&deep).expect("create deep dir");
+        fs::write(
+            deep.join("too-deep.jsonl"),
+            r#"{"sessionId":"too-deep","type":"user","message":{"role":"user","content":"Should not be scanned"}}"#,
+        )
+        .expect("write deep session");
+
+        let events = reconcile_local_sessions(temp.path());
+        assert!(events.is_empty());
     }
 }

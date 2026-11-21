@@ -70,6 +70,7 @@ private struct PetdexBubbleCardView: View {
     let showTail: Bool
     let extraCount: Int
     let isBackCard: Bool
+    let onSelect: () -> Void
     let onDismiss: () -> Void
 
     private let whiteTop = Color.white
@@ -188,6 +189,10 @@ private struct PetdexBubbleCardView: View {
                         )
                 }
             )
+            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .onTapGesture {
+                onSelect()
+            }
 
             if showTail {
                 ZStack {
@@ -209,6 +214,7 @@ private struct PetdexBubbleCardView: View {
 private struct PetdexBubbleDeckView: View {
     @ObservedObject var model: BubblePanelModel
     let onHoverChanged: (Bool) -> Void
+    let onSelectBubble: (ActiveBubble) -> Void
     let onDismiss: (ActiveBubble) -> Void
 
     private let cobaltRim = Color(red: 0.231, green: 0.349, blue: 0.949)
@@ -274,6 +280,9 @@ private struct PetdexBubbleDeckView: View {
                     showTail: isFront,
                     extraCount: (!expanded && isFront && model.bubbles.count > 1) ? model.bubbles.count - 1 : 0,
                     isBackCard: !expanded && !isFront,
+                    onSelect: {
+                        onSelectBubble(bubble)
+                    },
                     onDismiss: {
                         onDismiss(bubble)
                     }
@@ -304,6 +313,7 @@ final class PetdexBubblePanel: NSPanel {
     private var resizeObserver: NSObjectProtocol?
     private var collapseWorkItem: DispatchWorkItem?
     private var bubblesEnabled = true
+    var onSelectBubble: ((ActiveBubble) -> Void)?
     var onDismiss: ((ActiveBubble) -> Void)?
 
     private let panelSize = NSSize(width: 312, height: 376)
@@ -395,6 +405,9 @@ final class PetdexBubblePanel: NSPanel {
             model: model,
             onHoverChanged: { [weak self] hovering in
                 self?.handleHoverChange(hovering)
+            },
+            onSelectBubble: { [weak self] bubble in
+                self?.onSelectBubble?(bubble)
             },
             onDismiss: { [weak self] bubble in
                 self?.onDismiss?(bubble)

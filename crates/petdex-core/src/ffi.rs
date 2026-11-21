@@ -315,6 +315,39 @@ pub unsafe extern "C" fn petdex_engine_dismiss_session(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn petdex_engine_reconcile_local(
+    engine: *mut PetdexEngine,
+    now_ms: u64,
+) -> usize {
+    let Some(engine) = engine.as_mut() else {
+        return 0;
+    };
+    let Some(home) = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(std::path::PathBuf::from)
+    else {
+        return 0;
+    };
+
+    let events = crate::reconcile::reconcile_local_sessions(&home);
+    if events.is_empty() {
+        return 0;
+    }
+
+    let count = events.len();
+    let next_state = {
+        let mut guard = engine.attention.lock().unwrap_or_else(|e| e.into_inner());
+        for event in events {
+            guard.ingest(event, now_ms);
+        }
+        guard.active_state(now_ms)
+    };
+    engine.last_hook_state = Some(next_state);
+    engine.inner.set_state(next_state);
+    count
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn petdex_write_runtime_token(token_ptr: *const c_char) -> bool {
     if token_ptr.is_null() {
         return false;
@@ -672,5 +705,12 @@ mod tests {
         assert_eq!(petdex_agent_status(255), AgentInstallStatus::NotFound as u8);
         assert!(!petdex_agent_connect(255));
         assert!(!petdex_agent_disconnect(255));
+    }
+
+    #[test]
+    fn ffi_reconcile_local_null_engine_returns_zero() {
+        unsafe {
+            assert_eq!(petdex_engine_reconcile_local(std::ptr::null_mut(), 1_000), 0);
+        }
     }
 }
