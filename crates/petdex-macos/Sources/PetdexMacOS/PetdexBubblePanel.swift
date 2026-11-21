@@ -59,10 +59,17 @@ private enum AgentLogoLoader {
     }
 }
 
+private final class BubblePanelModel: ObservableObject {
+    @Published var bubbles: [ActiveBubble] = []
+    @Published var showAllSessions: Bool = true
+    @Published var isExpanded: Bool = false
+}
+
 private struct PetdexBubbleCardView: View {
     let bubble: ActiveBubble
     let showTail: Bool
     let extraCount: Int
+    let isBackCard: Bool
     let onDismiss: () -> Void
 
     private let whiteTop = Color.white
@@ -84,9 +91,14 @@ private struct PetdexBubbleCardView: View {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .fill(lipTint)
                     .offset(y: 2)
-                    .shadow(color: navyInk.opacity(0.14), radius: 6, x: 0, y: 3)
+                    .shadow(
+                        color: navyInk.opacity(isBackCard ? 0.08 : 0.14),
+                        radius: isBackCard ? 5 : 9,
+                        x: 0,
+                        y: isBackCard ? 2 : 4
+                    )
 
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 5) {
                     HStack(spacing: 6) {
                         if let logo = AgentLogoLoader.image(for: bubble.agent) {
                             Image(nsImage: logo)
@@ -121,17 +133,10 @@ private struct PetdexBubbleCardView: View {
                         if extraCount > 0 {
                             Text("+\(extraCount)")
                                 .font(.system(size: 8.5, weight: .bold, design: .monospaced))
-                                .foregroundColor(cobaltRim)
+                                .foregroundColor(.white)
                                 .padding(.horizontal, 5.5)
                                 .padding(.vertical, 1.5)
-                                .background(
-                                    Capsule()
-                                        .fill(cobaltRim.opacity(0.12))
-                                )
-                                .overlay(
-                                    Capsule()
-                                        .strokeBorder(cobaltRim.opacity(0.24), lineWidth: 0.75)
-                                )
+                                .background(Capsule().fill(cobaltRim))
                         }
 
                         Spacer(minLength: 4)
@@ -151,14 +156,14 @@ private struct PetdexBubbleCardView: View {
                     }
 
                     Text(bubble.summary.isEmpty ? bubble.statusDisplayName : bubble.summary)
-                        .font(.system(size: 12.5, weight: .medium, design: .rounded))
+                        .font(.system(size: 12.2, weight: .medium, design: .rounded))
                         .foregroundColor(navyInk)
-                        .lineLimit(3)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .padding(.horizontal, 13)
                 .padding(.vertical, 9.5)
-                .frame(minWidth: 204, maxWidth: 276, alignment: .leading)
+                .frame(width: 264, height: 66, alignment: .topLeading)
                 .background(
                     ZStack {
                         RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -203,187 +208,110 @@ private struct PetdexBubbleCardView: View {
     }
 }
 
-private struct PetdexBubbleStackView: View {
-    let bubbles: [ActiveBubble]
-    let showAllSessions: Bool
-    let isExpanded: Bool
-    let onToggleExpand: () -> Void
+private struct PetdexBubbleDeckView: View {
+    @ObservedObject var model: BubblePanelModel
+    let onHoverChanged: (Bool) -> Void
     let onDismiss: (ActiveBubble) -> Void
 
     private let cobaltRim = Color(red: 0.231, green: 0.349, blue: 0.949)
-    private let navyInk = Color(red: 0.082, green: 0.118, blue: 0.278)
-    private let pearlTop = Color.white
-    private let pearlBottom = Color(red: 0.949, green: 0.961, blue: 0.996)
-    private let lipTint = Color(red: 0.835, green: 0.867, blue: 0.961)
+    private let cardStep: CGFloat = 76
+    private let maxVisibleExpanded = 4
 
-    private var peekingLayers: Int {
-        min(2, max(0, bubbles.count - 1))
+    private var visibleBubbles: [ActiveBubble] {
+        Array(model.bubbles.prefix(maxVisibleExpanded))
+    }
+
+    private var hiddenCount: Int {
+        max(0, model.bubbles.count - maxVisibleExpanded)
+    }
+
+    private var expanded: Bool {
+        model.isExpanded && model.showAllSessions && model.bubbles.count > 1
     }
 
     var body: some View {
-        Group {
-            if bubbles.count > 1 && isExpanded {
-                VStack(spacing: 6) {
-                    HStack {
-                        Text("\(bubbles.count) SESSIONS")
-                            .font(.system(size: 9, weight: .bold, design: .monospaced))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
-                            .background(Capsule().fill(cobaltRim))
+        ZStack(alignment: .bottom) {
+            if expanded && hiddenCount > 0 {
+                Text("+\(hiddenCount) MORE SESSIONS")
+                    .font(.system(size: 8.5, weight: .bold, design: .monospaced))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(cobaltRim))
+                    .offset(y: -CGFloat(visibleBubbles.count) * cardStep - 12)
+                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
+            }
 
-                        Spacer(minLength: 4)
+            ForEach(Array(visibleBubbles.enumerated()), id: \.element.sessionId) { index, bubble in
+                let isFront = index == 0
+                let collapsedOffsetY: CGFloat = {
+                    if !model.showAllSessions { return 0 }
+                    if index == 0 { return 0 }
+                    if index == 1 { return -11 }
+                    if index == 2 { return -20 }
+                    return -26
+                }()
+                let collapsedScale: CGFloat = {
+                    if !model.showAllSessions { return 1.0 }
+                    if index == 0 { return 1.0 }
+                    if index == 1 { return 0.94 }
+                    if index == 2 { return 0.88 }
+                    return 0.82
+                }()
+                let collapsedOpacity: Double = {
+                    if !model.showAllSessions { return isFront ? 1.0 : 0.0 }
+                    if index == 0 { return 1.0 }
+                    if index == 1 { return 0.90 }
+                    if index == 2 { return 0.74 }
+                    return 0.0
+                }()
 
-                        Button(action: onToggleExpand) {
-                            HStack(spacing: 3) {
-                                Image(systemName: "rectangle.stack")
-                                    .font(.system(size: 9, weight: .bold))
-                                Text("Stack")
-                                    .font(.system(size: 10, weight: .bold, design: .rounded))
-                            }
-                            .foregroundColor(navyInk)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
-                            .background(
-                                Capsule()
-                                    .fill(pearlTop.opacity(0.95))
-                                    .overlay(Capsule().stroke(cobaltRim.opacity(0.22), lineWidth: 1))
-                            )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .frame(minWidth: 204, maxWidth: 276)
+                let yOffset = expanded ? -CGFloat(index) * cardStep : collapsedOffsetY
+                let scale = expanded ? 1.0 : collapsedScale
+                let opacity = expanded ? 1.0 : collapsedOpacity
 
-                    ScrollView(.vertical, showsIndicators: false) {
-                        VStack(spacing: 6) {
-                            ForEach(Array(bubbles.prefix(12).enumerated()), id: \.element.sessionId) { index, bubble in
-                                PetdexBubbleCardView(
-                                    bubble: bubble,
-                                    showTail: index == min(bubbles.count, 12) - 1,
-                                    extraCount: 0,
-                                    onDismiss: {
-                                        onDismiss(bubble)
-                                    }
-                                )
-                            }
-                        }
-                        .padding(.horizontal, 2)
-                        .padding(.top, 2)
-                        .padding(.bottom, 10)
+                PetdexBubbleCardView(
+                    bubble: bubble,
+                    showTail: isFront,
+                    extraCount: (!expanded && isFront && model.bubbles.count > 1) ? model.bubbles.count - 1 : 0,
+                    isBackCard: !expanded && !isFront,
+                    onDismiss: {
+                        onDismiss(bubble)
                     }
-                    .frame(maxHeight: 380)
-                }
-            } else if let front = bubbles.first {
-                ZStack(alignment: .top) {
-                    if bubbles.count >= 3 && showAllSessions {
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [pearlTop.opacity(0.86), pearlBottom.opacity(0.82)],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                )
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                    .strokeBorder(cobaltRim.opacity(0.14), lineWidth: 1)
-                            )
-                            .frame(width: 224, height: 52)
-                            .scaleEffect(0.90)
-                            .offset(y: -14)
-                            .shadow(color: navyInk.opacity(0.08), radius: 4, x: 0, y: 2)
-                            .onTapGesture(perform: onToggleExpand)
-                    }
-
-                    if bubbles.count >= 2 && showAllSessions {
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [pearlTop.opacity(0.94), pearlBottom.opacity(0.92)],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                )
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                    .strokeBorder(cobaltRim.opacity(0.16), lineWidth: 1.1)
-                            )
-                            .frame(width: 244, height: 56)
-                            .scaleEffect(0.95)
-                            .offset(y: -7)
-                            .shadow(color: navyInk.opacity(0.10), radius: 5, x: 0, y: 2)
-                            .onTapGesture(perform: onToggleExpand)
-                    }
-
-                    PetdexBubbleCardView(
-                        bubble: front,
-                        showTail: true,
-                        extraCount: bubbles.count > 1 ? bubbles.count - 1 : 0,
-                        onDismiss: {
-                            onDismiss(front)
-                        }
-                    )
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        if bubbles.count > 1 {
-                            onToggleExpand()
-                        }
-                    }
-                }
-                .padding(.top, CGFloat(showAllSessions ? peekingLayers * 8 : 0))
+                )
+                .scaleEffect(scale, anchor: .top)
+                .offset(y: yOffset)
+                .opacity(opacity)
+                .zIndex(Double(maxVisibleExpanded - index))
+                .allowsHitTesting(expanded || isFront)
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.top, 6)
-        .padding(.bottom, 10)
-    }
-}
-
-private final class HoverTrackingHostingView: NSHostingView<AnyView> {
-    var onHoverChanged: ((Bool) -> Void)?
-    private var trackingArea: NSTrackingArea?
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let trackingArea {
-            removeTrackingArea(trackingArea)
+        .padding(.horizontal, 22)
+        .padding(.bottom, 16)
+        .padding(.top, 24)
+        .frame(width: 312, height: 376, alignment: .bottom)
+        .animation(.spring(response: 0.36, dampingFraction: 0.74), value: expanded)
+        .animation(.spring(response: 0.32, dampingFraction: 0.78), value: model.bubbles)
+        .onHover { hovering in
+            onHoverChanged(hovering)
         }
-        let area = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
-            owner: self,
-            userInfo: nil
-        )
-        addTrackingArea(area)
-        trackingArea = area
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        super.mouseEntered(with: event)
-        onHoverChanged?(true)
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        super.mouseExited(with: event)
-        onHoverChanged?(false)
     }
 }
 
 final class PetdexBubblePanel: NSPanel {
-    private var hostingView: HoverTrackingHostingView?
+    private let model = BubblePanelModel()
+    private var hostingView: NSHostingView<PetdexBubbleDeckView>?
     private weak var anchorWindow: NSWindow?
-    private var moveObserver: NSObjectProtocol?
     private var resizeObserver: NSObjectProtocol?
     private var collapseWorkItem: DispatchWorkItem?
-    private var currentBubbles: [ActiveBubble] = []
-    private var currentShowAllSessions = true
     private var bubblesEnabled = true
-    private var isExpanded = false
     var onDismiss: ((ActiveBubble) -> Void)?
+
+    private let panelSize = NSSize(width: 312, height: 376)
 
     init() {
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 240, height: 80),
+            contentRect: NSRect(origin: .zero, size: NSSize(width: 312, height: 376)),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -396,6 +324,7 @@ final class PetdexBubblePanel: NSPanel {
         hidesOnDeactivate = false
         ignoresMouseEvents = false
         becomesKeyOnlyIfNeeded = true
+        acceptsMouseMovedEvents = true
     }
 
     deinit {
@@ -422,19 +351,14 @@ final class PetdexBubblePanel: NSPanel {
         level = enabled ? .statusBar : .normal
     }
 
-    func update(bubbles: [ActiveBubble], showAllSessions: Bool, enabled: Bool, anchorVisible: Bool, forceRender: Bool = false) {
-        if bubbles.count <= 1 {
-            isExpanded = false
-        }
-        let unchanged = !forceRender
-            && (bubbles == currentBubbles)
-            && (showAllSessions == currentShowAllSessions)
-            && (enabled == bubblesEnabled)
-        currentBubbles = bubbles
-        currentShowAllSessions = showAllSessions
+    func update(bubbles: [ActiveBubble], showAllSessions: Bool, enabled: Bool, anchorVisible: Bool) {
         bubblesEnabled = enabled
 
         guard enabled, anchorVisible, !bubbles.isEmpty else {
+            collapseWorkItem?.cancel()
+            collapseWorkItem = nil
+            model.bubbles = []
+            model.isExpanded = false
             if let anchorWindow {
                 anchorWindow.removeChildWindow(self)
             }
@@ -442,119 +366,99 @@ final class PetdexBubblePanel: NSPanel {
             return
         }
 
-        if unchanged && isVisible {
-            return
+        ensureHostingView()
+
+        if model.bubbles != bubbles {
+            model.bubbles = bubbles
+        }
+        if model.showAllSessions != showAllSessions {
+            model.showAllSessions = showAllSessions
+        }
+        if bubbles.count <= 1 && model.isExpanded {
+            model.isExpanded = false
         }
 
-        let stack = PetdexBubbleStackView(
-            bubbles: bubbles,
-            showAllSessions: showAllSessions,
-            isExpanded: isExpanded,
-            onToggleExpand: { [weak self] in
-                guard let self else { return }
-                self.isExpanded.toggle()
-                self.update(
-                    bubbles: self.currentBubbles,
-                    showAllSessions: self.currentShowAllSessions,
-                    enabled: self.bubblesEnabled,
-                    anchorVisible: self.anchorWindow?.isVisible ?? true,
-                    forceRender: true
-                )
+        if frame.size != panelSize {
+            setContentSize(panelSize)
+        }
+        reposition()
+        if let anchorWindow, parent !== anchorWindow {
+            anchorWindow.addChildWindow(self, ordered: .above)
+        }
+        if !isVisible {
+            orderFrontRegardless()
+        }
+    }
+
+    private func ensureHostingView() {
+        guard hostingView == nil else { return }
+        let deck = PetdexBubbleDeckView(
+            model: model,
+            onHoverChanged: { [weak self] hovering in
+                self?.handleHoverChange(hovering)
             },
             onDismiss: { [weak self] bubble in
                 self?.onDismiss?(bubble)
             }
         )
-        let wrapped = AnyView(stack)
-
-        if let hostingView {
-            hostingView.rootView = wrapped
-        } else {
-            let view = HoverTrackingHostingView(rootView: wrapped)
-            view.wantsLayer = true
-            view.layer?.backgroundColor = NSColor.clear.cgColor
-            view.onHoverChanged = { [weak self] hovering in
-                self?.handleHoverChange(hovering)
-            }
-            contentView = view
-            hostingView = view
-        }
-
-        hostingView?.layoutSubtreeIfNeeded()
-        let fitting = hostingView?.fittingSize ?? NSSize(width: 240, height: 76)
-        let maxHeight: CGFloat = isExpanded ? 440 : 180
-        let size = NSSize(
-            width: max(224, min(296, ceil(fitting.width))),
-            height: max(64, min(maxHeight, ceil(fitting.height)))
-        )
-        setContentSize(size)
-        reposition()
-        if let anchorWindow, parent !== anchorWindow {
-            anchorWindow.addChildWindow(self, ordered: .above)
-        }
-        orderFrontRegardless()
+        let view = NSHostingView(rootView: deck)
+        view.wantsLayer = true
+        view.layer?.backgroundColor = NSColor.clear.cgColor
+        contentView = view
+        hostingView = view
     }
 
     private func handleHoverChange(_ hovering: Bool) {
         collapseWorkItem?.cancel()
         collapseWorkItem = nil
 
-        guard currentBubbles.count > 1, currentShowAllSessions else { return }
+        guard model.bubbles.count > 1, model.showAllSessions else { return }
 
         if hovering {
-            if !isExpanded {
-                isExpanded = true
-                update(
-                    bubbles: currentBubbles,
-                    showAllSessions: currentShowAllSessions,
-                    enabled: bubblesEnabled,
-                    anchorVisible: anchorWindow?.isVisible ?? true,
-                    forceRender: true
-                )
+            if !model.isExpanded {
+                withAnimation(.spring(response: 0.36, dampingFraction: 0.74)) {
+                    model.isExpanded = true
+                }
             }
-        } else if isExpanded {
+        } else if model.isExpanded {
             let item = DispatchWorkItem { [weak self] in
-                guard let self, self.isExpanded else { return }
-                self.isExpanded = false
-                self.update(
-                    bubbles: self.currentBubbles,
-                    showAllSessions: self.currentShowAllSessions,
-                    enabled: self.bubblesEnabled,
-                    anchorVisible: self.anchorWindow?.isVisible ?? true,
-                    forceRender: true
-                )
+                guard let self, self.model.isExpanded else { return }
+                withAnimation(.spring(response: 0.34, dampingFraction: 0.78)) {
+                    self.model.isExpanded = false
+                }
             }
             collapseWorkItem = item
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: item)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.30, execute: item)
         }
     }
 
     func reposition() {
-        guard let anchorWindow, !currentBubbles.isEmpty, bubblesEnabled, anchorWindow.isVisible else {
+        guard let anchorWindow, !model.bubbles.isEmpty, bubblesEnabled, anchorWindow.isVisible else {
             return
         }
 
         let petFrame = anchorWindow.frame
         let bubbleSize = frame.size
         var originX = round(petFrame.midX - bubbleSize.width * 0.5)
-        var originY = round(petFrame.maxY + 8.0)
+        var originY = round(petFrame.maxY - 6.0)
 
         if let screenFrame = (anchorWindow.screen ?? NSScreen.main)?.visibleFrame {
-            originX = min(max(originX, screenFrame.minX + 8.0), screenFrame.maxX - bubbleSize.width - 8.0)
-            originY = min(originY, screenFrame.maxY - bubbleSize.height - 8.0)
+            originX = min(max(originX, screenFrame.minX + 4.0), screenFrame.maxX - bubbleSize.width - 4.0)
+            originY = min(originY, screenFrame.maxY - bubbleSize.height - 4.0)
         }
 
         setFrameOrigin(NSPoint(x: originX, y: originY))
     }
 
     private func detachAnchorObservers() {
-        if let moveObserver {
-            NotificationCenter.default.removeObserver(moveObserver)
-            self.moveObserver = nil
-        }
+        collapseWorkItem?.cancel()
+        collapseWorkItem = nil
         if let resizeObserver {
             NotificationCenter.default.removeObserver(resizeObserver)
             self.resizeObserver = nil
+        }
+        if let anchorWindow {
+            anchorWindow.removeChildWindow(self)
         }
     }
 }
