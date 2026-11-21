@@ -264,7 +264,8 @@ private struct PetdexBubbleDeckView: View {
                     return 0.0
                 }()
 
-                let yOffset = expanded ? -CGFloat(index) * cardStep : collapsedOffsetY
+                let tailLift: CGFloat = isFront ? 0 : -6
+                let yOffset = (expanded ? -CGFloat(index) * cardStep : collapsedOffsetY) + tailLift
                 let scale = expanded ? 1.0 : collapsedScale
                 let opacity = expanded ? 1.0 : collapsedOpacity
 
