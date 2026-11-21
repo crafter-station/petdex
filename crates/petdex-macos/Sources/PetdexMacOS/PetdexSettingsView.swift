@@ -3,6 +3,7 @@ import SwiftUI
 
 struct PetdexSettingsActions {
     let onSelectPet: (InstalledPet?) -> Void
+    let onPetInstalled: (InstalledPet) -> Void
     let onReloadPets: () -> Void
     let onOpenPetsFolder: () -> Void
     let onBrowsePetdex: () -> Void
@@ -14,6 +15,13 @@ struct PetdexSettingsActions {
     let onSendTestBubble: () -> Void
     let onSendTestTwoSessions: () -> Void
     let onRefreshAgents: () -> Void
+}
+
+private enum PetsSubtab: String, CaseIterable, Identifiable {
+    case installed = "Installed"
+    case catalog = "Browse Catalog"
+
+    var id: String { rawValue }
 }
 
 private enum PetdexSettingsTab: String, CaseIterable, Identifiable {
@@ -68,6 +76,15 @@ struct PetdexSettingsView: View {
     let actions: PetdexSettingsActions
 
     @State private var selectedTab: PetdexSettingsTab = .pets
+    @State private var selectedPetsSubtab: PetsSubtab = .installed
+    @State private var catalogSearch = ""
+    @State private var catalogPets: [RemotePetItem] = []
+    @State private var isLoadingCatalog = false
+    @State private var catalogError: String?
+    @State private var hasLoadedCatalog = false
+    @State private var installingSlugs: Set<String> = []
+    @State private var installError: String?
+    @State private var catalogFetchTask: Task<Void, Never>?
     @State private var copiedCurl = false
 
     var body: some View {
@@ -159,6 +176,35 @@ struct PetdexSettingsView: View {
 
     private var petsTab: some View {
         VStack(alignment: .leading, spacing: 12) {
+            Picker("Pets Source", selection: $selectedPetsSubtab) {
+                ForEach(PetsSubtab.allCases) { subtab in
+                    Text(subtab.rawValue).tag(subtab)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+
+            switch selectedPetsSubtab {
+            case .installed:
+                installedPetsContent
+            case .catalog:
+                browseCatalogContent
+            }
+        }
+        .onChange(of: selectedPetsSubtab) { nextSubtab in
+            if nextSubtab == .catalog && !hasLoadedCatalog {
+                scheduleCatalogFetch(query: catalogSearch, debounceMs: 0)
+            }
+        }
+        .onChange(of: catalogSearch) { nextQuery in
+            if selectedPetsSubtab == .catalog {
+                scheduleCatalogFetch(query: nextQuery, debounceMs: 280)
+            }
+        }
+    }
+
+    private var installedPetsContent: some View {
+        VStack(alignment: .leading, spacing: 12) {
             ScrollView {
                 LazyVGrid(
                     columns: [
@@ -224,6 +270,257 @@ struct PetdexSettingsView: View {
                     actions.onBrowsePetdex()
                 }
                 .buttonStyle(.borderedProminent)
+            }
+        }
+    }
+
+    private var browseCatalogContent: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                    TextField("Search petdex.dev...", text: $catalogSearch)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12))
+                    if !catalogSearch.isEmpty {
+                        Button {
+                            catalogSearch = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 12))
+                                .foregroundColor(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color(nsColor: .controlBackgroundColor))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(Color.secondary.opacity(0.25), lineWidth: 1)
+                )
+
+                Button {
+                    scheduleCatalogFetch(query: catalogSearch, debounceMs: 0)
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .disabled(isLoadingCatalog)
+                .help("Refresh catalog")
+            }
+
+            if let installError {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.orange)
+                        .font(.system(size: 11))
+                    Text(installError)
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                        .lineLimit(2)
+                    Spacer()
+                    Button("Dismiss") {
+                        self.installError = nil
+                    }
+                    .controlSize(.mini)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color.orange.opacity(0.10))
+                )
+            }
+
+            if isLoadingCatalog && catalogPets.isEmpty {
+                VStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.regular)
+                    Text("Loading pets from petdex.dev...")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let catalogError, catalogPets.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "wifi.exclamationmark")
+                        .font(.system(size: 22))
+                        .foregroundColor(.secondary)
+                    Text(catalogError)
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                    Button("Retry") {
+                        scheduleCatalogFetch(query: catalogSearch, debounceMs: 0)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if catalogPets.isEmpty {
+                VStack(spacing: 6) {
+                    Image(systemName: "pawprint")
+                        .font(.system(size: 22))
+                        .foregroundColor(.secondary)
+                    Text("No matching pets found.")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVGrid(
+                        columns: [
+                            GridItem(.flexible(), spacing: 12),
+                            GridItem(.flexible(), spacing: 12),
+                            GridItem(.flexible(), spacing: 12),
+                        ],
+                        spacing: 12
+                    ) {
+                        ForEach(catalogPets) { item in
+                            remotePetCard(item)
+                        }
+                    }
+                    .padding(2)
+                }
+            }
+        }
+    }
+
+    private func remotePetCard(_ item: RemotePetItem) -> some View {
+        let installedMatch = store.installedPets.first {
+            $0.id.caseInsensitiveCompare(item.slug) == .orderedSame
+        }
+        let isActive = installedMatch != nil && store.activePetId?.caseInsensitiveCompare(item.slug) == .orderedSame
+        let isInstalling = installingSlugs.contains(item.slug)
+
+        return VStack(spacing: 6) {
+            ZStack(alignment: .topTrailing) {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.secondary.opacity(0.08))
+                    .frame(height: 74)
+                    .overlay {
+                        AsyncImage(url: item.thumbnailURL) { phase in
+                            switch phase {
+                            case .success(let image):
+                                image
+                                    .interpolation(.none)
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .frame(width: 58, height: 58)
+                            case .failure:
+                                Image(systemName: "pawprint.fill")
+                                    .font(.system(size: 22))
+                                    .foregroundColor(.secondary.opacity(0.6))
+                            case .empty:
+                                ProgressView()
+                                    .controlSize(.small)
+                            @unknown default:
+                                EmptyView()
+                            }
+                        }
+                    }
+
+                if isActive {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundColor(.accentColor)
+                        .padding(6)
+                }
+            }
+
+            VStack(spacing: 1) {
+                Text(item.displayName)
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
+                Text(item.slug)
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+            }
+
+            if isInstalling {
+                HStack(spacing: 4) {
+                    ProgressView()
+                        .controlSize(.mini)
+                    Text("Installing")
+                        .font(.system(size: 10.5, weight: .medium))
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 22)
+            } else if let installedMatch {
+                Button(isActive ? "Active" : "Select") {
+                    actions.onSelectPet(installedMatch)
+                }
+                .controlSize(.small)
+                .disabled(isActive)
+                .frame(maxWidth: .infinity)
+            } else {
+                Button("Install") {
+                    installRemotePet(item)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .frame(maxWidth: .infinity)
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(isActive ? Color.accentColor.opacity(0.10) : Color(nsColor: .controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(
+                    isActive ? Color.accentColor : Color.secondary.opacity(0.20),
+                    lineWidth: isActive ? 2 : 1
+                )
+        )
+    }
+
+    private func scheduleCatalogFetch(query: String, debounceMs: UInt64) {
+        catalogFetchTask?.cancel()
+        catalogFetchTask = Task { @MainActor in
+            if debounceMs > 0 {
+                try? await Task.sleep(nanoseconds: debounceMs * 1_000_000)
+                if Task.isCancelled { return }
+            }
+            isLoadingCatalog = true
+            catalogError = nil
+            do {
+                let results = try await PetdexCatalogClient.shared.fetchCatalog(query: query)
+                if Task.isCancelled { return }
+                catalogPets = results
+                hasLoadedCatalog = true
+            } catch {
+                if Task.isCancelled { return }
+                catalogError = error.localizedDescription
+            }
+            isLoadingCatalog = false
+        }
+    }
+
+    private func installRemotePet(_ item: RemotePetItem) {
+        guard !installingSlugs.contains(item.slug) else { return }
+        installingSlugs.insert(item.slug)
+        installError = nil
+
+        Task { @MainActor in
+            defer { installingSlugs.remove(item.slug) }
+            do {
+                let installed = try await PetdexCatalogClient.shared.installPet(item)
+                PetPreviewCache.shared.invalidate()
+                actions.onPetInstalled(installed)
+            } catch {
+                installError = "Failed to install \(item.displayName): \(error.localizedDescription)"
             }
         }
     }
@@ -465,15 +762,22 @@ struct PetdexSettingsView: View {
 
                             Spacer()
 
-                            Text(agent.installed ? "Installed" : "Not found")
-                                .font(.system(size: 10.5, weight: .semibold))
-                                .foregroundColor(agent.installed ? Color(red: 0.10, green: 0.55, blue: 0.30) : .secondary)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 3)
-                                .background(
-                                    Capsule()
-                                        .fill(agent.installed ? Color.green.opacity(0.14) : Color.secondary.opacity(0.10))
-                                )
+                            agentStatusBadge(for: agent)
+
+                            if agent.supportsHookToggle {
+                                if agent.isConnected {
+                                    Button("Disconnect") {
+                                        store.disconnectAgent(agent.agentCode)
+                                    }
+                                    .controlSize(.small)
+                                } else {
+                                    Button("Connect") {
+                                        store.connectAgent(agent.agentCode)
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .controlSize(.small)
+                                }
+                            }
                         }
                         .padding(.horizontal, 10)
                         .padding(.vertical, 7)
@@ -486,6 +790,31 @@ struct PetdexSettingsView: View {
                 .padding(1)
             }
         }
+    }
+
+    private func agentStatusBadge(for agent: DetectedAgent) -> some View {
+        let foreground: Color
+        let background: Color
+        if agent.isConnected {
+            foreground = Color(red: 0.10, green: 0.55, blue: 0.30)
+            background = Color.green.opacity(0.14)
+        } else if agent.isDetected {
+            foreground = Color(red: 0.14, green: 0.42, blue: 0.88)
+            background = Color.blue.opacity(0.14)
+        } else {
+            foreground = .secondary
+            background = Color.secondary.opacity(0.10)
+        }
+
+        return Text(agent.statusLabel)
+            .font(.system(size: 10.5, weight: .semibold))
+            .foregroundColor(foreground)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(
+                Capsule()
+                    .fill(background)
+            )
     }
 
     private func copyCurlTestCommand() {

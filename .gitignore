@@ -96,3 +96,6 @@ target/
 
 # SwiftPM builds
 .build/
+
+# macOS Swift app bundles
+crates/petdex-macos/dist/

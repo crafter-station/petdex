@@ -5,6 +5,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::agents::CodingAgent;
 use crate::animation::{FrameOutput, PetAnimationEngine, PetState};
 use crate::attention::{AgentEvent, AttentionCoordinator, SessionStatus};
+use crate::hook_installer::{
+    connect_agent, detect_agent_status, disconnect_agent, AgentInstallStatus,
+};
 use crate::hook_server::{HookServer, HookServerConfig};
 use crate::json::escape_json_str;
 
@@ -320,6 +323,30 @@ pub unsafe extern "C" fn petdex_write_runtime_token(token_ptr: *const c_char) ->
         return false;
     };
     crate::runtime_token::write_runtime_token(token).is_ok()
+}
+
+#[no_mangle]
+pub extern "C" fn petdex_agent_status(agent: u8) -> u8 {
+    let Some(agent) = CodingAgent::from_u8(agent) else {
+        return AgentInstallStatus::NotFound as u8;
+    };
+    detect_agent_status(agent) as u8
+}
+
+#[no_mangle]
+pub extern "C" fn petdex_agent_connect(agent: u8) -> bool {
+    let Some(agent) = CodingAgent::from_u8(agent) else {
+        return false;
+    };
+    connect_agent(agent).unwrap_or(false)
+}
+
+#[no_mangle]
+pub extern "C" fn petdex_agent_disconnect(agent: u8) -> bool {
+    let Some(agent) = CodingAgent::from_u8(agent) else {
+        return false;
+    };
+    disconnect_agent(agent).unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -638,5 +665,12 @@ mod tests {
 
             petdex_engine_free(engine);
         }
+    }
+
+    #[test]
+    fn ffi_agent_hook_functions_reject_invalid_agent_id() {
+        assert_eq!(petdex_agent_status(255), AgentInstallStatus::NotFound as u8);
+        assert!(!petdex_agent_connect(255));
+        assert!(!petdex_agent_disconnect(255));
     }
 }

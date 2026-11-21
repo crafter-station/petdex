@@ -407,6 +407,7 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
     private var hookMenuItem: NSMenuItem?
     private var statusPetsSubmenuItem: NSMenuItem?
     private var installedPets: [InstalledPet] = []
+    private var pendingOpenSlugs: [String] = []
 
     deinit {
         if let panelMoveObserver {
@@ -506,6 +507,94 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
         updateStatusLabels(state: canvas.currentFrame.state)
         refreshPetMenuState()
         syncBubblePanel()
+
+        if !pendingOpenSlugs.isEmpty {
+            let queued = pendingOpenSlugs
+            pendingOpenSlugs.removeAll()
+            for slug in queued {
+                handleOpenPetSlug(slug)
+            }
+        }
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls {
+            guard let slug = Self.extractPetSlug(from: url) else { continue }
+            if canvasView == nil {
+                pendingOpenSlugs.append(slug)
+            } else {
+                handleOpenPetSlug(slug)
+            }
+        }
+    }
+
+    private static func extractPetSlug(from url: URL) -> String? {
+        guard url.scheme?.lowercased() == "petdex" else { return nil }
+
+        let host = url.host?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        if host == "install" {
+            if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+               let querySlug = components.queryItems?.first(where: { $0.name == "slug" })?.value?
+                   .trimmingCharacters(in: .whitespacesAndNewlines)
+                   .lowercased(),
+               !querySlug.isEmpty
+            {
+                return querySlug
+            }
+            let pathSlug = url.pathComponents
+                .first(where: { $0 != "/" && !$0.isEmpty })?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            return (pathSlug?.isEmpty == false) ? pathSlug : nil
+        }
+
+        if !host.isEmpty {
+            return host
+        }
+
+        let pathSlug = url.pathComponents
+            .first(where: { $0 != "/" && !$0.isEmpty })?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return (pathSlug?.isEmpty == false) ? pathSlug : nil
+    }
+
+    private func handleOpenPetSlug(_ rawSlug: String) {
+        let slug = rawSlug.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !slug.isEmpty else { return }
+
+        installedPets = PetCatalog.discoverPets()
+        settingsStore.installedPets = installedPets
+
+        if let existing = installedPets.first(where: { $0.id.caseInsensitiveCompare(slug) == .orderedSame }) {
+            canvasView?.selectPet(existing)
+            panel?.orderFrontRegardless()
+            refreshPetMenuState()
+            NSLog("PetdexMacOS selected already-installed pet %@ via URL scheme", existing.id)
+            return
+        }
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let installed = try await PetdexCatalogClient.shared.installPet(slug: slug)
+                self.registerAndActivateInstalledPet(installed)
+                self.panel?.orderFrontRegardless()
+                NSLog("PetdexMacOS installed and activated pet %@ via URL scheme", installed.id)
+            } catch {
+                NSLog("PetdexMacOS failed to install pet %@ via URL scheme: %@", slug, error.localizedDescription)
+            }
+        }
+    }
+
+    private func registerAndActivateInstalledPet(_ pet: InstalledPet) {
+        installedPets = PetCatalog.discoverPets()
+        if !installedPets.contains(where: { $0.id.caseInsensitiveCompare(pet.id) == .orderedSame }) {
+            installedPets.insert(pet, at: 0)
+        }
+        settingsStore.installedPets = installedPets
+        canvasView?.selectPet(pet)
+        refreshPetMenuState()
     }
 
     private func scaledPanelSize(for scale: Double) -> NSSize {
@@ -585,6 +674,9 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
             let actions = PetdexSettingsActions(
                 onSelectPet: { [weak self] pet in
                     self?.canvasView?.selectPet(pet)
+                },
+                onPetInstalled: { [weak self] pet in
+                    self?.registerAndActivateInstalledPet(pet)
                 },
                 onReloadPets: { [weak self] in
                     self?.handleReloadPets()

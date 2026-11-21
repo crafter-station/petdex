@@ -52,6 +52,12 @@ enum PetdexSessionStatus {
     PETDEX_STATUS_NEEDS_INPUT = 4
 };
 
+enum PetdexAgentInstallStatus {
+    PETDEX_AGENT_NOT_FOUND = 0,
+    PETDEX_AGENT_DETECTED = 1,
+    PETDEX_AGENT_CONNECTED = 2
+};
+
 const char *petdex_core_version(void);
 PetdexEngine *petdex_engine_new(void);
 void petdex_engine_free(PetdexEngine *engine);
@@ -89,6 +95,9 @@ bool petdex_engine_dismiss_session(
     const char *session_id_ptr
 );
 bool petdex_write_runtime_token(const char *token_ptr);
+uint8_t petdex_agent_status(uint8_t agent);
+bool petdex_agent_connect(uint8_t agent);
+bool petdex_agent_disconnect(uint8_t agent);
 
 #ifdef __cplusplus
 }

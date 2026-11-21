@@ -57,7 +57,31 @@ struct DetectedAgent: Identifiable, Equatable {
     let slug: String
     let agentCode: UInt8
     let configPath: String
-    let installed: Bool
+    let installStatus: UInt8
+    let supportsHookToggle: Bool
+
+    var installed: Bool {
+        installStatus != UInt8(PETDEX_AGENT_NOT_FOUND.rawValue)
+    }
+
+    var isDetected: Bool {
+        installStatus == UInt8(PETDEX_AGENT_DETECTED.rawValue)
+    }
+
+    var isConnected: Bool {
+        installStatus == UInt8(PETDEX_AGENT_CONNECTED.rawValue)
+    }
+
+    var statusLabel: String {
+        switch installStatus {
+        case UInt8(PETDEX_AGENT_CONNECTED.rawValue):
+            return "Connected"
+        case UInt8(PETDEX_AGENT_DETECTED.rawValue):
+            return "Detected"
+        default:
+            return "Not found"
+        }
+    }
 }
 
 enum AgentCatalog {
@@ -66,34 +90,33 @@ enum AgentCatalog {
         let name: String
         let agentCode: UInt8
         let relativePath: String
+        let supportsHookToggle: Bool
     }
 
     static let all: [Spec] = [
-        Spec(slug: "claude-code", name: "Claude Code", agentCode: UInt8(PETDEX_AGENT_CLAUDE_CODE.rawValue), relativePath: ".claude"),
-        Spec(slug: "codex", name: "Codex", agentCode: UInt8(PETDEX_AGENT_CODEX.rawValue), relativePath: ".codex"),
-        Spec(slug: "gemini", name: "Gemini CLI", agentCode: UInt8(PETDEX_AGENT_GEMINI.rawValue), relativePath: ".gemini"),
-        Spec(slug: "opencode", name: "OpenCode", agentCode: UInt8(PETDEX_AGENT_OPENCODE.rawValue), relativePath: ".config/opencode"),
-        Spec(slug: "qoder", name: "Qoder", agentCode: UInt8(PETDEX_AGENT_QODER.rawValue), relativePath: ".qoder"),
-        Spec(slug: "kimi-code", name: "Kimi Code", agentCode: UInt8(PETDEX_AGENT_KIMI_CODE.rawValue), relativePath: ".kimi"),
-        Spec(slug: "codebuddy", name: "CodeBuddy", agentCode: UInt8(PETDEX_AGENT_CODEBUDDY.rawValue), relativePath: ".codebuddy"),
-        Spec(slug: "omp", name: "Oh My Pi", agentCode: UInt8(PETDEX_AGENT_OMP.rawValue), relativePath: ".omp"),
-        Spec(slug: "hermes", name: "Hermes", agentCode: UInt8(PETDEX_AGENT_HERMES.rawValue), relativePath: ".hermes"),
-        Spec(slug: "dsh", name: "DeepSeek", agentCode: UInt8(PETDEX_AGENT_DSH.rawValue), relativePath: "Library/Application Support/DeepSeek"),
+        Spec(slug: "claude-code", name: "Claude Code", agentCode: UInt8(PETDEX_AGENT_CLAUDE_CODE.rawValue), relativePath: ".claude", supportsHookToggle: true),
+        Spec(slug: "codex", name: "Codex", agentCode: UInt8(PETDEX_AGENT_CODEX.rawValue), relativePath: ".codex", supportsHookToggle: true),
+        Spec(slug: "gemini", name: "Gemini CLI", agentCode: UInt8(PETDEX_AGENT_GEMINI.rawValue), relativePath: ".gemini", supportsHookToggle: true),
+        Spec(slug: "opencode", name: "OpenCode", agentCode: UInt8(PETDEX_AGENT_OPENCODE.rawValue), relativePath: ".config/opencode", supportsHookToggle: true),
+        Spec(slug: "qoder", name: "Qoder", agentCode: UInt8(PETDEX_AGENT_QODER.rawValue), relativePath: ".qoder", supportsHookToggle: false),
+        Spec(slug: "kimi-code", name: "Kimi Code", agentCode: UInt8(PETDEX_AGENT_KIMI_CODE.rawValue), relativePath: ".kimi", supportsHookToggle: false),
+        Spec(slug: "codebuddy", name: "CodeBuddy", agentCode: UInt8(PETDEX_AGENT_CODEBUDDY.rawValue), relativePath: ".codebuddy", supportsHookToggle: false),
+        Spec(slug: "omp", name: "Oh My Pi", agentCode: UInt8(PETDEX_AGENT_OMP.rawValue), relativePath: ".omp", supportsHookToggle: false),
+        Spec(slug: "hermes", name: "Hermes", agentCode: UInt8(PETDEX_AGENT_HERMES.rawValue), relativePath: ".hermes", supportsHookToggle: true),
+        Spec(slug: "dsh", name: "DeepSeek", agentCode: UInt8(PETDEX_AGENT_DSH.rawValue), relativePath: "Library/Application Support/DeepSeek", supportsHookToggle: false),
     ]
 
     static func scanInstalled() -> [DetectedAgent] {
-        let fm = FileManager.default
-        let home = fm.homeDirectoryForCurrentUser
-        return all.map { spec in
-            let url = home.appendingPathComponent(spec.relativePath)
-            let exists = fm.fileExists(atPath: url.path)
+        all.map { spec in
+            let status = petdex_agent_status(spec.agentCode)
             return DetectedAgent(
                 id: spec.slug,
                 name: spec.name,
                 slug: spec.slug,
                 agentCode: spec.agentCode,
                 configPath: "~/\(spec.relativePath)",
-                installed: exists
+                installStatus: status,
+                supportsHookToggle: spec.supportsHookToggle
             )
         }
     }
@@ -196,8 +219,26 @@ final class PetdexSettingsStore: ObservableObject {
         min(max(value, minScale), maxScale)
     }
 
-    func refreshDetectedAgents() {
+    func refreshAgents() {
         detectedAgents = AgentCatalog.scanInstalled()
+    }
+
+    func refreshDetectedAgents() {
+        refreshAgents()
+    }
+
+    @discardableResult
+    func connectAgent(_ agentCode: UInt8) -> Bool {
+        let ok = petdex_agent_connect(agentCode)
+        refreshAgents()
+        return ok
+    }
+
+    @discardableResult
+    func disconnectAgent(_ agentCode: UInt8) -> Bool {
+        let ok = petdex_agent_disconnect(agentCode)
+        refreshAgents()
+        return ok
     }
 
     func updatePanelOrigin(_ origin: NSPoint) {
