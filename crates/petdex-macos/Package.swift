@@ -41,8 +41,10 @@ let package = Package(
                 .unsafeFlags([coreStaticLib]),
                 .linkedFramework("AppKit"),
                 .linkedFramework("CoreGraphics"),
+                .linkedFramework("CryptoKit"),
                 .linkedFramework("ImageIO"),
                 .linkedFramework("QuartzCore"),
+                .linkedFramework("Security"),
                 .linkedFramework("ServiceManagement"),
                 .linkedFramework("SwiftUI"),
             ]

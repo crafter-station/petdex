@@ -90,6 +90,11 @@ size_t petdex_engine_active_bubbles_json(
     uint8_t *out_buf,
     size_t out_cap
 );
+size_t petdex_engine_take_oauth_callback_json(
+    PetdexEngine *engine,
+    uint8_t *out_buf,
+    size_t out_cap
+);
 bool petdex_engine_dismiss_session(
     PetdexEngine *engine,
     const char *session_id_ptr

@@ -33,10 +33,18 @@ impl HookServerConfig {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OAuthCallback {
+    pub code: String,
+    pub state: String,
+    pub error: String,
+}
+
 pub struct HookServer {
     local_addr: SocketAddr,
     stop_flag: Arc<AtomicBool>,
     coordinator: Arc<Mutex<AttentionCoordinator>>,
+    oauth_callback: Arc<Mutex<Option<OAuthCallback>>>,
     handle: Option<JoinHandle<()>>,
 }
 
@@ -48,9 +56,11 @@ impl HookServer {
         let listener = TcpListener::bind(("127.0.0.1", config.port))?;
         let local_addr = listener.local_addr()?;
         let stop_flag = Arc::new(AtomicBool::new(false));
+        let oauth_callback = Arc::new(Mutex::new(None));
 
         let thread_stop = Arc::clone(&stop_flag);
         let thread_coord = Arc::clone(&coordinator);
+        let thread_oauth = Arc::clone(&oauth_callback);
         let token = config.update_token;
 
         let handle = thread::spawn(move || {
@@ -59,7 +69,7 @@ impl HookServer {
                     break;
                 }
                 if let Ok(stream) = incoming {
-                    let _ = handle_connection(stream, &token, &thread_coord);
+                    let _ = handle_connection(stream, &token, &thread_coord, &thread_oauth);
                 }
             }
         });
@@ -68,6 +78,7 @@ impl HookServer {
             local_addr,
             stop_flag,
             coordinator,
+            oauth_callback,
             handle: Some(handle),
         })
     }
@@ -82,6 +93,11 @@ impl HookServer {
 
     pub fn coordinator(&self) -> &Arc<Mutex<AttentionCoordinator>> {
         &self.coordinator
+    }
+
+    pub fn take_oauth_callback(&self) -> Option<OAuthCallback> {
+        let mut guard = self.oauth_callback.lock().unwrap_or_else(|e| e.into_inner());
+        guard.take()
     }
 
     pub fn stop(&mut self) {
@@ -119,6 +135,7 @@ fn handle_connection(
     mut stream: TcpStream,
     expected_token: &str,
     coordinator: &Arc<Mutex<AttentionCoordinator>>,
+    oauth_callback: &Arc<Mutex<Option<OAuthCallback>>>,
 ) -> io::Result<()> {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
@@ -127,7 +144,21 @@ fn handle_connection(
         return Ok(());
     };
 
-    let path = req.path.split('?').next().unwrap_or(req.path.as_str());
+    let (path, query) = match req.path.split_once('?') {
+        Some((p, q)) => (p, q),
+        None => (req.path.as_str(), ""),
+    };
+
+    if req.method == "GET" && path == "/callback" {
+        let cb = parse_oauth_callback_query(query);
+        let html = render_oauth_callback_html(&cb.error);
+        {
+            let mut guard = oauth_callback.lock().unwrap_or_else(|e| e.into_inner());
+            *guard = Some(cb);
+        }
+        return write_http_response(&mut stream, "200 OK", "text/html; charset=utf-8", &html);
+    }
+
     let (status_line, body) = match (req.method.as_str(), path) {
         ("GET", "/health") => (
             "200 OK",
@@ -175,7 +206,164 @@ fn handle_connection(
         _ => ("404 Not Found", r#"{"error":"not_found"}"#.to_string()),
     };
 
-    write_http_response(&mut stream, status_line, &body)
+    write_http_response(&mut stream, status_line, "application/json", &body)
+}
+
+fn parse_oauth_callback_query(query: &str) -> OAuthCallback {
+    let mut code = String::new();
+    let mut state = String::new();
+    let mut error = String::new();
+
+    for pair in query.split('&') {
+        if pair.is_empty() {
+            continue;
+        }
+        let (raw_key, raw_val) = match pair.split_once('=') {
+            Some((k, v)) => (k, v),
+            None => (pair, ""),
+        };
+        let key = percent_decode(raw_key);
+        let val = percent_decode(raw_val);
+        match key.as_str() {
+            "code" => code = val,
+            "state" => state = val,
+            "error" => error = val,
+            _ => {}
+        }
+    }
+
+    OAuthCallback { code, state, error }
+}
+
+fn percent_decode(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'+' => {
+                out.push(b' ');
+                i += 1;
+            }
+            b'%' if i + 2 < bytes.len() => {
+                if let (Some(hi), Some(lo)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2])) {
+                    out.push((hi << 4) | lo);
+                    i += 3;
+                } else {
+                    out.push(b'%');
+                    i += 1;
+                }
+            }
+            b => {
+                out.push(b);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn hex_val(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn escape_html(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for ch in input.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+fn render_oauth_callback_html(error: &str) -> String {
+    let (badge, heading, message, accent) = if error.is_empty() {
+        (
+            "PETDEX READY",
+            "Signed in to Petdex!",
+            "You can close this tab and return to Petdex.".to_string(),
+            "#5B8C5A",
+        )
+    } else {
+        (
+            "SIGN-IN ERROR",
+            "Could not sign in to Petdex",
+            format!("Error: {}", escape_html(error)),
+            "#C85A53",
+        )
+    };
+
+    format!(
+        r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Petdex</title>
+<style>
+  body {{
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #F4EFE6;
+    color: #2C2621;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }}
+  .toy-shell {{
+    width: min(380px, 88vw);
+    background: #FFFDF8;
+    border: 3px solid #2C2621;
+    border-radius: 22px;
+    box-shadow: 0 8px 0 #2C2621;
+    padding: 28px 24px;
+    text-align: center;
+  }}
+  .badge {{
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 999px;
+    background: {accent};
+    color: #FFFDF8;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    margin-bottom: 14px;
+  }}
+  h1 {{
+    margin: 0 0 10px 0;
+    font-size: 20px;
+    line-height: 1.25;
+  }}
+  p {{
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.5;
+    color: #5E5348;
+  }}
+</style>
+</head>
+<body>
+  <main class="toy-shell">
+    <div class="badge">{badge}</div>
+    <h1>{heading}</h1>
+    <p>{message}</p>
+  </main>
+</body>
+</html>"#
+    )
 }
 
 fn handle_post_state(
@@ -365,9 +553,14 @@ fn find_header_end(buf: &[u8]) -> Option<usize> {
     buf.windows(4).position(|w| w == b"\r\n\r\n")
 }
 
-fn write_http_response(stream: &mut TcpStream, status: &str, body: &str) -> io::Result<()> {
+fn write_http_response(
+    stream: &mut TcpStream,
+    status: &str,
+    content_type: &str,
+    body: &str,
+) -> io::Result<()> {
     let response = format!(
-        "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
     stream.write_all(response.as_bytes())?;
@@ -491,6 +684,32 @@ mod tests {
         assert_eq!(dismiss_status, 200);
         assert!(dismiss_body.contains(r#""dismissed":true"#));
         assert!(dismiss_body.contains(r#""pet_state":"idle""#));
+
+        server.stop();
+    }
+
+    #[test]
+    fn get_callback_stores_oauth_params_and_returns_html_once() {
+        let coord = Arc::new(Mutex::new(AttentionCoordinator::new()));
+        let mut server =
+            HookServer::start(HookServerConfig::new(0, "secret-token"), coord).unwrap();
+
+        let (status, body) = send_raw_http(
+            server.port(),
+            "GET /callback?code=test_code&state=test_state HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+        );
+
+        assert_eq!(status, 200);
+        assert!(body.contains("<!DOCTYPE html>"));
+        assert!(body.contains("Signed in to Petdex!"));
+
+        let cb = server
+            .take_oauth_callback()
+            .expect("expected oauth callback");
+        assert_eq!(cb.code, "test_code");
+        assert_eq!(cb.state, "test_state");
+        assert_eq!(cb.error, "");
+        assert!(server.take_oauth_callback().is_none());
 
         server.stop();
     }

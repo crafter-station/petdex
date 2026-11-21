@@ -252,10 +252,6 @@ final class PetdexSettingsStore: ObservableObject {
         }
     }
 
-    @Published var apiToken: String {
-        didSet { persistIfReady() }
-    }
-
     @Published var launchAtLoginStatus: String? = nil
 
     @Published var panelX: Double? {
@@ -275,6 +271,19 @@ final class PetdexSettingsStore: ObservableObject {
     @Published var updateStatusText: String = "Not checked yet"
     @Published var updateDownloadURL: URL? = nil
     @Published var remoteHosts: [String] = []
+    @Published var authPhase: String = "signed_out"
+    @Published var authUser: PetdexUserProfile? = nil
+    @Published var ownedPets: [PetdexLibraryPet] = []
+    @Published var caughtPets: [PetdexLibraryPet] = []
+    @Published var authError: String? = nil
+
+    var isSignedIn: Bool {
+        authPhase == "signed_in" && authUser != nil
+    }
+
+    var hasLibraryPets: Bool {
+        !ownedPets.isEmpty || !caughtPets.isEmpty
+    }
 
     var activeBubble: ActiveBubble? {
         activeBubbles.first
@@ -300,7 +309,6 @@ final class PetdexSettingsStore: ObservableObject {
         self.bubbleTextSize = 12.2
         self.bubbleMaxLines = 2
         self.bubbleLifetimeSec = 10.0
-        self.apiToken = ""
         self.panelX = nil
         self.panelY = nil
         load()
@@ -400,7 +408,6 @@ final class PetdexSettingsStore: ObservableObject {
         bubbleTextSize = Self.clampBubbleTextSize(decoded.bubbleTextSize ?? 12.2)
         bubbleMaxLines = Self.clampBubbleMaxLines(decoded.bubbleMaxLines ?? 2)
         bubbleLifetimeSec = Self.clampBubbleLifetimeSec(decoded.bubbleLifetimeSec ?? 10.0)
-        apiToken = decoded.apiToken ?? ""
         panelX = decoded.panelX
         panelY = decoded.panelY
     }
@@ -427,7 +434,7 @@ final class PetdexSettingsStore: ObservableObject {
             bubbleTextSize: Self.clampBubbleTextSize(bubbleTextSize),
             bubbleMaxLines: Self.clampBubbleMaxLines(bubbleMaxLines),
             bubbleLifetimeSec: Self.clampBubbleLifetimeSec(bubbleLifetimeSec),
-            apiToken: apiToken,
+            apiToken: nil,
             panelX: panelX,
             panelY: panelY
         )

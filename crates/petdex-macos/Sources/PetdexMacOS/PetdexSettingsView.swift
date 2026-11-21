@@ -21,10 +21,14 @@ struct PetdexSettingsActions {
     var onBubbleStyleChanged: () -> Void = {}
     var onCheckUpdates: () -> Void = {}
     var onOpenRemoteConfig: () -> Void = {}
+    var onSignIn: () -> Void = {}
+    var onRefreshAccount: () -> Void = {}
+    var onSignOut: () -> Void = {}
 }
 
 private enum PetsSubtab: String, CaseIterable, Identifiable {
     case installed = "Installed"
+    case library = "My Library"
     case catalog = "Browse Catalog"
 
     var id: String { rawValue }
@@ -180,10 +184,17 @@ struct PetdexSettingsView: View {
         return "Active: Cobalt Squircle"
     }
 
+    private var availablePetsSubtabs: [PetsSubtab] {
+        if store.isSignedIn && store.hasLibraryPets {
+            return [.installed, .library, .catalog]
+        }
+        return [.installed, .catalog]
+    }
+
     private var petsTab: some View {
         VStack(alignment: .leading, spacing: 12) {
             Picker("Pets Source", selection: $selectedPetsSubtab) {
-                ForEach(PetsSubtab.allCases) { subtab in
+                ForEach(availablePetsSubtabs) { subtab in
                     Text(subtab.rawValue).tag(subtab)
                 }
             }
@@ -193,6 +204,8 @@ struct PetdexSettingsView: View {
             switch selectedPetsSubtab {
             case .installed:
                 installedPetsContent
+            case .library:
+                myLibraryContent
             case .catalog:
                 browseCatalogContent
             }
@@ -205,6 +218,11 @@ struct PetdexSettingsView: View {
         .onChange(of: catalogSearch) { nextQuery in
             if selectedPetsSubtab == .catalog {
                 scheduleCatalogFetch(query: nextQuery, debounceMs: 280)
+            }
+        }
+        .onChange(of: store.authPhase) { _ in
+            if selectedPetsSubtab == .library && !(store.isSignedIn && store.hasLibraryPets) {
+                selectedPetsSubtab = .installed
             }
         }
     }
@@ -276,6 +294,199 @@ struct PetdexSettingsView: View {
                     actions.onBrowsePetdex()
                 }
                 .buttonStyle(.borderedProminent)
+            }
+        }
+    }
+
+    private var myLibraryContent: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let installError {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.orange)
+                        .font(.system(size: 11))
+                    Text(installError)
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                        .lineLimit(2)
+                    Spacer()
+                    Button("Dismiss") {
+                        self.installError = nil
+                    }
+                    .controlSize(.mini)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color.orange.opacity(0.10))
+                )
+            }
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    if !store.ownedPets.isEmpty {
+                        librarySection(title: "Yours (\(store.ownedPets.count))", pets: store.ownedPets)
+                    }
+
+                    if !store.caughtPets.isEmpty {
+                        librarySection(title: "Caught (\(store.caughtPets.count))", pets: store.caughtPets)
+                    }
+                }
+                .padding(2)
+            }
+
+            HStack(spacing: 8) {
+                Button("Refresh Library") {
+                    actions.onRefreshAccount()
+                }
+                .disabled(store.authPhase == "syncing")
+
+                Spacer()
+
+                Button("Browse petdex.dev") {
+                    actions.onBrowsePetdex()
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+    }
+
+    private func librarySection(title: String, pets: [PetdexLibraryPet]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.secondary)
+
+            LazyVGrid(
+                columns: [
+                    GridItem(.flexible(), spacing: 12),
+                    GridItem(.flexible(), spacing: 12),
+                    GridItem(.flexible(), spacing: 12),
+                ],
+                spacing: 12
+            ) {
+                ForEach(pets) { pet in
+                    libraryPetCard(pet)
+                }
+            }
+        }
+    }
+
+    private func libraryPetCard(_ pet: PetdexLibraryPet) -> some View {
+        let installedMatch = store.installedPets.first {
+            $0.id.caseInsensitiveCompare(pet.slug) == .orderedSame
+        }
+        let isActive = installedMatch != nil && store.activePetId?.caseInsensitiveCompare(pet.slug) == .orderedSame
+        let isInstalling = installingSlugs.contains(pet.slug)
+        let normalizedStatus = pet.status.lowercased()
+        let isInstallable = normalizedStatus != "pending" && normalizedStatus != "rejected"
+
+        return VStack(spacing: 6) {
+            ZStack(alignment: .topTrailing) {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.secondary.opacity(0.08))
+                    .frame(height: 74)
+                    .overlay {
+                        AsyncImage(url: pet.thumbnailURL) { phase in
+                            switch phase {
+                            case .success(let image):
+                                image
+                                    .interpolation(.none)
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .frame(width: 58, height: 58)
+                            case .failure:
+                                Image(systemName: "pawprint.fill")
+                                    .font(.system(size: 22))
+                                    .foregroundColor(.secondary.opacity(0.6))
+                            case .empty:
+                                ProgressView()
+                                    .controlSize(.small)
+                            @unknown default:
+                                EmptyView()
+                            }
+                        }
+                    }
+
+                if isActive {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundColor(.accentColor)
+                        .padding(6)
+                }
+            }
+
+            VStack(spacing: 1) {
+                Text(pet.displayName)
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
+                Text(pet.slug)
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+            }
+
+            if isInstalling {
+                HStack(spacing: 4) {
+                    ProgressView()
+                        .controlSize(.mini)
+                    Text("Installing")
+                        .font(.system(size: 10.5, weight: .medium))
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 22)
+            } else if let installedMatch {
+                Button(isActive ? "Active" : "Select") {
+                    actions.onSelectPet(installedMatch)
+                }
+                .controlSize(.small)
+                .disabled(isActive)
+                .frame(maxWidth: .infinity)
+            } else if isInstallable {
+                Button("Install") {
+                    installLibraryPet(pet)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .frame(maxWidth: .infinity)
+            } else {
+                Text(pet.status.capitalized)
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 22)
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(isActive ? Color.accentColor.opacity(0.10) : Color(nsColor: .controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(
+                    isActive ? Color.accentColor : Color.secondary.opacity(0.20),
+                    lineWidth: isActive ? 2 : 1
+                )
+        )
+    }
+
+    private func installLibraryPet(_ pet: PetdexLibraryPet) {
+        guard !installingSlugs.contains(pet.slug) else { return }
+        installingSlugs.insert(pet.slug)
+        installError = nil
+
+        Task { @MainActor in
+            defer { installingSlugs.remove(pet.slug) }
+            do {
+                let installed = try await PetdexCatalogClient.shared.installPet(slug: pet.slug)
+                PetPreviewCache.shared.invalidate()
+                actions.onPetInstalled(installed)
+            } catch {
+                installError = "Failed to install \(pet.displayName): \(error.localizedDescription)"
             }
         }
     }
@@ -931,12 +1142,6 @@ struct PetdexSettingsView: View {
                 store.autoCheckUpdates = newValue
             }
         )
-        let apiTokenBinding = Binding<String>(
-            get: { store.apiToken },
-            set: { newValue in
-                store.apiToken = newValue
-            }
-        )
 
         return ScrollView {
             VStack(alignment: .leading, spacing: 12) {
@@ -1048,7 +1253,9 @@ struct PetdexSettingsView: View {
                     .padding(8)
                 }
 
-                GroupBox("Updates & Account") {
+                petdexAccountCard
+
+                GroupBox("Updates") {
                     VStack(alignment: .leading, spacing: 10) {
                         Toggle("Auto-check updates", isOn: autoCheckUpdatesBinding)
 
@@ -1073,20 +1280,176 @@ struct PetdexSettingsView: View {
                                 .controlSize(.small)
                             }
                         }
-
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("petdex.dev Library Token (optional)")
-                                .font(.system(size: 12, weight: .medium))
-                            SecureField("Paste API token...", text: apiTokenBinding)
-                                .textFieldStyle(.roundedBorder)
-                                .font(.system(size: 12))
-                        }
                     }
                     .padding(8)
                 }
             }
             .padding(1)
         }
+    }
+
+    private var petdexAccountCard: some View {
+        let isBusy = store.authPhase == "authorizing" || store.authPhase == "syncing"
+
+        return GroupBox("Petdex Account") {
+            VStack(alignment: .leading, spacing: 10) {
+                if let user = store.authUser {
+                    HStack(spacing: 10) {
+                        AsyncImage(url: user.avatarURL) { phase in
+                            switch phase {
+                            case .success(let image):
+                                image
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fill)
+                            default:
+                                ZStack {
+                                    Circle()
+                                        .fill(Color.accentColor.opacity(0.16))
+                                    Image(systemName: "person.fill")
+                                        .font(.system(size: 15, weight: .semibold))
+                                        .foregroundColor(.accentColor)
+                                }
+                            }
+                        }
+                        .frame(width: 36, height: 36)
+                        .clipShape(Circle())
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(user.name)
+                                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                                .lineLimit(1)
+
+                            HStack(spacing: 6) {
+                                if let handle = user.handleText {
+                                    Text(handle)
+                                        .font(.system(size: 11, design: .monospaced))
+                                        .foregroundColor(.secondary)
+                                        .lineLimit(1)
+                                }
+                                if let email = user.email, email != user.name {
+                                    Text(email)
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.secondary)
+                                        .lineLimit(1)
+                                }
+                            }
+                        }
+
+                        Spacer()
+                    }
+
+                    HStack(spacing: 8) {
+                        accountCountBadge(title: "Yours", count: store.ownedPets.count)
+                        accountCountBadge(title: "Caught", count: store.caughtPets.count)
+
+                        Spacer()
+
+                        Button {
+                            actions.onRefreshAccount()
+                        } label: {
+                            HStack(spacing: 4) {
+                                if store.authPhase == "syncing" {
+                                    ProgressView()
+                                        .controlSize(.mini)
+                                }
+                                Text("Refresh Library")
+                            }
+                        }
+                        .controlSize(.small)
+                        .disabled(isBusy)
+
+                        Button("Sign out") {
+                            actions.onSignOut()
+                        }
+                        .controlSize(.small)
+                    }
+                } else {
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Sync your Petdex library")
+                                .font(.system(size: 12.5, weight: .semibold))
+                            Text("Sign in with Clerk to access your created and caught pets directly from macOS.")
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+
+                        Spacer(minLength: 8)
+
+                        Button {
+                            actions.onSignIn()
+                        } label: {
+                            HStack(spacing: 6) {
+                                if isBusy {
+                                    ProgressView()
+                                        .controlSize(.mini)
+                                        .tint(.white)
+                                } else {
+                                    Image(systemName: "person.badge.key.fill")
+                                        .font(.system(size: 11.5, weight: .semibold))
+                                }
+                                Text(signInButtonTitle)
+                                    .font(.system(size: 12, weight: .semibold))
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .foregroundColor(.white)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [
+                                                Color(red: 0.23, green: 0.51, blue: 0.98),
+                                                Color(red: 0.11, green: 0.31, blue: 0.82),
+                                            ],
+                                            startPoint: .top,
+                                            endPoint: .bottom
+                                        )
+                                    )
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isBusy)
+                    }
+                }
+
+                if let authError = store.authError, !authError.isEmpty {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 11))
+                            .foregroundColor(.red)
+                        Text(authError)
+                            .font(.system(size: 11))
+                            .foregroundColor(.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            .padding(8)
+        }
+    }
+
+    private var signInButtonTitle: String {
+        switch store.authPhase {
+        case "authorizing":
+            return "Waiting for browser..."
+        case "syncing":
+            return "Syncing..."
+        default:
+            return "Sign in with Petdex"
+        }
+    }
+
+    private func accountCountBadge(title: String, count: Int) -> some View {
+        Text("\(title) (\(count))")
+            .font(.system(size: 11, weight: .medium, design: .rounded))
+            .foregroundColor(.secondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(
+                Capsule()
+                    .fill(Color.secondary.opacity(0.12))
+            )
     }
 
     private func agentStatusBadge(for agent: DetectedAgent) -> some View {

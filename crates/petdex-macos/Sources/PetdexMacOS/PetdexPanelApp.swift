@@ -263,6 +263,18 @@ final class PetdexSpriteCanvasView: NSView {
         }
     }
 
+    func takeOAuthCallback() -> PetdexOAuthCallbackPayload? {
+        guard let engine else { return nil }
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        let written = buffer.withUnsafeMutableBufferPointer { ptr -> Int in
+            guard let base = ptr.baseAddress else { return 0 }
+            return petdex_engine_take_oauth_callback_json(engine, base, ptr.count)
+        }
+        guard written > 0 else { return nil }
+        let data = Data(buffer[0..<written])
+        return try? JSONDecoder().decode(PetdexOAuthCallbackPayload.self, from: data)
+    }
+
     private func startTickLoop() {
         let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
             self?.stepFrame(dtMs: 16)
@@ -466,6 +478,7 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
     private let basePanelSize = NSSize(width: 220, height: 238)
     private let settingsStore = PetdexSettingsStore()
     private let chimePlayer = PetdexChimePlayer()
+    private let clerkAuth = PetdexClerkAuthClient.shared
     private var panel: PetdexFloatingPanel?
     private var canvasView: PetdexSpriteCanvasView?
     private var bubblePanel: PetdexBubblePanel?
@@ -473,6 +486,8 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
     private var panelMoveObserver: NSObjectProtocol?
     private var reconcileTimer: Timer?
     private var rotatePetsTimer: Timer?
+    private var oauthFlowTask: Task<Void, Never>?
+    private var accountSyncTask: Task<Void, Never>?
     private var statusItem: NSStatusItem?
     private var petMenuItem: NSMenuItem?
     private var stateMenuItem: NSMenuItem?
@@ -486,6 +501,8 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
     deinit {
         reconcileTimer?.invalidate()
         rotatePetsTimer?.invalidate()
+        oauthFlowTask?.cancel()
+        accountSyncTask?.cancel()
         if let panelMoveObserver {
             NotificationCenter.default.removeObserver(panelMoveObserver)
         }
@@ -608,6 +625,8 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
         if settingsStore.autoCheckUpdates {
             checkForUpdates()
         }
+
+        restoreAccountSessionOnLaunch()
 
         let reconcile = Timer(timeInterval: 10.0, repeats: true) { [weak self] _ in
             self?.canvasView?.reconcileLocalSessions()
@@ -903,6 +922,15 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
                 },
                 onOpenRemoteConfig: { [weak self] in
                     self?.openRemoteConfig()
+                },
+                onSignIn: { [weak self] in
+                    self?.handleSignIn()
+                },
+                onRefreshAccount: { [weak self] in
+                    self?.handleRefreshAccount()
+                },
+                onSignOut: { [weak self] in
+                    self?.handleSignOut()
                 }
             )
 
@@ -1223,6 +1251,167 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
             panel.orderFrontRegardless()
         }
         syncBubblePanel()
+    }
+
+    private func restoreAccountSessionOnLaunch() {
+        guard let savedTokens = clerkAuth.loadTokens() else {
+            settingsStore.authPhase = "signed_out"
+            return
+        }
+
+        accountSyncTask?.cancel()
+        settingsStore.authPhase = "syncing"
+        settingsStore.authError = nil
+
+        accountSyncTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let (library, _) = try await self.clerkAuth.fetchLibraryWithAutoRefresh(tokens: savedTokens)
+                if Task.isCancelled { return }
+                self.applySignedInLibrary(library)
+            } catch PetdexClerkAuthError.unauthorized {
+                if Task.isCancelled { return }
+                _ = self.clerkAuth.deleteTokens()
+                self.resetAccountState(error: nil)
+            } catch {
+                if Task.isCancelled { return }
+                NSLog("PetdexMacOS silent library sync failed: %@", error.localizedDescription)
+                self.settingsStore.authPhase = self.settingsStore.authUser != nil ? "signed_in" : "signed_out"
+            }
+        }
+    }
+
+    private func handleSignIn() {
+        oauthFlowTask?.cancel()
+        accountSyncTask?.cancel()
+        _ = canvasView?.takeOAuthCallback()
+
+        let challenge: PetdexPKCEChallenge
+        do {
+            challenge = try clerkAuth.beginPKCEFlow()
+        } catch {
+            settingsStore.authPhase = "error"
+            settingsStore.authError = error.localizedDescription
+            return
+        }
+
+        settingsStore.authPhase = "authorizing"
+        settingsStore.authError = nil
+        NSWorkspace.shared.open(challenge.authorizeURL)
+
+        oauthFlowTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let deadline = Date().addingTimeInterval(180)
+            var callback: PetdexOAuthCallbackPayload?
+
+            while Date() < deadline {
+                if Task.isCancelled { return }
+                if let received = self.canvasView?.takeOAuthCallback() {
+                    callback = received
+                    break
+                }
+                try? await Task.sleep(nanoseconds: 250_000_000)
+            }
+
+            if Task.isCancelled { return }
+
+            guard let callback else {
+                self.settingsStore.authPhase = "error"
+                self.settingsStore.authError = PetdexClerkAuthError.timedOut.localizedDescription
+                return
+            }
+
+            if !callback.error.isEmpty {
+                self.settingsStore.authPhase = "error"
+                self.settingsStore.authError = PetdexClerkAuthError.oauthError(callback.error).localizedDescription
+                return
+            }
+
+            guard callback.state == challenge.state else {
+                self.settingsStore.authPhase = "error"
+                self.settingsStore.authError = PetdexClerkAuthError.stateMismatch.localizedDescription
+                return
+            }
+
+            guard !callback.code.isEmpty else {
+                self.settingsStore.authPhase = "error"
+                self.settingsStore.authError = PetdexClerkAuthError.missingAuthorizationCode.localizedDescription
+                return
+            }
+
+            self.settingsStore.authPhase = "syncing"
+            self.settingsStore.authError = nil
+
+            do {
+                let tokens = try await self.clerkAuth.exchangeCodeForTokens(
+                    code: callback.code,
+                    codeVerifier: challenge.codeVerifier
+                )
+                if Task.isCancelled { return }
+                _ = self.clerkAuth.saveTokens(tokens)
+                let (library, _) = try await self.clerkAuth.fetchLibraryWithAutoRefresh(tokens: tokens)
+                if Task.isCancelled { return }
+                self.applySignedInLibrary(library)
+                NSApp.activate(ignoringOtherApps: true)
+                self.settingsWindow?.makeKeyAndOrderFront(nil)
+                self.settingsWindow?.orderFrontRegardless()
+            } catch {
+                if Task.isCancelled { return }
+                self.settingsStore.authPhase = "error"
+                self.settingsStore.authError = error.localizedDescription
+            }
+        }
+    }
+
+    private func handleRefreshAccount() {
+        guard let savedTokens = clerkAuth.loadTokens() else {
+            resetAccountState(error: nil)
+            return
+        }
+
+        accountSyncTask?.cancel()
+        settingsStore.authPhase = "syncing"
+        settingsStore.authError = nil
+
+        accountSyncTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let (library, _) = try await self.clerkAuth.fetchLibraryWithAutoRefresh(tokens: savedTokens)
+                if Task.isCancelled { return }
+                self.applySignedInLibrary(library)
+            } catch PetdexClerkAuthError.unauthorized {
+                if Task.isCancelled { return }
+                _ = self.clerkAuth.deleteTokens()
+                self.resetAccountState(error: PetdexClerkAuthError.unauthorized.localizedDescription)
+            } catch {
+                if Task.isCancelled { return }
+                self.settingsStore.authError = error.localizedDescription
+                self.settingsStore.authPhase = self.settingsStore.authUser != nil ? "signed_in" : "error"
+            }
+        }
+    }
+
+    private func handleSignOut() {
+        oauthFlowTask?.cancel()
+        accountSyncTask?.cancel()
+        _ = clerkAuth.deleteTokens()
+        resetAccountState(error: nil)
+    }
+
+    private func applySignedInLibrary(_ library: PetdexLibraryPayload) {
+        settingsStore.authUser = library.user
+        settingsStore.ownedPets = library.owned
+        settingsStore.caughtPets = library.caught
+        settingsStore.authError = nil
+        settingsStore.authPhase = "signed_in"
+    }
+
+    private func resetAccountState(error: String?) {
+        settingsStore.authUser = nil
+        settingsStore.ownedPets = []
+        settingsStore.caughtPets = []
+        settingsStore.authError = error
+        settingsStore.authPhase = error == nil ? "signed_out" : "error"
     }
 
     @objc private func handleQuit() {

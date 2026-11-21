@@ -297,6 +297,41 @@ pub unsafe extern "C" fn petdex_engine_active_bubbles_json(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn petdex_engine_take_oauth_callback_json(
+    engine: *mut PetdexEngine,
+    out_buf: *mut u8,
+    out_cap: usize,
+) -> usize {
+    if out_buf.is_null() || out_cap == 0 {
+        return 0;
+    }
+    let Some(engine) = engine.as_mut() else {
+        *out_buf = 0;
+        return 0;
+    };
+    let Some(server) = engine.hook_server.as_ref() else {
+        *out_buf = 0;
+        return 0;
+    };
+    let Some(cb) = server.take_oauth_callback() else {
+        *out_buf = 0;
+        return 0;
+    };
+
+    let json = format!(
+        r#"{{"code":{},"state":{},"error":{}}}"#,
+        escape_json_str(&cb.code),
+        escape_json_str(&cb.state),
+        escape_json_str(&cb.error),
+    );
+    let bytes = json.as_bytes();
+    let copy_len = bytes.len().min(out_cap - 1);
+    std::ptr::copy_nonoverlapping(bytes.as_ptr(), out_buf, copy_len);
+    *out_buf.add(copy_len) = 0;
+    copy_len
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn petdex_engine_dismiss_session(
     engine: *mut PetdexEngine,
     session_id_ptr: *const c_char,

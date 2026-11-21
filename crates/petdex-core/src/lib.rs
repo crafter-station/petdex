@@ -18,7 +18,9 @@ pub use hook_installer::{
     disconnect_agent, disconnect_agent_in, ensure_hook_runner_script,
     ensure_windows_hook_runner_script, AgentInstallStatus,
 };
-pub use hook_server::{HookServer, HookServerConfig, DEFAULT_HOOK_PORT, UPDATE_TOKEN_HEADER};
+pub use hook_server::{
+    HookServer, HookServerConfig, OAuthCallback, DEFAULT_HOOK_PORT, UPDATE_TOKEN_HEADER,
+};
 pub use reconcile::{
     parse_claude_jsonl, parse_gemini_jsonl, parse_hermes_json, parse_omp_jsonl, reconcile_file,
     reconcile_local_sessions, ReconcileError, ReconciledSession,
