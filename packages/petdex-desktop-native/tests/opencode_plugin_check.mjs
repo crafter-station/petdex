@@ -1,12 +1,24 @@
 // Drives the opencode plugin through both plugin APIs with a fake context
 // and a stubbed fetch, so no hook server or opencode install is needed.
+import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const home = mkdtempSync(join(tmpdir(), "petdex-opencode-"));
-process.env.HOME = home;
-process.env.USERPROFILE = home;
+// Bun on Linux reads HOME once at startup, so the fake home has to be in
+// place before the process starts.
+if (!process.env.PETDEX_OPENCODE_TEST_HOME) {
+  const fakeHome = mkdtempSync(join(tmpdir(), "petdex-opencode-"));
+  const result = spawnSync(process.execPath, [fileURLToPath(import.meta.url)], {
+    stdio: "inherit",
+    env: { ...process.env, HOME: fakeHome, USERPROFILE: fakeHome, PETDEX_OPENCODE_TEST_HOME: fakeHome },
+  });
+  rmSync(fakeHome, { recursive: true, force: true });
+  process.exit(result.status ?? 1);
+}
+
+const home = process.env.PETDEX_OPENCODE_TEST_HOME;
 mkdirSync(join(home, ".petdex", "runtime"), { recursive: true });
 writeFileSync(join(home, ".petdex", "runtime", "update-token"), "tok\n");
 
