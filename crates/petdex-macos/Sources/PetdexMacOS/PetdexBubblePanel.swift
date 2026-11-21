@@ -87,109 +87,107 @@ private struct PetdexBubbleCardView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(lipTint)
-                    .offset(y: 2)
-                    .shadow(
-                        color: navyInk.opacity(isBackCard ? 0.08 : 0.14),
-                        radius: isBackCard ? 5 : 9,
-                        x: 0,
-                        y: isBackCard ? 2 : 4
-                    )
-
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: 6) {
-                        if let logo = AgentLogoLoader.image(for: bubble.agent) {
-                            Image(nsImage: logo)
-                                .resizable()
-                                .interpolation(.high)
-                                .aspectRatio(contentMode: .fit)
-                                .frame(width: 15, height: 15)
-                                .clipShape(RoundedRectangle(cornerRadius: 3.5, style: .continuous))
-                        } else {
-                            Circle()
-                                .fill(bubble.statusColor)
-                                .frame(width: 8, height: 8)
-                        }
-
-                        Text(bubble.agentDisplayName)
-                            .font(.system(size: 10.5, weight: .bold, design: .rounded))
-                            .foregroundColor(navyInk)
-
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 6) {
+                    if let logo = AgentLogoLoader.image(for: bubble.agent) {
+                        Image(nsImage: logo)
+                            .resizable()
+                            .interpolation(.high)
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 15, height: 15)
+                            .clipShape(RoundedRectangle(cornerRadius: 3.5, style: .continuous))
+                    } else {
                         Circle()
                             .fill(bubble.statusColor)
-                            .frame(width: 6.5, height: 6.5)
-
-                        if isNeedsInput {
-                            Text("INPUT")
-                                .font(.system(size: 8.5, weight: .bold, design: .monospaced))
-                                .foregroundColor(navyInk)
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 1.5)
-                                .background(Capsule().fill(voltYellow))
-                        }
-
-                        if extraCount > 0 {
-                            Text("+\(extraCount)")
-                                .font(.system(size: 8.5, weight: .bold, design: .monospaced))
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 5.5)
-                                .padding(.vertical, 1.5)
-                                .background(Capsule().fill(cobaltRim))
-                        }
-
-                        Spacer(minLength: 4)
-
-                        Button(action: onDismiss) {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 8.5, weight: .bold))
-                                .foregroundColor(navyMuted)
-                                .frame(width: 18, height: 18)
-                                .background(
-                                    Circle()
-                                        .fill(cobaltRim.opacity(0.08))
-                                )
-                        }
-                        .buttonStyle(.plain)
-                        .help("Dismiss bubble")
+                            .frame(width: 8, height: 8)
                     }
 
-                    Text(bubble.summary.isEmpty ? bubble.statusDisplayName : bubble.summary)
-                        .font(.system(size: 12.2, weight: .medium, design: .rounded))
+                    Text(bubble.agentDisplayName)
+                        .font(.system(size: 10.5, weight: .bold, design: .rounded))
                         .foregroundColor(navyInk)
-                        .lineLimit(2)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .padding(.horizontal, 13)
-                .padding(.vertical, 9.5)
-                .frame(width: 264, height: 66, alignment: .topLeading)
-                .background(
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [whiteTop, pearlBottom],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                )
-                            )
 
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .strokeBorder(
-                                LinearGradient(
-                                    colors: [
-                                        Color.white.opacity(0.95),
-                                        cobaltRim.opacity(0.18),
-                                    ],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                ),
-                                lineWidth: 1.2
+                    Circle()
+                        .fill(bubble.statusColor)
+                        .frame(width: 6.5, height: 6.5)
+
+                    if isNeedsInput {
+                        Text("INPUT")
+                            .font(.system(size: 8.5, weight: .bold, design: .monospaced))
+                            .foregroundColor(navyInk)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1.5)
+                            .background(Capsule().fill(voltYellow))
+                    }
+
+                    if extraCount > 0 {
+                        Text("+\(extraCount)")
+                            .font(.system(size: 8.5, weight: .bold, design: .monospaced))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 5.5)
+                            .padding(.vertical, 1.5)
+                            .background(Capsule().fill(cobaltRim))
+                    }
+
+                    Spacer(minLength: 4)
+
+                    Button(action: onDismiss) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 8.5, weight: .bold))
+                            .foregroundColor(navyMuted)
+                            .frame(width: 18, height: 18)
+                            .background(
+                                Circle()
+                                    .fill(cobaltRim.opacity(0.08))
                             )
                     }
-                )
+                    .buttonStyle(.plain)
+                    .help("Dismiss bubble")
+                }
+
+                Text(bubble.summary.isEmpty ? bubble.statusDisplayName : bubble.summary)
+                    .font(.system(size: 12.2, weight: .medium, design: .rounded))
+                    .foregroundColor(navyInk)
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .padding(.horizontal, 13)
+            .padding(.vertical, 9.5)
+            .frame(width: 264, height: 66, alignment: .topLeading)
+            .background(
+                ZStack {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(lipTint)
+                        .offset(y: 2)
+                        .shadow(
+                            color: navyInk.opacity(isBackCard ? 0.08 : 0.14),
+                            radius: isBackCard ? 5 : 9,
+                            x: 0,
+                            y: isBackCard ? 2 : 4
+                        )
+
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [whiteTop, pearlBottom],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(0.95),
+                                    cobaltRim.opacity(0.18),
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            ),
+                            lineWidth: 1.2
+                        )
+                }
+            )
 
             if showTail {
                 ZStack {
