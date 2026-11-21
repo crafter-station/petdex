@@ -302,17 +302,33 @@ async function setup(ctx) {
   });
   await ctx.tool.hook("execute.before", (event) => petdex.tool("running", event.tool, event.input, event.sessionID));
   await ctx.tool.hook("execute.after", (event) => petdex.tool("done", event.tool, event.input, event.sessionID));
+  const sessionDirectories = new Map();
+  async function ownsSession(event, sessionID) {
+    if (!directory) return true;
+    const eventDirectory = event?.location?.directory;
+    if (eventDirectory) return eventDirectory === directory;
+    if (!sessionDirectories.has(sessionID)) {
+      try {
+        const sessionDirectory = (await ctx.session.get({ sessionID }))?.location?.directory;
+        if (sessionDirectory) sessionDirectories.set(sessionID, sessionDirectory);
+      } catch {
+        // Unknown owner: keep the event rather than drop it.
+      }
+    }
+    const owner = sessionDirectories.get(sessionID);
+    return !owner || owner === directory;
+  }
   const controller = new AbortController();
   void (async () => {
     for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
-      // One plugin instance loads per location; skip other locations'
-      // sessions so each event reaches the mascot once.
-      if (event?.location?.directory && directory && event.location.directory !== directory) continue;
       const sessionId = event?.data?.sessionID;
       if (typeof sessionId !== "string" || sessionId.length === 0) continue;
+      // One plugin instance loads per location; skip other locations'
+      // sessions so each event reaches the mascot once.
+      if (!(await ownsSession(event, sessionId))) continue;
       if (event.type === "session.created" || event.type === "session.renamed") {
         await petdex.syncServerTitle(sessionId, event.data.title);
-      } else if (event.type === "session.idle") {
+      } else if (event.type === "session.idle" || event.type === "session.execution.succeeded") {
         await petdex.idle(sessionId);
       } else if (event.type === "session.execution.failed") {
         await petdex.failed(sessionId);

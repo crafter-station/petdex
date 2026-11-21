@@ -34,13 +34,20 @@ try {
   const dir = "/work/project";
   const ctx = {
     location: { directory: dir },
-    session: { get: async ({ sessionID }) => ({ id: sessionID, title: "Fix the build" }) },
+    session: {
+      get: async ({ sessionID }) => ({
+        id: sessionID,
+        title: "Fix the build",
+        location: { directory: sessionID === "other" ? "/elsewhere" : dir },
+      }),
+    },
     tool: { hook: async (name, cb) => { hooks[name] = cb; return { dispose: async () => {} }; } },
     event: {
       async *subscribe() {
         yield { type: "session.renamed", location: { directory: "/elsewhere" }, data: { sessionID: "other", title: "Not ours" } };
         yield { type: "session.renamed", location: { directory: dir }, data: { sessionID: "s1", title: "Renamed" } };
-        yield { type: "session.idle", data: { sessionID: "s1" } };
+        yield { type: "session.execution.succeeded", data: { sessionID: "s1" } };
+        yield { type: "session.execution.failed", data: { sessionID: "other", error: { type: "x", message: "elsewhere" } } };
         yield { type: "session.execution.failed", location: { directory: dir }, data: { sessionID: "s1", error: { type: "x", message: "boom" } } };
         release();
       },
