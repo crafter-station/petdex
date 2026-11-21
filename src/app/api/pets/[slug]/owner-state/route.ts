@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 
 import { getCollectionCandidatesForPet } from "@/lib/collections";
 import { db, schema } from "@/lib/db/client";
+import { toPendingEditView } from "@/lib/pet-edit-state";
 
 export const runtime = "nodejs";
 
@@ -37,7 +38,6 @@ export async function GET(
     return NextResponse.json({ isOwner: false }, { headers: PRIVATE_HEADERS });
   }
 
-  const hasPending = Boolean(row.pendingSubmittedAt);
   const collectionSuggest = await getCollectionCandidatesForPet(slug, userId);
 
   return NextResponse.json(
@@ -45,16 +45,7 @@ export async function GET(
       isOwner: true,
       petId: row.id,
       currentTags: (row.tags as string[]) ?? [],
-      pending: hasPending
-        ? {
-            displayName: row.pendingDisplayName,
-            description: row.pendingDescription,
-            tags: (row.pendingTags as string[] | null) ?? null,
-            submittedAt: row.pendingSubmittedAt
-              ? row.pendingSubmittedAt.toISOString()
-              : null,
-          }
-        : null,
+      pending: toPendingEditView(row),
       lastRejection: row.pendingRejectionReason,
       collectionSuggest,
     },

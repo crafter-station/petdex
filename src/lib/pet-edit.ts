@@ -26,6 +26,7 @@ import {
   buildPendingEditPatch,
   type PendingEditPatch,
   pendingEditIsNoOp,
+  toPendingEditView,
 } from "@/lib/pet-edit-state";
 import { editRatelimit } from "@/lib/ratelimit";
 import { refreshSimilarityFor } from "@/lib/similarity";
@@ -385,7 +386,11 @@ type QueuedEditRow = Pick<
   | "pendingSubmittedAt"
 >;
 
-async function queueEdit(id: string, patch: PendingPatch): Promise<Response> {
+async function queueEdit(
+  id: string,
+  row: SubmittedPet,
+  patch: PendingPatch,
+): Promise<Response> {
   const assetKeys = pendingAssetKeysFromUrls([
     patch.pendingSpritesheetUrl,
     patch.pendingPetJsonUrl,
@@ -411,12 +416,11 @@ async function queueEdit(id: string, patch: PendingPatch): Promise<Response> {
 
   return NextResponse.json({
     status: "queued",
-    pending: {
-      displayName: updated.pendingDisplayName,
-      description: updated.pendingDescription,
-      tags: updated.pendingTags,
-      submittedAt: updated.pendingSubmittedAt,
-    },
+    pending: toPendingEditView({
+      ...updated,
+      spritesheetUrl: row.spritesheetUrl,
+      pendingSpritesheetUrl: patch.pendingSpritesheetUrl,
+    }),
   });
 }
 
@@ -559,5 +563,5 @@ export async function applyPetEdit(input: {
   patch.pendingSubmittedAt = new Date();
   patch.pendingRejectionReason = null;
   const autoAccepted = await tryAutoAccept(id, row, patch, flags);
-  return autoAccepted ?? queueEdit(id, patch);
+  return autoAccepted ?? queueEdit(id, row, patch);
 }

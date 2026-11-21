@@ -812,6 +812,7 @@
       },
       "spritesheetLabel": "Spritesheet",
       "spritesheetHelp": "Replaces the current sprite. Goes to manual review.",
+      "pendingSpritesheet": "Pending spritesheet",
       "metaLabel": "Metadata (pet.json)",
       "metaHelp": "Replaces the current metadata. Goes to manual review.",
       "fileTooBig": "File exceeds 8 MB",

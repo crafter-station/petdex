@@ -12,6 +12,7 @@ type Pending = {
   description: string | null;
   tags: string[] | null;
   submittedAt: string | null;
+  spritesheetUrl: string | null;
 };
 
 type OwnerState = {

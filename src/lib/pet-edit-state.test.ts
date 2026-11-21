@@ -1,6 +1,10 @@
 import { describe, expect, it } from "bun:test";
 
-import { buildPendingEditPatch, pendingEditIsNoOp } from "@/lib/pet-edit-state";
+import {
+  buildPendingEditPatch,
+  pendingEditIsNoOp,
+  toPendingEditView,
+} from "@/lib/pet-edit-state";
 
 function row(overrides: Record<string, unknown> = {}) {
   return {
@@ -61,5 +65,55 @@ describe("pending edit state", () => {
     const patch = buildPendingEditPatch(current);
     patch.pendingSpriteVersionNumber = 1;
     expect(pendingEditIsNoOp(current, patch)).toBe(false);
+  });
+});
+
+describe("pending edit view", () => {
+  const live = "https://assets.petdex.dev/pets/sample-pet/sprite.webp";
+  const pendingSprite =
+    "https://assets.petdex.dev/pets/sample-pet-pending-0123456789ab/sprite.webp";
+  const source = {
+    spritesheetUrl: live,
+    pendingDisplayName: "New name",
+    pendingDescription: null,
+    pendingTags: ["cat"],
+    pendingSubmittedAt: new Date("2026-08-01T00:00:00Z"),
+    pendingSpritesheetUrl: pendingSprite,
+  };
+
+  it("carries the pending spritesheet so View edit can preview it", () => {
+    expect(toPendingEditView(source)).toEqual({
+      displayName: "New name",
+      description: null,
+      tags: ["cat"],
+      submittedAt: "2026-08-01T00:00:00.000Z",
+      spritesheetUrl: pendingSprite,
+    });
+  });
+
+  it("omits the spritesheet when it is missing or matches the live one", () => {
+    expect(
+      toPendingEditView({ ...source, pendingSpritesheetUrl: null })
+        ?.spritesheetUrl,
+    ).toBeNull();
+    expect(
+      toPendingEditView({ ...source, pendingSpritesheetUrl: live })
+        ?.spritesheetUrl,
+    ).toBeNull();
+  });
+
+  it("returns null without a pending submission", () => {
+    expect(toPendingEditView({ ...source, pendingSubmittedAt: null })).toBe(
+      null,
+    );
+  });
+
+  it("keeps a string timestamp from raw SQL rows", () => {
+    expect(
+      toPendingEditView({
+        ...source,
+        pendingSubmittedAt: "2026-08-01T00:00:00.000Z",
+      })?.submittedAt,
+    ).toBe("2026-08-01T00:00:00.000Z");
   });
 });

@@ -1,5 +1,43 @@
 import type { SubmittedPet } from "@/lib/db/schema";
+import { toCurrentR2PublicUrl } from "@/lib/r2-public-url";
 import type { SpriteVersionNumber } from "@/lib/types";
+
+export type PendingEditView = {
+  displayName: string | null;
+  description: string | null;
+  tags: string[] | null;
+  submittedAt: string;
+  spritesheetUrl: string | null;
+};
+
+type PendingEditSource = {
+  spritesheetUrl: string;
+  pendingDisplayName: string | null;
+  pendingDescription: string | null;
+  pendingTags: unknown;
+  pendingSubmittedAt: Date | string | null;
+  pendingSpritesheetUrl: string | null;
+};
+
+export function toPendingEditView(
+  row: PendingEditSource,
+): PendingEditView | null {
+  if (!row.pendingSubmittedAt) return null;
+  const pendingSprite = row.pendingSpritesheetUrl;
+  return {
+    displayName: row.pendingDisplayName,
+    description: row.pendingDescription,
+    tags: (row.pendingTags as string[] | null) ?? null,
+    submittedAt:
+      row.pendingSubmittedAt instanceof Date
+        ? row.pendingSubmittedAt.toISOString()
+        : row.pendingSubmittedAt,
+    spritesheetUrl:
+      pendingSprite && pendingSprite !== row.spritesheetUrl
+        ? toCurrentR2PublicUrl(pendingSprite)
+        : null,
+  };
+}
 
 export type PendingEditPatch = {
   pendingDisplayName: string | null;

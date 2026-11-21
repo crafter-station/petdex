@@ -19,6 +19,7 @@ import { formatLocalizedNumber } from "@/lib/format-number";
 import { userIdForHandle, viewerIdForFallbackHandle } from "@/lib/handles";
 import { getOwnerRank } from "@/lib/leaderboard";
 import { buildLocaleAlternates } from "@/lib/locale-routing";
+import { toPendingEditView } from "@/lib/pet-edit-state";
 import { type PetWithMetrics, rowToPet } from "@/lib/pets";
 import { toCurrentR2PublicUrl } from "@/lib/r2-public-url";
 
@@ -213,14 +214,7 @@ export default async function UserProfilePage({ params }: PageProps) {
           approvedAt: row.approvedAt?.toISOString() ?? null,
           rejectedAt: row.rejectedAt?.toISOString() ?? null,
           rejectionReason: row.rejectionReason,
-          pending: row.pendingSubmittedAt
-            ? {
-                displayName: row.pendingDisplayName,
-                description: row.pendingDescription,
-                tags: (row.pendingTags as string[] | null) ?? null,
-                submittedAt: row.pendingSubmittedAt.toISOString(),
-              }
-            : null,
+          pending: toPendingEditView(row),
           pendingRejectionReason: row.pendingRejectionReason,
           metrics: { installCount: 0, zipDownloadCount: 0, likeCount: 0 },
         }))
