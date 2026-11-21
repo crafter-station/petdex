@@ -33,6 +33,7 @@ let package = Package(
             path: "Sources/PetdexMacOS",
             resources: [
                 .copy("Resources/agents"),
+                .copy("Resources/petdex-desktop-icon.png"),
             ],
             swiftSettings: [
                 .unsafeFlags(["-Xcc", "-I\(coreIncludeDir)"]),

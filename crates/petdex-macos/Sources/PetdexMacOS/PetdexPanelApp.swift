@@ -989,13 +989,21 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
 
         if let window = onboardingWindow {
             window.contentViewController = hostingController
-            window.setContentSize(NSSize(width: 540, height: 440))
+            window.setContentSize(NSSize(width: 560, height: 500))
             window.center()
         } else {
             let window = NSWindow(contentViewController: hostingController)
             window.title = "Welcome to Petdex"
-            window.styleMask = [.titled, .closable]
-            window.setContentSize(NSSize(width: 540, height: 440))
+            window.styleMask = [.titled, .closable, .fullSizeContentView]
+            window.titleVisibility = .hidden
+            window.titlebarAppearsTransparent = true
+            window.isMovableByWindowBackground = true
+            window.standardWindowButton(.miniaturizeButton)?.isHidden = true
+            window.standardWindowButton(.zoomButton)?.isHidden = true
+            window.isOpaque = false
+            window.backgroundColor = .clear
+            window.hasShadow = true
+            window.setContentSize(NSSize(width: 560, height: 500))
             window.isReleasedWhenClosed = false
             window.center()
             onboardingWindow = window

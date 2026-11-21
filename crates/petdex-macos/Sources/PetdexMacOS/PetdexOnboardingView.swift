@@ -34,6 +34,10 @@ private enum OnboardingStep: Int, CaseIterable, Identifiable {
             return "Ready"
         }
     }
+
+    var eyebrowLabel: String {
+        "\(numberLabel) · \(title.uppercased())"
+    }
 }
 
 struct PetdexOnboardingView: View {
@@ -45,6 +49,15 @@ struct PetdexOnboardingView: View {
     @State private var isInstallingBoba = false
     @State private var installBobaError: String?
     @State private var testBubbleSent = false
+
+    private static let desktopAppIcon: NSImage = {
+        if let url = Bundle.module.url(forResource: "petdex-desktop-icon", withExtension: "png"),
+           let image = NSImage(contentsOf: url)
+        {
+            return image
+        }
+        return NSApp.applicationIconImage
+    }()
 
     private static let onboardingAgentSlugs: [String] = [
         "claude-code",
@@ -97,10 +110,13 @@ struct PetdexOnboardingView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            stepHeaderBar
-            Rectangle()
-                .fill(hairlineBorder)
-                .frame(height: 1)
+            Text(currentStep.eyebrowLabel)
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .tracking(1.6)
+                .foregroundColor(.secondary)
+                .frame(maxWidth: .infinity)
+                .padding(.top, 26)
+                .padding(.bottom, 6)
 
             Group {
                 switch currentStep {
@@ -115,75 +131,21 @@ struct PetdexOnboardingView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding(.horizontal, 26)
-            .padding(.vertical, 20)
+            .padding(.horizontal, 28)
+            .padding(.vertical, 14)
 
-            Rectangle()
-                .fill(hairlineBorder)
-                .frame(height: 1)
             footerBar
         }
-        .frame(width: 540, height: 440)
+        .frame(width: 560, height: 500)
         .background(canvasBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(hairlineBorder, lineWidth: 1)
+        )
         .onAppear {
             actions.onRefreshAgents()
         }
-    }
-
-    private var stepHeaderBar: some View {
-        HStack(spacing: 8) {
-            ForEach(OnboardingStep.allCases) { step in
-                let isCurrent = step == currentStep
-                let isCompleted = step.rawValue < currentStep.rawValue
-
-                Button {
-                    withAnimation(.easeInOut(duration: 0.18)) {
-                        currentStep = step
-                    }
-                } label: {
-                    HStack(spacing: 5) {
-                        if isCompleted {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 9, weight: .bold))
-                        } else {
-                            Text(step.numberLabel)
-                                .font(.system(size: 10.5, weight: .bold, design: .monospaced))
-                        }
-
-                        Text(step.title)
-                            .font(.system(size: 11.5, weight: isCurrent ? .semibold : .medium, design: .rounded))
-                            .lineLimit(1)
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .frame(maxWidth: .infinity)
-                    .foregroundColor(
-                        isCurrent
-                            ? .white
-                            : (isCompleted ? cobalt : .secondary)
-                    )
-                    .background(
-                        Capsule()
-                            .fill(
-                                isCurrent
-                                    ? cobalt
-                                    : (isCompleted ? cobalt.opacity(0.12) : pearlSurface)
-                            )
-                    )
-                    .overlay(
-                        Capsule()
-                            .strokeBorder(
-                                isCurrent ? cobalt : (isCompleted ? cobalt.opacity(0.25) : hairlineBorder),
-                                lineWidth: 1
-                            )
-                    )
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 14)
-        .background(pearlSurface.opacity(colorScheme == .dark ? 0.5 : 0.85))
     }
 
     private var accountStepView: some View {
@@ -192,7 +154,7 @@ struct PetdexOnboardingView: View {
         return VStack(spacing: 16) {
             Spacer(minLength: 4)
 
-            cobaltSquircleMark(size: 68)
+            desktopAppIconMark(size: 80)
 
             VStack(spacing: 6) {
                 Text("Welcome to Petdex")
@@ -203,7 +165,8 @@ struct PetdexOnboardingView: View {
                     .font(.system(size: 13))
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
-                    .frame(maxWidth: 360)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 380)
             }
 
             if let user = store.authUser, store.isSignedIn {
@@ -302,7 +265,7 @@ struct PetdexOnboardingView: View {
                     .disabled(isBusy)
 
                     Button {
-                        withAnimation(.easeInOut(duration: 0.18)) {
+                        withAnimation(.spring(response: 0.30, dampingFraction: 0.78)) {
                             currentStep = .companion
                         }
                     } label: {
@@ -344,6 +307,7 @@ struct PetdexOnboardingView: View {
                 Text("Select a pixel pet to appear on your desktop right away.")
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if store.installedPets.isEmpty {
@@ -356,6 +320,7 @@ struct PetdexOnboardingView: View {
                             Text("Grab Boba from petdex.dev or start with the built-in Cobalt Squircle.")
                                 .font(.system(size: 11.5))
                                 .foregroundColor(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         Spacer()
                     }
@@ -470,6 +435,7 @@ struct PetdexOnboardingView: View {
                     Text("Enable live bubbles when your CLI agents run or wait for input.")
                         .font(.system(size: 12))
                         .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 Spacer()
@@ -545,17 +511,10 @@ struct PetdexOnboardingView: View {
     }
 
     private var readyStepView: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 14) {
             Spacer(minLength: 2)
 
-            ZStack {
-                Circle()
-                    .fill(cobalt.opacity(0.12))
-                    .frame(width: 58, height: 58)
-                Image(systemName: "sparkles")
-                    .font(.system(size: 24, weight: .semibold))
-                    .foregroundColor(cobalt)
-            }
+            desktopAppIconMark(size: 80)
 
             VStack(spacing: 5) {
                 Text("You're all set!")
@@ -564,7 +523,8 @@ struct PetdexOnboardingView: View {
                     .font(.system(size: 12.5))
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
-                    .frame(maxWidth: 380)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 400)
             }
 
             HStack(spacing: 12) {
@@ -642,81 +602,107 @@ struct PetdexOnboardingView: View {
     }
 
     private var footerBar: some View {
-        HStack {
-            if currentStep != .account {
-                Button {
-                    goToPreviousStep()
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 10.5, weight: .semibold))
-                        Text("Back")
-                            .font(.system(size: 12.5, weight: .medium, design: .rounded))
+        ZStack {
+            HStack(spacing: 7) {
+                ForEach(OnboardingStep.allCases) { step in
+                    let isCurrent = step == currentStep
+                    Button {
+                        withAnimation(.spring(response: 0.30, dampingFraction: 0.78)) {
+                            currentStep = step
+                        }
+                    } label: {
+                        Capsule()
+                            .fill(
+                                isCurrent
+                                    ? cobalt
+                                    : (colorScheme == .dark ? Color.white.opacity(0.22) : Color.black.opacity(0.16))
+                            )
+                            .frame(width: isCurrent ? 22 : 6, height: 6)
+                            .padding(.vertical, 8)
+                            .contentShape(Rectangle())
                     }
-                    .foregroundColor(.primary)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 7)
-                    .background(
-                        RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            .fill(pearlSurface)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            .strokeBorder(hairlineBorder, lineWidth: 1)
-                    )
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(step.title)
                 }
-                .buttonStyle(.plain)
             }
+            .animation(.spring(response: 0.30, dampingFraction: 0.78), value: currentStep)
 
-            Spacer()
-
-            if currentStep == .ready {
-                Button {
-                    store.onboardingCompleted = true
-                    actions.onFinish()
-                } label: {
-                    Text("Start Using Petdex")
-                        .font(.system(size: 12.5, weight: .semibold, design: .rounded))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 8)
+            HStack {
+                if currentStep != .account {
+                    Button {
+                        goToPreviousStep()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 10.5, weight: .semibold))
+                            Text("Back")
+                                .font(.system(size: 12.5, weight: .medium, design: .rounded))
+                        }
+                        .foregroundColor(.primary)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
                         .background(
                             RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                .fill(
-                                    LinearGradient(
-                                        colors: [cobalt, cobaltDeep],
-                                        startPoint: .top,
-                                        endPoint: .bottom
-                                    )
-                                )
+                                .fill(pearlSurface)
                         )
-                        .shadow(color: cobalt.opacity(0.24), radius: 6, x: 0, y: 3)
-                }
-                .buttonStyle(.plain)
-            } else {
-                Button {
-                    goToNextStep()
-                } label: {
-                    HStack(spacing: 4) {
-                        Text("Next")
-                            .font(.system(size: 12.5, weight: .semibold, design: .rounded))
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 10.5, weight: .semibold))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .strokeBorder(hairlineBorder, lineWidth: 1)
+                        )
                     }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 7)
-                    .background(
-                        RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            .fill(cobalt)
-                    )
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
+
+                Spacer()
+
+                if currentStep == .ready {
+                    Button {
+                        store.onboardingCompleted = true
+                        actions.onFinish()
+                    } label: {
+                        Text("Start Using Petdex")
+                            .font(.system(size: 12.5, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [cobalt, cobaltDeep],
+                                            startPoint: .top,
+                                            endPoint: .bottom
+                                        )
+                                    )
+                            )
+                            .shadow(color: cobalt.opacity(0.24), radius: 6, x: 0, y: 3)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Button {
+                        goToNextStep()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("Next")
+                                .font(.system(size: 12.5, weight: .semibold, design: .rounded))
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 10.5, weight: .semibold))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 7)
+                        .background(
+                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                .fill(cobalt)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 12)
-        .background(pearlSurface.opacity(colorScheme == .dark ? 0.5 : 0.85))
+        .padding(.horizontal, 26)
+        .padding(.top, 10)
+        .padding(.bottom, 22)
     }
 
     private func companionCard<Preview: View>(
@@ -816,6 +802,15 @@ struct PetdexOnboardingView: View {
         )
     }
 
+    private func desktopAppIconMark(size: CGFloat = 80) -> some View {
+        Image(nsImage: Self.desktopAppIcon)
+            .resizable()
+            .interpolation(.high)
+            .aspectRatio(contentMode: .fit)
+            .frame(width: size, height: size)
+            .shadow(color: cobalt.opacity(0.28), radius: 14, x: 0, y: 6)
+    }
+
     private func cobaltSquircleMark(size: CGFloat) -> some View {
         let corner = size * 0.28
         let eyeW = size * 0.15
@@ -888,14 +883,14 @@ struct PetdexOnboardingView: View {
 
     private func goToNextStep() {
         guard let next = OnboardingStep(rawValue: currentStep.rawValue + 1) else { return }
-        withAnimation(.easeInOut(duration: 0.18)) {
+        withAnimation(.spring(response: 0.30, dampingFraction: 0.78)) {
             currentStep = next
         }
     }
 
     private func goToPreviousStep() {
         guard let previous = OnboardingStep(rawValue: currentStep.rawValue - 1) else { return }
-        withAnimation(.easeInOut(duration: 0.18)) {
+        withAnimation(.spring(response: 0.30, dampingFraction: 0.78)) {
             currentStep = previous
         }
     }
