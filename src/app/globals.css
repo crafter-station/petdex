@@ -11,22 +11,22 @@
    one becomes available as bg-{name}, text-{name}, border-{name},
    ring-{name}, etc. */
 :root {
-  /* Page surfaces — perceptually near-white with a faint cool tint */
+  /* Page surfaces: perceptually near-white with a faint cool tint */
   --bg-app: oklch(0.984 0.009 271.7); /* #f7f8ff */
   --text-default: oklch(0.142 0 0); /* #050505 */
 
-  /* Brand purple family — same hue (~271°), three lightness steps */
+  /* Brand purple family: same hue (~271°), three lightness steps */
   --brand: oklch(0.561 0.207 271.8); /* #5266ea */
-  --brand-deep: oklch(0.521 0.26 269.4); /* #3847f5 — hovers/CTAs */
-  --brand-light: oklch(0.616 0.193 272.1); /* #6478f6 — borders/highlights */
-  --brand-tint: oklch(0.949 0.019 269); /* #eef1ff — chip backgrounds */
-  --brand-tint-dark: oklch(0.243 0.075 274.3); /* #1f2240 — dark chip bg */
+  --brand-deep: oklch(0.521 0.26 269.4); /* #3847f5: hovers/CTAs */
+  --brand-light: oklch(0.616 0.193 272.1); /* #6478f6: borders/highlights */
+  --brand-tint: oklch(0.949 0.019 269); /* #eef1ff: chip backgrounds */
+  --brand-tint-dark: oklch(0.243 0.075 274.3); /* #1f2240: dark chip bg */
 
   /* Body / muted text scale (single hue ~277°, varying L) */
-  --text-muted-1: oklch(0.235 0.009 277.1); /* #202127 — body secondary */
-  --text-muted-2: oklch(0.317 0.013 280.1); /* #33333a — submit intro */
-  --text-muted-3: oklch(0.475 0.024 273.7); /* #5b6076 — OG footer */
-  --text-muted-4: oklch(0.43 0.014 277.6); /* #4f515c — nav inactive */
+  --text-muted-1: oklch(0.235 0.009 277.1); /* #202127: body secondary */
+  --text-muted-2: oklch(0.317 0.013 280.1); /* #33333a: submit intro */
+  --text-muted-3: oklch(0.475 0.024 273.7); /* #5b6076: OG footer */
+  --text-muted-4: oklch(0.43 0.014 277.6); /* #4f515c: nav inactive */
 
   /* Hero cloud gradient stops */
   --gradient-a: oklch(0.918 0.04 247.6); /* #d8e9ff */
@@ -45,7 +45,7 @@
   --border-base: oklch(0.142 0 0 / 0.1);
   --border-strong: oklch(0.142 0 0 / 0.3);
 
-  /* Inverse pair — used by primary CTAs (bg flips to dark in light mode,
+  /* Inverse pair: used by primary CTAs (bg flips to dark in light mode,
      bg flips to near-white in dark mode; the text token tracks it). */
   --inverse: oklch(0.142 0 0); /* near-black */
   --inverse-hover: oklch(0.235 0.009 277.1);
@@ -65,7 +65,7 @@
   --background: var(--bg-app);
   --foreground: var(--text-default);
 
-  /* shadcn semantic tokens — OKLCH, derived from the Petdex brand seed.
+  /* shadcn semantic tokens: OKLCH, derived from the Petdex brand seed.
      Verified for AA contrast against their paired surfaces. The hue (272°)
      stays constant across primary/ring; destructive picks a separate hue
      (27° = red). */
@@ -86,6 +86,16 @@
   --border: oklch(0.142 0 0 / 0.1);
   --input: oklch(0.142 0 0 / 0.15);
   --ring: oklch(0.561 0.207 271.8);
+
+  --shell-pearl: #f7f8fc;
+  --shell-pearl-edge: #dfe3f0;
+  --toy-cobalt: #3b59f2;
+  --toy-navy: #101944;
+  --toy-volt: #ffe259;
+  --toy-sakura: #ff7aa2;
+  --toy-mint: #34d399;
+  --toy-ink: #101944;
+  --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .dark {
@@ -110,7 +120,7 @@
   --text-muted-1: oklch(0.88 0.01 277); /* near-white body */
   --text-muted-2: oklch(0.76 0.012 280); /* secondary */
   --text-muted-3: oklch(0.64 0.015 274); /* dim */
-  --text-muted-4: oklch(0.56 0.014 277.5); /* very dim — nav inactive */
+  --text-muted-4: oklch(0.56 0.014 277.5); /* very dim: nav inactive */
 
   /* Surface tokens flip to near-black variants. --surface is the base
      card bg, --surface-elev is the slightly lighter elevated panel,
@@ -144,7 +154,7 @@
   --background: var(--bg-app);
   --foreground: var(--text-default);
 
-  /* shadcn semantic tokens — dark mode. L values are flipped relative to
+  /* shadcn semantic tokens: dark mode. L values are flipped relative to
      light mode (card/popover use --surface; foregrounds become near-white).
      --primary is brightened (0.745) so chrome on near-black surfaces stays
      readable. --muted-foreground bumped to L=0.7 to clear AA normal text. */
@@ -165,6 +175,10 @@
   --border: oklch(1 0 0 / 0.1);
   --input: oklch(1 0 0 / 0.15);
   --ring: oklch(0.745 0.165 272);
+
+  --shell-pearl: #161c3a;
+  --shell-pearl-edge: #0a0f26;
+  --toy-ink: #f4f6ff;
 }
 
 @theme inline {
@@ -221,8 +235,19 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
 
-  --font-sans: var(--font-geist-sans);
+  --font-sans: var(--font-geist-sans), var(--font-cjk), sans-serif;
   --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-display), var(--font-cjk), sans-serif;
+  --font-hardware: var(--font-pixel), monospace;
+  --font-han: var(--font-cjk), sans-serif;
+  --color-shell-pearl: var(--shell-pearl);
+  --color-shell-pearl-edge: var(--shell-pearl-edge);
+  --color-toy-cobalt: var(--toy-cobalt);
+  --color-toy-navy: var(--toy-navy);
+  --color-toy-volt: var(--toy-volt);
+  --color-toy-sakura: var(--toy-sakura);
+  --color-toy-mint: var(--toy-mint);
+  --color-toy-ink: var(--toy-ink);
 }
 
 html {
@@ -238,6 +263,14 @@ html {
 body {
   background: var(--background);
   color: var(--foreground);
+  font-family: var(--font-geist-sans), var(--font-cjk), sans-serif;
+}
+
+@layer base {
+  h1,
+  h2 {
+    font-family: var(--font-display), var(--font-cjk), sans-serif;
+  }
 }
 
 .build-update-prompt {
@@ -650,7 +683,7 @@ input {
 }
 
 /* Static variant for list contexts (leaderboard rows, owner mini-grids).
-   Renders only the first frame of a chosen state row — no infinite keyframe, no paint
+   Renders only the first frame of a chosen state row: no infinite keyframe, no paint
    thrash on scroll. Same dimensions as .pet-sprite so layouts can
    swap one for the other without touching parent CSS. */
 .pet-sprite-static {
@@ -715,4 +748,71 @@ input {
     box-shadow: 0 0 0 2px oklch(from var(--brand) l c h / 0.45);
     opacity: 1;
   }
+}
+
+.toy-shell {
+  background: var(--shell-pearl);
+  border-radius: 2rem;
+  box-shadow:
+    inset 0 2px 0 rgb(255 255 255 / 0.9),
+    inset 0 -6px 0 var(--shell-pearl-edge),
+    0 18px 40px rgb(16 25 68 / 0.08);
+}
+.dark .toy-shell {
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.08),
+    inset 0 -6px 0 var(--shell-pearl-edge),
+    0 18px 40px rgb(0 0 0 / 0.4);
+}
+.toy-screen {
+  border-radius: 1.25rem;
+  background: var(--toy-navy);
+  box-shadow: inset 0 3px 10px rgb(0 0 0 / 0.55);
+}
+.toy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 1rem;
+  font-weight: 600;
+  transition:
+    transform 140ms var(--ease-bounce),
+    box-shadow 140ms var(--ease-bounce);
+}
+.toy-btn:active,
+.toy-btn[data-pressed] {
+  transform: translateY(5px);
+}
+.toy-btn-cobalt {
+  color: #fff;
+  background: linear-gradient(180deg, #5876ff, #2b46d9);
+  box-shadow:
+    inset 0 2px 0 rgb(255 255 255 / 0.4),
+    0 6px 0 #162472;
+}
+.toy-btn-cobalt:active {
+  box-shadow:
+    inset 0 2px 0 rgb(255 255 255 / 0.3),
+    0 1px 0 #162472;
+}
+.toy-btn-pearl {
+  color: var(--toy-ink);
+  background: var(--shell-pearl);
+  box-shadow:
+    inset 0 2px 0 rgb(255 255 255 / 0.85),
+    0 6px 0 var(--shell-pearl-edge);
+}
+.toy-btn-pearl:active {
+  box-shadow: 0 1px 0 var(--shell-pearl-edge);
+}
+.dark .toy-btn-pearl {
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.1),
+    0 6px 0 var(--shell-pearl-edge);
+}
+.toy-tag {
+  font-family: var(--font-pixel), monospace;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }

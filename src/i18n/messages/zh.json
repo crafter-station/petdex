@@ -724,6 +724,15 @@
       "ogTitle": "Petdex 品牌工具包",
       "ogTitle__fixme": true
     },
+    "nav": {
+      "overview": "概览",
+      "logoSystem": "标志系统",
+      "brandAssets": "品牌素材"
+    },
+    "actions": {
+      "copy": "复制",
+      "copied": "已复制"
+    },
     "eyebrow": "品牌工具包",
     "eyebrow__fixme": true,
     "hero": {
@@ -738,7 +747,85 @@
       "secondaryCta": "在 GitHub 查看",
       "secondaryCta__fixme": true,
       "iconAlt": "Petdex 桌面应用图标",
-      "iconAlt__fixme": true
+      "iconAlt__fixme": true,
+      "tactileCta": "下载立体 SVG"
+    },
+    "hub": {
+      "logoSystem": {
+        "title": "标志系统",
+        "body": "结构网格、安全留白比例、单色与深色组合、最小尺寸以及与 Crafter Station 的联合署名规范。",
+        "cta": "查看标志系统"
+      },
+      "brandAssets": {
+        "title": "品牌素材",
+        "body": "官方 SVG 和 PNG 标志、单色变体、产品图标以及可直接复制的嵌入代码片段。",
+        "cta": "浏览品牌素材"
+      }
+    },
+    "attribution": {
+      "eyebrow": "出品方",
+      "body": "Petdex 是由 Railly Hugo 在 Crafter Station 打造的开源产品。"
+    },
+    "logoSystem": {
+      "metadata": {
+        "title": "Petdex 标志系统",
+        "description": "Petdex 标志的 64x64 像素网格、安全留白、组合方式、最小尺寸与使用规范。",
+        "ogTitle": "Petdex 标志系统"
+      },
+      "eyebrow": "标志系统",
+      "title": "基于 64x64 像素网格构建。",
+      "body": "Petdex 标志将圆角容器与 6 像素生物网格结合，从 16px favicon 到原生应用图标都能保持锐利。",
+      "anatomy": {
+        "eyebrow": "结构与留白",
+        "title": "精确几何比例",
+        "body": "在容器四周至少保留 0.25x 安全留白，不要改动圆角半径或像素比例。",
+        "diagramAlt": "Petdex 标志网格与留白示意图",
+        "metrics": {
+          "viewBox": "画布尺寸",
+          "pixelUnit": "像素单位",
+          "cornerRadius": "圆角半径",
+          "clearspace": "安全留白"
+        }
+      },
+      "lockups": {
+        "eyebrow": "组合方式",
+        "title": "官方认可组合",
+        "primaryLight": "浅色背景主组合",
+        "primaryDark": "深色背景主组合",
+        "mono": "单色版本",
+        "cobrand": "联合品牌",
+        "bilingual": "双语组合"
+      },
+      "scale": {
+        "eyebrow": "最小尺寸",
+        "title": "跨界面清晰度"
+      }
+    },
+    "brandAssets": {
+      "metadata": {
+        "title": "Petdex 品牌素材",
+        "description": "下载 Petdex 官方 SVG 与 PNG 标志、单色版本、应用图标以及可复制代码片段。",
+        "ogTitle": "Petdex 品牌素材"
+      },
+      "eyebrow": "品牌素材",
+      "title": "即拿即用的文件与代码片段。",
+      "body": "涵盖全部官方 SVG 和 PNG 标志、字标与产品图标，以及适用于 README 和合作站点的代码片段。",
+      "groups": {
+        "logos": "标志与字标",
+        "icons": "产品与社区图标"
+      },
+      "snippets": {
+        "svgTitle": "内联 SVG 标志",
+        "badgeTitle": "README Markdown 徽章",
+        "imgTitle": "立体标志 img 标签",
+        "tabsLabel": "嵌入代码"
+      },
+      "surface": {
+        "label": "预览底色",
+        "pearl": "珍珠",
+        "navy": "深蓝",
+        "checker": "棋盘格"
+      }
     },
     "assets": {
       "eyebrow": "下载",
@@ -755,9 +842,15 @@
         "light": "浅色模式",
         "light__fixme": true,
         "dark": "深色模式",
-        "dark__fixme": true
+        "dark__fixme": true,
+        "checker": "透明背景"
       },
       "items": {
+        "tactileMark": {
+          "title": "立体标志",
+          "description": "带有凹刻像素脸的钴蓝圆角方块。用于应用图标、头像和发布图片的主图标。",
+          "alt": "Petdex 立体标志"
+        },
         "mark": {
           "title": "Petdex 标志",
           "title__fixme": true,
@@ -765,6 +858,16 @@
           "description__fixme": true,
           "alt": "Petdex 标志",
           "alt__fixme": true
+        },
+        "markMonoLight": {
+          "title": "单色标志（深墨色）",
+          "description": "适用于浅色印刷、单色文档和简洁页脚的单色标志。",
+          "alt": "Petdex 深墨色单色标志"
+        },
+        "markMonoDark": {
+          "title": "单色标志（纯白色）",
+          "description": "适用于深色叠加层、视频水印和深色单色界面的高对比白色标志。",
+          "alt": "Petdex 纯白色单色标志"
         },
         "wordmark": {
           "title": "Petdex 浅色字标",
@@ -789,6 +892,16 @@
           "description__fixme": true,
           "alt": "Petdex 桌面图标",
           "alt__fixme": true
+        },
+        "appIcon": {
+          "title": "应用图标（方形）",
+          "description": "适用于启动器、目录站和社交头像的方形产品图标。",
+          "alt": "Petdex 方形应用图标"
+        },
+        "discordIcon": {
+          "title": "Discord 社区图标",
+          "description": "用于 Discord 介绍和合作伙伴列表的官方社区徽标。",
+          "alt": "Petdex Discord 图标"
         }
       }
     },
@@ -819,30 +932,29 @@
       }
     },
     "system": {
-      "eyebrow": "设计系统",
-      "eyebrow__fixme": true,
-      "title": "颜色和字体",
-      "title__fixme": true,
-      "body": "Petdex 使用冷调应用底色、紫蓝色品牌强调色和 Geist 字体，让它像一个实用工具，同时带一点小宠物的能量。",
-      "body__fixme": true,
+      "eyebrow": "口袋玩具系统",
+      "title": "珍珠外壳，钴蓝按键",
+      "body": "Petdex 是给开发者的口袋玩具：温润的珍珠塑料外壳、光亮的钴蓝按键，点缀电光黄、樱花粉和薄荷绿的收藏感，再配上精准的工具字体。",
       "colors": {
-        "brand": "品牌色",
-        "brand__fixme": true,
-        "brandDeep": "深品牌色",
-        "brandDeep__fixme": true,
-        "brandLight": "浅品牌色",
-        "brandLight__fixme": true,
-        "bgApp": "应用背景",
-        "bgApp__fixme": true,
-        "brandTint": "品牌浅色底",
-        "brandTint__fixme": true,
-        "ink": "墨色",
-        "ink__fixme": true
+        "cobalt": "钴蓝",
+        "deepNavy": "深海军蓝",
+        "pearlShell": "珍珠外壳",
+        "voltYellow": "电光黄",
+        "sakuraPink": "樱花粉",
+        "mint": "薄荷绿"
       },
       "type": {
-        "title": "字体",
-        "title__fixme": true
+        "title": "字体样张",
+        "display": "标题",
+        "body": "正文",
+        "pixel": "硬件标签",
+        "cjk": "中文"
       }
+    },
+    "tags": {
+      "collect": "收集",
+      "level": "LV 01",
+      "new": "新宠物"
     }
   },
   "about": {

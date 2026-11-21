@@ -1,0 +1,119 @@
+# Petdex (Full Reference)
+
+> Open-source index, CLI, and native desktop companion ecosystem of animated pixel pets for coding agents. Created by Railly Hugo at Crafter Station.
+
+## Identity and Authorship
+
+- Name: Petdex (bilingual mark: Petdex · 宠物图鉴)
+- Canonical URL: https://petdex.dev
+- Source repository: https://github.com/crafter-station/petdex
+- License: MIT
+- Creator: Railly Hugo (https://railly.dev, https://github.com/Railly, https://x.com/raillyhugo)
+- Studio / Organization: Crafter Station (https://crafter.run, https://github.com/crafter-station)
+- Community Discord: https://discord.gg/byhubdyBTe
+- npm package: https://www.npmjs.com/package/petdex
+- Locales supported: English (`en`), Spanish (`es`), Simplified Chinese (`zh`)
+
+## What Petdex Is
+
+Petdex consists of three integrated layers:
+
+1. Public Web Gallery (`https://petdex.dev`): Browse, search, filter, collect, and submit animated pixel pets by kind (`creature`, `object`, `character`), vibe (`cozy`, `playful`, `focused`, `mystical`, `wholesome`, etc.), color family, and curated collections.
+2. Petdex CLI (`npx petdex`): One-command installation, submission, editing, and collection management from the terminal.
+3. Petdex Desktop (`https://petdex.dev/download`): A lightweight native floating companion app for macOS, Windows, and Linux built on Native SDK (`vercel-labs/native`, Zig) with zero WebView and zero Node sidecar. It connects to 10 coding agents and animates your chosen pixel pet in real time across 9 states.
+
+## Supported Coding Agents
+
+Petdex Desktop supports 10 coding agents out of the box, with dedicated integration pages at `https://petdex.dev/agents/<slug>`:
+
+1. **Claude Code** (`https://petdex.dev/agents/claude-code`)
+   - Vendor: Anthropic
+   - Integration: Non-destructive JSON lifecycle hooks merged into `~/.claude/settings.json` (or `CLAUDE_CONFIG_DIR` / `~/.petdex/agent-paths.json`) with one-time backup, plus local read-only transcript recovery.
+2. **OpenAI Codex** (`https://petdex.dev/agents/codex`)
+   - Vendor: OpenAI
+   - Integration: Native Codex pet packs under `~/.codex/pets` and `~/.petdex/pets`, Petdex Desktop in-binary hook runner, and durable local Codex rollout recovery.
+3. **Gemini CLI** (`https://petdex.dev/agents/gemini-cli`)
+   - Vendor: Google
+   - Integration: JSON lifecycle hooks in `~/.gemini/settings.json` plus local read-only Gemini chat session recovery.
+4. **OpenCode** (`https://petdex.dev/agents/opencode`)
+   - Vendor: SST / OpenCode
+   - Integration: Low-latency local lifecycle hook bridge configured in one click from Petdex Desktop Settings.
+5. **Hermes** (`https://petdex.dev/agents/hermes`)
+   - Vendor: Nous Research
+   - Integration: Bundled `petdex-desktop` plugin installed under `~/.hermes/plugins/petdex-desktop` (or `HERMES_HOME`), `~/.hermes/shell-hooks-allowlist.json` registration, and local read-only `state.db` session recovery.
+6. **Kimi Code** (`https://petdex.dev/agents/kimi-code`)
+   - Vendor: Moonshot AI
+   - Integration: JSON lifecycle hooks wired to Petdex Desktop's native hook runner.
+7. **Qoder** (`https://petdex.dev/agents/qoder`)
+   - Vendor: Alibaba / Qoder
+   - Integration: Dual-root JSON lifecycle hooks merged into both `~/.qoder/settings.json` and `~/.qoder-cn/settings.json`.
+8. **CodeBuddy** (`https://petdex.dev/agents/codebuddy`)
+   - Vendor: Tencent
+   - Integration: JSON lifecycle hooks installed via Petdex Desktop's in-binary hook runner with automatic config backup.
+9. **OMP (Oh My Pi)** (`https://petdex.dev/agents/omp`)
+   - Vendor: Oh My Pi
+   - Integration: Session hooks under `PI_CODING_AGENT_DIR` paired with local read-only OMP session log recovery.
+10. **DeepSeek Harness (DSH)** (`https://petdex.dev/agents/dsh`)
+    - Vendor: DeepSeek
+    - Integration: Embedded `@petdex/dsh-plugin` Cordis bridge installed into the DSH Web profile (`~/.dsh/profiles/web` or `$DSH_HOME/profiles/web`).
+
+## CLI Usage
+
+The `petdex` CLI is published on npm and works with `npx`:
+
+- Install a pet: `npx petdex install boba`
+- Install any pet by slug: `npx petdex install <slug>`
+- Installed pets are written to `~/.petdex/pets/<slug>/` containing `pet.json` and `spritesheet.webp` (or `spritesheet.png`).
+- Submit a new pet pack: `npx petdex submit ./my-pet/`
+- Manage collections:
+  - `npx petdex collection list`
+  - `npx petdex collection create --title "My pets" --pets boba,mochi`
+- Authenticate with Petdex: `npx petdex login`
+
+## Petdex Desktop App
+
+- Download page: `https://petdex.dev/download`
+- Platforms: macOS, Windows, and Linux (including optional `wlr-layer-shell` overlay support on Wayland compositors such as Hyprland, Sway, KDE, and niri).
+- Runtime architecture: Built in Zig on Native SDK (`vercel-labs/native`), with no WebView and no Node sidecar.
+- Animation engine: 9-state canonical animation table (idle with irregular blinking, thinking, working, happy, alert, sleeping, tool failure, and status bubbles).
+- Settings shortcut: Press `Cmd+,` over the floating pet to switch active pets under **Pets** and connect or remove coding agents under **Agents** with one click.
+- Privacy: All agent hooks and durable recovery scans run strictly locally on the user's machine; prompts and code are never sent to external servers.
+
+## Pet Pack Architecture and Builder API
+
+Builders creating desktop companions, wearables, Discord bots, wellness apps, or SDKs integrate with two stable surfaces:
+
+1. **Public HTTP Manifest API**: `https://petdex.dev/api/manifest` returns every approved pet with its slug, spritesheet URL, animation states, and metadata.
+2. **Pet Pack Format**: Every pet is a self-contained folder with:
+   - `pet.json`: Metadata, display name, creator credit, and animation state definitions.
+   - `spritesheet.webp` or `spritesheet.png`: Pixel-art sprite atlas arranged as an 8x9 grid of 192x208 frames, or the v2 8x11 grid.
+- Community showcase: `https://petdex.dev/built-with` catalogs open-source and source-available apps, wearables, wellness tools, and SDKs built on Petdex.
+
+## Brand Kit (Pocket Toy Identity)
+
+- Brand overview: `https://petdex.dev/brand`
+- Logo System: `https://petdex.dev/brand/logo-system`
+  - 64x64 pixel construction grid, 56x56 rounded container (4px inset, 16px corner radius), 6px pixel unit, 25% clearspace rule, and bilingual `Petdex · 宠物图鉴` lockups.
+- Brand Assets: `https://petdex.dev/brand/brand-assets`
+  - Official tactile SVG mark (`/brand/petdex-tactile-mark.svg`), standard SVG/PNG marks, monochrome light/dark variants, wordmarks, and embed snippets.
+- Pocket Toy color palette:
+  - Cobalt: `#3B59F2` (`var(--toy-cobalt)`)
+  - Deep Navy: `#101944` (`var(--toy-navy)`)
+  - Pearl Shell: `#F7F8FC` (`var(--shell-pearl)`)
+  - Volt Yellow: `#FFE259` (`var(--toy-volt)`)
+  - Sakura Pink: `#FF7AA2` (`var(--toy-sakura)`)
+  - Mint: `#34D399` (`var(--toy-mint)`)
+
+## Key URLs
+
+- Home & Pet Gallery: https://petdex.dev/
+- Download Petdex Desktop: https://petdex.dev/download
+- Collections: https://petdex.dev/collections
+- Built With Petdex: https://petdex.dev/built-with
+- Docs: https://petdex.dev/docs
+- Brand Kit: https://petdex.dev/brand
+- Logo System: https://petdex.dev/brand/logo-system
+- Brand Assets: https://petdex.dev/brand/brand-assets
+- About & FAQ: https://petdex.dev/about
+- Compact LLM summary: https://petdex.dev/llms.txt
+- Full LLM reference: https://petdex.dev/llms-full.txt

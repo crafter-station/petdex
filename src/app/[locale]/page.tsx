@@ -102,41 +102,68 @@ export default async function Home({
   const showWechatCommunity = isZh;
   const surprisePet = randomPet ? toSurprisePet(randomPet) : null;
 
-  const jsonLd = [
-    {
-      "@context": "https://schema.org",
-      "@type": "WebSite",
-      "@id": `${SITE_URL}/#website`,
-      name: "Petdex",
-      url: `${SITE_URL}/`,
-      description: t("jsonLdDescription"),
-      publisher: {
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
         "@type": "Organization",
+        "@id": "https://crafter.run/#organization",
         name: "Crafter Station",
         url: "https://crafter.run",
+        sameAs: ["https://github.com/crafter-station"],
+        founder: { "@id": "https://railly.dev/#person" },
       },
-      potentialAction: {
-        "@type": "SearchAction",
-        target: {
-          "@type": "EntryPoint",
-          urlTemplate: `${SITE_URL}/?q={search_term_string}#gallery`,
+      {
+        "@type": "Person",
+        "@id": "https://railly.dev/#person",
+        name: "Railly Hugo",
+        url: "https://railly.dev",
+        sameAs: ["https://github.com/Railly", "https://x.com/raillyhugo"],
+        worksFor: { "@id": "https://crafter.run/#organization" },
+      },
+      {
+        "@type": "WebSite",
+        "@id": `${SITE_URL}/#website`,
+        name: "Petdex",
+        url: `${SITE_URL}/`,
+        inLanguage: locale,
+        description: t("jsonLdDescription"),
+        creator: { "@id": "https://railly.dev/#person" },
+        publisher: { "@id": "https://crafter.run/#organization" },
+        potentialAction: {
+          "@type": "SearchAction",
+          target: {
+            "@type": "EntryPoint",
+            urlTemplate: `${SITE_URL}/?q={search_term_string}#gallery`,
+          },
+          "query-input": "required name=search_term_string",
         },
-        "query-input": "required name=search_term_string",
       },
-    },
-    {
-      "@context": "https://schema.org",
-      "@type": "ItemList",
-      name: t("jsonLdFeaturedPets"),
-      numberOfItems: heroPets.length,
-      itemListElement: heroPets.map((pet, i) => ({
-        "@type": "ListItem",
-        position: i + 1,
-        url: `${SITE_URL}/pets/${pet.slug}`,
-        name: pet.displayName,
-      })),
-    },
-  ];
+      {
+        "@type": "SoftwareApplication",
+        "@id": `${SITE_URL}/#desktop-app`,
+        name: "Petdex Desktop",
+        applicationCategory: "DeveloperApplication",
+        operatingSystem: "macOS, Windows, Linux",
+        url: `${SITE_URL}/${locale}/download`,
+        offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+        creator: { "@id": "https://railly.dev/#person" },
+        publisher: { "@id": "https://crafter.run/#organization" },
+      },
+      {
+        "@type": "ItemList",
+        "@id": `${SITE_URL}/#featured-pets`,
+        name: t("jsonLdFeaturedPets"),
+        numberOfItems: heroPets.length,
+        itemListElement: heroPets.map((pet, i) => ({
+          "@type": "ListItem",
+          position: i + 1,
+          url: `${SITE_URL}/pets/${pet.slug}`,
+          name: pet.displayName,
+        })),
+      },
+    ],
+  };
 
   return (
     <main className="min-h-dvh bg-background text-foreground">
@@ -146,8 +173,11 @@ export default async function Home({
       <section className="petdex-hero relative -mt-14 overflow-clip pt-14">
         <div className="relative mx-auto flex w-full max-w-[1440px] flex-col px-5 pb-10 md:px-8">
           <div className="mt-12 flex flex-col items-center text-center md:mt-16">
-            <p className="inline-flex items-center gap-2 rounded-full border border-border-base bg-surface/60 px-3.5 py-1.5 font-mono text-[11px] tracking-[0.18em] text-brand uppercase backdrop-blur">
-              <span className="size-1.5 animate-pulse rounded-full bg-brand" />
+            <p
+              className="toy-btn-pearl inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-[10px] tracking-[0.14em] text-toy-cobalt uppercase dark:text-[#9BB2FF]"
+              style={{ fontFamily: "var(--font-pixel), monospace" }}
+            >
+              <span className="size-1.5 animate-pulse rounded-full bg-toy-mint shadow-[0_0_6px_var(--toy-mint)]" />
               {t("eyebrow")}
             </p>
             <h1 className="mt-5 text-[56px] leading-[0.95] font-semibold tracking-[-0.03em] md:text-[96px]">
@@ -199,13 +229,7 @@ export default async function Home({
               <DownloadDesktopCTA
                 href={`/${locale}/download`}
                 source="hero_primary"
-                className={cn(
-                  buttonVariants({
-                    variant: "petdex-cta",
-                    size: "petdex-pill",
-                    className: "gap-1.5",
-                  }),
-                )}
+                className="toy-btn toy-btn-cobalt h-10 justify-center gap-1.5 rounded-full px-5 text-sm"
               >
                 {t("downloadCta")}
                 <ArrowRight className="size-3.5" />
@@ -279,7 +303,7 @@ async function FeaturedCollections({
     <section className="mx-auto flex w-full max-w-[1440px] flex-col gap-5 px-5 pt-12 md:px-8">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="font-mono text-[11px] tracking-[0.22em] text-brand uppercase">
+          <p className="toy-tag text-toy-cobalt dark:text-[#9BB2FF]">
             {t("eyebrow")}
           </p>
           <h2 className="mt-2 text-2xl font-semibold tracking-tight text-foreground md:text-3xl">
@@ -308,7 +332,7 @@ async function FeaturedCollections({
           return (
             <Card
               key={collection.slug}
-              className="group relative flex h-full flex-col gap-0 overflow-hidden rounded-2xl border border-border-base bg-surface/70 py-0 ring-0 backdrop-blur transition hover:border-brand/30 hover:bg-surface has-[[aria-expanded=true]]:z-30"
+              className="toy-shell group relative flex h-full flex-col gap-0 overflow-hidden rounded-[1.75rem] border-0 py-0 ring-0 transition-transform duration-200 [transition-timing-function:var(--ease-bounce)] hover:-translate-y-1 has-[[aria-expanded=true]]:z-30"
             >
               <Link
                 href={`/collections/${collection.slug}`}
@@ -327,7 +351,7 @@ async function FeaturedCollections({
                     <CardTitle className="truncate text-[15px] font-semibold tracking-tight text-foreground">
                       {collection.title}
                     </CardTitle>
-                    <span className="shrink-0 font-mono text-[10px] tracking-[0.18em] text-muted-3 uppercase">
+                    <span className="toy-tag shrink-0 rounded-md bg-toy-volt px-1.5 py-0.5 text-[#101944] shadow-[0_2px_0_#C9A91F]">
                       {t("petsCount", { count: collection.pets.length })}
                     </span>
                   </div>

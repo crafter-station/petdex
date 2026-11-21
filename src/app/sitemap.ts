@@ -1,5 +1,6 @@
 import type { MetadataRoute } from "next";
 
+import { CODING_AGENTS } from "@/lib/coding-agents";
 import { getCollectionSitemapEntries } from "@/lib/collections";
 import {
   buildAbsoluteLocaleAlternates,
@@ -60,10 +61,28 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       priority: 1,
     },
     {
+      pathname: "/download",
+      lastModified: now,
+      changeFrequency: "weekly",
+      priority: 0.9,
+    },
+    {
       pathname: "/about",
       lastModified: now,
       changeFrequency: "monthly",
       priority: 0.8,
+    },
+    {
+      pathname: "/built-with",
+      lastModified: now,
+      changeFrequency: "weekly",
+      priority: 0.8,
+    },
+    {
+      pathname: "/community",
+      lastModified: now,
+      changeFrequency: "weekly",
+      priority: 0.7,
     },
     {
       pathname: "/docs",
@@ -73,6 +92,18 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     },
     {
       pathname: "/brand",
+      lastModified: now,
+      changeFrequency: "monthly",
+      priority: 0.5,
+    },
+    {
+      pathname: "/brand/logo-system",
+      lastModified: now,
+      changeFrequency: "monthly",
+      priority: 0.5,
+    },
+    {
+      pathname: "/brand/brand-assets",
       lastModified: now,
       changeFrequency: "monthly",
       priority: 0.5,
@@ -93,12 +124,6 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       pathname: "/requests",
       lastModified: now,
       changeFrequency: "daily",
-      priority: 0.6,
-    },
-    {
-      pathname: "/create",
-      lastModified: now,
-      changeFrequency: "weekly",
       priority: 0.6,
     },
     {
@@ -137,8 +162,16 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     priority: collection.featured ? 0.8 : 0.5,
   }));
 
+  const agentEntries: EntryInput[] = CODING_AGENTS.map((agent) => ({
+    pathname: `/agents/${agent.slug}`,
+    lastModified: now,
+    changeFrequency: "weekly",
+    priority: 0.8,
+  }));
+
   return [
     ...staticEntries,
+    ...agentEntries,
     ...vibeEntries,
     ...kindEntries,
     ...petEntries,

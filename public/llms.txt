@@ -1,0 +1,29 @@
+# Petdex
+
+> Open-source index and native desktop companion ecosystem of animated pixel pets for coding agents. Created by Railly Hugo at Crafter Station.
+
+- Canonical site: https://petdex.dev
+- Source code: https://github.com/crafter-station/petdex
+- Creator: Railly Hugo (https://railly.dev, https://github.com/Railly, https://x.com/raillyhugo)
+- Studio: Crafter Station (https://crafter.run, https://github.com/crafter-station)
+
+## Quick install
+
+- CLI: `npx petdex install boba`
+- Native Desktop app (macOS, Windows, Linux): https://petdex.dev/download
+
+## Supported coding agents
+
+Claude Code, OpenAI Codex, Gemini CLI, OpenCode, Qoder, Kimi Code, CodeBuddy, OMP, Hermes, and DeepSeek Harness.
+
+## Key pages
+
+- [Home & Pet Gallery](https://petdex.dev/): browse and search animated pixel pets by kind, vibe, color, and collection.
+- [Download Petdex Desktop](https://petdex.dev/download): native desktop companion for macOS, Windows, and Linux.
+- [Collections](https://petdex.dev/collections): curated and franchise pet collections.
+- [Built With Petdex](https://petdex.dev/built-with): community apps, wellness tools, wearables, and SDKs built on Petdex.
+- [Brand Kit](https://petdex.dev/brand): Pocket Toy brand identity, colors, and typography.
+- [Logo System](https://petdex.dev/brand/logo-system): 64x64 pixel construction grid, clearspace, lockups, and bilingual `Petdex · 宠物图鉴` usage.
+- [Brand Assets](https://petdex.dev/brand/brand-assets): official tactile SVG/PNG marks, monochrome variants, and embed snippets.
+- [Docs](https://petdex.dev/docs): CLI, desktop, and submission documentation.
+- [About](https://petdex.dev/about): project story, FAQ, and open-source licensing notes.

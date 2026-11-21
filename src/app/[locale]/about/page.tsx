@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { getTranslations } from "next-intl/server";
 
+import { BRAND_JSON_LD } from "@/lib/brand-kit";
 import { buildLocaleAlternates, withLocale } from "@/lib/locale-routing";
 import { getApprovedPetCount } from "@/lib/pets";
 
@@ -69,28 +70,38 @@ export default async function AboutPage({
     [t("browse.links.wholesome"), withLocale("/vibe/wholesome", localeValue)],
   ] as const;
 
-  const jsonLd = [
-    {
-      "@context": "https://schema.org",
-      "@type": "AboutPage",
-      name: t("metadata.ogTitle"),
-      url: `${SITE_URL}/about`,
-      description: t("metadata.ogDescription"),
-      isPartOf: { "@type": "WebSite", "@id": `${SITE_URL}/#website` },
-    },
-    {
-      "@context": "https://schema.org",
-      "@type": "FAQPage",
-      mainEntity: faq.map((item) => ({
-        "@type": "Question",
-        name: item.q,
-        acceptedAnswer: {
-          "@type": "Answer",
-          text: item.a,
-        },
-      })),
-    },
-  ];
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@graph": [
+      ...BRAND_JSON_LD["@graph"],
+      {
+        "@type": "AboutPage",
+        "@id": `${SITE_URL}/about#webpage`,
+        name: t("metadata.ogTitle"),
+        url: `${SITE_URL}/about`,
+        description: t("metadata.ogDescription"),
+        isPartOf: { "@id": `${SITE_URL}/#website` },
+        author: { "@id": "https://railly.dev/#person" },
+        publisher: { "@id": "https://crafter.run/#organization" },
+      },
+      {
+        "@type": "FAQPage",
+        "@id": `${SITE_URL}/about#faq`,
+        url: `${SITE_URL}/about`,
+        isPartOf: { "@id": `${SITE_URL}/#website` },
+        author: { "@id": "https://railly.dev/#person" },
+        publisher: { "@id": "https://crafter.run/#organization" },
+        mainEntity: faq.map((item) => ({
+          "@type": "Question",
+          name: item.q,
+          acceptedAnswer: {
+            "@type": "Answer",
+            text: item.a,
+          },
+        })),
+      },
+    ],
+  };
 
   return (
     <main className="min-h-dvh bg-background text-foreground">
@@ -99,10 +110,10 @@ export default async function AboutPage({
       <section className="petdex-hero relative -mt-14 overflow-clip pt-14">
         <div className="relative mx-auto flex w-full max-w-[1440px] flex-col px-5 pb-10 md:px-8">
           <div className="mt-12 flex flex-col items-center text-center md:mt-16">
-            <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
+            <p className="toy-tag inline-block rounded-full bg-toy-volt px-2.5 py-1 text-[#101944] shadow-[0_2px_0_#C9A91F]">
               {t("eyebrow")}
             </p>
-            <h1 className="mt-3 text-balance text-[40px] leading-[1] font-semibold tracking-tight md:text-[64px]">
+            <h1 className="mt-4 text-balance text-[40px] leading-[1] font-semibold tracking-tight md:text-[64px]">
               {t("hero.title")}
             </h1>
             <p className="mt-5 max-w-2xl text-balance text-base leading-7 text-muted-1 md:text-lg">
@@ -163,13 +174,22 @@ export default async function AboutPage({
           </p>
         </div>
 
-        <div className="space-y-4">
-          <h2 className="text-2xl font-semibold tracking-tight text-foreground md:text-3xl">
-            {t("faq.title")}
-          </h2>
-          <div className="space-y-6">
-            {faq.map((item) => (
-              <article key={item.q} className="space-y-2">
+        <div className="space-y-5">
+          <div className="space-y-2">
+            <p className="toy-tag text-toy-cobalt dark:text-[#9BB2FF]">FAQ</p>
+            <h2 className="text-2xl font-semibold tracking-tight text-foreground md:text-3xl">
+              {t("faq.title")}
+            </h2>
+          </div>
+          <div className="space-y-4">
+            {faq.map((item, index) => (
+              <article
+                key={item.q}
+                className="toy-shell space-y-2 rounded-3xl p-6"
+              >
+                <p className="toy-tag text-toy-cobalt dark:text-[#9BB2FF]">
+                  0{index + 1}
+                </p>
                 <h3 className="text-lg font-semibold text-foreground">
                   {item.q}
                 </h3>
@@ -179,22 +199,52 @@ export default async function AboutPage({
           </div>
         </div>
 
-        <div className="space-y-4">
+        <div className="toy-shell space-y-4 rounded-3xl p-6 md:p-8">
+          <p className="toy-tag text-toy-cobalt dark:text-[#9BB2FF]">INDEX</p>
           <h2 className="text-2xl font-semibold tracking-tight text-foreground md:text-3xl">
             {t("browse.title")}
           </h2>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2.5 pt-1">
             {browseLinks.map(([label, href]) => (
               <Link
                 key={href}
                 href={href}
-                className="inline-flex h-9 items-center rounded-full border border-border-base bg-surface px-3 text-sm text-muted-2 transition hover:border-border-strong"
+                className="toy-btn toy-btn-pearl h-9 rounded-full px-3.5 text-sm text-muted-1 hover:text-foreground"
               >
                 {label}
               </Link>
             ))}
           </div>
         </div>
+
+        <aside className="toy-shell flex flex-col items-start justify-between gap-4 rounded-3xl p-6 sm:flex-row sm:items-center md:p-8">
+          <div className="space-y-1.5">
+            <p className="toy-tag text-toy-cobalt dark:text-[#9BB2FF]">
+              Crafter Station
+            </p>
+            <p className="text-base font-semibold text-foreground">
+              Built by Railly Hugo at Crafter Station
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <a
+              href="https://railly.dev"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="toy-btn toy-btn-cobalt h-10 rounded-full px-4 text-sm"
+            >
+              railly.dev
+            </a>
+            <a
+              href="https://crafter.run"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="toy-btn toy-btn-pearl h-10 rounded-full px-4 text-sm"
+            >
+              crafter.run
+            </a>
+          </div>
+        </aside>
       </section>
 
       <SiteFooter />

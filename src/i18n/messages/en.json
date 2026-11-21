@@ -627,6 +627,15 @@
       "description": "Download Petdex logos, icons, color tokens, and usage notes for press, projects, and community posts.",
       "ogTitle": "Petdex brand kit"
     },
+    "nav": {
+      "overview": "Overview",
+      "logoSystem": "Logo system",
+      "brandAssets": "Brand assets"
+    },
+    "actions": {
+      "copy": "Copy",
+      "copied": "Copied"
+    },
     "eyebrow": "Brand kit",
     "hero": {
       "title": "Use Petdex clearly and consistently.",
@@ -634,7 +643,85 @@
       "primaryCtaSvg": "Download SVG",
       "primaryCtaPng": "PNG",
       "secondaryCta": "View on GitHub",
-      "iconAlt": "Petdex desktop app icon"
+      "iconAlt": "Petdex desktop app icon",
+      "tactileCta": "Download tactile SVG"
+    },
+    "hub": {
+      "logoSystem": {
+        "title": "Logo system",
+        "body": "Construction grid, clearspace ratios, monochrome and dark lockups, minimum sizes, and co-branding with Crafter Station.",
+        "cta": "Explore logo system"
+      },
+      "brandAssets": {
+        "title": "Brand assets",
+        "body": "Official SVG and PNG marks, monochrome variants, product icons, and copyable embed snippets.",
+        "cta": "Browse brand assets"
+      }
+    },
+    "attribution": {
+      "eyebrow": "Crafted by",
+      "body": "Petdex is an open-source product built by Railly Hugo at Crafter Station."
+    },
+    "logoSystem": {
+      "metadata": {
+        "title": "Petdex logo system",
+        "description": "Construction grid, clearspace, lockups, minimum sizes, and usage rules for the Petdex mark.",
+        "ogTitle": "Petdex logo system"
+      },
+      "eyebrow": "Logo system",
+      "title": "Built on a 64x64 pixel grid.",
+      "body": "The Petdex mark pairs a rounded container with a six-pixel creature grid so it stays sharp from 16px favicons to native app icons.",
+      "anatomy": {
+        "eyebrow": "Anatomy & clearspace",
+        "title": "Exact geometry",
+        "body": "Keep at least 0.25x clearspace around the container on all sides. Never alter the corner radius or pixel proportions.",
+        "diagramAlt": "Petdex mark construction grid and clearspace diagram",
+        "metrics": {
+          "viewBox": "ViewBox",
+          "pixelUnit": "Pixel unit",
+          "cornerRadius": "Corner radius",
+          "clearspace": "Clearspace"
+        }
+      },
+      "lockups": {
+        "eyebrow": "Lockups",
+        "title": "Approved combinations",
+        "primaryLight": "Primary on light",
+        "primaryDark": "Primary on dark",
+        "mono": "Monochrome",
+        "cobrand": "Co-branding",
+        "bilingual": "Bilingual lockup"
+      },
+      "scale": {
+        "eyebrow": "Minimum size",
+        "title": "Legibility across surfaces"
+      }
+    },
+    "brandAssets": {
+      "metadata": {
+        "title": "Petdex brand assets",
+        "description": "Download official Petdex SVG and PNG logos, monochrome marks, app icons, and copyable embed snippets.",
+        "ogTitle": "Petdex brand assets"
+      },
+      "eyebrow": "Brand assets",
+      "title": "Ready-to-ship files and snippets.",
+      "body": "Every official mark, wordmark, and product icon in SVG and PNG, plus copyable markup for READMEs and partner sites.",
+      "groups": {
+        "logos": "Logos & marks",
+        "icons": "Product & community icons"
+      },
+      "snippets": {
+        "svgTitle": "Inline SVG mark",
+        "badgeTitle": "README Markdown badge",
+        "imgTitle": "Tactile img tag",
+        "tabsLabel": "Embed snippets"
+      },
+      "surface": {
+        "label": "Preview surface",
+        "pearl": "Pearl",
+        "navy": "Dark navy",
+        "checker": "Checker"
+      }
     },
     "assets": {
       "eyebrow": "Downloads",
@@ -646,13 +733,29 @@
       },
       "modes": {
         "light": "Light mode",
-        "dark": "Dark mode"
+        "dark": "Dark mode",
+        "checker": "Transparent"
       },
       "items": {
+        "tactileMark": {
+          "title": "Tactile mark",
+          "description": "The glossy cobalt squircle with a debossed pixel face. Primary icon for app tiles, avatars, and launch graphics.",
+          "alt": "Petdex tactile mark"
+        },
         "mark": {
           "title": "Petdex mark",
           "description": "The primary symbol for compact layouts, avatars, favicons, and badges.",
           "alt": "Petdex mark"
+        },
+        "markMonoLight": {
+          "title": "Monochrome mark (dark ink)",
+          "description": "Single-color ink mark for light prints, monochrome docs, and subtle footers.",
+          "alt": "Petdex monochrome dark ink mark"
+        },
+        "markMonoDark": {
+          "title": "Monochrome mark (white)",
+          "description": "High-contrast white mark for dark overlays, video bugs, and monochrome dark UI.",
+          "alt": "Petdex monochrome white mark"
         },
         "wordmark": {
           "title": "Petdex wordmark light",
@@ -668,6 +771,16 @@
           "title": "Desktop icon",
           "description": "Rounded app icon for Petdex Desktop references, press cards, and launch graphics.",
           "alt": "Petdex desktop icon"
+        },
+        "appIcon": {
+          "title": "App icon (square)",
+          "description": "Square product icon for launchers, directories, and social avatars.",
+          "alt": "Petdex square app icon"
+        },
+        "discordIcon": {
+          "title": "Discord server icon",
+          "description": "Official community emblem for Discord references and partner listings.",
+          "alt": "Petdex Discord icon"
         }
       }
     },
@@ -688,20 +801,29 @@
       }
     },
     "system": {
-      "eyebrow": "Design system",
-      "title": "Colors and type",
-      "body": "Petdex uses cool app surfaces, purple-blue brand accents, and Geist type to feel like a useful tool with a tiny bit of creature energy.",
+      "eyebrow": "Pocket Toy system",
+      "title": "Pearl shell, cobalt buttons",
+      "body": "Petdex is a pocket toy for developers: warm pearl plastic, glossy cobalt push buttons, collectible pops of volt, sakura, and mint, with crisp tooling type.",
       "colors": {
-        "brand": "Brand",
-        "brandDeep": "Brand deep",
-        "brandLight": "Brand light",
-        "bgApp": "App background",
-        "brandTint": "Brand tint",
-        "ink": "Ink"
+        "cobalt": "Cobalt",
+        "deepNavy": "Deep navy",
+        "pearlShell": "Pearl shell",
+        "voltYellow": "Volt yellow",
+        "sakuraPink": "Sakura pink",
+        "mint": "Mint"
       },
       "type": {
-        "title": "Typography"
+        "title": "Type specimen",
+        "display": "Display",
+        "body": "Body",
+        "pixel": "Hardware labels",
+        "cjk": "Chinese"
       }
+    },
+    "tags": {
+      "collect": "Collect",
+      "level": "LV 01",
+      "new": "New pet"
     }
   },
   "about": {

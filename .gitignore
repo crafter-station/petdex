@@ -90,3 +90,6 @@ HANDOFF.md
 /dist/
 packages/petdex-desktop-native/zig-out/
 packages/petdex-desktop-native/.zig-cache/
+
+# Rust builds
+target/

@@ -1,5 +1,7 @@
 import Link from "next/link";
 
+import { PetdexTactileMark } from "@/components/brand/petdex-tactile-mark";
+
 type PetdexLogoProps = {
   href?: string;
   showWordmark?: boolean;
@@ -17,9 +19,18 @@ export function PetdexLogo({
 }: PetdexLogoProps) {
   const content = (
     <>
-      <PetdexMark className={markClassName} />
+      <span aria-hidden="true" className="inline-flex">
+        <PetdexTactileMark className={markClassName} />
+      </span>
       {showWordmark ? (
-        <span className="text-xl font-semibold tracking-normal">Petdex</span>
+        <span
+          className="text-xl font-bold tracking-[-0.03em]"
+          style={{
+            fontFamily: "var(--font-display), var(--font-cjk), sans-serif",
+          }}
+        >
+          Petdex
+        </span>
       ) : null}
     </>
   );
@@ -40,47 +51,4 @@ export function PetdexLogo({
   }
 
   return <div className={classes}>{content}</div>;
-}
-
-function PetdexMark({ className }: { className?: string }) {
-  return (
-    <svg
-      aria-hidden="true"
-      className={className}
-      fill="none"
-      viewBox="0 0 64 64"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <defs>
-        <linearGradient
-          id="petdex-body"
-          x1="8"
-          y1="8"
-          x2="56"
-          y2="56"
-          gradientUnits="userSpaceOnUse"
-        >
-          <stop stopColor="#3847f5" />
-          <stop offset="1" stopColor="#1a1d2e" />
-        </linearGradient>
-      </defs>
-
-      <rect
-        x="4"
-        y="4"
-        width="56"
-        height="56"
-        rx="16"
-        fill="url(#petdex-body)"
-      />
-
-      <g fill="#ffffff">
-        <rect x="22" y="20" width="6" height="6" />
-        <rect x="36" y="20" width="6" height="6" />
-        <rect x="16" y="26" width="6" height="18" />
-        <rect x="42" y="26" width="6" height="18" />
-        <rect x="22" y="38" width="20" height="6" />
-      </g>
-    </svg>
-  );
 }

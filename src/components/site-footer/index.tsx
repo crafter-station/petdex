@@ -11,7 +11,30 @@ export function SiteFooter() {
   return (
     <footer className="mx-auto w-full max-w-[1440px] px-5 py-10 md:px-8">
       <div className="flex flex-col items-start justify-between gap-3 border-t border-border-base pt-6 text-xs text-muted-3 md:flex-row md:items-center">
-        <p>{t("rightsNotice")}</p>
+        <div className="space-y-1">
+          <p>{t("rightsNotice")}</p>
+          <p className="text-muted-3">
+            Built by{" "}
+            <a
+              href="https://railly.dev"
+              target="_blank"
+              rel="noreferrer"
+              className="font-medium text-foreground underline underline-offset-4 transition hover:text-brand"
+            >
+              Railly Hugo
+            </a>{" "}
+            at{" "}
+            <a
+              href="https://crafter.run"
+              target="_blank"
+              rel="noreferrer"
+              className="font-medium text-foreground underline underline-offset-4 transition hover:text-brand"
+            >
+              Crafter Station
+            </a>
+            .
+          </p>
+        </div>
         <div className="flex flex-wrap items-center gap-4">
           <Link
             href="/leaderboard"

@@ -1,5 +1,11 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import {
+  Bricolage_Grotesque,
+  Geist,
+  Geist_Mono,
+  Noto_Sans_SC,
+  Silkscreen,
+} from "next/font/google";
 import { notFound } from "next/navigation";
 
 import { NextIntlClientProvider } from "next-intl";
@@ -28,6 +34,24 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const display = Bricolage_Grotesque({
+  variable: "--font-display",
+  subsets: ["latin"],
+});
+
+const pixel = Silkscreen({
+  variable: "--font-pixel",
+  weight: ["400", "700"],
+  subsets: ["latin"],
+});
+
+const cjk = Noto_Sans_SC({
+  variable: "--font-cjk",
+  weight: ["400", "500", "700"],
+  subsets: ["latin"],
+  preload: false,
+});
+
 type Props = {
   children: React.ReactNode;
   params: Promise<{ locale: string }>;
@@ -52,6 +76,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   // Doing the UA check inside that route keeps this layout fully
   // statically renderable and preserves ISR for the whole [locale] tree.
   return {
+    metadataBase: new URL(SITE_URL),
+    authors: [{ name: "Railly Hugo", url: "https://railly.dev" }],
+    creator: "Railly Hugo",
+    publisher: "Crafter Station",
     title: {
       default: t("titleDefault"),
       template: t("titleTemplate"),
@@ -112,7 +140,7 @@ export default async function LocaleLayout({ children, params }: Props) {
     <html
       lang={locale}
       suppressHydrationWarning
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} ${display.variable} ${pixel.variable} ${cjk.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-background text-foreground">
         <NextIntlClientProvider messages={clientMessages}>

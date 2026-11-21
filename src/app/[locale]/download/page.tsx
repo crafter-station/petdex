@@ -3,9 +3,11 @@ import Link from "next/link";
 import { ArrowRight, MonitorSmartphone, Pointer, Zap } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 
+import { BRAND_JSON_LD } from "@/lib/brand-kit";
 import { buildLocaleAlternates } from "@/lib/locale-routing";
 
 import { DownloadHero } from "@/components/download/download-hero";
+import { JsonLd } from "@/components/layout/json-ld";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 
@@ -38,7 +40,7 @@ export async function generateMetadata({
   return {
     title: "Download Petdex Desktop",
     description:
-      "Download Petdex Desktop for macOS. Your pet, floating beside every coding agent.",
+      "Download Petdex Desktop for macOS, Windows, and Linux. Your animated pet, floating beside every coding agent. Built by Railly Hugo at Crafter Station.",
     alternates: buildLocaleAlternates(
       "/download",
       hasLocale(locale) ? locale : undefined,
@@ -46,14 +48,15 @@ export async function generateMetadata({
     openGraph: {
       title: "Petdex Desktop",
       description:
-        "Your pet, floating beside every coding agent. macOS native.",
+        "Your animated pet, floating beside every coding agent on macOS, Windows, and Linux.",
       url: `${SITE_URL}/download`,
       images: [{ url: OG_IMAGE, width: 1200, height: 630 }],
     },
     twitter: {
       card: "summary_large_image",
       title: "Petdex Desktop",
-      description: "Your pet, floating beside every coding agent.",
+      description:
+        "Your animated pet, floating beside every coding agent on macOS, Windows, and Linux.",
       images: [OG_IMAGE],
     },
   };
@@ -84,8 +87,31 @@ export default async function DownloadPage() {
     },
   ];
 
+  const softwareJsonLd = {
+    "@context": "https://schema.org",
+    "@graph": [
+      ...BRAND_JSON_LD["@graph"],
+      {
+        "@type": "SoftwareApplication",
+        "@id": `${SITE_URL}/download#app`,
+        name: "Petdex Desktop",
+        applicationCategory: "DeveloperApplication",
+        operatingSystem: "macOS, Windows, Linux",
+        url: `${SITE_URL}/download`,
+        offers: {
+          "@type": "Offer",
+          price: "0",
+          priceCurrency: "USD",
+        },
+        author: { "@id": "https://railly.dev/#person" },
+        publisher: { "@id": "https://crafter.run/#organization" },
+      },
+    ],
+  };
+
   return (
     <main className="relative min-h-dvh bg-background text-foreground">
+      <JsonLd data={softwareJsonLd} />
       <SiteHeader />
 
       <DownloadHero />
@@ -109,7 +135,7 @@ export default async function DownloadPage() {
             return (
               <div
                 key={feature.title}
-                className="flex flex-col gap-4 rounded-3xl border border-border-base bg-surface p-6"
+                className="toy-shell flex flex-col gap-4 rounded-3xl p-6"
               >
                 <span className="grid size-10 shrink-0 place-items-center rounded-full bg-brand-tint text-brand ring-1 ring-brand/15 dark:bg-brand-tint-dark dark:ring-brand/25">
                   <Icon className="size-5" />

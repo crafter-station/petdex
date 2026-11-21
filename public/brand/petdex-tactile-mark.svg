@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" fill="none" role="img" aria-label="Petdex tactile mark">
+  <defs>
+    <linearGradient id="body" x1="64" y1="8" x2="64" y2="120" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#5876FF"/>
+      <stop offset="32%" stop-color="#3B59F2"/>
+      <stop offset="74%" stop-color="#1D2F8A"/>
+      <stop offset="100%" stop-color="#101944"/>
+    </linearGradient>
+    <radialGradient id="gloss" cx="50%" cy="14%" r="65%" fx="50%" fy="10%">
+      <stop offset="0%" stop-color="#9BB2FF" stop-opacity="0.55"/>
+      <stop offset="45%" stop-color="#5C7BFF" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#101944" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="rim" x1="64" y1="8" x2="64" y2="120" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#C2D0FF" stop-opacity="0.72"/>
+      <stop offset="22%" stop-color="#7C96FF" stop-opacity="0.18"/>
+      <stop offset="80%" stop-color="#090F2B" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#050818" stop-opacity="0.6"/>
+    </linearGradient>
+    <filter id="glyph" x="26" y="36" width="76" height="58" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="-1.2" stdDeviation="0.6" flood-color="#0B133A" flood-opacity="0.55"/>
+      <feDropShadow dx="0" dy="1.5" stdDeviation="1.4" flood-color="#091134" flood-opacity="0.32"/>
+    </filter>
+    <filter id="outer" x="0" y="2" width="128" height="126" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="6" stdDeviation="5" flood-color="#0A1030" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+  <g filter="url(#outer)">
+    <path d="M64 8C95.5 8 106.4 8 113.2 14.8C120 21.6 120 32.5 120 64C120 95.5 120 106.4 113.2 113.2C106.4 120 95.5 120 64 120C32.5 120 21.6 120 14.8 113.2C8 106.4 8 95.5 8 64C8 32.5 8 21.6 14.8 14.8C21.6 8 32.5 8 64 8Z" fill="url(#body)"/>
+    <path d="M64 8C95.5 8 106.4 8 113.2 14.8C120 21.6 120 32.5 120 64C120 95.5 120 106.4 113.2 113.2C106.4 120 95.5 120 64 120C32.5 120 21.6 120 14.8 113.2C8 106.4 8 95.5 8 64C8 32.5 8 21.6 14.8 14.8C21.6 8 32.5 8 64 8Z" fill="url(#gloss)"/>
+    <path d="M64 9.5C94.8 9.5 105.4 9.6 112 16C118.4 22.6 118.5 33.2 118.5 64C118.5 94.8 118.4 105.4 112 112C105.4 118.4 94.8 118.5 64 118.5C33.2 118.5 22.6 118.4 16 112C9.6 105.4 9.5 94.8 9.5 64C9.5 33.2 9.6 22.6 16 16C22.6 9.6 33.2 9.5 64 9.5Z" stroke="url(#rim)" stroke-width="2.5"/>
+  </g>
+  <g filter="url(#glyph)" fill="#FFFFFF">
+    <rect x="44" y="40" width="12" height="12"/>
+    <rect x="72" y="40" width="12" height="12"/>
+    <rect x="32" y="52" width="12" height="36"/>
+    <rect x="84" y="52" width="12" height="36"/>
+    <rect x="44" y="76" width="40" height="12"/>
+  </g>
+</svg>

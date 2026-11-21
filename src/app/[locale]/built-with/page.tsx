@@ -14,6 +14,7 @@ import {
 } from "@phosphor-icons/react/ssr";
 import { getTranslations } from "next-intl/server";
 
+import { BRAND_JSON_LD } from "@/lib/brand-kit";
 import { formatLocalizedNumber } from "@/lib/format-number";
 import { buildLocaleAlternates } from "@/lib/locale-routing";
 
@@ -139,18 +140,27 @@ export default async function BuiltWithPage({
 
   const jsonLd = {
     "@context": "https://schema.org",
-    "@type": "CollectionPage",
-    name: t("title"),
-    url: `${SITE_URL}/built-with`,
-    description: t("metadata.description", { total }),
-    hasPart: builtWithData.projects.map((project) => ({
-      "@type": "SoftwareApplication",
-      name: project.name,
-      url: `https://github.com/${project.repo}`,
-      applicationCategory: t(
-        `categories.${CATEGORY_KEY_TO_I18N[project.category as CategoryKey]}.label`,
-      ),
-    })),
+    "@graph": [
+      ...BRAND_JSON_LD["@graph"],
+      {
+        "@type": "CollectionPage",
+        "@id": `${SITE_URL}/built-with#webpage`,
+        name: t("title"),
+        url: `${SITE_URL}/built-with`,
+        description: t("metadata.description", { total }),
+        isPartOf: { "@id": `${SITE_URL}/#website` },
+        author: { "@id": "https://railly.dev/#person" },
+        publisher: { "@id": "https://crafter.run/#organization" },
+        hasPart: builtWithData.projects.map((project) => ({
+          "@type": "SoftwareApplication",
+          name: project.name,
+          url: `https://github.com/${project.repo}`,
+          applicationCategory: t(
+            `categories.${CATEGORY_KEY_TO_I18N[project.category as CategoryKey]}.label`,
+          ),
+        })),
+      },
+    ],
   };
 
   return (
@@ -158,12 +168,12 @@ export default async function BuiltWithPage({
       <JsonLd data={jsonLd} />
       <SiteHeader />
 
-      <section className="petdex-hero relative -mt-14 overflow-hidden border-b border-border-base pt-14 xl:h-[56dvh]">
+      <section className="petdex-hero relative -mt-14 overflow-hidden border-b border-border-base pt-14 xl:min-h-[56dvh]">
         <div className="pointer-events-none absolute inset-x-0 bottom-0 mx-auto h-px max-w-7xl bg-gradient-to-r from-transparent via-brand/50 to-transparent" />
         <div className="relative mx-auto grid w-full max-w-7xl lg:grid-cols-[minmax(0,0.88fr)_minmax(520px,1.12fr)] xl:h-full">
           <div className="relative flex min-h-[500px] flex-col justify-center border-border-base px-5 py-12 sm:px-8 lg:border-r lg:px-12 lg:py-8 xl:h-full xl:min-h-0">
             <div className="relative z-10 max-w-2xl">
-              <p className="font-mono text-[11px] font-medium tracking-[0.24em] text-brand uppercase">
+              <p className="toy-tag inline-block rounded-full bg-toy-volt px-2.5 py-1 text-[#101944] shadow-[0_2px_0_#C9A91F]">
                 {t("eyebrow")}
               </p>
               <h1 className="mt-5 max-w-[620px] text-balance text-[46px] leading-[0.98] font-semibold tracking-[-0.05em] sm:text-[58px] lg:text-[48px] xl:text-[62px] [@media(min-width:1280px)_and_(max-height:900px)]:mt-2.5 [@media(min-width:1280px)_and_(max-height:900px)]:text-[48px]">
@@ -227,11 +237,11 @@ export default async function BuiltWithPage({
         </div>
       </section>
 
-      <section className="relative border-b border-border-base bg-surface/25 xl:h-[44dvh]">
-        <div className="mx-auto flex w-full max-w-7xl flex-col px-5 py-10 sm:px-8 lg:px-12 lg:py-6 xl:h-full">
+      <section className="relative border-b border-border-base bg-surface/25">
+        <div className="mx-auto flex w-full max-w-7xl flex-col px-5 py-10 sm:px-8 lg:px-12 lg:py-10">
           <div className="grid gap-6 border-b border-border-base pb-5 lg:grid-cols-[0.7fr_1.3fr] lg:items-end">
             <div>
-              <p className="font-mono text-[11px] font-medium tracking-[0.24em] text-brand uppercase">
+              <p className="toy-tag text-toy-cobalt dark:text-[#9BB2FF]">
                 {t("chapters.eyebrow")}
               </p>
               <h2 className="mt-3 text-3xl font-semibold tracking-[-0.04em] sm:text-4xl">
@@ -243,7 +253,7 @@ export default async function BuiltWithPage({
             </p>
           </div>
 
-          <div className="relative grid flex-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+          <div className="relative mt-6 grid flex-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
             {CATEGORY_ORDER.map((categoryKey, index) => {
               const items = grouped[categoryKey];
               const i18nKey = CATEGORY_KEY_TO_I18N[categoryKey];
@@ -251,13 +261,11 @@ export default async function BuiltWithPage({
               return (
                 <article
                   key={categoryKey}
-                  className="group relative flex min-h-[285px] flex-col border-b border-border-base px-1 py-6 sm:px-6 sm:[&:nth-child(odd)]:border-r lg:[&:nth-child(3n+1)]:border-r lg:[&:nth-child(3n+2)]:border-r xl:min-h-0 xl:border-b-0 xl:border-r xl:px-5 xl:py-4 xl:last:border-r-0"
+                  className="toy-shell group relative flex min-h-[285px] flex-col rounded-3xl p-5 transition-transform duration-200 [transition-timing-function:var(--ease-bounce)] hover:-translate-y-1 xl:min-h-0"
                 >
                   <div className="flex items-center justify-between">
                     <Icon className="size-5 text-brand" weight="duotone" />
-                    <span className="font-mono text-[10px] tracking-[0.18em] text-muted-2 uppercase">
-                      0{index + 1}
-                    </span>
+                    <span className="toy-tag text-muted-2">0{index + 1}</span>
                   </div>
                   <h3 className="mt-4 text-base font-semibold tracking-tight">
                     {t(`categories.${i18nKey}.label`)}
@@ -287,7 +295,7 @@ export default async function BuiltWithPage({
                   </div>
                   <a
                     href={`#category-${categoryKey}`}
-                    className="mt-auto inline-flex items-center gap-1.5 pt-3 font-mono text-[10px] font-medium tracking-[0.12em] text-muted-2 uppercase transition group-hover:text-brand"
+                    className="toy-tag mt-auto inline-flex items-center gap-1.5 pt-3 text-muted-2 transition group-hover:text-brand"
                   >
                     {t("chapters.viewAll", { count: items.length })}
                     <ArrowUpRightIcon className="size-3" weight="bold" />
@@ -312,7 +320,7 @@ export default async function BuiltWithPage({
         <div className="mx-auto w-full max-w-7xl px-5 py-16 sm:px-8 lg:px-12 lg:py-24">
           <div className="grid gap-7 border-b border-border-base pb-10 lg:grid-cols-[0.8fr_1.2fr] lg:items-end">
             <div>
-              <p className="font-mono text-[11px] font-medium tracking-[0.24em] text-brand uppercase">
+              <p className="toy-tag text-toy-cobalt dark:text-[#9BB2FF]">
                 {t("registry.eyebrow")}
               </p>
               <h2 className="mt-3 text-balance text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">
@@ -337,7 +345,7 @@ export default async function BuiltWithPage({
                 <div className="mb-7 lg:sticky lg:top-24 lg:mb-0 lg:self-start">
                   <div className="flex items-center gap-3">
                     <Icon className="size-5 text-brand" weight="duotone" />
-                    <span className="font-mono text-[10px] tracking-[0.18em] text-muted-2 uppercase">
+                    <span className="toy-tag text-muted-2">
                       Chapter 0{categoryIndex + 1}
                     </span>
                   </div>
@@ -347,7 +355,7 @@ export default async function BuiltWithPage({
                   <p className="mt-3 text-sm leading-6 text-muted-2">
                     {t(`categories.${i18nKey}.description`)}
                   </p>
-                  <p className="mt-5 font-mono text-[10px] tracking-[0.14em] text-brand uppercase">
+                  <p className="toy-tag mt-5 text-toy-cobalt dark:text-[#9BB2FF]">
                     {items.length} {t("registry.entries")}
                   </p>
                 </div>
@@ -369,10 +377,10 @@ export default async function BuiltWithPage({
         </div>
       </section>
 
-      <section className="border-y border-border-base bg-surface/30">
-        <div className="mx-auto grid w-full max-w-7xl gap-8 px-5 py-12 sm:px-8 lg:grid-cols-[1fr_auto] lg:items-center lg:px-12">
+      <section className="mx-auto w-full max-w-7xl px-5 py-12 sm:px-8 lg:px-12">
+        <div className="toy-shell grid gap-8 rounded-3xl p-6 sm:p-8 lg:grid-cols-[1fr_auto] lg:items-center lg:p-10">
           <div>
-            <p className="font-mono text-[11px] font-medium tracking-[0.24em] text-brand uppercase">
+            <p className="toy-tag text-toy-cobalt dark:text-[#9BB2FF]">
               {t("submit.eyebrow")}
             </p>
             <h2 className="mt-3 text-3xl font-semibold tracking-[-0.035em]">
@@ -387,7 +395,7 @@ export default async function BuiltWithPage({
               href={SUBMIT_ISSUE_URL}
               target="_blank"
               rel="noreferrer"
-              className="btn-3d-brand inline-flex h-11 items-center gap-2 rounded-full bg-brand-deep px-5 text-[13px] font-semibold text-white transition hover:bg-brand"
+              className="toy-btn toy-btn-cobalt h-11 rounded-full px-5 text-[13px]"
             >
               <PlusIcon className="size-4" weight="bold" />
               {t("submit.openIssue")}
@@ -396,7 +404,7 @@ export default async function BuiltWithPage({
               href={REGISTRY_URL}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-2 text-sm font-semibold text-brand hover:underline"
+              className="toy-btn toy-btn-pearl h-11 rounded-full px-4 text-sm text-brand"
             >
               built-with.json
               <ArrowUpRightIcon className="size-4" weight="bold" />
@@ -439,41 +447,49 @@ function FeaturedProject({
   return (
     <article className="relative flex min-h-[500px] flex-col justify-center bg-surface/20 px-5 py-10 sm:px-8 lg:px-12 lg:py-8 xl:h-full xl:min-h-0">
       <div className="absolute inset-y-0 left-0 w-px bg-gradient-to-b from-transparent via-brand/40 to-transparent lg:hidden" />
-      <Link
-        href={primaryHref}
-        target="_blank"
-        rel="noreferrer"
-        className="group relative block aspect-[1280/577] overflow-hidden border border-border-base bg-background shadow-[0_28px_80px_rgba(0,0,0,0.22)]"
-      >
-        <Image
-          src={project.screenshot}
-          alt={screenshotAlt}
-          fill
-          loading="eager"
-          sizes="(max-width: 1024px) 100vw, 55vw"
-          className="object-cover transition duration-500 group-hover:scale-[1.015]"
-        />
-        <div className="absolute inset-0 ring-1 ring-inset ring-white/10" />
-      </Link>
-
-      <div className="mt-5 grid gap-4 sm:grid-cols-[1fr_auto] sm:items-start">
-        <div>
-          <h2 className="text-2xl font-semibold tracking-[-0.04em]">
-            {project.name}
-          </h2>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-1">
-            {project.tagline}
-          </p>
+      <div className="toy-shell rounded-[1.75rem] p-4 sm:p-5">
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <span className="toy-tag rounded-full bg-toy-volt px-2 py-0.5 text-[#101944] shadow-[0_2px_0_#C9A91F]">
+            FEATURED
+          </span>
+          <span className="toy-tag text-muted-2">{project.language}</span>
         </div>
-        <a
+        <Link
           href={primaryHref}
           target="_blank"
           rel="noreferrer"
-          className="inline-flex items-center gap-1.5 text-sm font-semibold text-brand hover:underline"
+          className="group relative block aspect-[1280/577] overflow-hidden rounded-2xl border border-border-base bg-background shadow-[0_18px_40px_rgba(16,25,68,0.16)]"
         >
-          {homepageUrl ? siteLabel : project.repo}
-          <ArrowUpRightIcon className="size-4" weight="bold" />
-        </a>
+          <Image
+            src={project.screenshot}
+            alt={screenshotAlt}
+            fill
+            loading="eager"
+            sizes="(max-width: 1024px) 100vw, 55vw"
+            className="object-cover transition duration-500 group-hover:scale-[1.015]"
+          />
+          <div className="absolute inset-0 ring-1 ring-inset ring-white/10" />
+        </Link>
+
+        <div className="mt-5 grid gap-4 sm:grid-cols-[1fr_auto] sm:items-start">
+          <div>
+            <h2 className="text-2xl font-semibold tracking-[-0.04em]">
+              {project.name}
+            </h2>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-1">
+              {project.tagline}
+            </p>
+          </div>
+          <a
+            href={primaryHref}
+            target="_blank"
+            rel="noreferrer"
+            className="toy-btn toy-btn-pearl h-9 shrink-0 rounded-full px-3.5 text-xs text-brand"
+          >
+            {homepageUrl ? siteLabel : project.repo}
+            <ArrowUpRightIcon className="size-3.5" weight="bold" />
+          </a>
+        </div>
       </div>
     </article>
   );

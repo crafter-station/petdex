@@ -627,6 +627,15 @@
       "description": "Descarga logos, íconos, tokens de color y notas de uso de Petdex para prensa, proyectos y posts de la comunidad.",
       "ogTitle": "Kit de marca de Petdex"
     },
+    "nav": {
+      "overview": "Resumen",
+      "logoSystem": "Sistema de logo",
+      "brandAssets": "Assets de marca"
+    },
+    "actions": {
+      "copy": "Copiar",
+      "copied": "Copiado"
+    },
     "eyebrow": "Kit de marca",
     "hero": {
       "title": "Usa Petdex de forma clara y consistente.",
@@ -634,7 +643,85 @@
       "primaryCtaSvg": "Descargar SVG",
       "primaryCtaPng": "PNG",
       "secondaryCta": "Ver en GitHub",
-      "iconAlt": "Ícono de la app de escritorio Petdex"
+      "iconAlt": "Ícono de la app de escritorio Petdex",
+      "tactileCta": "Descargar SVG táctil"
+    },
+    "hub": {
+      "logoSystem": {
+        "title": "Sistema de logo",
+        "body": "Grilla de construcción, proporciones de espacio libre, versiones monocromáticas y oscuras, tamaños mínimos y co-branding con Crafter Station.",
+        "cta": "Explorar sistema de logo"
+      },
+      "brandAssets": {
+        "title": "Assets de marca",
+        "body": "Logos oficiales en SVG y PNG, variantes monocromáticas, íconos de producto y snippets copiables.",
+        "cta": "Ver assets de marca"
+      }
+    },
+    "attribution": {
+      "eyebrow": "Creado por",
+      "body": "Petdex es un producto open source creado por Railly Hugo en Crafter Station."
+    },
+    "logoSystem": {
+      "metadata": {
+        "title": "Sistema de logo de Petdex",
+        "description": "Grilla de construcción, espacio libre, lockups, tamaños mínimos y reglas de uso para la marca Petdex.",
+        "ogTitle": "Sistema de logo de Petdex"
+      },
+      "eyebrow": "Sistema de logo",
+      "title": "Construido sobre una grilla de 64x64 píxeles.",
+      "body": "La marca de Petdex combina un contenedor redondeado con una grilla de seis píxeles para mantenerse nítida desde favicons de 16px hasta íconos nativos.",
+      "anatomy": {
+        "eyebrow": "Anatomía y espacio libre",
+        "title": "Geometría exacta",
+        "body": "Mantén al menos 0.25x de espacio libre alrededor del contenedor en todos los lados. Nunca alteres el radio ni las proporciones de píxel.",
+        "diagramAlt": "Diagrama de grilla de construcción y espacio libre de la marca Petdex",
+        "metrics": {
+          "viewBox": "ViewBox",
+          "pixelUnit": "Unidad de píxel",
+          "cornerRadius": "Radio de esquina",
+          "clearspace": "Espacio libre"
+        }
+      },
+      "lockups": {
+        "eyebrow": "Lockups",
+        "title": "Combinaciones aprobadas",
+        "primaryLight": "Principal sobre claro",
+        "primaryDark": "Principal sobre oscuro",
+        "mono": "Monocromático",
+        "cobrand": "Co-branding",
+        "bilingual": "Versión bilingüe"
+      },
+      "scale": {
+        "eyebrow": "Tamaño mínimo",
+        "title": "Legibilidad en cada superficie"
+      }
+    },
+    "brandAssets": {
+      "metadata": {
+        "title": "Assets de marca de Petdex",
+        "description": "Descarga logos oficiales de Petdex en SVG y PNG, versiones monocromáticas, íconos de app y snippets copiables.",
+        "ogTitle": "Assets de marca de Petdex"
+      },
+      "eyebrow": "Assets de marca",
+      "title": "Archivos y snippets listos para usar.",
+      "body": "Cada marca, wordmark e ícono oficial en SVG y PNG, más código listo para copiar en READMEs y sitios aliados.",
+      "groups": {
+        "logos": "Logos y marcas",
+        "icons": "Íconos de producto y comunidad"
+      },
+      "snippets": {
+        "svgTitle": "Marca SVG inline",
+        "badgeTitle": "Badge Markdown para README",
+        "imgTitle": "Etiqueta img táctil",
+        "tabsLabel": "Snippets para incrustar"
+      },
+      "surface": {
+        "label": "Superficie de vista previa",
+        "pearl": "Perla",
+        "navy": "Marino",
+        "checker": "Cuadros"
+      }
     },
     "assets": {
       "eyebrow": "Descargas",
@@ -646,13 +733,29 @@
       },
       "modes": {
         "light": "Modo claro",
-        "dark": "Modo oscuro"
+        "dark": "Modo oscuro",
+        "checker": "Transparente"
       },
       "items": {
+        "tactileMark": {
+          "title": "Marca táctil",
+          "description": "El squircle cobalto brillante con cara pixelada en bajorrelieve. Icono principal para apps, avatares y gráficos de lanzamiento.",
+          "alt": "Marca táctil de Petdex"
+        },
         "mark": {
           "title": "Marca de Petdex",
           "description": "El símbolo principal para layouts compactos, avatares, favicons y badges.",
           "alt": "Marca de Petdex"
+        },
+        "markMonoLight": {
+          "title": "Marca monocromática (tinta oscura)",
+          "description": "Marca de un solo color para impresiones claras, documentación monocromática y footers sutiles.",
+          "alt": "Marca monocromática oscura de Petdex"
+        },
+        "markMonoDark": {
+          "title": "Marca monocromática (blanca)",
+          "description": "Marca blanca de alto contraste para overlays oscuros, video y UI monocromática oscura.",
+          "alt": "Marca monocromática blanca de Petdex"
         },
         "wordmark": {
           "title": "Wordmark claro de Petdex",
@@ -668,6 +771,16 @@
           "title": "Ícono de escritorio",
           "description": "Ícono redondeado para referencias de Petdex Desktop, tarjetas de prensa y gráficos de lanzamiento.",
           "alt": "Ícono de escritorio de Petdex"
+        },
+        "appIcon": {
+          "title": "Ícono de app (cuadrado)",
+          "description": "Ícono cuadrado para lanzadores, directorios y avatares sociales.",
+          "alt": "Ícono cuadrado de Petdex"
+        },
+        "discordIcon": {
+          "title": "Ícono de Discord",
+          "description": "Emblema oficial de la comunidad para referencias de Discord y directorios.",
+          "alt": "Ícono de Discord de Petdex"
         }
       }
     },
@@ -688,20 +801,29 @@
       }
     },
     "system": {
-      "eyebrow": "Sistema de diseño",
-      "title": "Colores y tipografía",
-      "body": "Petdex usa superficies frías de app, acentos púrpura-azules y la familia Geist para sentirse como una herramienta útil con un poco de energía de criatura.",
+      "eyebrow": "Sistema Pocket Toy",
+      "title": "Carcasa perla, botones cobalto",
+      "body": "Petdex es un juguete de bolsillo para developers: plástico perla cálido, botones cobalto brillantes y toques coleccionables en volt, sakura y menta, con tipografía precisa de herramienta.",
       "colors": {
-        "brand": "Marca",
-        "brandDeep": "Marca profunda",
-        "brandLight": "Marca clara",
-        "bgApp": "Fondo de app",
-        "brandTint": "Tinte de marca",
-        "ink": "Tinta"
+        "cobalt": "Cobalto",
+        "deepNavy": "Azul marino profundo",
+        "pearlShell": "Carcasa perla",
+        "voltYellow": "Amarillo volt",
+        "sakuraPink": "Rosa sakura",
+        "mint": "Menta"
       },
       "type": {
-        "title": "Tipografía"
+        "title": "Muestra tipográfica",
+        "display": "Display",
+        "body": "Texto",
+        "pixel": "Etiquetas de hardware",
+        "cjk": "Chino"
       }
+    },
+    "tags": {
+      "collect": "Colecciona",
+      "level": "NV 01",
+      "new": "Nueva mascota"
     }
   },
   "about": {

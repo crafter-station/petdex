@@ -128,8 +128,8 @@ export default function proxy(req: NextRequest, event: NextFetchEvent) {
 
 export const config = {
   matcher: [
-    // Skip Next.js internals + static assets + SEO files (robots, sitemap)
-    "/((?!_next|robots\\.txt|sitemap\\.xml|manifest\\.json|version\\.json|opengraph-image|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
+    // Skip Next.js internals + static assets + SEO files (robots, sitemap, llms)
+    "/((?!_next|robots\\.txt|sitemap\\.xml|llms\\.txt|llms-full\\.txt|manifest\\.json|version\\.json|opengraph-image|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
     "/(pets|collections|u)/:slug/opengraph-image",
     "/(en|es|zh)/(pets|collections|u)/:slug/opengraph-image",
     "/(collections|download)/opengraph-image",
