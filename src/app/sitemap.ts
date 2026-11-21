@@ -1,11 +1,15 @@
 import type { MetadataRoute } from "next";
 
+import { asc, isNotNull } from "drizzle-orm";
+
 import { CODING_AGENTS } from "@/lib/coding-agents";
 import { getCollectionSitemapEntries } from "@/lib/collections";
+import { db, schema } from "@/lib/db/client";
 import {
   buildAbsoluteLocaleAlternates,
   buildAbsoluteUrl,
 } from "@/lib/locale-routing";
+import { IS_MOCK } from "@/lib/mock";
 import { getPetSitemapEntries } from "@/lib/pets";
 import { PET_KINDS, PET_VIBES } from "@/lib/types";
 
@@ -46,10 +50,45 @@ function expandLocalizedEntry(entry: EntryInput): MetadataRoute.Sitemap {
   ];
 }
 
+type CreatorSitemapEntry = {
+  handle: string;
+  updatedAt: Date;
+};
+
+async function getCreatorSitemapEntries(): Promise<CreatorSitemapEntry[]> {
+  if (IS_MOCK || !process.env.DATABASE_URL) return [];
+  try {
+    const rows = await db
+      .select({
+        handle: schema.userProfiles.handle,
+        updatedAt: schema.userProfiles.updatedAt,
+      })
+      .from(schema.userProfiles)
+      .where(isNotNull(schema.userProfiles.handle))
+      .orderBy(asc(schema.userProfiles.handle));
+
+    const seen = new Set<string>();
+    const entries: CreatorSitemapEntry[] = [];
+    for (const row of rows) {
+      const normalized = row.handle?.trim().toLowerCase();
+      if (!normalized || seen.has(normalized)) continue;
+      seen.add(normalized);
+      entries.push({
+        handle: normalized,
+        updatedAt: row.updatedAt,
+      });
+    }
+    return entries;
+  } catch {
+    return [];
+  }
+}
+
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const [pets, collections] = await Promise.all([
+  const [pets, collections, creators] = await Promise.all([
     getPetSitemapEntries(),
     getCollectionSitemapEntries(),
+    getCreatorSitemapEntries(),
   ]);
   const now = new Date();
 
@@ -169,6 +208,13 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     priority: 0.8,
   }));
 
+  const creatorEntries: EntryInput[] = creators.map((creator) => ({
+    pathname: `/u/${creator.handle}`,
+    lastModified: creator.updatedAt ?? now,
+    changeFrequency: "weekly",
+    priority: 0.6,
+  }));
+
   return [
     ...staticEntries,
     ...agentEntries,
@@ -176,5 +222,6 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     ...kindEntries,
     ...petEntries,
     ...collectionEntries,
+    ...creatorEntries,
   ].flatMap(expandLocalizedEntry);
 }

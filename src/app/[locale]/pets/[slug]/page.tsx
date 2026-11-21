@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { Layers, Shuffle, Sparkles } from "lucide-react";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 
+import { BRAND_JSON_LD, BRAND_SITE_URL } from "@/lib/brand-kit";
 import { getCollectionsContainingPet } from "@/lib/collections";
 import { formatDexNumber, getDexEntryMap } from "@/lib/dex";
 import { buildLocaleAlternates } from "@/lib/locale-routing";
@@ -38,7 +39,7 @@ import { SiteHeader } from "@/components/site-header";
 
 import { defaultLocale, hasLocale } from "@/i18n/config";
 
-const SITE_URL = "https://petdex.dev";
+const SITE_URL = BRAND_SITE_URL;
 
 type PageProps = {
   params: Promise<{
@@ -179,57 +180,65 @@ export default async function PetPage({ params }: PageProps) {
   const ownerCredit = ownerCreditResult?.credit ?? null;
 
   const url = `${SITE_URL}/pets/${pet.slug}`;
-  const jsonLd = [
-    {
-      "@context": "https://schema.org",
-      "@type": "CreativeWork",
-      "@id": `${url}#pet`,
-      name: pet.displayName,
-      description: pet.description,
-      url,
-      image: pet.spritesheetPath,
-      keywords: [...pet.tags, ...pet.vibes].join(", "),
-      genre: pet.kind,
-      datePublished: pet.importedAt,
-      isPartOf: { "@type": "WebSite", "@id": `${SITE_URL}/#website` },
-      ...(ownerCredit
-        ? {
-            creator: {
-              "@type": "Person",
-              name: ownerCredit.name,
-              ...(ownerCredit.externals[0]
-                ? { url: ownerCredit.externals[0].url }
-                : {}),
-              ...(ownerCredit.imageUrl ? { image: ownerCredit.imageUrl } : {}),
-            },
-          }
-        : {}),
-    },
-    {
-      "@context": "https://schema.org",
-      "@type": "BreadcrumbList",
-      itemListElement: [
-        {
-          "@type": "ListItem",
-          position: 1,
-          name: "Petdex",
-          item: SITE_URL,
-        },
-        {
-          "@type": "ListItem",
-          position: 2,
-          name: "Pets",
-          item: `${SITE_URL}/#gallery`,
-        },
-        {
-          "@type": "ListItem",
-          position: 3,
-          name: pet.displayName,
-          item: url,
-        },
-      ],
-    },
-  ];
+  const kindUrl = `${SITE_URL}/kind/${pet.kind}`;
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@graph": [
+      ...BRAND_JSON_LD["@graph"],
+      {
+        "@type": ["CreativeWork", "ImageObject"],
+        "@id": `${url}#pet`,
+        name: pet.displayName,
+        description: pet.description,
+        url,
+        image: pet.spritesheetPath,
+        contentUrl: pet.spritesheetPath,
+        keywords: [...pet.tags, ...pet.vibes].join(", "),
+        genre: pet.kind,
+        datePublished: pet.importedAt,
+        isPartOf: { "@id": `${SITE_URL}/#website` },
+        publisher: { "@id": "https://crafter.run/#organization" },
+        ...(ownerCredit
+          ? {
+              creator: {
+                "@type": "Person",
+                name: ownerCredit.name,
+                ...(ownerCredit.externals[0]
+                  ? { url: ownerCredit.externals[0].url }
+                  : {}),
+                ...(ownerCredit.imageUrl
+                  ? { image: ownerCredit.imageUrl }
+                  : {}),
+              },
+            }
+          : {}),
+      },
+      {
+        "@type": "BreadcrumbList",
+        "@id": `${url}#breadcrumb`,
+        itemListElement: [
+          {
+            "@type": "ListItem",
+            position: 1,
+            name: "Petdex",
+            item: SITE_URL,
+          },
+          {
+            "@type": "ListItem",
+            position: 2,
+            name: pet.kind,
+            item: kindUrl,
+          },
+          {
+            "@type": "ListItem",
+            position: 3,
+            name: pet.displayName,
+            item: url,
+          },
+        ],
+      },
+    ],
+  };
 
   const shuffleHref = `/api/pets/random?exclude=${encodeURIComponent(pet.slug)}`;
 
@@ -289,7 +298,7 @@ export default async function PetPage({ params }: PageProps) {
                 Sticky on lg+ so it stays visible while the right
                 column scrolls. */}
             <div className="lg:sticky lg:top-24">
-              <div className="petdex-floater-stage pet-sprite-stage relative h-56 w-full overflow-hidden rounded-2xl border border-border-base bg-surface/40 backdrop-blur sm:h-72 lg:aspect-square lg:h-auto">
+              <div className="toy-shell petdex-floater-stage pet-sprite-stage relative h-56 w-full overflow-hidden rounded-3xl sm:h-72 lg:aspect-square lg:h-auto">
                 {/* Static fallback for mobile + first paint. Anchored
                     upper-left so the pet reads like a peeking
                     character, not a centered specimen photo. Hidden
@@ -321,19 +330,23 @@ export default async function PetPage({ params }: PageProps) {
                 (install command) → quick actions (like/sound/menu +
                 stats) → tags → collections. */}
             <header className="flex flex-col gap-5">
-              <div className="flex flex-wrap items-baseline gap-x-4 gap-y-2">
-                <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                <p className="toy-tag inline-block rounded-full bg-toy-volt px-2.5 py-1 text-[#101944] shadow-[0_2px_0_#C9A91F]">
                   {pet.featured ? "Featured" : "Petdex entry"}
                 </p>
                 {currentDexNumber != null ? (
-                  <p className="font-mono text-xs tracking-[0.22em] text-muted-3 uppercase">
+                  <p className="toy-tag text-toy-cobalt dark:text-[#9BB2FF]">
                     No. {formatDexNumber(currentDexNumber)}
                   </p>
                 ) : null}
-                <p className="font-mono text-xs tracking-[0.22em] text-muted-3 uppercase">
+                <Link
+                  href={`/kind/${pet.kind}`}
+                  prefetch={false}
+                  className="toy-tag text-muted-3 transition hover:text-brand"
+                >
                   {pet.kind}
-                </p>
-                <p className="rounded-full bg-black px-2.5 py-1 font-mono text-xs font-semibold tracking-[0.08em] text-white shadow-sm">
+                </Link>
+                <p className="toy-tag rounded-full bg-black px-2.5 py-1 font-semibold text-white shadow-sm">
                   v{pet.spriteVersionNumber}
                 </p>
               </div>
@@ -426,7 +439,7 @@ export default async function PetPage({ params }: PageProps) {
 
               {memberOfCollections.length > 0 ? (
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="inline-flex items-center gap-1.5 font-mono text-[11px] tracking-[0.18em] text-muted-3 uppercase">
+                  <span className="toy-tag inline-flex items-center gap-1.5 text-muted-3">
                     <Layers className="size-3.5" />
                     Part of
                   </span>
@@ -549,7 +562,7 @@ export default async function PetPage({ params }: PageProps) {
           </div>
 
           {variants.length > 0 ? (
-            <section className="rounded-2xl border border-border-base bg-surface/60 p-4 backdrop-blur">
+            <section className="toy-shell rounded-3xl p-5">
               <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                 <Sparkles className="size-4" />
                 {tPet("variants.title")}
@@ -576,7 +589,7 @@ export default async function PetPage({ params }: PageProps) {
                       <p className="truncate text-sm font-semibold text-foreground transition group-hover:text-brand">
                         {variant.displayName}
                       </p>
-                      <p className="mt-1 font-mono text-[11px] tracking-[0.16em] text-muted-3 uppercase">
+                      <p className="toy-tag mt-1 text-muted-3">
                         #{formatDexNumber(variant.dexNumber)}
                       </p>
                     </div>
@@ -628,7 +641,7 @@ function InfoCard({
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-2xl border border-border-base bg-surface/60 p-4 backdrop-blur">
+    <div className="toy-shell rounded-3xl p-5">
       <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
         {icon}
         {title}

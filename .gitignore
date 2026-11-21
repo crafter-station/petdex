@@ -93,3 +93,6 @@ packages/petdex-desktop-native/.zig-cache/
 
 # Rust builds
 target/
+
+# SwiftPM builds
+.build/

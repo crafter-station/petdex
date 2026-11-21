@@ -1,5 +1,14 @@
 // swift-tools-version: 5.9
+import Foundation
 import PackageDescription
+
+let packageDir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+let coreRoot = packageDir
+    .deletingLastPathComponent()
+    .appendingPathComponent("petdex-core")
+    .standardizedFileURL
+let coreIncludeDir = coreRoot.appendingPathComponent("include").path
+let coreStaticLib = coreRoot.appendingPathComponent("target/release/libpetdex_core.a").path
 
 let package = Package(
     name: "PetdexMacOS",
@@ -15,16 +24,18 @@ let package = Package(
             path: "Sources/CPetdexCore",
             publicHeadersPath: "include",
             cSettings: [
-                .headerSearchPath("../../../petdex-core/include"),
+                .unsafeFlags(["-I\(coreIncludeDir)"]),
             ]
         ),
         .executableTarget(
             name: "PetdexMacOS",
             dependencies: ["CPetdexCore"],
             path: "Sources/PetdexMacOS",
+            swiftSettings: [
+                .unsafeFlags(["-Xcc", "-I\(coreIncludeDir)"]),
+            ],
             linkerSettings: [
-                .unsafeFlags(["-L../petdex-core/target/release"]),
-                .linkedLibrary("petdex_core"),
+                .unsafeFlags([coreStaticLib]),
                 .linkedFramework("AppKit"),
                 .linkedFramework("QuartzCore"),
                 .linkedFramework("Metal"),

@@ -1,14 +1,26 @@
 use std::ffi::{c_char, CStr};
+use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::agents::CodingAgent;
 use crate::animation::{FrameOutput, PetAnimationEngine, PetState};
 use crate::attention::{AgentEvent, AttentionCoordinator, SessionStatus};
+use crate::hook_server::{HookServer, HookServerConfig};
 
 const CORE_VERSION_CSTR: &[u8] = concat!(env!("CARGO_PKG_VERSION"), "\0").as_bytes();
 
 pub struct PetdexEngine {
     inner: PetAnimationEngine,
-    attention: AttentionCoordinator,
+    attention: Arc<Mutex<AttentionCoordinator>>,
+    hook_server: Option<HookServer>,
+    last_hook_state: Option<PetState>,
+}
+
+fn current_time_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,7 +54,9 @@ pub extern "C" fn petdex_core_version() -> *const c_char {
 pub extern "C" fn petdex_engine_new() -> *mut PetdexEngine {
     Box::into_raw(Box::new(PetdexEngine {
         inner: PetAnimationEngine::new(),
-        attention: AttentionCoordinator::new(),
+        attention: Arc::new(Mutex::new(AttentionCoordinator::new())),
+        hook_server: None,
+        last_hook_state: None,
     }))
 }
 
@@ -98,17 +112,71 @@ pub unsafe extern "C" fn petdex_engine_ingest_status(
         }
     };
 
-    engine.attention.ingest(
-        AgentEvent {
-            session_id: session_id_str.to_string(),
-            agent,
-            status,
-            summary: summary_str.to_string(),
-        },
-        now_ms,
-    );
-    engine.inner.set_state(engine.attention.active_state(now_ms));
+    let next_state = {
+        let mut guard = engine.attention.lock().unwrap_or_else(|e| e.into_inner());
+        guard.ingest(
+            AgentEvent {
+                session_id: session_id_str.to_string(),
+                agent,
+                status,
+                summary: summary_str.to_string(),
+            },
+            now_ms,
+        );
+        guard.active_state(now_ms)
+    };
+    engine.last_hook_state = Some(next_state);
+    engine.inner.set_state(next_state);
     true
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn petdex_engine_start_hook_server(
+    engine: *mut PetdexEngine,
+    port: u16,
+    token_ptr: *const c_char,
+    token_len: usize,
+) -> u16 {
+    let Some(engine) = engine.as_mut() else {
+        return 0;
+    };
+
+    let token = if token_len == 0 {
+        String::new()
+    } else {
+        if token_ptr.is_null() {
+            return 0;
+        }
+        let bytes = std::slice::from_raw_parts(token_ptr as *const u8, token_len);
+        match std::str::from_utf8(bytes) {
+            Ok(s) => s.to_string(),
+            Err(_) => return 0,
+        }
+    };
+
+    engine.hook_server = None;
+
+    let config = HookServerConfig::new(port, token);
+    match HookServer::start(config, Arc::clone(&engine.attention)) {
+        Ok(server) => {
+            let bound_port = server.port();
+            let active = {
+                let guard = engine.attention.lock().unwrap_or_else(|e| e.into_inner());
+                guard.active_state(current_time_ms())
+            };
+            engine.last_hook_state = Some(active);
+            engine.hook_server = Some(server);
+            bound_port
+        }
+        Err(_) => 0,
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn petdex_engine_stop_hook_server(engine: *mut PetdexEngine) {
+    if let Some(engine) = engine.as_mut() {
+        engine.hook_server = None;
+    }
 }
 
 #[no_mangle]
@@ -125,6 +193,16 @@ pub unsafe extern "C" fn petdex_engine_tick_ms(
             frame_dur_ms: 0,
         };
     };
+    if engine.hook_server.is_some() {
+        let active = {
+            let guard = engine.attention.lock().unwrap_or_else(|e| e.into_inner());
+            guard.active_state(current_time_ms())
+        };
+        if engine.last_hook_state != Some(active) {
+            engine.last_hook_state = Some(active);
+            engine.inner.set_state(active);
+        }
+    }
     PetdexFrame::from(engine.inner.tick(dt_ms))
 }
 
@@ -221,6 +299,54 @@ mod tests {
             assert_eq!(idle_frame.state, PetState::Idle as u8);
             assert_eq!(idle_frame.row, 0);
 
+            petdex_engine_free(engine);
+        }
+    }
+
+    #[test]
+    fn ffi_hook_server_receives_post_state_and_updates_tick() {
+        use std::io::{Read, Write};
+        use std::net::TcpStream;
+
+        unsafe {
+            assert_eq!(
+                petdex_engine_start_hook_server(std::ptr::null_mut(), 0, std::ptr::null(), 0),
+                0
+            );
+
+            let engine = petdex_engine_new();
+            assert_eq!(
+                petdex_engine_start_hook_server(engine, 0, std::ptr::null(), 4),
+                0
+            );
+
+            let token = "ffi-secret";
+            let port = petdex_engine_start_hook_server(
+                engine,
+                0,
+                token.as_ptr() as *const c_char,
+                token.len(),
+            );
+            assert!(port > 0);
+
+            let body = r#"{"session_id":"hook-1","agent":"claude-code","status":"needs-input","summary":"Approve"}"#;
+            let req = format!(
+                "POST /state HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Petdex-Update-Token: {token}\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            );
+            let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect hook server");
+            stream.write_all(req.as_bytes()).expect("write request");
+            stream.flush().expect("flush request");
+
+            let mut resp = String::new();
+            stream.read_to_string(&mut resp).expect("read response");
+            assert!(resp.starts_with("HTTP/1.1 200 OK"));
+
+            let frame = petdex_engine_tick_ms(engine, 16);
+            assert_eq!(frame.state, PetState::Waiting as u8);
+            assert_eq!(frame.row, 6);
+
+            petdex_engine_stop_hook_server(engine);
             petdex_engine_free(engine);
         }
     }

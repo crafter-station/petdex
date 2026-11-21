@@ -7,6 +7,7 @@ import { Heart, TerminalSquare, Trophy } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 
 import { isAdmin } from "@/lib/admin";
+import { BRAND_JSON_LD, BRAND_SITE_URL } from "@/lib/brand-kit";
 import { getCatchProgress, getLikedPetsForUser } from "@/lib/catch-status";
 import {
   canManageCreatorCollections,
@@ -36,7 +37,7 @@ import { hasLocale } from "@/i18n/config";
 
 export const dynamic = "force-dynamic";
 
-const SITE_URL = "https://petdex.dev";
+const SITE_URL = BRAND_SITE_URL;
 
 // Preview slice for the visitor view, which renders a count and the leading
 // pets. Owners get the full member list because the collection editor
@@ -270,18 +271,33 @@ export default async function UserProfilePage({ params }: PageProps) {
     .slice(0, 1)
     .toUpperCase();
 
+  const profileUrl = `${SITE_URL}/u/${publicHandle}`;
+  const personId = `${profileUrl}#person`;
   const jsonLd = {
     "@context": "https://schema.org",
-    "@type": "ProfilePage",
-    mainEntity: {
-      "@type": "Person",
-      name: displayName ?? `@${publicHandle}`,
-      url: `${SITE_URL}/u/${publicHandle}`,
-      ...(avatarUrl ? { image: avatarUrl } : {}),
-      ...(externalUrls.length > 0
-        ? { sameAs: externalUrls.map((e) => e.url) }
-        : {}),
-    },
+    "@graph": [
+      ...BRAND_JSON_LD["@graph"],
+      {
+        "@type": "ProfilePage",
+        "@id": `${profileUrl}#profile`,
+        url: profileUrl,
+        name: `${displayName ?? `@${publicHandle}`} on Petdex`,
+        isPartOf: { "@id": `${SITE_URL}/#website` },
+        mainEntity: { "@id": personId },
+      },
+      {
+        "@type": "Person",
+        "@id": personId,
+        name: displayName ?? `@${publicHandle}`,
+        alternateName: `@${publicHandle}`,
+        url: profileUrl,
+        ...(bio ? { description: bio } : {}),
+        ...(avatarUrl ? { image: avatarUrl } : {}),
+        ...(externalUrls.length > 0
+          ? { sameAs: externalUrls.map((e) => e.url) }
+          : {}),
+      },
+    ],
   };
 
   return (
@@ -291,7 +307,7 @@ export default async function UserProfilePage({ params }: PageProps) {
       <SiteHeader />
       <section className="petdex-hero relative -mt-14 overflow-clip pt-14">
         <div className="relative mx-auto flex w-full max-w-[1440px] flex-col px-5 pb-10 md:px-8">
-          <header className="mt-10 grid gap-8 md:mt-14 lg:grid-cols-[auto_1fr_auto] lg:items-start">
+          <header className="toy-shell mt-10 grid gap-8 rounded-3xl p-6 md:mt-14 md:p-8 lg:grid-cols-[auto_1fr_auto] lg:items-start">
             {/* Avatar */}
             <div className="flex justify-center lg:block">
               {avatarUrl ? (
@@ -311,11 +327,11 @@ export default async function UserProfilePage({ params }: PageProps) {
             {/* Identity */}
             <div className="text-center lg:text-left">
               <div className="flex flex-wrap items-center justify-center gap-2 lg:justify-start">
-                <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
+                <p className="toy-tag inline-block rounded-full bg-toy-volt px-2.5 py-1 text-[#101944] shadow-[0_2px_0_#C9A91F]">
                   {t("creatorBadge")}
                 </p>
                 {catchProgress ? (
-                  <p className="font-mono text-xs tracking-[0.22em] text-muted-3 uppercase">
+                  <p className="toy-tag text-toy-cobalt dark:text-[#9BB2FF]">
                     {t("yourAlbum", {
                       caught: catchProgress.caught,
                       total: catchProgress.total,
@@ -325,7 +341,7 @@ export default async function UserProfilePage({ params }: PageProps) {
                 ) : null}
                 {isOwnerAdmin ? (
                   <span
-                    className="inline-flex items-center gap-1 rounded-full bg-brand px-2 py-0.5 font-mono text-[10px] tracking-[0.15em] text-white uppercase"
+                    className="toy-tag inline-flex items-center gap-1 rounded-full bg-brand px-2.5 py-1 text-white"
                     title="One of the people who built Petdex"
                   >
                     <Trophy className="size-3" />
@@ -334,7 +350,7 @@ export default async function UserProfilePage({ params }: PageProps) {
                 ) : rank ? (
                   <Link
                     href="/leaderboard"
-                    className="inline-flex items-center gap-1 rounded-full bg-chip-warning-bg px-2 py-0.5 font-mono text-[10px] tracking-[0.15em] text-chip-warning-fg uppercase transition hover:opacity-80"
+                    className="toy-tag inline-flex items-center gap-1 rounded-full bg-chip-warning-bg px-2.5 py-1 text-chip-warning-fg transition hover:opacity-80"
                     title={`Ranked #${rank.rank} of ${rank.total} by approved pets. See the full leaderboard`}
                   >
                     <Trophy className="size-3" />#{rank.rank} most pets
@@ -356,16 +372,18 @@ export default async function UserProfilePage({ params }: PageProps) {
               ) : null}
 
               {/* Stats row */}
-              <div className="mt-5 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 font-mono text-[11px] tracking-[0.18em] text-muted-3 uppercase lg:justify-start">
-                <span>{t("petsCount", { count: pets.length })}</span>
+              <div className="toy-tag mt-5 flex flex-wrap items-center justify-center gap-2 text-muted-2 lg:justify-start">
+                <span className="rounded-full border border-border-base bg-background/70 px-3 py-1">
+                  {t("petsCount", { count: pets.length })}
+                </span>
                 {totalLikes > 0 ? (
-                  <span className="inline-flex items-center gap-1.5">
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-border-base bg-background/70 px-3 py-1">
                     <Heart className="size-3" />
                     {formatLocalizedNumber(totalLikes, locale)}
                   </span>
                 ) : null}
                 {totalInstalls > 0 ? (
-                  <span className="inline-flex items-center gap-1.5">
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-border-base bg-background/70 px-3 py-1">
                     <TerminalSquare className="size-3" />
                     {t("installs", {
                       count: formatLocalizedNumber(totalInstalls, locale),
@@ -373,7 +391,7 @@ export default async function UserProfilePage({ params }: PageProps) {
                   </span>
                 ) : null}
                 {memberSince ? (
-                  <span>
+                  <span className="rounded-full border border-border-base bg-background/70 px-3 py-1">
                     {t("joined", {
                       date: new Date(memberSince).toLocaleDateString(
                         locale === "zh"

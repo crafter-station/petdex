@@ -2,6 +2,7 @@
 #define PETDEX_CORE_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -63,6 +64,13 @@ bool petdex_engine_ingest_status(
     const char *summary,
     uint64_t now_ms
 );
+uint16_t petdex_engine_start_hook_server(
+    PetdexEngine *engine,
+    uint16_t port,
+    const char *token_ptr,
+    size_t token_len
+);
+void petdex_engine_stop_hook_server(PetdexEngine *engine);
 PetdexFrame petdex_engine_tick_ms(PetdexEngine *engine, uint32_t dt_ms);
 
 #ifdef __cplusplus
