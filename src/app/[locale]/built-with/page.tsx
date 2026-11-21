@@ -18,6 +18,7 @@ import { BRAND_JSON_LD } from "@/lib/brand-kit";
 import { formatLocalizedNumber } from "@/lib/format-number";
 import { buildLocaleAlternates } from "@/lib/locale-routing";
 
+import { CrafterLaunchpadStrip } from "@/components/brand/crafter-launchpad-strip";
 import { GithubIcon } from "@/components/brand/github-icon";
 import { JsonLd } from "@/components/layout/json-ld";
 import { PetSprite } from "@/components/pets/pet-sprite";
@@ -411,6 +412,10 @@ export default async function BuiltWithPage({
             </Link>
           </div>
         </div>
+      </section>
+
+      <section className="mx-auto w-full max-w-7xl px-5 pb-12 sm:px-8 lg:px-12">
+        <CrafterLaunchpadStrip />
       </section>
 
       <SiteFooter />

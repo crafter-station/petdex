@@ -642,6 +642,12 @@ struct PetdexSettingsView: View {
                 store.setLaunchAtLogin(newValue)
             }
         )
+        let hideCrafterAnnouncementsBinding = Binding<Bool>(
+            get: { store.hideCrafterAnnouncements },
+            set: { newValue in
+                store.hideCrafterAnnouncements = newValue
+            }
+        )
         let stateBinding = Binding<UInt8>(
             get: { store.currentState },
             set: { newValue in
@@ -649,82 +655,142 @@ struct PetdexSettingsView: View {
             }
         )
 
-        return VStack(alignment: .leading, spacing: 12) {
-            GroupBox("Pet Window") {
-                VStack(alignment: .leading, spacing: 10) {
-                    VStack(alignment: .leading, spacing: 6) {
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                GroupBox("Pet Window") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text("Scale")
+                                    .font(.system(size: 13, weight: .medium))
+                                Spacer()
+                                Text(String(format: "%.2fx", store.scale))
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .foregroundColor(.secondary)
+                            }
+                            Slider(
+                                value: scaleBinding,
+                                in: PetdexSettingsStore.minScale...PetdexSettingsStore.maxScale,
+                                step: 0.05
+                            )
+                        }
+
+                        Toggle("Always on top", isOn: alwaysOnTopBinding)
+                        Toggle("Speech bubbles", isOn: bubblesBinding)
+                        Toggle("Stack all active sessions", isOn: showAllSessionsBinding)
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Toggle("Launch at login", isOn: launchAtLoginBinding)
+                            if let statusNote = store.launchAtLoginStatus {
+                                Text(statusNote)
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                    .padding(8)
+                }
+
+                GroupBox("Preview & Testing") {
+                    VStack(alignment: .leading, spacing: 12) {
                         HStack {
-                            Text("Scale")
+                            Text("State")
                                 .font(.system(size: 13, weight: .medium))
                             Spacer()
-                            Text(String(format: "%.2fx", store.scale))
-                                .font(.system(size: 12, design: .monospaced))
-                                .foregroundColor(.secondary)
+                            Picker("State", selection: stateBinding) {
+                                ForEach(PetdexStateCatalog.allStates, id: \.0) { stateValue, label in
+                                    Text(label).tag(stateValue)
+                                }
+                            }
+                            .labelsHidden()
+                            .frame(width: 180)
                         }
-                        Slider(
-                            value: scaleBinding,
-                            in: PetdexSettingsStore.minScale...PetdexSettingsStore.maxScale,
-                            step: 0.05
-                        )
-                    }
 
-                    Toggle("Always on top", isOn: alwaysOnTopBinding)
-                    Toggle("Speech bubbles", isOn: bubblesBinding)
-                    Toggle("Stack all active sessions", isOn: showAllSessionsBinding)
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Toggle("Launch at login", isOn: launchAtLoginBinding)
-                        if let statusNote = store.launchAtLoginStatus {
-                            Text(statusNote)
-                                .font(.system(size: 11))
-                                .foregroundColor(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Floating Bubble Preview")
+                                    .font(.system(size: 12, weight: .medium))
+                                Text("Sends sample agent alerts above your pet.")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            HStack(spacing: 8) {
+                                Button("Test 2 Sessions") {
+                                    actions.onSendTestTwoSessions()
+                                }
+                                Button("Send Test Bubble") {
+                                    actions.onSendTestBubble()
+                                }
+                                .buttonStyle(.borderedProminent)
+                            }
                         }
                     }
+                    .padding(8)
                 }
-                .padding(8)
-            }
 
-            GroupBox("Preview & Testing") {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Text("State")
-                            .font(.system(size: 13, weight: .medium))
-                        Spacer()
-                        Picker("State", selection: stateBinding) {
-                            ForEach(PetdexStateCatalog.allStates, id: \.0) { stateValue, label in
-                                Text(label).tag(stateValue)
-                            }
+                GroupBox("Crafter Station") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        if !store.hideCrafterAnnouncements {
+                            crafterLaunchpadCard
                         }
-                        .labelsHidden()
-                        .frame(width: 180)
+                        Toggle("Hide Crafter announcements", isOn: hideCrafterAnnouncementsBinding)
                     }
-
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Floating Bubble Preview")
-                                .font(.system(size: 12, weight: .medium))
-                            Text("Sends sample agent alerts above your pet.")
-                                .font(.system(size: 11))
-                                .foregroundColor(.secondary)
-                        }
-                        Spacer()
-                        HStack(spacing: 8) {
-                            Button("Test 2 Sessions") {
-                                actions.onSendTestTwoSessions()
-                            }
-                            Button("Send Test Bubble") {
-                                actions.onSendTestBubble()
-                            }
-                            .buttonStyle(.borderedProminent)
-                        }
-                    }
+                    .padding(8)
                 }
-                .padding(8)
             }
-
-            Spacer()
+            .padding(1)
         }
+    }
+
+    private var crafterLaunchpadCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("From Crafter Station")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    Text("Explore more open-source dev tools and React primitives built alongside Petdex.")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 8)
+
+                Button {
+                    store.hideCrafterAnnouncements = true
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Hide Crafter announcements")
+            }
+
+            HStack(spacing: 8) {
+                Button("crafter.run") {
+                    if let url = URL(string: "https://crafter.run") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                .controlSize(.small)
+
+                Button("ui-sdk.dev") {
+                    if let url = URL(string: "https://ui-sdk.dev") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                .controlSize(.small)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.secondary.opacity(0.08))
+        )
     }
 
     private var agentsTab: some View {

@@ -144,6 +144,7 @@ final class PetdexSettingsStore: ObservableObject {
         var showAllSessions: Bool?
         var alwaysOnTop: Bool
         var launchAtLogin: Bool?
+        var hideCrafterAnnouncements: Bool?
         var panelX: Double?
         var panelY: Double?
     }
@@ -179,6 +180,10 @@ final class PetdexSettingsStore: ObservableObject {
         didSet { persistIfReady() }
     }
 
+    @Published var hideCrafterAnnouncements: Bool {
+        didSet { persistIfReady() }
+    }
+
     @Published var launchAtLoginStatus: String? = nil
 
     @Published var panelX: Double? {
@@ -211,6 +216,7 @@ final class PetdexSettingsStore: ObservableObject {
         self.showAllSessions = true
         self.alwaysOnTop = true
         self.launchAtLogin = false
+        self.hideCrafterAnnouncements = false
         self.panelX = nil
         self.panelY = nil
         load()
@@ -289,6 +295,7 @@ final class PetdexSettingsStore: ObservableObject {
         showAllSessions = decoded.showAllSessions ?? true
         alwaysOnTop = decoded.alwaysOnTop
         launchAtLogin = decoded.launchAtLogin ?? false
+        hideCrafterAnnouncements = decoded.hideCrafterAnnouncements ?? false
         panelX = decoded.panelX
         panelY = decoded.panelY
     }
@@ -306,6 +313,7 @@ final class PetdexSettingsStore: ObservableObject {
             showAllSessions: showAllSessions,
             alwaysOnTop: alwaysOnTop,
             launchAtLogin: launchAtLogin,
+            hideCrafterAnnouncements: hideCrafterAnnouncements,
             panelX: panelX,
             panelY: panelY
         )
