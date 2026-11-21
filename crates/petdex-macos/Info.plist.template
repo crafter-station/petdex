@@ -28,6 +28,12 @@
     <true/>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>SUFeedURL</key>
+    <string>https://petdex.dev/api/desktop/appcast.xml</string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUPublicEDKey</key>
+    <string>__SPARKLE_PUBLIC_ED_KEY__</string>
     <key>CFBundleURLTypes</key>
     <array>
         <dict>

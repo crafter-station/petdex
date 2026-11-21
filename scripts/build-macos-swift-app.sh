@@ -10,10 +10,12 @@ DIST_DIR="$MACOS_DIR/dist"
 APP_BUNDLE="$DIST_DIR/Petdex.app"
 CONTENTS_DIR="$APP_BUNDLE/Contents"
 APP_MACOS_DIR="$CONTENTS_DIR/MacOS"
+APP_FRAMEWORKS_DIR="$CONTENTS_DIR/Frameworks"
 APP_RESOURCES_DIR="$CONTENTS_DIR/Resources"
 
 PETDEX_VERSION="${PETDEX_VERSION:-0.1.0}"
 PETDEX_BUILD_NUMBER="${PETDEX_BUILD_NUMBER:-1}"
+SPARKLE_PUBLIC_ED_KEY="${SPARKLE_PUBLIC_ED_KEY:-}"
 
 if [[ ! -f "$PLIST_TEMPLATE" ]]; then
   echo "build-macos-swift-app: missing Info.plist.template at $PLIST_TEMPLATE" >&2
@@ -60,11 +62,27 @@ iconutil -c icns "$ICONSET_DIR" -o "$ICNS_PATH"
 
 echo "==> Assembling $APP_BUNDLE"
 rm -rf "$APP_BUNDLE"
-mkdir -p "$APP_MACOS_DIR" "$APP_RESOURCES_DIR"
+mkdir -p "$APP_MACOS_DIR" "$APP_FRAMEWORKS_DIR" "$APP_RESOURCES_DIR"
 
 cp "$EXECUTABLE" "$APP_MACOS_DIR/PetdexMacOS"
 chmod +x "$APP_MACOS_DIR/PetdexMacOS"
+install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP_MACOS_DIR/PetdexMacOS" 2>/dev/null || true
 cp "$ICNS_PATH" "$APP_RESOURCES_DIR/AppIcon.icns"
+
+SPARKLE_FRAMEWORK=""
+for candidate in \
+  "$BIN_DIR/Sparkle.framework" \
+  "$MACOS_DIR/.build/release/Sparkle.framework" \
+  "$MACOS_DIR"/.build/*/release/Sparkle.framework; do
+  if [[ -d "$candidate" ]]; then
+    SPARKLE_FRAMEWORK="$candidate"
+    break
+  fi
+done
+
+if [[ -n "$SPARKLE_FRAMEWORK" ]]; then
+  cp -R "$SPARKLE_FRAMEWORK" "$APP_FRAMEWORKS_DIR/Sparkle.framework"
+fi
 
 RESOURCE_BUNDLE="$BIN_DIR/PetdexMacOS_PetdexMacOS.bundle"
 if [[ -d "$RESOURCE_BUNDLE" ]]; then
@@ -72,11 +90,15 @@ if [[ -d "$RESOURCE_BUNDLE" ]]; then
 fi
 
 sed \
-  -e "s/__PETDEX_VERSION__/$PETDEX_VERSION/g" \
-  -e "s/__PETDEX_BUILD_NUMBER__/$PETDEX_BUILD_NUMBER/g" \
+  -e "s|__PETDEX_VERSION__|$PETDEX_VERSION|g" \
+  -e "s|__PETDEX_BUILD_NUMBER__|$PETDEX_BUILD_NUMBER|g" \
+  -e "s|__SPARKLE_PUBLIC_ED_KEY__|$SPARKLE_PUBLIC_ED_KEY|g" \
   "$PLIST_TEMPLATE" > "$CONTENTS_DIR/Info.plist"
 
 if command -v codesign >/dev/null 2>&1; then
+  if [[ -d "$APP_FRAMEWORKS_DIR/Sparkle.framework" ]]; then
+    codesign --force --deep --sign - "$APP_FRAMEWORKS_DIR/Sparkle.framework" >/dev/null 2>&1 || true
+  fi
   codesign --force --deep --sign - "$APP_BUNDLE" >/dev/null 2>&1 || true
 fi
 

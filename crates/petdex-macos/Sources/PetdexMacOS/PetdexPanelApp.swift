@@ -479,6 +479,7 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
     private let settingsStore = PetdexSettingsStore()
     private let chimePlayer = PetdexChimePlayer()
     private let clerkAuth = PetdexClerkAuthClient.shared
+    private let sparkleUpdater = PetdexSparkleUpdater()
     private var panel: PetdexFloatingPanel?
     private var canvasView: PetdexSpriteCanvasView?
     private var bubblePanel: PetdexBubblePanel?
@@ -623,7 +624,8 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
         reloadRemoteHosts()
         syncBubblePanel()
 
-        if settingsStore.autoCheckUpdates {
+        sparkleUpdater.setAutomaticChecks(settingsStore.autoCheckUpdates)
+        if settingsStore.autoCheckUpdates && !sparkleUpdater.isSparkleAvailable {
             checkForUpdates()
         }
 
@@ -829,6 +831,12 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func checkForUpdates() {
+        if sparkleUpdater.checkForUpdates() {
+            settingsStore.updateStatusText = "Checking via Sparkle..."
+            settingsStore.updateDownloadURL = nil
+            return
+        }
+
         settingsStore.updateStatusText = "Checking for updates..."
         settingsStore.updateDownloadURL = nil
         Task { @MainActor [weak self] in
@@ -1169,6 +1177,10 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
         settingsItem.target = self
         menu.addItem(settingsItem)
 
+        let updatesItem = NSMenuItem(title: "Check for Updates...", action: #selector(handleCheckForUpdates), keyEquivalent: "")
+        updatesItem.target = self
+        menu.addItem(updatesItem)
+
         let onboardingItem = NSMenuItem(title: "Welcome & Onboarding...", action: #selector(handleOpenOnboarding), keyEquivalent: "")
         onboardingItem.target = self
         menu.addItem(onboardingItem)
@@ -1273,6 +1285,10 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func handleOpenSettings() {
         openSettingsWindow()
+    }
+
+    @objc private func handleCheckForUpdates() {
+        checkForUpdates()
     }
 
     @objc private func handleOpenOnboarding() {

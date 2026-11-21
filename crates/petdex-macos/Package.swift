@@ -18,6 +18,9 @@ let package = Package(
     products: [
         .executable(name: "PetdexMacOS", targets: ["PetdexMacOS"]),
     ],
+    dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0"),
+    ],
     targets: [
         .target(
             name: "CPetdexCore",
@@ -29,7 +32,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "PetdexMacOS",
-            dependencies: ["CPetdexCore"],
+            dependencies: [
+                "CPetdexCore",
+                .product(name: "Sparkle", package: "Sparkle"),
+            ],
             path: "Sources/PetdexMacOS",
             resources: [
                 .copy("Resources/agents"),
