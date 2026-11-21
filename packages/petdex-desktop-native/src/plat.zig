@@ -1197,8 +1197,9 @@ pub fn openExternal(target: []const u8) void {
     var scope = Scope.init();
     defer scope.deinit();
     const io = scope.io();
+    var windows_argv: [5][]const u8 = undefined;
     const argv: []const []const u8 = switch (builtin.os.tag) {
-        .windows => &.{ "cmd", "/c", "start", "", target },
+        .windows => windowsOpenArgv(&windows_argv, target),
         .macos => &.{ "/usr/bin/open", target },
         else => &.{ "xdg-open", target },
     };
@@ -1209,6 +1210,29 @@ pub fn openExternal(target: []const u8) void {
         .stderr = .ignore,
     }) catch return;
     _ = child.wait(io) catch {};
+}
+
+fn windowsOpenArgv(buf: *[5][]const u8, target: []const u8) []const []const u8 {
+    if (std.mem.startsWith(u8, target, "https://") or std.mem.startsWith(u8, target, "http://")) {
+        buf[0..3].* = .{ "rundll32", "url.dll,FileProtocolHandler", target };
+        return buf[0..3];
+    }
+    buf.* = .{ "cmd", "/c", "start", "", target };
+    return buf[0..5];
+}
+
+test "Windows URL opener keeps query separators out of cmd" {
+    var buf: [5][]const u8 = undefined;
+    const url = "https://clerk.petdex.dev/oauth/authorize?response_type=code&client_id=abc&state=xyz";
+    const argv = windowsOpenArgv(&buf, url);
+    try std.testing.expectEqual(@as(usize, 3), argv.len);
+    try std.testing.expectEqualStrings("rundll32", argv[0]);
+    try std.testing.expectEqualStrings("url.dll,FileProtocolHandler", argv[1]);
+    try std.testing.expectEqualStrings(url, argv[2]);
+
+    const folder = windowsOpenArgv(&buf, "C:\\Users\\pet/.petdex/pets");
+    try std.testing.expectEqualStrings("cmd", folder[0]);
+    try std.testing.expectEqualStrings("C:\\Users\\pet/.petdex/pets", folder[folder.len - 1]);
 }
 
 /// Resolve the current default HTTP handler through NSWorkspace, then activate
