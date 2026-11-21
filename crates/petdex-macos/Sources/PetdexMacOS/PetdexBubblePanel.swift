@@ -1,68 +1,157 @@
 import AppKit
 import SwiftUI
 
+private struct BubbleTailShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.midX, y: rect.maxY),
+            control: CGPoint(x: rect.midX + rect.width * 0.18, y: rect.midY + 1)
+        )
+        path.addQuadCurve(
+            to: CGPoint(x: rect.minX, y: rect.minY),
+            control: CGPoint(x: rect.midX - rect.width * 0.18, y: rect.midY + 1)
+        )
+        path.closeSubpath()
+        return path
+    }
+}
+
 private struct PetdexBubbleCardView: View {
     let bubble: ActiveBubble
     let onDismiss: () -> Void
 
-    private let pearlFill = Color(red: 0.97, green: 0.98, blue: 1.0)
-    private let navyInk = Color(red: 0.09, green: 0.16, blue: 0.34)
-    private let navyMuted = Color(red: 0.25, green: 0.34, blue: 0.54)
-    private let navyBorder = Color(red: 0.13, green: 0.24, blue: 0.50)
+    private let cobaltTop = Color(red: 0.345, green: 0.463, blue: 1.0)
+    private let cobaltMid = Color(red: 0.231, green: 0.349, blue: 0.949)
+    private let cobaltBottom = Color(red: 0.137, green: 0.220, blue: 0.675)
+    private let lipNavy = Color(red: 0.075, green: 0.125, blue: 0.420)
+    private let deepShadow = Color(red: 0.043, green: 0.075, blue: 0.227)
+    private let voltYellow = Color(red: 1.0, green: 0.886, blue: 0.349)
+    private let navyInk = Color(red: 0.063, green: 0.098, blue: 0.267)
+
+    private var isNeedsInput: Bool {
+        bubble.status.lowercased() == "needs_input"
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(bubble.statusColor)
-                    .frame(width: 8, height: 8)
-                    .shadow(color: bubble.statusColor.opacity(0.45), radius: 2, x: 0, y: 0)
+        VStack(spacing: 0) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(lipNavy)
+                    .offset(y: 4)
+                    .shadow(color: deepShadow.opacity(0.38), radius: 10, x: 0, y: 7)
 
-                Text(bubble.agentDisplayName)
-                    .font(.system(size: 10.5, weight: .semibold, design: .rounded))
-                    .foregroundColor(navyInk)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 2)
-                    .background(
-                        Capsule()
-                            .fill(navyBorder.opacity(0.09))
-                    )
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(bubble.statusColor)
+                            .frame(width: 8, height: 8)
+                            .overlay(
+                                Circle()
+                                    .stroke(Color.white.opacity(0.65), lineWidth: 1)
+                            )
+                            .shadow(color: bubble.statusColor.opacity(0.75), radius: 3, x: 0, y: 0)
 
-                Spacer(minLength: 4)
+                        Text(bubble.agentDisplayName.uppercased())
+                            .font(.system(size: 9.5, weight: .bold, design: .monospaced))
+                            .tracking(0.6)
+                            .foregroundColor(isNeedsInput ? navyInk : Color.white)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2.5)
+                            .background(
+                                Capsule()
+                                    .fill(isNeedsInput ? voltYellow : Color.white.opacity(0.18))
+                            )
 
-                Button(action: onDismiss) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundColor(navyMuted)
-                        .frame(width: 18, height: 18)
-                        .background(
-                            Circle()
-                                .fill(navyBorder.opacity(0.08))
-                        )
+                        Spacer(minLength: 4)
+
+                        Button(action: onDismiss) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 8.5, weight: .heavy))
+                                .foregroundColor(Color.white.opacity(0.88))
+                                .frame(width: 19, height: 19)
+                                .background(
+                                    Circle()
+                                        .fill(Color.white.opacity(0.16))
+                                        .overlay(
+                                            Circle()
+                                                .stroke(Color.white.opacity(0.24), lineWidth: 0.8)
+                                        )
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .help("Dismiss bubble")
+                    }
+
+                    Text(bubble.summary.isEmpty ? bubble.statusDisplayName : bubble.summary)
+                        .font(.system(size: 12.5, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white)
+                        .shadow(color: deepShadow.opacity(0.35), radius: 1, x: 0, y: 1)
+                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .buttonStyle(.plain)
-                .help("Dismiss bubble")
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .frame(minWidth: 204, maxWidth: 276, alignment: .leading)
+                .background(
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [cobaltTop, cobaltMid, cobaltBottom],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .fill(
+                                RadialGradient(
+                                    colors: [
+                                        Color.white.opacity(0.30),
+                                        Color.white.opacity(0.06),
+                                        Color.clear,
+                                    ],
+                                    center: UnitPoint(x: 0.5, y: 0.0),
+                                    startRadius: 4,
+                                    endRadius: 96
+                                )
+                            )
+
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .strokeBorder(
+                                LinearGradient(
+                                    colors: [
+                                        Color.white.opacity(0.62),
+                                        Color.white.opacity(0.16),
+                                        lipNavy.opacity(0.55),
+                                    ],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                ),
+                                lineWidth: 1.4
+                            )
+                    }
+                )
             }
 
-            Text(bubble.summary.isEmpty ? bubble.statusDisplayName : bubble.summary)
-                .font(.system(size: 12, weight: .medium, design: .rounded))
-                .foregroundColor(navyInk)
-                .lineLimit(3)
-                .fixedSize(horizontal: false, vertical: true)
+            ZStack {
+                BubbleTailShape()
+                    .fill(lipNavy)
+                    .frame(width: 16, height: 9)
+                    .offset(y: 3)
+
+                BubbleTailShape()
+                    .fill(cobaltBottom)
+                    .frame(width: 16, height: 9)
+            }
+            .offset(y: -1)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .frame(minWidth: 196, maxWidth: 268, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(pearlFill.opacity(0.97))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .strokeBorder(navyBorder.opacity(0.24), lineWidth: 1.5)
-                )
-                .shadow(color: navyBorder.opacity(0.18), radius: 8, x: 0, y: 4)
-        )
-        .padding(8)
+        .padding(.horizontal, 10)
+        .padding(.top, 8)
+        .padding(.bottom, 12)
     }
 }
 
