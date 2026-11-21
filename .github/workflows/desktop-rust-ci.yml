@@ -55,6 +55,96 @@ jobs:
           cargo test
           cargo build --release
 
+      - name: Live smoke test petdex-windows on Windows runner
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path "crates/petdex-windows/target/release/petdex-windows.exe"
+          $logOut = "windows-smoke.out.log"
+          $logErr = "windows-smoke.err.log"
+          $proc = Start-Process -FilePath $exe -PassThru -RedirectStandardOutput $logOut -RedirectStandardError $logErr
+          try {
+            $tokenPath = Join-Path $env:USERPROFILE ".petdex\runtime\update-token"
+            $ready = $false
+            for ($i = 0; $i -lt 30; $i++) {
+              if ($proc.HasExited) {
+                throw "petdex-windows.exe exited early with code $($proc.ExitCode)"
+              }
+              if (Test-Path $tokenPath) {
+                try {
+                  $health = Invoke-RestMethod -Uri "http://127.0.0.1:7777/health" -TimeoutSec 2
+                  if ($health.ok -eq $true) {
+                    $ready = $true
+                    break
+                  }
+                } catch {}
+              }
+              Start-Sleep -Milliseconds 300
+            }
+            if (-not $ready) {
+              throw "HookServer or update-token did not become ready in time"
+            }
+
+            $token = (Get-Content -Path $tokenPath -Raw).Trim()
+            Write-Host "Health OK. Token length: $($token.Length)"
+
+            $payload = @{
+              session_id = "win-ci-smoke"
+              agent = "claude-code"
+              status = "needs_input"
+              summary = "Windows full-native smoke test OK!"
+            } | ConvertTo-Json -Compress
+
+            $postRes = Invoke-WebRequest -Method Post -Uri "http://127.0.0.1:7777/bubble" `
+              -Headers @{ "x-petdex-update-token" = $token } `
+              -ContentType "application/json" `
+              -Body $payload `
+              -UseBasicParsing
+            if ($postRes.StatusCode -ne 200) {
+              throw "POST /bubble returned $($postRes.StatusCode)"
+            }
+            Write-Host "POST /bubble -> $($postRes.StatusCode)"
+
+            Start-Sleep -Milliseconds 500
+            $state = Invoke-RestMethod -Uri "http://127.0.0.1:7777/state" -TimeoutSec 2
+            Write-Host "GET /state -> $($state | ConvertTo-Json -Compress)"
+            if ($state.state -ne "waiting") {
+              throw "Expected state=waiting after needs_input bubble, got $($state.state)"
+            }
+
+            if ($proc.HasExited) {
+              throw "petdex-windows.exe crashed after bubble"
+            }
+
+            try {
+              Add-Type -AssemblyName System.Windows.Forms
+              Add-Type -AssemblyName System.Drawing
+              $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+              $bmp = New-Object System.Drawing.Bitmap($bounds.Width, $bounds.Height)
+              $gfx = [System.Drawing.Graphics]::FromImage($bmp)
+              $gfx.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+              $bmp.Save("windows-smoke.png", [System.Drawing.Imaging.ImageFormat]::Png)
+              $gfx.Dispose()
+              $bmp.Dispose()
+              Write-Host "Captured windows-smoke.png ($($bounds.Width)x$($bounds.Height))"
+            } catch {
+              Write-Host "Screenshot capture skipped on headless session: $($_.Exception.Message)"
+            }
+          } finally {
+            if (-not $proc.HasExited) {
+              Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            }
+            if (Test-Path $logOut) { Write-Host "--- stdout ---"; Get-Content $logOut }
+            if (Test-Path $logErr) { Write-Host "--- stderr ---"; Get-Content $logErr }
+          }
+
+      - name: Upload Windows smoke screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: petdex-windows-smoke
+          path: windows-smoke.png
+          if-no-files-found: ignore
+
       - name: Package Windows release binary
         shell: pwsh
         run: |
