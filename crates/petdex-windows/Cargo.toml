@@ -2,7 +2,7 @@
 name = "petdex-windows"
 version = "0.1.0"
 edition = "2021"
-description = "Native Windows desktop shell scaffold for Petdex backed by petdex-core"
+description = "Native Windows desktop shell for Petdex backed by petdex-core"
 
 [dependencies]
 petdex-core = { path = "../petdex-core" }

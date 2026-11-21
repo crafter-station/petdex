@@ -37,8 +37,9 @@ let package = Package(
             linkerSettings: [
                 .unsafeFlags([coreStaticLib]),
                 .linkedFramework("AppKit"),
+                .linkedFramework("CoreGraphics"),
+                .linkedFramework("ImageIO"),
                 .linkedFramework("QuartzCore"),
-                .linkedFramework("Metal"),
             ]
         ),
     ]

@@ -1,0 +1,56 @@
+name: desktop-rust-ci
+
+on:
+  push:
+    paths:
+      - "crates/**"
+      - ".github/workflows/desktop-rust-ci.yml"
+  pull_request:
+    paths:
+      - "crates/**"
+      - ".github/workflows/desktop-rust-ci.yml"
+  workflow_dispatch:
+
+jobs:
+  rust-core:
+    name: rust-core (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15, windows-latest]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run petdex-core tests
+        working-directory: crates/petdex-core
+        run: cargo test
+
+  macos-swift:
+    name: macos-swift
+    runs-on: macos-15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build petdex-core release static library
+        working-directory: crates/petdex-core
+        run: cargo build --release
+
+      - name: Build petdex-macos Swift package
+        working-directory: crates/petdex-macos
+        run: swift build
+
+  windows-native:
+    name: windows-native
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Test and build petdex-windows
+        working-directory: crates/petdex-windows
+        run: |
+          cargo test
+          cargo build --release
