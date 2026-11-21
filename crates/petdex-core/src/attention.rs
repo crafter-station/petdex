@@ -14,6 +14,38 @@ pub enum SessionStatus {
 }
 
 impl SessionStatus {
+    pub const fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(SessionStatus::Idle),
+            1 => Some(SessionStatus::Completed),
+            2 => Some(SessionStatus::Running),
+            3 => Some(SessionStatus::Failed),
+            4 => Some(SessionStatus::NeedsInput),
+            _ => None,
+        }
+    }
+
+    pub fn from_str_name(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "idle" => Some(SessionStatus::Idle),
+            "completed" | "complete" | "done" | "review" => Some(SessionStatus::Completed),
+            "running" | "working" | "busy" => Some(SessionStatus::Running),
+            "failed" | "fail" | "error" => Some(SessionStatus::Failed),
+            "needs_input" | "needs-input" | "waiting" | "input" => Some(SessionStatus::NeedsInput),
+            _ => None,
+        }
+    }
+
+    pub const fn slug(self) -> &'static str {
+        match self {
+            SessionStatus::Idle => "idle",
+            SessionStatus::Completed => "completed",
+            SessionStatus::Running => "running",
+            SessionStatus::Failed => "failed",
+            SessionStatus::NeedsInput => "needs-input",
+        }
+    }
+
     pub const fn priority(self) -> u8 {
         match self {
             SessionStatus::NeedsInput => 4,

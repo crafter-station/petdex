@@ -2,16 +2,16 @@ import Image from "next/image";
 import Link from "next/link";
 
 import {
-  ArrowUpRightIcon,
-  CodeIcon,
-  DesktopIcon,
-  HeartIcon,
-  PackageIcon,
-  PaintBrushIcon,
-  PlusIcon,
-  StarIcon,
-  WatchIcon,
-} from "@phosphor-icons/react/ssr";
+  ArrowUpRight,
+  Code,
+  Heart,
+  Monitor,
+  Package,
+  Paintbrush,
+  Plus,
+  Star,
+  Watch,
+} from "lucide-react";
 import { getTranslations } from "next-intl/server";
 
 import { BRAND_JSON_LD } from "@/lib/brand-kit";
@@ -61,13 +61,13 @@ const PROJECT_PRIORITY: Record<string, number> = {
 };
 
 const CATEGORY_ICONS = {
-  wellness: HeartIcon,
-  "desktop-companion": DesktopIcon,
-  wearable: WatchIcon,
-  sdk: CodeIcon,
-  bundled: PackageIcon,
-  "pet-creator": PaintBrushIcon,
-} satisfies Record<CategoryKey, typeof HeartIcon>;
+  wellness: Heart,
+  "desktop-companion": Monitor,
+  wearable: Watch,
+  sdk: Code,
+  bundled: Package,
+  "pet-creator": Paintbrush,
+} satisfies Record<CategoryKey, typeof Heart>;
 
 function safeHttpUrl(value: string | null | undefined): string | null {
   if (!value) return null;
@@ -190,7 +190,7 @@ export default async function BuiltWithPage({
                   rel="noreferrer"
                   className="btn-3d-brand inline-flex h-11 items-center gap-2 rounded-full bg-brand-deep px-5 text-[13px] font-semibold text-white transition hover:bg-brand"
                 >
-                  <PlusIcon className="size-4" weight="bold" />
+                  <Plus className="size-4" />
                   {t("cta.submit")}
                 </Link>
                 <Link
@@ -198,7 +198,7 @@ export default async function BuiltWithPage({
                   className="inline-flex h-11 items-center gap-2 rounded-full border border-border-base bg-surface/70 px-5 text-[13px] font-semibold text-muted-1 backdrop-blur transition hover:border-brand/40 hover:text-foreground"
                 >
                   {t("cta.browseRegistry")}
-                  <ArrowUpRightIcon className="size-4" weight="bold" />
+                  <ArrowUpRight className="size-4" />
                 </Link>
               </div>
             </div>
@@ -264,7 +264,7 @@ export default async function BuiltWithPage({
                   className="toy-shell group relative flex min-h-[285px] flex-col rounded-3xl p-5 transition-transform duration-200 [transition-timing-function:var(--ease-bounce)] hover:-translate-y-1 xl:min-h-0"
                 >
                   <div className="flex items-center justify-between">
-                    <Icon className="size-5 text-brand" weight="duotone" />
+                    <Icon className="size-5 text-brand" />
                     <span className="toy-tag text-muted-2">0{index + 1}</span>
                   </div>
                   <h3 className="mt-4 text-base font-semibold tracking-tight">
@@ -298,7 +298,7 @@ export default async function BuiltWithPage({
                     className="toy-tag mt-auto inline-flex items-center gap-1.5 pt-3 text-muted-2 transition group-hover:text-brand"
                   >
                     {t("chapters.viewAll", { count: items.length })}
-                    <ArrowUpRightIcon className="size-3" weight="bold" />
+                    <ArrowUpRight className="size-3" />
                   </a>
                 </article>
               );
@@ -344,7 +344,7 @@ export default async function BuiltWithPage({
               >
                 <div className="mb-7 lg:sticky lg:top-24 lg:mb-0 lg:self-start">
                   <div className="flex items-center gap-3">
-                    <Icon className="size-5 text-brand" weight="duotone" />
+                    <Icon className="size-5 text-brand" />
                     <span className="toy-tag text-muted-2">
                       Chapter 0{categoryIndex + 1}
                     </span>
@@ -397,7 +397,7 @@ export default async function BuiltWithPage({
               rel="noreferrer"
               className="toy-btn toy-btn-cobalt h-11 rounded-full px-5 text-[13px]"
             >
-              <PlusIcon className="size-4" weight="bold" />
+              <Plus className="size-4" />
               {t("submit.openIssue")}
             </Link>
             <Link
@@ -407,7 +407,7 @@ export default async function BuiltWithPage({
               className="toy-btn toy-btn-pearl h-11 rounded-full px-4 text-sm text-brand"
             >
               built-with.json
-              <ArrowUpRightIcon className="size-4" weight="bold" />
+              <ArrowUpRight className="size-4" />
             </Link>
           </div>
         </div>
@@ -487,7 +487,7 @@ function FeaturedProject({
             className="toy-btn toy-btn-pearl h-9 shrink-0 rounded-full px-3.5 text-xs text-brand"
           >
             {homepageUrl ? siteLabel : project.repo}
-            <ArrowUpRightIcon className="size-3.5" weight="bold" />
+            <ArrowUpRight className="size-3.5" />
           </a>
         </div>
       </div>
@@ -547,7 +547,7 @@ function ProjectRow({
             className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-brand hover:underline"
           >
             {homepageUrl ? siteLabel : project.repo}
-            <ArrowUpRightIcon className="size-3.5" weight="bold" />
+            <ArrowUpRight className="size-3.5" />
           </a>
         </div>
 
@@ -556,7 +556,7 @@ function ProjectRow({
           <span>{project.platforms.slice(0, 3).join(" · ")}</span>
           {project.stars > 0 ? (
             <span className="inline-flex items-center gap-1">
-              <StarIcon className="size-3" weight="fill" />
+              <Star className="size-3 fill-current" />
               {formatLocalizedNumber(project.stars, locale)}
             </span>
           ) : null}

@@ -4,10 +4,12 @@ import type React from "react";
 import { ArrowRight, Check } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 
+import { BRAND_JSON_LD, BRAND_SITE_URL } from "@/lib/brand-kit";
 import { buildLocaleAlternates, withLocale } from "@/lib/locale-routing";
 
 import { GithubIcon } from "@/components/brand/github-icon";
 import { CommandLine } from "@/components/download/command-line";
+import { JsonLd } from "@/components/layout/json-ld";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 
@@ -85,12 +87,31 @@ export default async function DocsPage({
     ...placeholder,
   };
 
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@graph": [
+      ...BRAND_JSON_LD["@graph"],
+      {
+        "@type": "TechArticle",
+        "@id": `${BRAND_SITE_URL}/docs#article`,
+        headline: t("metadata.ogTitle"),
+        name: t("metadata.title"),
+        description: t("metadata.description"),
+        url: `${BRAND_SITE_URL}/docs`,
+        isPartOf: { "@id": `${BRAND_SITE_URL}/#website` },
+        author: { "@id": "https://railly.dev/#person" },
+        publisher: { "@id": "https://crafter.run/#organization" },
+      },
+    ],
+  };
+
   return (
     <main className="min-h-dvh bg-background text-foreground">
+      <JsonLd data={jsonLd} />
       <SiteHeader />
       <section className="mx-auto grid w-full max-w-6xl gap-12 px-5 pt-8 pb-12 md:grid-cols-[220px_1fr] md:px-8 md:pb-16">
         <aside className="hidden md:block">
-          <nav className="sticky top-24 flex flex-col gap-1.5 text-sm">
+          <nav className="toy-shell sticky top-24 flex flex-col gap-1.5 rounded-3xl p-4 text-sm">
             <NavHeader>{t("nav.getStarted")}</NavHeader>
             {DOC_SECTIONS.slice(0, 3).map(([id, label]) => (
               <NavLink key={id} href={`#${id}`}>
@@ -116,7 +137,7 @@ export default async function DocsPage({
 
         <article className="min-w-0 space-y-14">
           <header className="space-y-3">
-            <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
+            <p className="toy-tag inline-block rounded-full bg-toy-volt px-2.5 py-1 text-[#101944] shadow-[0_2px_0_#C9A91F]">
               {t("hero.eyebrow")}
             </p>
             <h1 className="text-5xl font-medium tracking-tight md:text-6xl">
@@ -130,7 +151,7 @@ export default async function DocsPage({
                 href={NPM_URL}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex h-10 items-center gap-2 rounded-full border border-border-base bg-surface px-4 text-sm font-medium transition hover:border-border-strong"
+                className="toy-btn toy-btn-cobalt h-10 rounded-full px-4 text-sm"
               >
                 {t("hero.npmCta")}
                 <ArrowRight className="size-4" />
@@ -139,7 +160,7 @@ export default async function DocsPage({
                 href={REPO_URL}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex h-10 items-center gap-2 rounded-full border border-border-base bg-surface px-4 text-sm font-medium transition hover:border-border-strong"
+                className="toy-btn toy-btn-pearl h-10 rounded-full px-4 text-sm"
               >
                 <GithubIcon className="size-4" />
                 {t("hero.repoCta")}
@@ -439,9 +460,9 @@ export default async function DocsPage({
           </Section>
 
           <Section id="failure" title={t("sections.failure.title")}>
-            <div className="overflow-x-auto rounded-2xl border border-border-base bg-surface">
+            <div className="toy-shell overflow-x-auto rounded-3xl p-2">
               <table className="w-full min-w-[520px] text-sm">
-                <thead className="border-b border-border-base bg-surface-muted">
+                <thead className="border-b border-border-base">
                   <tr>
                     <Th>{t("sections.failure.headers.symptom")}</Th>
                     <Th>{t("sections.failure.headers.cause")}</Th>
@@ -619,9 +640,9 @@ function QuickStartStep({
   children?: React.ReactNode;
 }) {
   return (
-    <li className="grid gap-3 rounded-lg border border-border-base bg-surface p-4">
+    <li className="toy-shell grid gap-3 rounded-3xl p-5">
       <div className="flex items-start gap-3">
-        <span className="grid size-7 shrink-0 place-items-center rounded-full bg-brand-tint font-mono text-xs font-semibold text-brand-deep dark:bg-brand-tint-dark dark:text-brand-light">
+        <span className="toy-tag grid size-7 shrink-0 place-items-center rounded-full bg-toy-volt text-[#101944] shadow-[0_2px_0_#C9A91F]">
           {number}
         </span>
         <div className="min-w-0 space-y-2">
@@ -681,7 +702,7 @@ function Section({
 
 function Callout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="rounded-2xl border border-brand-light/40 bg-brand-tint p-4 text-sm leading-6 text-muted-2 dark:bg-brand-tint-dark">
+    <div className="toy-shell rounded-3xl p-5 text-sm leading-6 text-muted-2">
       {children}
     </div>
   );
@@ -689,7 +710,7 @@ function Callout({ children }: { children: React.ReactNode }) {
 
 function NavHeader({ children }: { children: React.ReactNode }) {
   return (
-    <p className="mt-3 font-mono text-[10px] tracking-[0.18em] text-muted-3 uppercase first:mt-0">
+    <p className="toy-tag mt-3 px-2 text-toy-cobalt first:mt-0 dark:text-[#9BB2FF]">
       {children}
     </p>
   );
@@ -705,7 +726,7 @@ function NavLink({
   return (
     <a
       href={href}
-      className="rounded px-2 py-1 text-muted-2 transition hover:bg-white hover:text-foreground dark:hover:bg-stone-800"
+      className="rounded-xl px-2 py-1 text-muted-2 transition hover:bg-surface hover:text-foreground"
     >
       {children}
     </a>
@@ -714,7 +735,7 @@ function NavLink({
 
 function Th({ children }: { children: React.ReactNode }) {
   return (
-    <th className="px-4 py-2 text-left font-mono text-[10px] tracking-[0.18em] text-muted-2 uppercase">
+    <th className="toy-tag px-4 py-3 text-left text-toy-cobalt dark:text-[#9BB2FF]">
       {children}
     </th>
   );

@@ -1,5 +1,6 @@
 import { getTranslations } from "next-intl/server";
 
+import { BRAND_JSON_LD } from "@/lib/brand-kit";
 import { sortCollectionListingItems } from "@/lib/collection-listing-order";
 import {
   getCollectionListingMetadata,
@@ -15,7 +16,7 @@ import { SiteHeader } from "@/components/site-header";
 
 import { hasLocale } from "@/i18n/config";
 
-// /collections is fully public — no auth, no cookies, no per-visitor
+// /collections is fully public - no auth, no cookies, no per-visitor
 // data. 24h ceiling + revalidateTag('collection:list') from admin
 // write paths keeps the page fresh on actual changes without burning
 // a function on every visit.
@@ -85,18 +86,27 @@ export default async function CollectionsPage({
 
   const jsonLd = {
     "@context": "https://schema.org",
-    "@type": "CollectionPage",
-    name: "Petdex collections",
-    url: `${SITE_URL}/collections`,
-    mainEntity: {
-      "@type": "ItemList",
-      itemListElement: collections.map((c, index) => ({
-        "@type": "ListItem",
-        position: index + 1,
-        url: `${SITE_URL}/collections/${c.slug}`,
-        name: c.title,
-      })),
-    },
+    "@graph": [
+      ...BRAND_JSON_LD["@graph"],
+      {
+        "@type": "CollectionPage",
+        "@id": `${SITE_URL}/collections#webpage`,
+        name: "Petdex collections",
+        url: `${SITE_URL}/collections`,
+        isPartOf: { "@id": `${SITE_URL}/#website` },
+        author: { "@id": "https://railly.dev/#person" },
+        publisher: { "@id": "https://crafter.run/#organization" },
+        mainEntity: {
+          "@type": "ItemList",
+          itemListElement: collections.map((c, index) => ({
+            "@type": "ListItem",
+            position: index + 1,
+            url: `${SITE_URL}/collections/${c.slug}`,
+            name: c.title,
+          })),
+        },
+      },
+    ],
   };
 
   const browserItems = defaultVisibleOrder.map((c) => ({
@@ -121,10 +131,10 @@ export default async function CollectionsPage({
       <section className="petdex-hero relative -mt-14 overflow-clip pt-14">
         <div className="relative mx-auto flex w-full max-w-[1440px] flex-col px-5 pb-10 md:px-8">
           <div className="mt-12 max-w-2xl md:mt-16">
-            <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
+            <p className="toy-tag inline-block rounded-full bg-toy-volt px-2.5 py-1 text-[#101944] shadow-[0_2px_0_#C9A91F]">
               {t("hero.eyebrow")}
             </p>
-            <h1 className="mt-3 text-balance text-[40px] leading-[1] font-semibold tracking-tight md:text-[64px]">
+            <h1 className="mt-4 text-balance text-[40px] leading-[1] font-semibold tracking-tight md:text-[64px]">
               {t("hero.title")}
             </h1>
             <p className="mt-5 text-balance text-base leading-7 text-muted-1 md:text-lg">
@@ -135,8 +145,8 @@ export default async function CollectionsPage({
       </section>
 
       <section className="mx-auto w-full max-w-[1440px] px-5 py-10 md:px-8 md:py-14">
-        <div className="mb-4 flex items-center justify-end">
-          <span className="text-xs text-muted-3">
+        <div className="mb-5 flex items-center justify-end">
+          <span className="toy-tag text-toy-cobalt dark:text-[#9BB2FF]">
             {browserT("showingCount", {
               visible: browserItems.length,
               total: browserItems.length,
@@ -149,26 +159,30 @@ export default async function CollectionsPage({
               ? (creditsObj[collection.ownerId] ?? null)
               : null;
             return (
-              <StaticCollectionCard
+              <div
                 key={collection.slug}
-                collection={collection}
-                owner={owner}
-                labels={{
-                  kind: {
-                    franchise: browserT("kindLabel.franchise"),
-                    category: browserT("kindLabel.category"),
-                    categorySub: browserT("kindLabel.categorySub"),
-                    other: browserT("kindLabel.other"),
-                  },
-                  petCount: browserT("card.petCount", {
-                    count: collection.petCount,
-                  }),
-                  siteLink: browserT("card.siteLink"),
-                  byOwner: owner
-                    ? browserT("card.byOwner", { name: owner.name })
-                    : null,
-                }}
-              />
+                className="toy-shell h-full rounded-[1.75rem] p-2.5 transition-transform duration-200 [transition-timing-function:var(--ease-bounce)] hover:-translate-y-1"
+              >
+                <StaticCollectionCard
+                  collection={collection}
+                  owner={owner}
+                  labels={{
+                    kind: {
+                      franchise: browserT("kindLabel.franchise"),
+                      category: browserT("kindLabel.category"),
+                      categorySub: browserT("kindLabel.categorySub"),
+                      other: browserT("kindLabel.other"),
+                    },
+                    petCount: browserT("card.petCount", {
+                      count: collection.petCount,
+                    }),
+                    siteLink: browserT("card.siteLink"),
+                    byOwner: owner
+                      ? browserT("card.byOwner", { name: owner.name })
+                      : null,
+                  }}
+                />
+              </div>
             );
           })}
         </div>

@@ -1,22 +1,20 @@
 "use client";
 
-import { Toggle as TogglePrimitive } from "@base-ui/react/toggle";
+import type * as React from "react";
+
+import { Toggle as TogglePrimitive } from "@ui-sdk/react/toggle";
 import { cva, type VariantProps } from "class-variance-authority";
 
 import { cn } from "@/lib/utils";
 
 const toggleVariants = cva(
-  "group/toggle inline-flex items-center justify-center gap-1 rounded-full text-xs font-medium whitespace-nowrap transition-all outline-none hover:bg-muted hover:text-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 aria-pressed:bg-muted data-[state=on]:bg-muted dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "group/toggle inline-flex items-center justify-center gap-1 rounded-full text-xs font-medium whitespace-nowrap transition-all outline-none hover:bg-muted hover:text-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 aria-pressed:bg-muted data-pressed:bg-muted dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
         default: "bg-transparent",
         outline: "border border-input bg-transparent hover:bg-muted",
-        // Petdex filter chip — outline by default, fills to inverse on
-        // active. base-ui Toggle exposes both data-[state=on] and the
-        // ARIA aria-pressed attribute, so styling either keeps screen
-        // readers and keyboard nav happy.
-        chip: "border border-border-base bg-surface/70 text-muted-2 backdrop-blur hover:bg-surface-muted hover:text-foreground aria-pressed:border-brand/40 aria-pressed:bg-brand/15 aria-pressed:text-brand aria-pressed:hover:bg-brand/20 data-[state=on]:border-brand/40 data-[state=on]:bg-brand/15 data-[state=on]:text-brand data-[state=on]:hover:bg-brand/20",
+        chip: "border border-border-base bg-surface/70 text-muted-2 backdrop-blur hover:bg-surface-muted hover:text-foreground aria-pressed:border-brand/40 aria-pressed:bg-brand/15 aria-pressed:text-brand aria-pressed:hover:bg-brand/20 data-pressed:border-brand/40 data-pressed:bg-brand/15 data-pressed:text-brand data-pressed:hover:bg-brand/20",
       },
       size: {
         default:
@@ -38,7 +36,10 @@ function Toggle({
   variant = "default",
   size = "default",
   ...props
-}: TogglePrimitive.Props & VariantProps<typeof toggleVariants>) {
+}: Omit<React.ComponentProps<typeof TogglePrimitive>, "className"> &
+  VariantProps<typeof toggleVariants> & {
+    className?: string;
+  }) {
   return (
     <TogglePrimitive
       data-slot="toggle"

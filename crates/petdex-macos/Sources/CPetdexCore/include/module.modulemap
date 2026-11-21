@@ -1,0 +1,4 @@
+module CPetdexCore {
+    header "CPetdexCore.h"
+    export *
+}

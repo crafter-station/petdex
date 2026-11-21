@@ -154,6 +154,22 @@ impl CodingAgent {
         }
     }
 
+    pub const fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(CodingAgent::ClaudeCode),
+            1 => Some(CodingAgent::Codex),
+            2 => Some(CodingAgent::Gemini),
+            3 => Some(CodingAgent::OpenCode),
+            4 => Some(CodingAgent::Qoder),
+            5 => Some(CodingAgent::KimiCode),
+            6 => Some(CodingAgent::CodeBuddy),
+            7 => Some(CodingAgent::Omp),
+            8 => Some(CodingAgent::Hermes),
+            9 => Some(CodingAgent::Dsh),
+            _ => None,
+        }
+    }
+
     pub fn from_slug(slug: &str) -> Option<Self> {
         match slug {
             "claude-code" => Some(CodingAgent::ClaudeCode),

@@ -1,11 +1,14 @@
-use std::ffi::c_char;
+use std::ffi::{c_char, CStr};
 
+use crate::agents::CodingAgent;
 use crate::animation::{FrameOutput, PetAnimationEngine, PetState};
+use crate::attention::{AgentEvent, AttentionCoordinator, SessionStatus};
 
 const CORE_VERSION_CSTR: &[u8] = concat!(env!("CARGO_PKG_VERSION"), "\0").as_bytes();
 
 pub struct PetdexEngine {
     inner: PetAnimationEngine,
+    attention: AttentionCoordinator,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,6 +42,7 @@ pub extern "C" fn petdex_core_version() -> *const c_char {
 pub extern "C" fn petdex_engine_new() -> *mut PetdexEngine {
     Box::into_raw(Box::new(PetdexEngine {
         inner: PetAnimationEngine::new(),
+        attention: AttentionCoordinator::new(),
     }))
 }
 
@@ -62,6 +66,52 @@ pub unsafe extern "C" fn petdex_engine_set_state(engine: *mut PetdexEngine, stat
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn petdex_engine_ingest_status(
+    engine: *mut PetdexEngine,
+    session_id: *const c_char,
+    agent: u8,
+    status: u8,
+    summary: *const c_char,
+    now_ms: u64,
+) -> bool {
+    let Some(engine) = engine.as_mut() else {
+        return false;
+    };
+    if session_id.is_null() {
+        return false;
+    }
+    let Some(agent) = CodingAgent::from_u8(agent) else {
+        return false;
+    };
+    let Some(status) = SessionStatus::from_u8(status) else {
+        return false;
+    };
+    let Ok(session_id_str) = CStr::from_ptr(session_id).to_str() else {
+        return false;
+    };
+    let summary_str = if summary.is_null() {
+        ""
+    } else {
+        match CStr::from_ptr(summary).to_str() {
+            Ok(s) => s,
+            Err(_) => return false,
+        }
+    };
+
+    engine.attention.ingest(
+        AgentEvent {
+            session_id: session_id_str.to_string(),
+            agent,
+            status,
+            summary: summary_str.to_string(),
+        },
+        now_ms,
+    );
+    engine.inner.set_state(engine.attention.active_state(now_ms));
+    true
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn petdex_engine_tick_ms(
     engine: *mut PetdexEngine,
     dt_ms: u32,
@@ -80,7 +130,7 @@ pub unsafe extern "C" fn petdex_engine_tick_ms(
 
 #[cfg(test)]
 mod tests {
-    use std::ffi::CStr;
+    use std::ffi::{CStr, CString};
 
     use super::*;
 
@@ -116,6 +166,60 @@ mod tests {
             assert_eq!(run_frame.row, 7);
             assert_eq!(run_frame.col, 0);
             assert_eq!(run_frame.frame_dur_ms, 120);
+
+            petdex_engine_free(engine);
+        }
+    }
+
+    #[test]
+    fn ffi_ingest_status_updates_active_pet_state() {
+        unsafe {
+            let engine = petdex_engine_new();
+            let sid = CString::new("sess-1").unwrap();
+            let summary = CString::new("Waiting for approval").unwrap();
+
+            assert!(!petdex_engine_ingest_status(
+                std::ptr::null_mut(),
+                sid.as_ptr(),
+                CodingAgent::ClaudeCode as u8,
+                SessionStatus::NeedsInput as u8,
+                summary.as_ptr(),
+                1_000,
+            ));
+            assert!(!petdex_engine_ingest_status(
+                engine,
+                std::ptr::null(),
+                CodingAgent::ClaudeCode as u8,
+                SessionStatus::NeedsInput as u8,
+                summary.as_ptr(),
+                1_000,
+            ));
+
+            assert!(petdex_engine_ingest_status(
+                engine,
+                sid.as_ptr(),
+                CodingAgent::ClaudeCode as u8,
+                SessionStatus::NeedsInput as u8,
+                summary.as_ptr(),
+                1_000,
+            ));
+
+            let frame = petdex_engine_tick_ms(engine, 0);
+            assert_eq!(frame.state, PetState::Waiting as u8);
+            assert_eq!(frame.row, 6);
+
+            assert!(petdex_engine_ingest_status(
+                engine,
+                sid.as_ptr(),
+                CodingAgent::ClaudeCode as u8,
+                SessionStatus::Idle as u8,
+                std::ptr::null(),
+                2_000,
+            ));
+
+            let idle_frame = petdex_engine_tick_ms(engine, 0);
+            assert_eq!(idle_frame.state, PetState::Idle as u8);
+            assert_eq!(idle_frame.row, 0);
 
             petdex_engine_free(engine);
         }

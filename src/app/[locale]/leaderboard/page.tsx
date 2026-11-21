@@ -1,5 +1,6 @@
 import { getTranslations } from "next-intl/server";
 
+import { BRAND_JSON_LD, BRAND_SITE_URL } from "@/lib/brand-kit";
 import {
   getLeaderboard,
   getLeaderboardPetThumbs,
@@ -8,6 +9,7 @@ import {
 import { buildLocaleAlternates } from "@/lib/locale-routing";
 import { resolveOwnerCredits } from "@/lib/owner-credit";
 
+import { JsonLd } from "@/components/layout/json-ld";
 import { LeaderboardView } from "@/components/leaderboard/leaderboard-view";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
@@ -42,7 +44,7 @@ export default async function LeaderboardPage() {
   const t = await getTranslations("leaderboard");
 
   // Fetch every variant in parallel so the tabs feel instant when the
-  // user clicks between them — Next will serve cached HTML for the tab
+  // user clicks between them - Next will serve cached HTML for the tab
   // they pick first, but the visible table still renders SSR on the
   // initial pick. The volume is tiny (5 GROUP BY queries, top 50 each).
   const [petsRows, likesRows, installsRows, risingRows, collectorsRows] =
@@ -55,7 +57,7 @@ export default async function LeaderboardPage() {
     ]);
 
   // Resolve Clerk credits ONCE for the union of owners that appear in
-  // any tab — we want the same name/avatar regardless of which tab is
+  // any tab - we want the same name/avatar regardless of which tab is
   // active so renames and rotates only happen at one fetch boundary.
   const allOwnerIds = new Set<string>([
     ...petsRows.map((r) => r.ownerId),
@@ -77,16 +79,34 @@ export default async function LeaderboardPage() {
     getLeaderboardPetThumbs([...allOwnerIds]),
   ]);
 
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@graph": [
+      ...BRAND_JSON_LD["@graph"],
+      {
+        "@type": "WebPage",
+        "@id": `${BRAND_SITE_URL}/leaderboard#webpage`,
+        name: t("title"),
+        url: `${BRAND_SITE_URL}/leaderboard`,
+        description: t("subtitle"),
+        isPartOf: { "@id": `${BRAND_SITE_URL}/#website` },
+        author: { "@id": "https://railly.dev/#person" },
+        publisher: { "@id": "https://crafter.run/#organization" },
+      },
+    ],
+  };
+
   return (
     <main className="min-h-dvh bg-background text-foreground">
+      <JsonLd data={jsonLd} />
       <SiteHeader />
       <section className="petdex-hero relative -mt-14 overflow-clip pt-14">
         <div className="relative mx-auto flex w-full max-w-5xl flex-col px-5 pb-10 md:px-8">
           <div className="mt-12 flex flex-col items-center text-center md:mt-16">
-            <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
+            <p className="toy-tag inline-block rounded-full bg-toy-volt px-2.5 py-1 text-[#101944] shadow-[0_2px_0_#C9A91F]">
               {t("eyebrow")}
             </p>
-            <h1 className="mt-3 text-balance text-[36px] leading-[1] font-semibold tracking-tight md:text-[56px]">
+            <h1 className="mt-4 text-balance text-[36px] leading-[1] font-semibold tracking-tight md:text-[56px]">
               {t("title")}
             </h1>
             <p className="mt-4 max-w-xl text-balance text-base leading-7 text-muted-1 md:text-lg">
@@ -97,18 +117,20 @@ export default async function LeaderboardPage() {
       </section>
 
       <section className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-5 py-10 md:px-8 md:py-14">
-        <LeaderboardView
-          defaultActive="pets"
-          credits={serializeCredits(credits)}
-          petThumbs={petThumbs}
-          rows={{
-            pets: petsRows,
-            likes: likesRows,
-            installs: installsRows,
-            rising: risingRows,
-            collectors: collectorsRows,
-          }}
-        />
+        <div className="toy-shell rounded-3xl p-4 sm:p-6 md:p-8">
+          <LeaderboardView
+            defaultActive="pets"
+            credits={serializeCredits(credits)}
+            petThumbs={petThumbs}
+            rows={{
+              pets: petsRows,
+              likes: likesRows,
+              installs: installsRows,
+              rising: risingRows,
+              collectors: collectorsRows,
+            }}
+          />
+        </div>
       </section>
 
       <SiteFooter />
