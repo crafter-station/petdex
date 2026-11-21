@@ -267,9 +267,11 @@ private struct PetdexBubbleStackView: View {
                                 )
                             }
                         }
-                        .padding(.vertical, 2)
+                        .padding(.horizontal, 2)
+                        .padding(.top, 2)
+                        .padding(.bottom, 10)
                     }
-                    .frame(maxHeight: 300)
+                    .frame(maxHeight: 380)
                 }
             } else if let front = bubbles.first {
                 ZStack(alignment: .top) {
@@ -337,11 +339,42 @@ private struct PetdexBubbleStackView: View {
     }
 }
 
+private final class HoverTrackingHostingView: NSHostingView<AnyView> {
+    var onHoverChanged: ((Bool) -> Void)?
+    private var trackingArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        super.mouseEntered(with: event)
+        onHoverChanged?(true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        onHoverChanged?(false)
+    }
+}
+
 final class PetdexBubblePanel: NSPanel {
-    private var hostingView: NSHostingView<AnyView>?
+    private var hostingView: HoverTrackingHostingView?
     private weak var anchorWindow: NSWindow?
     private var moveObserver: NSObjectProtocol?
     private var resizeObserver: NSObjectProtocol?
+    private var collapseWorkItem: DispatchWorkItem?
     private var currentBubbles: [ActiveBubble] = []
     private var currentShowAllSessions = true
     private var bubblesEnabled = true
@@ -437,18 +470,22 @@ final class PetdexBubblePanel: NSPanel {
         if let hostingView {
             hostingView.rootView = wrapped
         } else {
-            let view = NSHostingView(rootView: wrapped)
+            let view = HoverTrackingHostingView(rootView: wrapped)
             view.wantsLayer = true
             view.layer?.backgroundColor = NSColor.clear.cgColor
+            view.onHoverChanged = { [weak self] hovering in
+                self?.handleHoverChange(hovering)
+            }
             contentView = view
             hostingView = view
         }
 
         hostingView?.layoutSubtreeIfNeeded()
         let fitting = hostingView?.fittingSize ?? NSSize(width: 240, height: 76)
+        let maxHeight: CGFloat = isExpanded ? 440 : 180
         let size = NSSize(
-            width: max(212, min(284, ceil(fitting.width))),
-            height: max(60, min(360, ceil(fitting.height)))
+            width: max(224, min(296, ceil(fitting.width))),
+            height: max(64, min(maxHeight, ceil(fitting.height)))
         )
         setContentSize(size)
         reposition()
@@ -456,6 +493,40 @@ final class PetdexBubblePanel: NSPanel {
             anchorWindow.addChildWindow(self, ordered: .above)
         }
         orderFrontRegardless()
+    }
+
+    private func handleHoverChange(_ hovering: Bool) {
+        collapseWorkItem?.cancel()
+        collapseWorkItem = nil
+
+        guard currentBubbles.count > 1, currentShowAllSessions else { return }
+
+        if hovering {
+            if !isExpanded {
+                isExpanded = true
+                update(
+                    bubbles: currentBubbles,
+                    showAllSessions: currentShowAllSessions,
+                    enabled: bubblesEnabled,
+                    anchorVisible: anchorWindow?.isVisible ?? true,
+                    forceRender: true
+                )
+            }
+        } else if isExpanded {
+            let item = DispatchWorkItem { [weak self] in
+                guard let self, self.isExpanded else { return }
+                self.isExpanded = false
+                self.update(
+                    bubbles: self.currentBubbles,
+                    showAllSessions: self.currentShowAllSessions,
+                    enabled: self.bubblesEnabled,
+                    anchorVisible: self.anchorWindow?.isVisible ?? true,
+                    forceRender: true
+                )
+            }
+            collapseWorkItem = item
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: item)
+        }
     }
 
     func reposition() {
