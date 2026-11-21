@@ -60,7 +60,7 @@ jobs:
       matrix:
         include:
           - platform: macos
-            runner: macos-14
+            runner: macos-15
             expected_to_fail: false
           - platform: linux
             runner: ubuntu-latest
