@@ -245,6 +245,12 @@ extern "kernel32" fn ReadDirectoryChangesW(
 /// One Io per calling thread. Cheap to build (no worker threads spin
 /// up until an async call asks for them) and never shared, so the
 /// blocking helpers below are safe from any thread.
+/// The process environment, set once by main(). Children spawned through a
+/// Scope inherit it; with the default empty value Windows children start
+/// without SystemRoot or PATH, and `start` fails with "Class not
+/// registered" (#792).
+pub var process_environ: std.process.Environ = .empty;
+
 pub const Scope = struct {
     threaded: std.Io.Threaded,
 
@@ -252,7 +258,7 @@ pub const Scope = struct {
         // Allocator.failing is what the SDK passes when a scope only
         // does blocking calls: it is consulted solely by the async
         // vtable entries, which nothing here reaches.
-        return .{ .threaded = std.Io.Threaded.init(std.heap.page_allocator, .{}) };
+        return .{ .threaded = std.Io.Threaded.init(std.heap.page_allocator, .{ .environ = process_environ }) };
     }
 
     pub fn io(self: *Scope) std.Io {

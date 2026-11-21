@@ -1,7 +1,7 @@
 {
   "$schema": "./built-with.schema.json",
   "version": 1,
-  "lastUpdated": "2026-09-27",
+  "lastUpdated": "2026-11-19",
   "categories": {
     "desktop-companion": {
       "label": "Desktop companions",
@@ -408,24 +408,6 @@
       "screenshot": "/built-with/codedog.webp"
     },
     {
-      "slug": "skales",
-      "name": "Skales",
-      "tagline": "Open desktop AI agent whose floating buddy wears Petdex pets as animated skins, with gallery imports and a built-in Petdex sprite creator.",
-      "category": "desktop-companion",
-      "repo": "skalesapp/skales",
-      "homepage": "https://skales.app",
-      "stars": 1101,
-      "language": "TypeScript",
-      "platforms": ["macOS", "Windows", "Linux"],
-      "addedAt": "2026-06-29",
-      "evidence": {
-        "type": "readme",
-        "quote": "The buddy also wears animated pixel pets in the open [Petdex](https://petdex.dev) sprite format - the most-requested feature of the last twenty updates.",
-        "url": "https://github.com/skalesapp/skales/blob/main/README.md#custom-pixel-skins---works-with-petdex"
-      },
-      "screenshot": "/built-with/skales.png"
-    },
-    {
       "slug": "desktop-pet",
       "name": "desktop-pet",
       "tagline": "Tauri v2 desktop pet app with Claude Code hooks, AI chat, and automatic discovery/import of Petdex pet packages from ~/.petdex/pets.",
@@ -604,6 +586,24 @@
         "url": "https://github.com/lttxzmj/sleepwing/blob/main/README.md"
       },
       "screenshot": "/built-with/sleepwing.png"
+    },
+    {
+      "slug": "playpets",
+      "name": "PlayPets",
+      "tagline": "Desktop pet app where several Codex pets share a yard, chat with each other, and react to coding agents. Paste a Petdex pet link and that pet moves in.",
+      "category": "desktop-companion",
+      "repo": "gaerae/playpets",
+      "homepage": "https://playpets.gaerae.com/",
+      "stars": 4,
+      "language": "Rust",
+      "platforms": ["macOS", "Windows", "Linux"],
+      "addedAt": "2026-11-19",
+      "evidence": {
+        "type": "code",
+        "quote": "let pet = get_json(&format!(\"https://petdex.dev/api/install-pet/{slug}\"), fetch)?",
+        "url": "https://github.com/gaerae/playpets/blob/2d210722a7d906cb3c391e38d96fbb39d15ab822/src-tauri/src/pets/importer/sites.rs#L381-L382"
+      },
+      "screenshot": "/built-with/playpets.png"
     }
   ]
 }

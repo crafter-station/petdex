@@ -1983,8 +1983,15 @@ fn inspectFeatureHooks(toml: []const u8) FeatureHooksInspection {
         const line = toml[line_start..line_end];
         const trimmed = std.mem.trim(u8, line, " \t\r\n");
         if (trimmed.len > 0 and trimmed[0] == '[') {
-            const name = sectionName(trimmed) orelse return .{ .state = .unsafe };
-            if (std.mem.eql(u8, name, "features")) {
+            const header = tableHeader(trimmed) orelse return .{ .state = .unsafe };
+            const name = header.name;
+            if (header.array) {
+                // Array tables such as the ChatGPT app's [[skills.config]]
+                // are fine elsewhere, but one under features would make
+                // where hooks lives ambiguous.
+                if (std.mem.eql(u8, name, "features") or std.mem.startsWith(u8, name, "features.")) return .{ .state = .unsafe };
+                current_features = false;
+            } else if (std.mem.eql(u8, name, "features")) {
                 // A child table before its parent makes an insertion at the
                 // end ambiguous, so keep that layout conservative. Once the
                 // parent is known, later [features.*] tables do not change
@@ -2040,13 +2047,44 @@ fn isFeaturesNamespaceAssignment(line: []const u8) bool {
     return std.mem.eql(u8, key, "features") or std.mem.startsWith(u8, key, "features.");
 }
 
-fn sectionName(line: []const u8) ?[]const u8 {
-    if (line.len < 3 or line[0] != '[' or line[1] == '[') return null;
-    const close = std.mem.indexOfScalar(u8, line[1..], ']') orelse return null;
-    const close_index = close + 1;
-    const suffix = std.mem.trim(u8, line[close_index + 1 ..], " \t");
+const TableHeader = struct {
+    name: []const u8,
+    array: bool,
+};
+
+/// Parse a `[table]` or `[[array.table]]` header line. Brackets inside
+/// quoted keys (e.g. `[projects."/app/[slug]"]`) do not close the header.
+/// Returns null for anything malformed.
+fn tableHeader(line: []const u8) ?TableHeader {
+    const array = std.mem.startsWith(u8, line, "[[");
+    const open: usize = if (array) 2 else 1;
+    var i = open;
+    var quote: ?u8 = null;
+    while (i < line.len) : (i += 1) {
+        const c = line[i];
+        if (quote) |q| {
+            if (q == '"' and c == '\\') {
+                i += 1;
+            } else if (c == q) {
+                quote = null;
+            }
+        } else if (c == '"' or c == '\'') {
+            quote = c;
+        } else if (c == ']') {
+            break;
+        }
+    }
+    if (i >= line.len) return null;
+    const close = i;
+    const after = if (array) blk: {
+        if (close + 1 >= line.len or line[close + 1] != ']') return null;
+        break :blk close + 2;
+    } else close + 1;
+    const suffix = std.mem.trim(u8, line[after..], " \t");
     if (suffix.len > 0 and suffix[0] != '#') return null;
-    return std.mem.trim(u8, line[1..close_index], " \t");
+    const name = std.mem.trim(u8, line[open..close], " \t");
+    if (name.len == 0) return null;
+    return .{ .name = name, .array = array };
 }
 
 const HooksAssignment = union(enum) {
@@ -2996,6 +3034,53 @@ test "codex feature inspection is section-aware and conservative" {
     try t.expectEqual(FeatureHooksState.unsafe, inspectFeatureHooks("[features.extra]\nvalue = true\n").state);
     try t.expectEqual(FeatureHooksState.unsafe, inspectFeatureHooks("features.hooks = true\n").state);
     try t.expectEqual(FeatureHooksState.unsafe, inspectFeatureHooks("features = { hooks = true }\n").state);
+}
+
+test "codex feature inspection accepts array tables and quoted keys" {
+    // The unified ChatGPT app writes [[skills.config]] array tables, and
+    // trusted project paths may contain brackets (e.g. Next.js routes).
+    try t.expectEqual(FeatureHooksState.insert_after_features, inspectFeatureHooks("[features]\nmemories = true\n\n[[skills.config]]\nname = \"a\"\n").state);
+    try t.expectEqual(FeatureHooksState.enabled, inspectFeatureHooks("[[skills.config]]\nname = \"a\"\n[features]\nhooks = true\n").state);
+    try t.expectEqual(FeatureHooksState.append_features, inspectFeatureHooks("[[skills.config]] # comment\nhooks = true\n").state);
+    try t.expectEqual(FeatureHooksState.insert_after_features, inspectFeatureHooks("[features]\n[projects.\"/web/app/[slug]\"]\ntrust_level = \"trusted\"\n").state);
+    try t.expectEqual(FeatureHooksState.insert_after_features, inspectFeatureHooks("[features]\n[projects.'/web/[id]/\"x\"']\ntrust_level = \"trusted\"\n").state);
+    try t.expectEqual(FeatureHooksState.insert_after_features, inspectFeatureHooks("[features]\n[projects.\"/a/\\\"]\\\"\"]\n").state);
+    // Hooks set in an array table under features would be ambiguous.
+    try t.expectEqual(FeatureHooksState.unsafe, inspectFeatureHooks("[[features]]\nhooks = true\n").state);
+    try t.expectEqual(FeatureHooksState.unsafe, inspectFeatureHooks("[features]\n[[features.extra]]\n").state);
+    // Malformed headers stay unsafe.
+    try t.expectEqual(FeatureHooksState.unsafe, inspectFeatureHooks("[[skills.config]\n").state);
+    try t.expectEqual(FeatureHooksState.unsafe, inspectFeatureHooks("[projects.\"/a]\nx = 1\n").state);
+    try t.expectEqual(FeatureHooksState.unsafe, inspectFeatureHooks("[a] b\n").state);
+}
+
+test "installCodex enables hooks in a unified ChatGPT app config" {
+    const home = ".zig-cache/petdex-agenthooks-codex-chatgpt-config";
+    plat.makeDir(home ++ "/.codex");
+    var path_buf: [512]u8 = undefined;
+    const toml = std.fmt.bufPrint(&path_buf, "{s}/.codex/config.toml", .{home}) catch unreachable;
+    try t.expect(writeFile(toml,
+        \\model = "gpt-5"
+        \\
+        \\[features]
+        \\multi_agent = true
+        \\
+        \\[projects."/Users/me/site/app/[slug]"]
+        \\trust_level = "trusted"
+        \\
+        \\[[skills.config]]
+        \\path = "/Users/me/.codex/skills/demo"
+        \\enabled = true
+        \\
+    ));
+    try t.expect(installCodex(t.allocator, home));
+    const after = readFileAlloc(t.allocator, toml, 64 * 1024).?;
+    defer t.allocator.free(after);
+    try t.expect(std.mem.indexOf(u8, after, "[features]\nhooks = true\nmulti_agent = true\n") != null);
+    try t.expect(std.mem.indexOf(u8, after, "[[skills.config]]") != null);
+    var hooks_path_buf: [512]u8 = undefined;
+    const hooks = std.fmt.bufPrint(&hooks_path_buf, "{s}/.codex/hooks.json", .{home}) catch unreachable;
+    try t.expect(fileExists(hooks));
 }
 
 test "installCodex replaces a false feature flag without duplicating it" {
