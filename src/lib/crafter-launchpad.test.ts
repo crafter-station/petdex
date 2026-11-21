@@ -12,7 +12,7 @@ describe("crafter-launchpad", () => {
   test("declares the canonical Crafter Station apps with unique IDs", () => {
     const ids = CRAFTER_LAUNCHPAD_APPS.map((app) => app.id);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(ids).toEqual(["crafter-run", "ui-sdk", "hack0", "wterm"]);
+    expect(ids).toEqual(["crafter-run", "ojito", "muelle", "maca", "hack0"]);
   });
 
   test("every app has a valid HTTPS URL and non-empty metadata", () => {

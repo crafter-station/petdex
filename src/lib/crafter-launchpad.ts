@@ -22,14 +22,29 @@ export const CRAFTER_LAUNCHPAD_APPS: readonly CrafterLaunchpadApp[] = [
     crossPetSlug: "boba",
   },
   {
-    id: "ui-sdk",
-    name: "ui-sdk",
-    tagline:
-      "Accessible React primitives and composable design-system blocks powering Petdex.",
-    url: "https://ui-sdk.dev",
-    badge: "React UI",
+    id: "ojito",
+    name: "Ojito",
+    tagline: "Visual craft and developer tooling by Crafter Station.",
+    url: "https://ojito.dev",
+    badge: "Crafter App",
     active: true,
     crossPetSlug: "mallow",
+  },
+  {
+    id: "muelle",
+    name: "Muelle",
+    tagline: "Workspace and creative studio tooling built at Crafter Station.",
+    url: "https://muelle.crafter.run",
+    badge: "Crafter App",
+    active: true,
+  },
+  {
+    id: "maca",
+    name: "Maca",
+    tagline: "Fast developer shell workflows by Crafter Station.",
+    url: "https://maca.sh",
+    badge: "CLI",
+    active: true,
   },
   {
     id: "hack0",
@@ -38,15 +53,6 @@ export const CRAFTER_LAUNCHPAD_APPS: readonly CrafterLaunchpadApp[] = [
       "Discover, organize, and ship at hackathons across Latin America and beyond.",
     url: "https://hack0.dev",
     badge: "Hackathons",
-    active: true,
-  },
-  {
-    id: "wterm",
-    name: "wterm",
-    tagline:
-      "Fast, scriptable web terminal built for modern coding and agent workflows.",
-    url: "https://wterm.dev",
-    badge: "Terminal",
     active: true,
   },
 ] as const;

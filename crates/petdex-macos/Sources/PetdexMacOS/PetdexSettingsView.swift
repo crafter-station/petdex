@@ -894,8 +894,22 @@ struct PetdexSettingsView: View {
                 }
                 .controlSize(.small)
 
-                Button("ui-sdk.dev") {
-                    if let url = URL(string: "https://ui-sdk.dev") {
+                Button("ojito.dev") {
+                    if let url = URL(string: "https://ojito.dev") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                .controlSize(.small)
+
+                Button("muelle") {
+                    if let url = URL(string: "https://muelle.crafter.run") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                .controlSize(.small)
+
+                Button("maca.sh") {
+                    if let url = URL(string: "https://maca.sh") {
                         NSWorkspace.shared.open(url)
                     }
                 }
