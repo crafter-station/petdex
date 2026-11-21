@@ -130,6 +130,37 @@ describe("clerk cli auth login page", () => {
     expect(await page?.text()).toContain('class="chip chip-danger"');
   });
 
+  test("a re-login that fails at userinfo keeps the previous account intact", async () => {
+    const store = memoryStore();
+    await store.set("tokens", JSON.stringify({ accessToken: "tok-A" }));
+    await store.set("user", JSON.stringify({ sub: "user_A" }));
+
+    const { outcome } = await runLogin({ store, userinfoStatus: 503 });
+
+    expect(outcome.ok).toBe(false);
+    expect(await store.get("tokens")).toContain("tok-A");
+    expect(await store.get("user")).toContain("user_A");
+  });
+
+  test("a re-login that cannot store the profile leaves no stale profile behind", async () => {
+    const base = memoryStore();
+    await base.set("tokens", JSON.stringify({ accessToken: "tok-A" }));
+    await base.set("user", JSON.stringify({ sub: "user_A" }));
+    const store: CredentialStore = {
+      ...base,
+      set: async (key, value) => {
+        if (key === "user") throw new Error("keychain unavailable");
+        await base.set(key, value);
+      },
+    };
+
+    const { outcome } = await runLogin({ store });
+
+    expect(outcome.ok).toBe(false);
+    expect(await base.get("tokens")).toContain('"token"');
+    expect(await base.get("user")).toBeNull();
+  });
+
   test("shows a failure page when the credentials cannot be stored", async () => {
     const failing: CredentialStore = {
       get: async () => null,

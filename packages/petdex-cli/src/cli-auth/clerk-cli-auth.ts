@@ -138,11 +138,19 @@ export class ClerkCliAuth {
         redirectUri: server.redirectUri,
       });
 
-      await this.setJson("tokens", tokens);
+      // Resolve the profile before touching storage, and drop the old one
+      // before the new tokens land, so the store never pairs one account's
+      // tokens with another account's profile.
       const user = await fetchUserInfo({
         issuer: this.config.issuer,
         accessToken: tokens.accessToken,
       });
+      try {
+        await this.config.storage.delete("user");
+      } catch (error) {
+        throw storageError("clear stored user", error);
+      }
+      await this.setJson("tokens", tokens);
       await this.setJson("user", user);
 
       // Last, and only once every step that can still fail has succeeded.
