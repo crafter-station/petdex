@@ -93,6 +93,7 @@ final class PetdexSpriteCanvasView: NSView {
 
     override var isOpaque: Bool { false }
     override var mouseDownCanMoveWindow: Bool { false }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func mouseDown(with event: NSEvent) {
         if event.modifierFlags.contains(.control) {

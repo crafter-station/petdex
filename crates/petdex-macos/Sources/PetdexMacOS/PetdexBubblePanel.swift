@@ -510,7 +510,8 @@ final class PetdexBubblePanel: NSPanel {
 
         if let screenFrame = (anchorWindow.screen ?? NSScreen.main)?.visibleFrame {
             originX = min(max(originX, screenFrame.minX + 4.0), screenFrame.maxX - bubbleSize.width - 4.0)
-            originY = min(originY, screenFrame.maxY - bubbleSize.height - 4.0)
+            let visibleCardHeight: CGFloat = 112.0
+            originY = min(originY, screenFrame.maxY - visibleCardHeight - 4.0)
         }
 
         setFrameOrigin(NSPoint(x: originX, y: originY))
