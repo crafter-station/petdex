@@ -61,6 +61,8 @@ private enum AgentLogoLoader {
 
 private struct PetdexBubbleCardView: View {
     let bubble: ActiveBubble
+    let showTail: Bool
+    let extraCount: Int
     let onDismiss: () -> Void
 
     private let whiteTop = Color.white
@@ -72,7 +74,8 @@ private struct PetdexBubbleCardView: View {
     private let voltYellow = Color(red: 1.0, green: 0.898, blue: 0.420)
 
     private var isNeedsInput: Bool {
-        bubble.status.lowercased() == "needs_input"
+        let normalized = bubble.status.lowercased()
+        return normalized == "needs_input" || normalized == "needs-input"
     }
 
     var body: some View {
@@ -113,6 +116,22 @@ private struct PetdexBubbleCardView: View {
                                 .padding(.horizontal, 5)
                                 .padding(.vertical, 1.5)
                                 .background(Capsule().fill(voltYellow))
+                        }
+
+                        if extraCount > 0 {
+                            Text("+\(extraCount)")
+                                .font(.system(size: 8.5, weight: .bold, design: .monospaced))
+                                .foregroundColor(cobaltRim)
+                                .padding(.horizontal, 5.5)
+                                .padding(.vertical, 1.5)
+                                .background(
+                                    Capsule()
+                                        .fill(cobaltRim.opacity(0.12))
+                                )
+                                .overlay(
+                                    Capsule()
+                                        .strokeBorder(cobaltRim.opacity(0.24), lineWidth: 0.75)
+                                )
                         }
 
                         Spacer(minLength: 4)
@@ -167,17 +186,54 @@ private struct PetdexBubbleCardView: View {
                 )
             }
 
-            ZStack {
-                BubbleTailShape()
-                    .fill(lipTint)
-                    .frame(width: 14, height: 7)
-                    .offset(y: 1.5)
+            if showTail {
+                ZStack {
+                    BubbleTailShape()
+                        .fill(lipTint)
+                        .frame(width: 14, height: 7)
+                        .offset(y: 1.5)
 
-                BubbleTailShape()
-                    .fill(pearlBottom)
-                    .frame(width: 14, height: 7)
+                    BubbleTailShape()
+                        .fill(pearlBottom)
+                        .frame(width: 14, height: 7)
+                }
+                .offset(y: -1)
             }
-            .offset(y: -1)
+        }
+    }
+}
+
+private struct PetdexBubbleStackView: View {
+    let bubbles: [ActiveBubble]
+    let showAllSessions: Bool
+    let onDismiss: (ActiveBubble) -> Void
+
+    private var visibleBubbles: [ActiveBubble] {
+        if showAllSessions {
+            return Array(bubbles.prefix(4))
+        }
+        return Array(bubbles.prefix(1))
+    }
+
+    private var extraCount: Int {
+        if !showAllSessions && bubbles.count > 1 {
+            return bubbles.count - 1
+        }
+        return 0
+    }
+
+    var body: some View {
+        VStack(spacing: 6) {
+            ForEach(Array(visibleBubbles.enumerated()), id: \.element.sessionId) { index, bubble in
+                PetdexBubbleCardView(
+                    bubble: bubble,
+                    showTail: index == visibleBubbles.count - 1,
+                    extraCount: index == 0 ? extraCount : 0,
+                    onDismiss: {
+                        onDismiss(bubble)
+                    }
+                )
+            }
         }
         .padding(.horizontal, 10)
         .padding(.top, 6)
@@ -190,7 +246,8 @@ final class PetdexBubblePanel: NSPanel {
     private weak var anchorWindow: NSWindow?
     private var moveObserver: NSObjectProtocol?
     private var resizeObserver: NSObjectProtocol?
-    private var currentBubble: ActiveBubble?
+    private var currentBubbles: [ActiveBubble] = []
+    private var currentShowAllSessions = true
     private var bubblesEnabled = true
     var onDismiss: ((ActiveBubble) -> Void)?
 
@@ -235,12 +292,15 @@ final class PetdexBubblePanel: NSPanel {
         level = enabled ? .statusBar : .normal
     }
 
-    func update(bubble: ActiveBubble?, enabled: Bool, anchorVisible: Bool) {
-        let unchanged = (bubble == currentBubble) && (enabled == bubblesEnabled)
-        currentBubble = bubble
+    func update(bubbles: [ActiveBubble], showAllSessions: Bool, enabled: Bool, anchorVisible: Bool) {
+        let unchanged = (bubbles == currentBubbles)
+            && (showAllSessions == currentShowAllSessions)
+            && (enabled == bubblesEnabled)
+        currentBubbles = bubbles
+        currentShowAllSessions = showAllSessions
         bubblesEnabled = enabled
 
-        guard enabled, anchorVisible, let bubble else {
+        guard enabled, anchorVisible, !bubbles.isEmpty else {
             if let anchorWindow {
                 anchorWindow.removeChildWindow(self)
             }
@@ -252,10 +312,13 @@ final class PetdexBubblePanel: NSPanel {
             return
         }
 
-        let card = PetdexBubbleCardView(bubble: bubble) { [weak self] in
+        let stack = PetdexBubbleStackView(
+            bubbles: bubbles,
+            showAllSessions: showAllSessions
+        ) { [weak self] bubble in
             self?.onDismiss?(bubble)
         }
-        let wrapped = AnyView(card)
+        let wrapped = AnyView(stack)
 
         if let hostingView {
             hostingView.rootView = wrapped
@@ -271,7 +334,7 @@ final class PetdexBubblePanel: NSPanel {
         let fitting = hostingView?.fittingSize ?? NSSize(width: 240, height: 76)
         let size = NSSize(
             width: max(212, min(284, ceil(fitting.width))),
-            height: max(60, ceil(fitting.height))
+            height: max(60, min(360, ceil(fitting.height)))
         )
         setContentSize(size)
         reposition()
@@ -282,7 +345,7 @@ final class PetdexBubblePanel: NSPanel {
     }
 
     func reposition() {
-        guard let anchorWindow, currentBubble != nil, bubblesEnabled, anchorWindow.isVisible else {
+        guard let anchorWindow, !currentBubbles.isEmpty, bubblesEnabled, anchorWindow.isVisible else {
             return
         }
 

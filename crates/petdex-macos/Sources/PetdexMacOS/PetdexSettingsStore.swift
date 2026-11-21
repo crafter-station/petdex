@@ -21,8 +21,8 @@ struct ActiveBubble: Equatable, Decodable {
     }
 
     var statusDisplayName: String {
-        switch status {
-        case "needs-input":
+        switch status.lowercased() {
+        case "needs-input", "needs_input":
             return "Needs Input"
         case "running":
             return "Running"
@@ -36,8 +36,8 @@ struct ActiveBubble: Equatable, Decodable {
     }
 
     var statusColor: Color {
-        switch status {
-        case "needs-input":
+        switch status.lowercased() {
+        case "needs-input", "needs_input":
             return Color(red: 0.94, green: 0.58, blue: 0.12)
         case "running":
             return Color(red: 0.18, green: 0.46, blue: 0.96)
@@ -117,6 +117,7 @@ final class PetdexSettingsStore: ObservableObject {
         var activePetId: String?
         var scale: Double
         var bubblesEnabled: Bool
+        var showAllSessions: Bool?
         var alwaysOnTop: Bool
         var panelX: Double?
         var panelY: Double?
@@ -141,6 +142,10 @@ final class PetdexSettingsStore: ObservableObject {
         didSet { persistIfReady() }
     }
 
+    @Published var showAllSessions: Bool {
+        didSet { persistIfReady() }
+    }
+
     @Published var alwaysOnTop: Bool {
         didSet { persistIfReady() }
     }
@@ -157,8 +162,12 @@ final class PetdexSettingsStore: ObservableObject {
     @Published var currentState: UInt8 = UInt8(PETDEX_STATE_IDLE.rawValue)
     @Published var hookServerPort: UInt16 = 0
     @Published var hookToken: String = ""
-    @Published var activeBubble: ActiveBubble?
+    @Published var activeBubbles: [ActiveBubble] = []
     @Published var detectedAgents: [DetectedAgent] = []
+
+    var activeBubble: ActiveBubble? {
+        activeBubbles.first
+    }
 
     let settingsURL: URL
     private var isLoaded = false
@@ -168,6 +177,7 @@ final class PetdexSettingsStore: ObservableObject {
         self.activePetId = nil
         self.scale = 1.0
         self.bubblesEnabled = true
+        self.showAllSessions = true
         self.alwaysOnTop = true
         self.panelX = nil
         self.panelY = nil
@@ -211,6 +221,7 @@ final class PetdexSettingsStore: ObservableObject {
         activePetId = decoded.activePetId
         scale = Self.clampScale(decoded.scale)
         bubblesEnabled = decoded.bubblesEnabled
+        showAllSessions = decoded.showAllSessions ?? true
         alwaysOnTop = decoded.alwaysOnTop
         panelX = decoded.panelX
         panelY = decoded.panelY
@@ -226,6 +237,7 @@ final class PetdexSettingsStore: ObservableObject {
             activePetId: activePetId,
             scale: Self.clampScale(scale),
             bubblesEnabled: bubblesEnabled,
+            showAllSessions: showAllSessions,
             alwaysOnTop: alwaysOnTop,
             panelX: panelX,
             panelY: panelY

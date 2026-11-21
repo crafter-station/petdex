@@ -55,13 +55,13 @@ final class PetdexSpriteCanvasView: NSView {
     private var spriteAtlas: PetSpriteAtlas?
     private var lastFrame = PetdexFrame(state: 0, row: 0, col: 0, frame_index: 0, frame_dur_ms: 0)
     private var bubblePollAccumulatorMs: UInt32 = 0
-    private var lastBubble: ActiveBubble?
+    private var lastBubbles: [ActiveBubble] = []
     private(set) var hookServerPort: UInt16 = 0
     private(set) var activePet: InstalledPet?
     var contextMenuProvider: (() -> NSMenu)?
     var onStateChanged: ((UInt8) -> Void)?
     var onPetChanged: ((InstalledPet?) -> Void)?
-    var onBubbleChanged: ((ActiveBubble?) -> Void)?
+    var onBubblesChanged: (([ActiveBubble]) -> Void)?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -179,38 +179,37 @@ final class PetdexSpriteCanvasView: NSView {
                 _ = petdex_engine_ingest_status(engine, sidPtr, agent, status, sumPtr, nowMs)
             }
         }
-        pollActiveBubble()
+        pollActiveBubbles()
     }
 
     func dismissBubble(_ bubble: ActiveBubble) {
-        ingestStatus(
-            sessionId: bubble.sessionId,
-            agent: AgentCatalog.agentCode(for: bubble.agent),
-            status: UInt8(PETDEX_STATUS_IDLE.rawValue),
-            summary: ""
-        )
+        guard let engine else { return }
+        _ = bubble.sessionId.withCString { sidPtr in
+            petdex_engine_dismiss_session(engine, sidPtr)
+        }
+        pollActiveBubbles()
     }
 
-    func pollActiveBubble() {
+    func pollActiveBubbles() {
         guard let engine else { return }
         let nowMs = UInt64(Date().timeIntervalSince1970 * 1000.0)
-        var buffer = [UInt8](repeating: 0, count: 4096)
+        var buffer = [UInt8](repeating: 0, count: 8192)
         let written = buffer.withUnsafeMutableBufferPointer { ptr -> Int in
             guard let base = ptr.baseAddress else { return 0 }
-            return petdex_engine_active_bubble_json(engine, nowMs, base, ptr.count)
+            return petdex_engine_active_bubbles_json(engine, nowMs, base, ptr.count)
         }
 
-        let decoded: ActiveBubble?
+        let decoded: [ActiveBubble]
         if written > 0 {
             let data = Data(buffer[0..<written])
-            decoded = try? JSONDecoder().decode(ActiveBubble.self, from: data)
+            decoded = (try? JSONDecoder().decode([ActiveBubble].self, from: data)) ?? []
         } else {
-            decoded = nil
+            decoded = []
         }
 
-        if decoded != lastBubble {
-            lastBubble = decoded
-            onBubbleChanged?(decoded)
+        if decoded != lastBubbles {
+            lastBubbles = decoded
+            onBubblesChanged?(decoded)
         }
     }
 
@@ -239,7 +238,7 @@ final class PetdexSpriteCanvasView: NSView {
         bubblePollAccumulatorMs += dtMs
         if bubblePollAccumulatorMs >= 150 {
             bubblePollAccumulatorMs = 0
-            pollActiveBubble()
+            pollActiveBubbles()
         }
     }
 
@@ -437,8 +436,8 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
             self?.settingsStore.activePetId = pet?.id
             self?.refreshPetMenuState()
         }
-        canvas.onBubbleChanged = { [weak self] bubble in
-            self?.settingsStore.activeBubble = bubble
+        canvas.onBubblesChanged = { [weak self] bubbles in
+            self?.settingsStore.activeBubbles = bubbles
             self?.syncBubblePanel()
         }
 
@@ -480,6 +479,12 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
         let boundPort = canvas.startHookServer(port: requestedPort, token: token)
         settingsStore.hookServerPort = boundPort
         settingsStore.hookToken = token
+        let tokenPersisted = token.withCString { tokenPtr in
+            petdex_write_runtime_token(tokenPtr)
+        }
+        if !tokenPersisted {
+            NSLog("PetdexMacOS failed to persist runtime update token")
+        }
         if boundPort > 0 {
             NSLog("PetdexMacOS hook server listening on 127.0.0.1:%u", boundPort)
         } else {
@@ -567,7 +572,8 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
 
     private func syncBubblePanel() {
         bubblePanel?.update(
-            bubble: settingsStore.activeBubble,
+            bubbles: settingsStore.activeBubbles,
+            showAllSessions: settingsStore.showAllSessions,
             enabled: settingsStore.bubblesEnabled,
             anchorVisible: panel?.isVisible ?? false
         )
@@ -600,11 +606,17 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
                 onBubblesEnabledChanged: { [weak self] _ in
                     self?.syncBubblePanel()
                 },
+                onShowAllSessionsChanged: { [weak self] _ in
+                    self?.syncBubblePanel()
+                },
                 onSelectState: { [weak self] state in
                     self?.canvasView?.setState(state)
                 },
                 onSendTestBubble: { [weak self] in
                     self?.sendTestBubble()
+                },
+                onSendTestTwoSessions: { [weak self] in
+                    self?.sendTestTwoSessions()
                 },
                 onRefreshAgents: { [weak self] in
                     self?.settingsStore.refreshDetectedAgents()
@@ -643,6 +655,25 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
             agent: UInt8(PETDEX_AGENT_CLAUDE_CODE.rawValue),
             status: UInt8(PETDEX_STATUS_NEEDS_INPUT.rawValue),
             summary: "Build passed. Ready for review!"
+        )
+        syncBubblePanel()
+    }
+
+    private func sendTestTwoSessions() {
+        if !settingsStore.bubblesEnabled {
+            settingsStore.bubblesEnabled = true
+        }
+        canvasView?.ingestStatus(
+            sessionId: "settings-test-claude",
+            agent: UInt8(PETDEX_AGENT_CLAUDE_CODE.rawValue),
+            status: UInt8(PETDEX_STATUS_NEEDS_INPUT.rawValue),
+            summary: "Build passed. Ready for review!"
+        )
+        canvasView?.ingestStatus(
+            sessionId: "settings-test-codex",
+            agent: UInt8(PETDEX_AGENT_CODEX.rawValue),
+            status: UInt8(PETDEX_STATUS_RUNNING.rawValue),
+            summary: "Running unit tests on petdex-core..."
         )
         syncBubblePanel()
     }

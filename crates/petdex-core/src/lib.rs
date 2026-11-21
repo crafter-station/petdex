@@ -5,6 +5,7 @@ pub mod ffi;
 pub mod hook_server;
 mod json;
 pub mod reconcile;
+pub mod runtime_token;
 
 pub use agents::{all_specs, AgentAdapter, AgentSpec, CodingAgent, StaticAgentAdapter};
 pub use animation::{state_def, FrameOutput, FrameSpec, PetAnimationEngine, PetState, StateDef};

@@ -78,6 +78,17 @@ size_t petdex_engine_active_bubble_json(
     uint8_t *out_buf,
     size_t out_cap
 );
+size_t petdex_engine_active_bubbles_json(
+    PetdexEngine *engine,
+    uint64_t now_ms,
+    uint8_t *out_buf,
+    size_t out_cap
+);
+bool petdex_engine_dismiss_session(
+    PetdexEngine *engine,
+    const char *session_id_ptr
+);
+bool petdex_write_runtime_token(const char *token_ptr);
 
 #ifdef __cplusplus
 }

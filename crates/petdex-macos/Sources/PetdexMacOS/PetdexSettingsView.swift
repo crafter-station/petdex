@@ -9,8 +9,10 @@ struct PetdexSettingsActions {
     let onScaleChanged: (Double) -> Void
     let onAlwaysOnTopChanged: (Bool) -> Void
     let onBubblesEnabledChanged: (Bool) -> Void
+    let onShowAllSessionsChanged: (Bool) -> Void
     let onSelectState: (UInt8) -> Void
     let onSendTestBubble: () -> Void
+    let onSendTestTwoSessions: () -> Void
     let onRefreshAgents: () -> Void
 }
 
@@ -330,6 +332,13 @@ struct PetdexSettingsView: View {
                 actions.onBubblesEnabledChanged(newValue)
             }
         )
+        let showAllSessionsBinding = Binding<Bool>(
+            get: { store.showAllSessions },
+            set: { newValue in
+                store.showAllSessions = newValue
+                actions.onShowAllSessionsChanged(newValue)
+            }
+        )
         let stateBinding = Binding<UInt8>(
             get: { store.currentState },
             set: { newValue in
@@ -358,6 +367,7 @@ struct PetdexSettingsView: View {
 
                     Toggle("Always on top", isOn: alwaysOnTopBinding)
                     Toggle("Speech bubbles", isOn: bubblesBinding)
+                    Toggle("Stack all active sessions", isOn: showAllSessionsBinding)
                 }
                 .padding(8)
             }
@@ -381,15 +391,20 @@ struct PetdexSettingsView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Floating Bubble Preview")
                                 .font(.system(size: 12, weight: .medium))
-                            Text("Sends a sample agent alert above your pet.")
+                            Text("Sends sample agent alerts above your pet.")
                                 .font(.system(size: 11))
                                 .foregroundColor(.secondary)
                         }
                         Spacer()
-                        Button("Send Test Bubble") {
-                            actions.onSendTestBubble()
+                        HStack(spacing: 8) {
+                            Button("Test 2 Sessions") {
+                                actions.onSendTestTwoSessions()
+                            }
+                            Button("Send Test Bubble") {
+                                actions.onSendTestBubble()
+                            }
+                            .buttonStyle(.borderedProminent)
                         }
-                        .buttonStyle(.borderedProminent)
                     }
                 }
                 .padding(8)

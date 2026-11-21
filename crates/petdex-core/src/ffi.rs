@@ -246,6 +246,82 @@ pub unsafe extern "C" fn petdex_engine_active_bubble_json(
     copy_len
 }
 
+#[no_mangle]
+pub unsafe extern "C" fn petdex_engine_active_bubbles_json(
+    engine: *mut PetdexEngine,
+    now_ms: u64,
+    out_buf: *mut u8,
+    out_cap: usize,
+) -> usize {
+    if out_buf.is_null() || out_cap == 0 {
+        return 0;
+    }
+    let Some(engine) = engine.as_mut() else {
+        *out_buf = 0;
+        return 0;
+    };
+
+    let bubbles = {
+        let guard = engine.attention.lock().unwrap_or_else(|e| e.into_inner());
+        guard.active_bubbles(now_ms)
+    };
+
+    if bubbles.is_empty() {
+        *out_buf = 0;
+        return 0;
+    }
+
+    let mut json = String::from("[");
+    for (idx, bubble) in bubbles.iter().enumerate() {
+        if idx > 0 {
+            json.push(',');
+        }
+        json.push_str(&format!(
+            r#"{{"session_id":{},"agent":{},"status":{},"summary":{}}}"#,
+            escape_json_str(&bubble.session_id),
+            escape_json_str(bubble.agent.spec().slug),
+            escape_json_str(bubble.status.slug()),
+            escape_json_str(&bubble.summary),
+        ));
+    }
+    json.push(']');
+
+    let bytes = json.as_bytes();
+    let copy_len = bytes.len().min(out_cap - 1);
+    std::ptr::copy_nonoverlapping(bytes.as_ptr(), out_buf, copy_len);
+    *out_buf.add(copy_len) = 0;
+    copy_len
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn petdex_engine_dismiss_session(
+    engine: *mut PetdexEngine,
+    session_id_ptr: *const c_char,
+) -> bool {
+    let Some(engine) = engine.as_mut() else {
+        return false;
+    };
+    if session_id_ptr.is_null() {
+        return false;
+    }
+    let Ok(session_id_str) = CStr::from_ptr(session_id_ptr).to_str() else {
+        return false;
+    };
+    let mut guard = engine.attention.lock().unwrap_or_else(|e| e.into_inner());
+    guard.dismiss(session_id_str)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn petdex_write_runtime_token(token_ptr: *const c_char) -> bool {
+    if token_ptr.is_null() {
+        return false;
+    }
+    let Ok(token) = CStr::from_ptr(token_ptr).to_str() else {
+        return false;
+    };
+    crate::runtime_token::write_runtime_token(token).is_ok()
+}
+
 #[cfg(test)]
 mod tests {
     use std::ffi::{CStr, CString};
@@ -443,6 +519,122 @@ mod tests {
             assert_eq!(parsed.get_str("agent"), Some("claude-code"));
             assert_eq!(parsed.get_str("status"), Some("needs-input"));
             assert_eq!(parsed.get_str("summary"), Some("Waiting for \"approval\""));
+
+            petdex_engine_free(engine);
+        }
+    }
+
+    #[test]
+    fn ffi_active_bubbles_json_orders_multiple_sessions_by_priority() {
+        unsafe {
+            let mut buf = [0u8; 1024];
+            assert_eq!(
+                petdex_engine_active_bubbles_json(
+                    std::ptr::null_mut(),
+                    1_000,
+                    buf.as_mut_ptr(),
+                    buf.len()
+                ),
+                0
+            );
+
+            let engine = petdex_engine_new();
+            buf[0] = b'x';
+            assert_eq!(
+                petdex_engine_active_bubbles_json(engine, 1_000, buf.as_mut_ptr(), buf.len()),
+                0
+            );
+            assert_eq!(buf[0], 0);
+
+            let s_run = CString::new("sess-running").unwrap();
+            let sum_run = CString::new("Building crate").unwrap();
+            assert!(petdex_engine_ingest_status(
+                engine,
+                s_run.as_ptr(),
+                CodingAgent::Codex as u8,
+                SessionStatus::Running as u8,
+                sum_run.as_ptr(),
+                1_000,
+            ));
+
+            let s_fail = CString::new("sess-failed").unwrap();
+            let sum_fail = CString::new("Tests failed").unwrap();
+            assert!(petdex_engine_ingest_status(
+                engine,
+                s_fail.as_ptr(),
+                CodingAgent::Gemini as u8,
+                SessionStatus::Failed as u8,
+                sum_fail.as_ptr(),
+                1_100,
+            ));
+
+            let s_wait = CString::new("sess-waiting").unwrap();
+            let sum_wait = CString::new("Approve tool").unwrap();
+            assert!(petdex_engine_ingest_status(
+                engine,
+                s_wait.as_ptr(),
+                CodingAgent::ClaudeCode as u8,
+                SessionStatus::NeedsInput as u8,
+                sum_wait.as_ptr(),
+                1_200,
+            ));
+
+            let len = petdex_engine_active_bubbles_json(engine, 1_500, buf.as_mut_ptr(), buf.len());
+            assert!(len > 0);
+            assert_eq!(buf[len], 0);
+
+            let text = std::str::from_utf8(&buf[..len]).expect("valid utf-8");
+            assert!(text.starts_with('['));
+            assert!(text.ends_with(']'));
+
+            let wait_pos = text.find("sess-waiting").expect("waiting session");
+            let fail_pos = text.find("sess-failed").expect("failed session");
+            let run_pos = text.find("sess-running").expect("running session");
+            assert!(wait_pos < fail_pos && fail_pos < run_pos);
+
+            petdex_engine_free(engine);
+        }
+    }
+
+    #[test]
+    fn ffi_dismiss_session_removes_only_target_session() {
+        unsafe {
+            let engine = petdex_engine_new();
+            let s1 = CString::new("sess-1").unwrap();
+            let s2 = CString::new("sess-2").unwrap();
+            let sum1 = CString::new("First").unwrap();
+            let sum2 = CString::new("Second").unwrap();
+
+            assert!(!petdex_engine_dismiss_session(std::ptr::null_mut(), s1.as_ptr()));
+            assert!(!petdex_engine_dismiss_session(engine, std::ptr::null()));
+            assert!(!petdex_engine_dismiss_session(engine, s1.as_ptr()));
+
+            assert!(petdex_engine_ingest_status(
+                engine,
+                s1.as_ptr(),
+                CodingAgent::ClaudeCode as u8,
+                SessionStatus::NeedsInput as u8,
+                sum1.as_ptr(),
+                1_000,
+            ));
+            assert!(petdex_engine_ingest_status(
+                engine,
+                s2.as_ptr(),
+                CodingAgent::Codex as u8,
+                SessionStatus::Running as u8,
+                sum2.as_ptr(),
+                1_100,
+            ));
+
+            assert!(petdex_engine_dismiss_session(engine, s1.as_ptr()));
+            assert!(!petdex_engine_dismiss_session(engine, s1.as_ptr()));
+
+            let mut buf = [0u8; 512];
+            let len = petdex_engine_active_bubbles_json(engine, 1_500, buf.as_mut_ptr(), buf.len());
+            assert!(len > 0);
+            let text = std::str::from_utf8(&buf[..len]).expect("valid utf-8");
+            assert!(!text.contains("sess-1"));
+            assert!(text.contains("sess-2"));
 
             petdex_engine_free(engine);
         }
