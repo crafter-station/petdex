@@ -51,7 +51,8 @@ export async function GET(): Promise<Response> {
   if (release?.tag_name) {
     const version = release.tag_name.replace(/^desktop-v/, "");
     const arm64Asset = pickAssetForPlatform(release, "darwin-arm64");
-    const enclosureUrl = arm64Asset ?? releasePageUrl(release);
+    const enclosureUrl =
+      arm64Asset?.browser_download_url ?? releasePageUrl(release);
     const notesUrl = releasePageUrl(release);
     const pubDate = new Date().toUTCString();
 
