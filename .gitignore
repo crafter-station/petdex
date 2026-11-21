@@ -99,3 +99,4 @@ target/
 
 # macOS Swift app bundles
 crates/petdex-macos/dist/
+crates/petdex-core/Cargo.lock
