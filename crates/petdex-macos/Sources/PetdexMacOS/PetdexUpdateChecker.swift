@@ -9,9 +9,16 @@ enum PetdexUpdateStatus: Equatable {
 }
 
 final class PetdexUpdateChecker {
-    static let currentAppVersion = "1.0.0-native"
+    static var currentAppVersion: String {
+        if let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
+           !v.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        {
+            return v
+        }
+        return "1.0.0"
+    }
 
-    private static let latestReleaseURL = URL(string: "https://petdex.dev/api/desktop/latest-release")!
+    private static let latestReleaseURL = URL(string: "https://petdex.dev/api/desktop/latest-release?format=json")!
     private static let fallbackDownloadURL = URL(string: "https://petdex.dev/download")!
 
     private struct ReleasePayload: Decodable {
