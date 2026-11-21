@@ -483,6 +483,7 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
     private var canvasView: PetdexSpriteCanvasView?
     private var bubblePanel: PetdexBubblePanel?
     private var settingsWindow: NSWindow?
+    private var onboardingWindow: NSWindow?
     private var panelMoveObserver: NSObjectProtocol?
     private var reconcileTimer: Timer?
     private var rotatePetsTimer: Timer?
@@ -648,6 +649,12 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
             pendingOpenSlugs.removeAll()
             for slug in queued {
                 handleOpenPetSlug(slug)
+            }
+        }
+
+        if !settingsStore.onboardingCompleted || env["PETDEX_SHOW_ONBOARDING"] == "1" {
+            DispatchQueue.main.async { [weak self] in
+                self?.showOnboardingWindow()
             }
         }
     }
@@ -931,6 +938,9 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
                 },
                 onSignOut: { [weak self] in
                     self?.handleSignOut()
+                },
+                onReplayOnboarding: { [weak self] in
+                    self?.showOnboardingWindow()
                 }
             )
 
@@ -939,7 +949,7 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
             let window = NSWindow(contentViewController: hostingController)
             window.title = "Petdex Settings"
             window.styleMask = [.titled, .closable, .miniaturizable]
-            window.setContentSize(NSSize(width: 520, height: 420))
+            window.setContentSize(NSSize(width: 520, height: 460))
             window.isReleasedWhenClosed = false
             window.center()
             settingsWindow = window
@@ -948,6 +958,52 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
         settingsWindow?.makeKeyAndOrderFront(nil)
         settingsWindow?.orderFrontRegardless()
+    }
+
+    private func showOnboardingWindow() {
+        settingsStore.refreshDetectedAgents()
+
+        let actions = PetdexOnboardingActions(
+            onSignIn: { [weak self] in
+                self?.handleSignIn()
+            },
+            onSelectPet: { [weak self] pet in
+                self?.canvasView?.selectPet(pet)
+            },
+            onPetInstalled: { [weak self] pet in
+                self?.registerAndActivateInstalledPet(pet)
+            },
+            onRefreshAgents: { [weak self] in
+                self?.settingsStore.refreshDetectedAgents()
+            },
+            onSendTestBubble: { [weak self] in
+                self?.sendTestBubble()
+            },
+            onFinish: { [weak self] in
+                self?.onboardingWindow?.close()
+            }
+        )
+
+        let rootView = PetdexOnboardingView(store: settingsStore, actions: actions)
+        let hostingController = NSHostingController(rootView: rootView)
+
+        if let window = onboardingWindow {
+            window.contentViewController = hostingController
+            window.setContentSize(NSSize(width: 540, height: 440))
+            window.center()
+        } else {
+            let window = NSWindow(contentViewController: hostingController)
+            window.title = "Welcome to Petdex"
+            window.styleMask = [.titled, .closable]
+            window.setContentSize(NSSize(width: 540, height: 440))
+            window.isReleasedWhenClosed = false
+            window.center()
+            onboardingWindow = window
+        }
+
+        NSApp.activate(ignoringOtherApps: true)
+        onboardingWindow?.makeKeyAndOrderFront(nil)
+        onboardingWindow?.orderFrontRegardless()
     }
 
     private func focusCodingApplication(for bubble: ActiveBubble) {
@@ -1100,6 +1156,10 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
         settingsItem.target = self
         menu.addItem(settingsItem)
 
+        let onboardingItem = NSMenuItem(title: "Welcome & Onboarding...", action: #selector(handleOpenOnboarding), keyEquivalent: "")
+        onboardingItem.target = self
+        menu.addItem(onboardingItem)
+
         menu.addItem(.separator())
 
         let quitItem = NSMenuItem(title: "Quit Petdex", action: #selector(handleQuit), keyEquivalent: "q")
@@ -1200,6 +1260,10 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func handleOpenSettings() {
         openSettingsWindow()
+    }
+
+    @objc private func handleOpenOnboarding() {
+        showOnboardingWindow()
     }
 
     @objc private func handleSelectPet(_ sender: NSMenuItem) {
@@ -1353,8 +1417,13 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
                 if Task.isCancelled { return }
                 self.applySignedInLibrary(library)
                 NSApp.activate(ignoringOtherApps: true)
-                self.settingsWindow?.makeKeyAndOrderFront(nil)
-                self.settingsWindow?.orderFrontRegardless()
+                if let onboardingWindow = self.onboardingWindow, onboardingWindow.isVisible {
+                    onboardingWindow.makeKeyAndOrderFront(nil)
+                    onboardingWindow.orderFrontRegardless()
+                } else {
+                    self.settingsWindow?.makeKeyAndOrderFront(nil)
+                    self.settingsWindow?.orderFrontRegardless()
+                }
             } catch {
                 if Task.isCancelled { return }
                 self.settingsStore.authPhase = "error"

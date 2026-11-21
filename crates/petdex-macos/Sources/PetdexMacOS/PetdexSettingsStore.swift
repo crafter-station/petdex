@@ -162,6 +162,7 @@ final class PetdexSettingsStore: ObservableObject {
         var apiToken: String?
         var panelX: Double?
         var panelY: Double?
+        var onboardingCompleted: Bool?
     }
 
     @Published var activePetId: String? {
@@ -262,6 +263,10 @@ final class PetdexSettingsStore: ObservableObject {
         didSet { persistIfReady() }
     }
 
+    @Published var onboardingCompleted: Bool {
+        didSet { persistIfReady() }
+    }
+
     @Published var installedPets: [InstalledPet] = []
     @Published var currentState: UInt8 = UInt8(PETDEX_STATE_IDLE.rawValue)
     @Published var hookServerPort: UInt16 = 0
@@ -311,6 +316,7 @@ final class PetdexSettingsStore: ObservableObject {
         self.bubbleLifetimeSec = 10.0
         self.panelX = nil
         self.panelY = nil
+        self.onboardingCompleted = false
         load()
         isLoaded = true
         refreshDetectedAgents()
@@ -410,6 +416,7 @@ final class PetdexSettingsStore: ObservableObject {
         bubbleLifetimeSec = Self.clampBubbleLifetimeSec(decoded.bubbleLifetimeSec ?? 10.0)
         panelX = decoded.panelX
         panelY = decoded.panelY
+        onboardingCompleted = decoded.onboardingCompleted ?? false
     }
 
     private func persistIfReady() {
@@ -436,7 +443,8 @@ final class PetdexSettingsStore: ObservableObject {
             bubbleLifetimeSec: Self.clampBubbleLifetimeSec(bubbleLifetimeSec),
             apiToken: nil,
             panelX: panelX,
-            panelY: panelY
+            panelY: panelY,
+            onboardingCompleted: onboardingCompleted
         )
 
         let fm = FileManager.default
