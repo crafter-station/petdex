@@ -948,8 +948,13 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
             let hostingController = NSHostingController(rootView: rootView)
             let window = NSWindow(contentViewController: hostingController)
             window.title = "Petdex Settings"
-            window.styleMask = [.titled, .closable, .miniaturizable]
-            window.setContentSize(NSSize(width: 520, height: 460))
+            window.styleMask = [.titled, .closable, .fullSizeContentView]
+            window.titleVisibility = .hidden
+            window.titlebarAppearsTransparent = true
+            window.isMovableByWindowBackground = true
+            window.standardWindowButton(.miniaturizeButton)?.isHidden = true
+            window.standardWindowButton(.zoomButton)?.isHidden = true
+            window.setContentSize(NSSize(width: 720, height: 520))
             window.isReleasedWhenClosed = false
             window.center()
             settingsWindow = window

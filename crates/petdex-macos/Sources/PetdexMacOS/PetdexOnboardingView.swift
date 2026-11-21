@@ -47,6 +47,7 @@ struct PetdexOnboardingView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var currentStep: OnboardingStep = .account
     @State private var isInstallingBoba = false
+    @State private var installingSlug: String?
     @State private var installBobaError: String?
     @State private var testBubbleSent = false
 
@@ -299,6 +300,36 @@ struct PetdexOnboardingView: View {
         }
     }
 
+    private var syncedLibraryPetsNotInstalled: [PetdexLibraryPet] {
+        let installedIds = Set(store.installedPets.map { $0.id.lowercased() })
+        var seen = Set<String>()
+        var result: [PetdexLibraryPet] = []
+        for pet in store.ownedPets + store.caughtPets {
+            let key = pet.slug.lowercased()
+            if installedIds.contains(key) || seen.contains(key) {
+                continue
+            }
+            seen.insert(key)
+            result.append(pet)
+        }
+        return result
+    }
+
+    private func installLibraryPet(_ slug: String) {
+        guard installingSlug == nil else { return }
+        installingSlug = slug
+        installBobaError = nil
+        Task { @MainActor in
+            do {
+                let installed = try await PetdexCatalogClient.shared.installPet(slug: slug)
+                actions.onPetInstalled(installed)
+            } catch {
+                installBobaError = error.localizedDescription
+            }
+            installingSlug = nil
+        }
+    }
+
     private var companionStepView: some View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 3) {
@@ -408,6 +439,43 @@ struct PetdexOnboardingView: View {
                             }
                         } action: {
                             actions.onSelectPet(pet)
+                        }
+                    }
+
+                    ForEach(syncedLibraryPetsNotInstalled) { libPet in
+                        let isInstalling = installingSlug == libPet.slug
+                        companionCard(
+                            title: libPet.displayName,
+                            subtitle: isInstalling ? "Installing..." : "Cloud · Tap to adopt",
+                            selected: false
+                        ) {
+                            if isInstalling {
+                                ProgressView()
+                                    .controlSize(.small)
+                                    .frame(width: 58, height: 58)
+                            } else if let thumbStr = libPet.thumbnailUrl, let thumbURL = URL(string: thumbStr) {
+                                AsyncImage(url: thumbURL) { phase in
+                                    switch phase {
+                                    case let .success(image):
+                                        image
+                                            .interpolation(.none)
+                                            .resizable()
+                                            .aspectRatio(contentMode: .fit)
+                                    default:
+                                        Image(systemName: "icloud.and.arrow.down")
+                                            .font(.system(size: 20))
+                                            .foregroundColor(cobalt)
+                                    }
+                                }
+                                .frame(width: 58, height: 58)
+                            } else {
+                                Image(systemName: "icloud.and.arrow.down")
+                                    .font(.system(size: 20))
+                                    .foregroundColor(cobalt)
+                                    .frame(width: 58, height: 58)
+                            }
+                        } action: {
+                            installLibraryPet(libPet.slug)
                         }
                     }
 

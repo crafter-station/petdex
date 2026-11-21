@@ -38,7 +38,7 @@ struct PetdexLibraryPet: Identifiable, Equatable, Sendable {
                 return url
             }
         }
-        return URL(string: "https://assets.petdex.dev/pets/\(slug)/thumb.webp")
+        return URL(string: "https://petdex.dev/api/pets/\(slug)/thumb")
     }
 }
 
@@ -391,10 +391,14 @@ final class PetdexClerkAuthClient: @unchecked Sendable {
         let trimmedName = raw.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
         let displayName = (trimmedName?.isEmpty == false) ? trimmedName! : slug
         let status = raw.status?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "approved"
+        let trimmedThumb = raw.thumbnailUrl?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let thumbnailUrl = (trimmedThumb?.isEmpty == false)
+            ? trimmedThumb!
+            : "https://petdex.dev/api/pets/\(slug)/thumb"
         return PetdexLibraryPet(
             slug: slug,
             displayName: displayName,
-            thumbnailUrl: raw.thumbnailUrl,
+            thumbnailUrl: thumbnailUrl,
             status: status
         )
     }
