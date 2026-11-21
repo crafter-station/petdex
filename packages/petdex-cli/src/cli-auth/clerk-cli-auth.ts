@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 
 import { startAuthServer } from "./lib/auth-server.js";
+import { browserCommand } from "./lib/browser-command.js";
 import { createCredentialStore } from "./lib/credential-store.js";
 import {
   generateCodeChallenge,
@@ -48,10 +49,7 @@ function storageError(operation: string, error: unknown): ClerkCliAuthError {
 async function openBrowserFallback(url: string): Promise<void> {
   console.log(`Open this URL to sign in:\n${url}`);
 
-  const platform = process.platform;
-  const command =
-    platform === "darwin" ? "open" : platform === "win32" ? "cmd" : "xdg-open";
-  const args = platform === "win32" ? ["/c", "start", "", url] : [url];
+  const { command, args } = browserCommand(url);
 
   await new Promise<void>((resolve) => {
     const child = spawn(command, args, { detached: true, stdio: "ignore" });
