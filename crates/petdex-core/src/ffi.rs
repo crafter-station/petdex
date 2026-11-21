@@ -6,6 +6,7 @@ use crate::agents::CodingAgent;
 use crate::animation::{FrameOutput, PetAnimationEngine, PetState};
 use crate::attention::{AgentEvent, AttentionCoordinator, SessionStatus};
 use crate::hook_server::{HookServer, HookServerConfig};
+use crate::json::escape_json_str;
 
 const CORE_VERSION_CSTR: &[u8] = concat!(env!("CARGO_PKG_VERSION"), "\0").as_bytes();
 
@@ -206,6 +207,45 @@ pub unsafe extern "C" fn petdex_engine_tick_ms(
     PetdexFrame::from(engine.inner.tick(dt_ms))
 }
 
+#[no_mangle]
+pub unsafe extern "C" fn petdex_engine_active_bubble_json(
+    engine: *mut PetdexEngine,
+    now_ms: u64,
+    out_buf: *mut u8,
+    out_cap: usize,
+) -> usize {
+    if out_buf.is_null() || out_cap == 0 {
+        return 0;
+    }
+    let Some(engine) = engine.as_mut() else {
+        *out_buf = 0;
+        return 0;
+    };
+
+    let top = {
+        let guard = engine.attention.lock().unwrap_or_else(|e| e.into_inner());
+        guard.active_bubbles(now_ms).into_iter().next()
+    };
+
+    let Some(bubble) = top else {
+        *out_buf = 0;
+        return 0;
+    };
+
+    let json = format!(
+        r#"{{"session_id":{},"agent":{},"status":{},"summary":{}}}"#,
+        escape_json_str(&bubble.session_id),
+        escape_json_str(bubble.agent.spec().slug),
+        escape_json_str(bubble.status.slug()),
+        escape_json_str(&bubble.summary),
+    );
+    let bytes = json.as_bytes();
+    let copy_len = bytes.len().min(out_cap - 1);
+    std::ptr::copy_nonoverlapping(bytes.as_ptr(), out_buf, copy_len);
+    *out_buf.add(copy_len) = 0;
+    copy_len
+}
+
 #[cfg(test)]
 mod tests {
     use std::ffi::{CStr, CString};
@@ -347,6 +387,63 @@ mod tests {
             assert_eq!(frame.row, 6);
 
             petdex_engine_stop_hook_server(engine);
+            petdex_engine_free(engine);
+        }
+    }
+
+    #[test]
+    fn ffi_active_bubble_json_idle_and_active() {
+        unsafe {
+            let mut buf = [0u8; 512];
+            assert_eq!(
+                petdex_engine_active_bubble_json(
+                    std::ptr::null_mut(),
+                    1_000,
+                    buf.as_mut_ptr(),
+                    buf.len()
+                ),
+                0
+            );
+
+            let engine = petdex_engine_new();
+            assert_eq!(
+                petdex_engine_active_bubble_json(engine, 1_000, std::ptr::null_mut(), 16),
+                0
+            );
+            assert_eq!(
+                petdex_engine_active_bubble_json(engine, 1_000, buf.as_mut_ptr(), 0),
+                0
+            );
+
+            buf[0] = b'x';
+            assert_eq!(
+                petdex_engine_active_bubble_json(engine, 1_000, buf.as_mut_ptr(), buf.len()),
+                0
+            );
+            assert_eq!(buf[0], 0);
+
+            let sid = CString::new("sess-bubble").unwrap();
+            let summary = CString::new("Waiting for \"approval\"").unwrap();
+            assert!(petdex_engine_ingest_status(
+                engine,
+                sid.as_ptr(),
+                CodingAgent::ClaudeCode as u8,
+                SessionStatus::NeedsInput as u8,
+                summary.as_ptr(),
+                1_000,
+            ));
+
+            let len = petdex_engine_active_bubble_json(engine, 1_500, buf.as_mut_ptr(), buf.len());
+            assert!(len > 0);
+            assert_eq!(buf[len], 0);
+
+            let text = std::str::from_utf8(&buf[..len]).expect("valid utf-8");
+            let parsed = crate::json::parse_json(text).expect("valid json");
+            assert_eq!(parsed.get_str("session_id"), Some("sess-bubble"));
+            assert_eq!(parsed.get_str("agent"), Some("claude-code"));
+            assert_eq!(parsed.get_str("status"), Some("needs-input"));
+            assert_eq!(parsed.get_str("summary"), Some("Waiting for \"approval\""));
+
             petdex_engine_free(engine);
         }
     }

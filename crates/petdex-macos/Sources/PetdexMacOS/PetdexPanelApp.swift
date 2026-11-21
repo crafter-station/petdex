@@ -3,6 +3,7 @@ import CPetdexCore
 import CoreGraphics
 import Foundation
 import QuartzCore
+import SwiftUI
 
 enum PetdexStateCatalog {
     static let allStates: [(UInt8, String)] = [
@@ -42,6 +43,10 @@ final class PetdexFloatingPanel: NSPanel {
 
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
+
+    func setAlwaysOnTop(_ enabled: Bool) {
+        level = enabled ? .statusBar : .normal
+    }
 }
 
 final class PetdexSpriteCanvasView: NSView {
@@ -49,11 +54,14 @@ final class PetdexSpriteCanvasView: NSView {
     private var tickTimer: Timer?
     private var spriteAtlas: PetSpriteAtlas?
     private var lastFrame = PetdexFrame(state: 0, row: 0, col: 0, frame_index: 0, frame_dur_ms: 0)
+    private var bubblePollAccumulatorMs: UInt32 = 0
+    private var lastBubble: ActiveBubble?
     private(set) var hookServerPort: UInt16 = 0
     private(set) var activePet: InstalledPet?
     var contextMenuProvider: (() -> NSMenu)?
     var onStateChanged: ((UInt8) -> Void)?
     var onPetChanged: ((InstalledPet?) -> Void)?
+    var onBubbleChanged: ((ActiveBubble?) -> Void)?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -171,6 +179,39 @@ final class PetdexSpriteCanvasView: NSView {
                 _ = petdex_engine_ingest_status(engine, sidPtr, agent, status, sumPtr, nowMs)
             }
         }
+        pollActiveBubble()
+    }
+
+    func dismissBubble(_ bubble: ActiveBubble) {
+        ingestStatus(
+            sessionId: bubble.sessionId,
+            agent: AgentCatalog.agentCode(for: bubble.agent),
+            status: UInt8(PETDEX_STATUS_IDLE.rawValue),
+            summary: ""
+        )
+    }
+
+    func pollActiveBubble() {
+        guard let engine else { return }
+        let nowMs = UInt64(Date().timeIntervalSince1970 * 1000.0)
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        let written = buffer.withUnsafeMutableBufferPointer { ptr -> Int in
+            guard let base = ptr.baseAddress else { return 0 }
+            return petdex_engine_active_bubble_json(engine, nowMs, base, ptr.count)
+        }
+
+        let decoded: ActiveBubble?
+        if written > 0 {
+            let data = Data(buffer[0..<written])
+            decoded = try? JSONDecoder().decode(ActiveBubble.self, from: data)
+        } else {
+            decoded = nil
+        }
+
+        if decoded != lastBubble {
+            lastBubble = decoded
+            onBubbleChanged?(decoded)
+        }
     }
 
     private func startTickLoop() {
@@ -193,6 +234,12 @@ final class PetdexSpriteCanvasView: NSView {
 
         if next.row != previous.row || next.col != previous.col || next.state != previous.state || next.frame_index != previous.frame_index {
             needsDisplay = true
+        }
+
+        bubblePollAccumulatorMs += dtMs
+        if bubblePollAccumulatorMs >= 150 {
+            bubblePollAccumulatorMs = 0
+            pollActiveBubble()
         }
     }
 
@@ -348,8 +395,13 @@ final class PetdexSpriteCanvasView: NSView {
 }
 
 final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
+    private let basePanelSize = NSSize(width: 220, height: 238)
+    private let settingsStore = PetdexSettingsStore()
     private var panel: PetdexFloatingPanel?
     private var canvasView: PetdexSpriteCanvasView?
+    private var bubblePanel: PetdexBubblePanel?
+    private var settingsWindow: NSWindow?
+    private var panelMoveObserver: NSObjectProtocol?
     private var statusItem: NSStatusItem?
     private var petMenuItem: NSMenuItem?
     private var stateMenuItem: NSMenuItem?
@@ -357,27 +409,57 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
     private var statusPetsSubmenuItem: NSMenuItem?
     private var installedPets: [InstalledPet] = []
 
+    deinit {
+        if let panelMoveObserver {
+            NotificationCenter.default.removeObserver(panelMoveObserver)
+        }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let panelSize = NSSize(width: 220, height: 238)
-        let screenFrame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        let origin = NSPoint(
-            x: screenFrame.maxX - panelSize.width - 48,
-            y: screenFrame.minY + 48
-        )
+        let scale = settingsStore.scale
+        let panelSize = scaledPanelSize(for: scale)
+        let origin = resolvedInitialOrigin(for: panelSize)
         let frame = NSRect(origin: origin, size: panelSize)
+
         let panel = PetdexFloatingPanel(contentRect: frame)
+        panel.setAlwaysOnTop(settingsStore.alwaysOnTop)
+
         let canvas = PetdexSpriteCanvasView(frame: NSRect(origin: .zero, size: frame.size))
+        canvas.autoresizingMask = [.width, .height]
         canvas.contextMenuProvider = { [weak self] in
             self?.buildPanelContextMenu() ?? NSMenu()
         }
         canvas.onStateChanged = { [weak self] state in
+            self?.settingsStore.currentState = state
             self?.updateStatusLabels(state: state)
         }
-        canvas.onPetChanged = { [weak self] _ in
+        canvas.onPetChanged = { [weak self] pet in
+            self?.settingsStore.activePetId = pet?.id
             self?.refreshPetMenuState()
         }
+        canvas.onBubbleChanged = { [weak self] bubble in
+            self?.settingsStore.activeBubble = bubble
+            self?.syncBubblePanel()
+        }
+
         panel.contentView = canvas
         panel.orderFrontRegardless()
+
+        panelMoveObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didMoveNotification,
+            object: panel,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self, let panel = self.panel else { return }
+            self.settingsStore.updatePanelOrigin(panel.frame.origin)
+        }
+
+        let bubblePanel = PetdexBubblePanel()
+        bubblePanel.setAlwaysOnTop(settingsStore.alwaysOnTop)
+        bubblePanel.attach(to: panel)
+        bubblePanel.onDismiss = { [weak self] bubble in
+            self?.canvasView?.dismissBubble(bubble)
+        }
 
         if let versionPtr = petdex_core_version() {
             let version = String(cString: versionPtr)
@@ -385,16 +467,19 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
         }
 
         installedPets = PetCatalog.discoverPets()
-        let initialPet = PetCatalog.resolveInitialPet(from: installedPets)
+        let initialPet = resolveBootPet(from: installedPets)
         if let initialPet, !installedPets.contains(initialPet) {
             installedPets.insert(initialPet, at: 0)
         }
+        settingsStore.installedPets = installedPets
         canvas.selectPet(initialPet)
 
         let env = ProcessInfo.processInfo.environment
         let requestedPort = env["PETDEX_HOOK_PORT"].flatMap(UInt16.init) ?? 7777
         let token = env["PETDEX_UPDATE_TOKEN"] ?? UUID().uuidString
         let boundPort = canvas.startHookServer(port: requestedPort, token: token)
+        settingsStore.hookServerPort = boundPort
+        settingsStore.hookToken = token
         if boundPort > 0 {
             NSLog("PetdexMacOS hook server listening on 127.0.0.1:%u", boundPort)
         } else {
@@ -410,9 +495,156 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
 
         self.panel = panel
         self.canvasView = canvas
+        self.bubblePanel = bubblePanel
+        settingsStore.currentState = canvas.currentFrame.state
         configureStatusItem(boundPort: boundPort)
         updateStatusLabels(state: canvas.currentFrame.state)
         refreshPetMenuState()
+        syncBubblePanel()
+    }
+
+    private func scaledPanelSize(for scale: Double) -> NSSize {
+        let clamped = PetdexSettingsStore.clampScale(scale)
+        return NSSize(
+            width: round(basePanelSize.width * clamped),
+            height: round(basePanelSize.height * clamped)
+        )
+    }
+
+    private func resolvedInitialOrigin(for panelSize: NSSize) -> NSPoint {
+        let fallbackScreen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        if let savedX = settingsStore.panelX, let savedY = settingsStore.panelY {
+            let candidate = NSRect(origin: NSPoint(x: savedX, y: savedY), size: panelSize)
+            let onAnyScreen = NSScreen.screens.contains { screen in
+                screen.visibleFrame.intersects(candidate)
+            }
+            if onAnyScreen {
+                return candidate.origin
+            }
+        }
+        return NSPoint(
+            x: fallbackScreen.maxX - panelSize.width - 48,
+            y: fallbackScreen.minY + 48
+        )
+    }
+
+    private func resolveBootPet(from pets: [InstalledPet]) -> InstalledPet? {
+        let env = ProcessInfo.processInfo.environment
+        if let requested = env["PETDEX_PET"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !requested.isEmpty
+        {
+            return PetCatalog.resolveInitialPet(from: pets, environment: env)
+        }
+
+        if let savedId = settingsStore.activePetId,
+           let savedPet = pets.first(where: { $0.id.caseInsensitiveCompare(savedId) == .orderedSame })
+        {
+            return savedPet
+        }
+
+        return PetCatalog.resolveInitialPet(from: pets, environment: env)
+    }
+
+    private func applyScale(_ scale: Double) {
+        guard let panel else { return }
+        let oldFrame = panel.frame
+        let nextSize = scaledPanelSize(for: scale)
+        let nextOrigin = NSPoint(
+            x: round(oldFrame.midX - nextSize.width * 0.5),
+            y: oldFrame.minY
+        )
+        panel.setFrame(NSRect(origin: nextOrigin, size: nextSize), display: true)
+        canvasView?.frame = NSRect(origin: .zero, size: panel.contentLayoutRect.size)
+        canvasView?.needsDisplay = true
+        settingsStore.updatePanelOrigin(panel.frame.origin)
+        bubblePanel?.reposition()
+    }
+
+    private func applyAlwaysOnTop(_ enabled: Bool) {
+        panel?.setAlwaysOnTop(enabled)
+        bubblePanel?.setAlwaysOnTop(enabled)
+    }
+
+    private func syncBubblePanel() {
+        bubblePanel?.update(
+            bubble: settingsStore.activeBubble,
+            enabled: settingsStore.bubblesEnabled,
+            anchorVisible: panel?.isVisible ?? false
+        )
+    }
+
+    private func openSettingsWindow() {
+        settingsStore.refreshDetectedAgents()
+        if settingsWindow == nil {
+            let actions = PetdexSettingsActions(
+                onSelectPet: { [weak self] pet in
+                    self?.canvasView?.selectPet(pet)
+                },
+                onReloadPets: { [weak self] in
+                    self?.handleReloadPets()
+                },
+                onOpenPetsFolder: { [weak self] in
+                    self?.openPetsFolder()
+                },
+                onBrowsePetdex: {
+                    if let url = URL(string: "https://petdex.dev") {
+                        NSWorkspace.shared.open(url)
+                    }
+                },
+                onScaleChanged: { [weak self] scale in
+                    self?.applyScale(scale)
+                },
+                onAlwaysOnTopChanged: { [weak self] enabled in
+                    self?.applyAlwaysOnTop(enabled)
+                },
+                onBubblesEnabledChanged: { [weak self] _ in
+                    self?.syncBubblePanel()
+                },
+                onSelectState: { [weak self] state in
+                    self?.canvasView?.setState(state)
+                },
+                onSendTestBubble: { [weak self] in
+                    self?.sendTestBubble()
+                },
+                onRefreshAgents: { [weak self] in
+                    self?.settingsStore.refreshDetectedAgents()
+                }
+            )
+
+            let rootView = PetdexSettingsView(store: settingsStore, actions: actions)
+            let hostingController = NSHostingController(rootView: rootView)
+            let window = NSWindow(contentViewController: hostingController)
+            window.title = "Petdex Settings"
+            window.styleMask = [.titled, .closable, .miniaturizable]
+            window.setContentSize(NSSize(width: 520, height: 420))
+            window.isReleasedWhenClosed = false
+            window.center()
+            settingsWindow = window
+        }
+
+        NSApp.activate(ignoringOtherApps: true)
+        settingsWindow?.makeKeyAndOrderFront(nil)
+        settingsWindow?.orderFrontRegardless()
+    }
+
+    private func openPetsFolder() {
+        let petsDir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".petdex/pets", isDirectory: true)
+        try? FileManager.default.createDirectory(at: petsDir, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(petsDir)
+    }
+
+    private func sendTestBubble() {
+        if !settingsStore.bubblesEnabled {
+            settingsStore.bubblesEnabled = true
+        }
+        canvasView?.ingestStatus(
+            sessionId: "settings-test",
+            agent: UInt8(PETDEX_AGENT_CLAUDE_CODE.rawValue),
+            status: UInt8(PETDEX_STATUS_NEEDS_INPUT.rawValue),
+            summary: "Build passed. Ready for review!"
+        )
+        syncBubblePanel()
     }
 
     private func configureStatusItem(boundPort: UInt16) {
@@ -457,6 +689,10 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
         let toggleItem = NSMenuItem(title: "Toggle Pet Panel", action: #selector(handleTogglePanel), keyEquivalent: "p")
         toggleItem.target = self
         menu.addItem(toggleItem)
+
+        let settingsItem = NSMenuItem(title: "Settings...", action: #selector(handleOpenSettings), keyEquivalent: ",")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
 
         menu.addItem(.separator())
 
@@ -530,6 +766,10 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
         setStateItem.submenu = statesMenu
         menu.addItem(setStateItem)
 
+        let settingsItem = NSMenuItem(title: "Settings...", action: #selector(handleOpenSettings), keyEquivalent: ",")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+
         menu.addItem(.separator())
 
         let quitItem = NSMenuItem(title: "Quit Petdex", action: #selector(handleQuit), keyEquivalent: "")
@@ -552,6 +792,10 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    @objc private func handleOpenSettings() {
+        openSettingsWindow()
+    }
+
     @objc private func handleSelectPet(_ sender: NSMenuItem) {
         guard let pet = sender.representedObject as? InstalledPet else { return }
         canvasView?.selectPet(pet)
@@ -564,6 +808,7 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
     @objc private func handleReloadPets() {
         let previousId = canvasView?.activePet?.id
         installedPets = PetCatalog.discoverPets()
+        settingsStore.installedPets = installedPets
         if let previousId,
            let match = installedPets.first(where: { $0.id == previousId })
         {
@@ -590,6 +835,7 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
         } else {
             panel.orderFrontRegardless()
         }
+        syncBubblePanel()
     }
 
     @objc private func handleQuit() {

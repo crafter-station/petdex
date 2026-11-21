@@ -72,6 +72,12 @@ uint16_t petdex_engine_start_hook_server(
 );
 void petdex_engine_stop_hook_server(PetdexEngine *engine);
 PetdexFrame petdex_engine_tick_ms(PetdexEngine *engine, uint32_t dt_ms);
+size_t petdex_engine_active_bubble_json(
+    PetdexEngine *engine,
+    uint64_t now_ms,
+    uint8_t *out_buf,
+    size_t out_cap
+);
 
 #ifdef __cplusplus
 }
