@@ -17,6 +17,7 @@ import {
 import { useLocale, useTranslations } from "next-intl";
 
 import { formatLocalizedNumber } from "@/lib/format-number";
+import type { PendingEditView } from "@/lib/pet-edit-state";
 import { petStates } from "@/lib/pet-states";
 import type { PetWithMetrics } from "@/lib/pets";
 import { cn } from "@/lib/utils";
@@ -51,12 +52,7 @@ type Submission = {
   approvedAt: string | null;
   rejectedAt: string | null;
   rejectionReason: string | null;
-  pending: {
-    displayName: string | null;
-    description: string | null;
-    tags: string[] | null;
-    submittedAt: string;
-  } | null;
+  pending: PendingEditView | null;
   pendingRejectionReason: string | null;
   metrics: {
     installCount: number;

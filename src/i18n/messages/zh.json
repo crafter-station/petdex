@@ -990,6 +990,7 @@
       },
       "spritesheetLabel": "精灵图集 Spritesheet",
       "spritesheetHelp": "替换当前精灵图集 Spritesheet。需要人工审核。",
+      "pendingSpritesheet": "待审核的精灵图集 Spritesheet",
       "metaLabel": "元数据 pet.json",
       "metaHelp": "替换当前元数据。需要人工审核。",
       "fileTooBig": "文件超过 8 MB",

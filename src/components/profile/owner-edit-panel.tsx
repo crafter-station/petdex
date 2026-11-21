@@ -14,6 +14,7 @@ type Pending = {
   description: string | null;
   tags: string[] | null;
   submittedAt: string | null;
+  spritesheetUrl: string | null;
 };
 
 const TAG_RE = /^[a-z0-9][a-z0-9-]{0,30}$/;
@@ -551,6 +552,18 @@ export function OwnerEditPanel({
                     >
                       <X className="size-3.5" />
                     </button>
+                  </div>
+                ) : pending?.spritesheetUrl ? (
+                  <div className="mt-2 flex items-center gap-3">
+                    {/* biome-ignore lint/performance/noImgElement: full spritesheet atlas from R2, matches the local preview above */}
+                    <img
+                      src={pending.spritesheetUrl}
+                      alt={t("pendingSpritesheet")}
+                      className="h-16 w-16 rounded-lg border border-border-base object-contain"
+                    />
+                    <span className="text-[11px] text-muted-4">
+                      {t("pendingSpritesheet")}
+                    </span>
                   </div>
                 ) : null}
               </div>
