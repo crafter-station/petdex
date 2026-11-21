@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
   generateMiniMaxImage,
+  generateMiniMaxReferenceImageFromEnv,
   MiniMaxImageGenerationError,
   validateMiniMaxImageToImageRequest,
 } from "./minimax-image-generation";
@@ -97,5 +98,33 @@ describe("MiniMax image generation", () => {
           }),
       }),
     ).rejects.toThrow("Invalid request");
+  });
+
+  test("never decodes an image URL as base64", async () => {
+    const realFetch = globalThis.fetch;
+    const env = {
+      key: process.env.MINIMAX_API_KEY,
+      ref: process.env.MINIMAX_SUBJECT_REFERENCE_URL,
+    };
+    process.env.MINIMAX_API_KEY = "test-key";
+    process.env.MINIMAX_SUBJECT_REFERENCE_URL = "https://example.com/ref.png";
+    globalThis.fetch = (async () =>
+      Response.json({
+        data: { image_urls: ["https://example.com/generated.png"] },
+        metadata: { success_count: 1, failed_count: 0 },
+        base_resp: { status_code: 0 },
+      })) as unknown as typeof fetch;
+    try {
+      await expect(
+        generateMiniMaxReferenceImageFromEnv("prompt", "1:1"),
+      ).rejects.toThrow("no generated image data");
+    } finally {
+      globalThis.fetch = realFetch;
+      if (env.key === undefined) delete process.env.MINIMAX_API_KEY;
+      else process.env.MINIMAX_API_KEY = env.key;
+      if (env.ref === undefined)
+        delete process.env.MINIMAX_SUBJECT_REFERENCE_URL;
+      else process.env.MINIMAX_SUBJECT_REFERENCE_URL = env.ref;
+    }
   });
 });

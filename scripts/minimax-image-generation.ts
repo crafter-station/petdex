@@ -271,8 +271,7 @@ export async function generateMiniMaxReferenceImageFromEnv(
     n: 1,
     prompt_optimizer: false,
   });
-  const encoded =
-    response.data.image_base64?.[0] || response.data.image_urls?.[0];
+  const encoded = response.data.image_base64?.[0];
   if (!encoded) {
     throw new MiniMaxImageGenerationError(
       "MiniMax returned no generated image data",
