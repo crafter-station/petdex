@@ -30,7 +30,7 @@ final class PetdexFloatingPanel: NSPanel {
             backing: .buffered,
             defer: false
         )
-        level = .floating
+        level = .statusBar
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         isOpaque = false
         backgroundColor = .clear
@@ -58,6 +58,7 @@ final class PetdexSpriteCanvasView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
+        layerContentsRedrawPolicy = .onSetNeedsDisplay
         configureBackingLayer()
         engine = petdex_engine_new()
         if let engine {
@@ -80,16 +81,6 @@ final class PetdexSpriteCanvasView: NSView {
 
     override var isOpaque: Bool { false }
     override var mouseDownCanMoveWindow: Bool { true }
-
-    override func makeBackingLayer() -> CALayer {
-        let layer = CALayer()
-        layer.isOpaque = false
-        layer.backgroundColor = NSColor.clear.cgColor
-        layer.magnificationFilter = .nearest
-        layer.minificationFilter = .nearest
-        layer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2.0
-        return layer
-    }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -367,7 +358,13 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
     private var installedPets: [InstalledPet] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let frame = NSRect(x: 120, y: 120, width: 160, height: 160)
+        let panelSize = NSSize(width: 220, height: 238)
+        let screenFrame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let origin = NSPoint(
+            x: screenFrame.maxX - panelSize.width - 48,
+            y: screenFrame.minY + 48
+        )
+        let frame = NSRect(origin: origin, size: panelSize)
         let panel = PetdexFloatingPanel(contentRect: frame)
         let canvas = PetdexSpriteCanvasView(frame: NSRect(origin: .zero, size: frame.size))
         canvas.contextMenuProvider = { [weak self] in
