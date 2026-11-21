@@ -56,7 +56,7 @@ index 80dd7d8..4f1753a 100644
                  // See the web-layer branch above: the floating flag
                  // reaches the window manager through Xlib, so X11 has to
 diff --git a/src/platform/linux/gtk_host.c b/src/platform/linux/gtk_host.c
-index 45eac2a..7311cfd 100644
+index 45eac2a..504a144 100644
 --- a/src/platform/linux/gtk_host.c
 +++ b/src/platform/linux/gtk_host.c
 @@ -75,6 +75,20 @@ typedef struct native_sdk_absent_content_manager WebKitUserContentManager;
@@ -88,7 +88,7 @@ index 45eac2a..7311cfd 100644
  
  #define NATIVE_SDK_MAX_WINDOWS 16
  #define NATIVE_SDK_MAX_WEBVIEWS 16
-@@ -364,6 +379,26 @@ typedef struct native_sdk_gtk_window {
+@@ -364,6 +379,30 @@ typedef struct native_sdk_gtk_window {
      int last_press_button;
      double last_press_x;
      double last_press_y;
@@ -112,10 +112,14 @@ index 45eac2a..7311cfd 100644
 +    double layer_drag_dx, layer_drag_dy;
 +    /* Weak: the clock whose after-paint advances the applied origin. */
 +    GdkFrameClock *layer_clock;
++    /* Weak: the output the compositor mapped an unpinned surface on,
++     * resolved once so a surface overhanging an edge mid-drag is not
++     * reassigned to the neighbor it overlaps. */
++    GdkMonitor *layer_output;
      native_sdk_gtk_webview_t webviews[NATIVE_SDK_MAX_WEBVIEWS];
      int webview_count;
      native_sdk_gtk_native_view_t native_views[NATIVE_SDK_MAX_NATIVE_VIEWS];
-@@ -975,6 +1010,25 @@ static double native_sdk_gpu_surface_height(native_sdk_gtk_native_view_t *view)
+@@ -975,6 +1014,25 @@ static double native_sdk_gpu_surface_height(native_sdk_gtk_native_view_t *view)
      return 0;
  }
  
@@ -141,7 +145,7 @@ index 45eac2a..7311cfd 100644
  /* Emit a gpu_surface_resize when the widget's logical size or device scale
   * differ from the last emitted values. Returns 1 when an event was sent. */
  static int native_sdk_gpu_surface_sync_geometry(native_sdk_gtk_native_view_t *view, double width, double height, double scale) {
-@@ -1010,7 +1064,7 @@ static void native_sdk_gpu_surface_scale_changed(GObject *object, GParamSpec *ps
+@@ -1010,7 +1068,7 @@ static void native_sdk_gpu_surface_scale_changed(GObject *object, GParamSpec *ps
      const double width = native_sdk_gpu_surface_width(view);
      const double height = native_sdk_gpu_surface_height(view);
      if (width <= 0 || height <= 0) return;
@@ -150,7 +154,7 @@ index 45eac2a..7311cfd 100644
      if (native_sdk_gpu_surface_sync_geometry(view, width, height, scale)) {
          gtk_widget_queue_draw(view->widget);
      }
-@@ -1050,7 +1104,7 @@ static void native_sdk_gpu_surface_emit_frame(native_sdk_gtk_native_view_t *view
+@@ -1050,7 +1108,7 @@ static void native_sdk_gpu_surface_emit_frame(native_sdk_gtk_native_view_t *view
  
      const double width = native_sdk_gpu_surface_width(view);
      const double height = native_sdk_gpu_surface_height(view);
@@ -159,7 +163,7 @@ index 45eac2a..7311cfd 100644
      if (width <= 0 || height <= 0) return;
  
      (void)native_sdk_gpu_surface_sync_geometry(view, width, height, scale);
-@@ -1160,7 +1214,7 @@ static void native_sdk_gpu_surface_resized(GtkDrawingArea *area, int width, int
+@@ -1160,7 +1218,7 @@ static void native_sdk_gpu_surface_resized(GtkDrawingArea *area, int width, int
      const double logical_width = native_sdk_gpu_surface_width(view);
      const double logical_height = native_sdk_gpu_surface_height(view);
      if (logical_width <= 0 || logical_height <= 0) return;
@@ -168,7 +172,7 @@ index 45eac2a..7311cfd 100644
      if (native_sdk_gpu_surface_sync_geometry(view, logical_width, logical_height, scale)) {
          gtk_widget_queue_draw(view->widget);
      }
-@@ -1185,8 +1239,15 @@ static void native_sdk_gpu_surface_draw(GtkDrawingArea *area, cairo_t *cr, int w
+@@ -1185,8 +1243,15 @@ static void native_sdk_gpu_surface_draw(GtkDrawingArea *area, cairo_t *cr, int w
          const double device_scale_x = (double)view->gpu_buf_width / (double)width;
          const double device_scale_y = (double)view->gpu_buf_height / (double)height;
          cairo_surface_set_device_scale(surface, device_scale_x, device_scale_y);
@@ -186,7 +190,7 @@ index 45eac2a..7311cfd 100644
          cairo_set_source_surface(cr, surface, 0, 0);
          cairo_pattern_set_filter(cairo_get_source(cr), exact ? CAIRO_FILTER_NEAREST : CAIRO_FILTER_BILINEAR);
      } else {
-@@ -1198,12 +1259,355 @@ static void native_sdk_gpu_surface_draw(GtkDrawingArea *area, cairo_t *cr, int w
+@@ -1198,12 +1263,377 @@ static void native_sdk_gpu_surface_draw(GtkDrawingArea *area, cairo_t *cr, int w
      cairo_surface_destroy(surface);
  }
  
@@ -207,11 +211,17 @@ index 45eac2a..7311cfd 100644
 +    /* An unplugged output stays set but invalid; the compositor has
 +     * moved the surface elsewhere. */
 +    if (monitor && gdk_monitor_is_valid(monitor)) return monitor;
++    if (win->layer_output && gdk_monitor_is_valid(win->layer_output)) return win->layer_output;
 +    GdkDisplay *display = gtk_widget_get_display(GTK_WIDGET(win->gtk_window));
 +    GdkSurface *surface = gtk_native_get_surface(GTK_NATIVE(win->gtk_window));
 +    if (surface && gtk_widget_get_mapped(GTK_WIDGET(win->gtk_window))) {
 +        monitor = gdk_display_get_monitor_at_surface(display, surface);
-+        if (monitor) return monitor;
++        if (monitor) {
++            if (win->layer_output) g_object_remove_weak_pointer(G_OBJECT(win->layer_output), (gpointer *)&win->layer_output);
++            win->layer_output = monitor;
++            g_object_add_weak_pointer(G_OBJECT(monitor), (gpointer *)&win->layer_output);
++            return monitor;
++        }
 +    }
 +    monitor = g_list_model_get_item(gdk_display_get_monitors(display), 0);
 +    if (monitor) g_object_unref(monitor);
@@ -434,10 +444,18 @@ index 45eac2a..7311cfd 100644
 +    void (*relative_motion)(void *, struct wl_proxy *, uint32_t, uint32_t, wl_fixed_t, wl_fixed_t, wl_fixed_t, wl_fixed_t);
 +} native_sdk_relative_pointer_listener = { native_sdk_relative_motion };
 +
-+/* One relative pointer for the seat's pointer, created on the first drag
-+ * and kept: it only reports while this client has pointer focus. */
++static void native_sdk_relative_release(void) {
++    if (!native_sdk_relative_pointer) return;
++    wl_proxy_marshal_flags(native_sdk_relative_pointer, 0, NULL,
++        wl_proxy_get_version(native_sdk_relative_pointer), WL_MARSHAL_FLAG_DESTROY);
++    native_sdk_relative_pointer = NULL;
++}
++
++/* One relative pointer per drag, bound to the pointer that pressed: a
++ * reconnected mouse is a new wl_pointer, and one bound to the old one
++ * stops reporting. */
 +static int native_sdk_relative_ready(native_sdk_gtk_window_t *win) {
-+    if (native_sdk_relative_pointer) return 1;
++    native_sdk_relative_release();
 +    if (!native_sdk_relative_manager) return 0;
 +    GdkDevice *device = win->last_press_device;
 +    if (!device || !GDK_IS_WAYLAND_DEVICE(device)) return 0;
@@ -480,6 +498,7 @@ index 45eac2a..7311cfd 100644
 +
 +static void native_sdk_layer_drag_end(native_sdk_gtk_window_t *win) {
 +    win->layer_dragging = 0;
++    native_sdk_relative_release();
 +    double dx = 0, dy = 0;
 +    if (native_sdk_relative_drag_window == win) {
 +        /* Mid-drag the surface stops at its output's edge (a remap would
@@ -495,7 +514,14 @@ index 45eac2a..7311cfd 100644
 +/* The window's slot is about to be zeroed or freed: nothing static or
 + * signal-borne may keep pointing at it. */
 +static void native_sdk_layer_forget(native_sdk_gtk_window_t *win) {
-+    if (native_sdk_relative_drag_window == win) native_sdk_relative_drag_window = NULL;
++    if (native_sdk_relative_drag_window == win) {
++        native_sdk_relative_drag_window = NULL;
++        native_sdk_relative_release();
++    }
++    if (win->layer_output) {
++        g_object_remove_weak_pointer(G_OBJECT(win->layer_output), (gpointer *)&win->layer_output);
++        win->layer_output = NULL;
++    }
 +    if (win->layer_clock) {
 +        g_signal_handlers_disconnect_by_data(win->layer_clock, win);
 +        g_object_remove_weak_pointer(G_OBJECT(win->layer_clock), (gpointer *)&win->layer_clock);
@@ -542,7 +568,7 @@ index 45eac2a..7311cfd 100644
      if (!win->last_press_device || win->last_press_time == 0) return;
      GdkSurface *surface = gtk_native_get_surface(GTK_NATIVE(win->gtk_window));
      if (!surface || !GDK_IS_TOPLEVEL(surface)) return;
-@@ -1312,6 +1716,11 @@ static void native_sdk_gpu_pointer_released(GtkGestureClick *gesture, int n_pres
+@@ -1312,6 +1742,11 @@ static void native_sdk_gpu_pointer_released(GtkGestureClick *gesture, int n_pres
      (void)n_press;
      native_sdk_gtk_native_view_t *view = data;
      if (!view) return;
@@ -554,7 +580,7 @@ index 45eac2a..7311cfd 100644
      view->gpu_pointer_down = 0;
      view->gpu_pointer_x = x;
      view->gpu_pointer_y = y;
-@@ -1335,6 +1744,15 @@ static void native_sdk_gpu_pointer_released(GtkGestureClick *gesture, int n_pres
+@@ -1335,6 +1770,15 @@ static void native_sdk_gpu_pointer_released(GtkGestureClick *gesture, int n_pres
  static void native_sdk_gpu_pointer_motion(GtkEventControllerMotion *controller, double x, double y, gpointer data) {
      native_sdk_gtk_native_view_t *view = data;
      if (!view) return;
@@ -570,7 +596,7 @@ index 45eac2a..7311cfd 100644
      if (view->gpu_native_drag_pending) {
          const double dx = x - view->gpu_native_drag_press_x;
          const double dy = y - view->gpu_native_drag_press_y;
-@@ -1343,6 +1761,9 @@ static void native_sdk_gpu_pointer_motion(GtkEventControllerMotion *controller,
+@@ -1343,6 +1787,9 @@ static void native_sdk_gpu_pointer_motion(GtkEventControllerMotion *controller,
              view->gpu_native_drag_active = 1;
              native_sdk_emit_window_drag_command(view, 1, dx > 0 ? 1 : dx < 0 ? -1 : 0);
              native_sdk_window_begin_interactive_move(view->window);
@@ -580,7 +606,7 @@ index 45eac2a..7311cfd 100644
          }
          return;
      }
-@@ -1756,6 +2177,9 @@ static void native_sdk_clear_window(native_sdk_gtk_window_t *win) {
+@@ -1756,6 +2203,9 @@ static void native_sdk_clear_window(native_sdk_gtk_window_t *win) {
      }
      free(win->label);
      free(win->title);
@@ -590,7 +616,7 @@ index 45eac2a..7311cfd 100644
      memset(win, 0, sizeof(*win));
  }
  
-@@ -3221,6 +3645,13 @@ static void native_sdk_window_apply_flags(native_sdk_gtk_window_t *win, int wind
+@@ -3221,6 +3671,13 @@ static void native_sdk_window_apply_flags(native_sdk_gtk_window_t *win, int wind
      GtkWidget *widget = GTK_WIDGET(win->gtk_window);
  
      if (window_flags & NATIVE_SDK_WINDOW_FLAG_FLOATING) {
@@ -604,7 +630,7 @@ index 45eac2a..7311cfd 100644
  #if NATIVE_SDK_HAS_X11
          g_signal_connect(widget, "realize", G_CALLBACK(native_sdk_window_apply_x11_above), NULL);
  #endif
-@@ -4294,6 +4725,38 @@ int native_sdk_gtk_start_window_drag(native_sdk_gtk_host_t *host, uint64_t windo
+@@ -4294,6 +4751,38 @@ int native_sdk_gtk_start_window_drag(native_sdk_gtk_host_t *host, uint64_t windo
      return 1;
  }
  
