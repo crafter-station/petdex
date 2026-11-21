@@ -107,8 +107,8 @@ jobs:
             Start-Sleep -Milliseconds 500
             $state = Invoke-RestMethod -Uri "http://127.0.0.1:7777/state" -TimeoutSec 2
             Write-Host "GET /state -> $($state | ConvertTo-Json -Compress)"
-            if ($state.state -ne "waiting") {
-              throw "Expected state=waiting after needs_input bubble, got $($state.state)"
+            if ($state.pet_state -ne "waiting") {
+              throw "Expected pet_state=waiting after needs_input bubble, got $($state.pet_state)"
             }
 
             if ($proc.HasExited) {
