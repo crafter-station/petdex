@@ -19,17 +19,57 @@ private struct BubbleTailShape: Shape {
     }
 }
 
+private enum AgentLogoLoader {
+    private static var cache: [String: NSImage] = [:]
+
+    static func image(for agent: String) -> NSImage? {
+        let key = normalizedResourceName(for: agent)
+        if let cached = cache[key] {
+            return cached
+        }
+        if let url = Bundle.module.url(forResource: key, withExtension: "png", subdirectory: "agents"),
+           let img = NSImage(contentsOf: url)
+        {
+            cache[key] = img
+            return img
+        }
+        if let fallbackUrl = Bundle.module.url(forResource: "fallback", withExtension: "png", subdirectory: "agents"),
+           let img = NSImage(contentsOf: fallbackUrl)
+        {
+            cache[key] = img
+            return img
+        }
+        return nil
+    }
+
+    private static func normalizedResourceName(for agent: String) -> String {
+        switch agent.lowercased() {
+        case "claude-code", "claude_code": return "claude-code"
+        case "codex": return "codex"
+        case "gemini", "gemini-cli": return "gemini"
+        case "opencode": return "opencode-light"
+        case "qoder": return "qoder"
+        case "kimi-code", "kimi_code": return "kimi-code"
+        case "codebuddy": return "codebuddy"
+        case "omp": return "omp"
+        case "hermes": return "hermes"
+        case "herdr": return "herdr"
+        default: return "fallback"
+        }
+    }
+}
+
 private struct PetdexBubbleCardView: View {
     let bubble: ActiveBubble
     let onDismiss: () -> Void
 
-    private let cobaltTop = Color(red: 0.345, green: 0.463, blue: 1.0)
-    private let cobaltMid = Color(red: 0.231, green: 0.349, blue: 0.949)
-    private let cobaltBottom = Color(red: 0.137, green: 0.220, blue: 0.675)
-    private let lipNavy = Color(red: 0.075, green: 0.125, blue: 0.420)
-    private let deepShadow = Color(red: 0.043, green: 0.075, blue: 0.227)
-    private let voltYellow = Color(red: 1.0, green: 0.886, blue: 0.349)
-    private let navyInk = Color(red: 0.063, green: 0.098, blue: 0.267)
+    private let whiteTop = Color.white
+    private let pearlBottom = Color(red: 0.961, green: 0.973, blue: 1.0)
+    private let lipTint = Color(red: 0.835, green: 0.867, blue: 0.961)
+    private let cobaltRim = Color(red: 0.231, green: 0.349, blue: 0.949)
+    private let navyInk = Color(red: 0.082, green: 0.118, blue: 0.278)
+    private let navyMuted = Color(red: 0.329, green: 0.388, blue: 0.569)
+    private let voltYellow = Color(red: 1.0, green: 0.898, blue: 0.420)
 
     private var isNeedsInput: Bool {
         bubble.status.lowercased() == "needs_input"
@@ -38,47 +78,53 @@ private struct PetdexBubbleCardView: View {
     var body: some View {
         VStack(spacing: 0) {
             ZStack {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(lipNavy)
-                    .offset(y: 4)
-                    .shadow(color: deepShadow.opacity(0.38), radius: 10, x: 0, y: 7)
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(lipTint)
+                    .offset(y: 2)
+                    .shadow(color: navyInk.opacity(0.14), radius: 6, x: 0, y: 3)
 
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 6) {
+                        if let logo = AgentLogoLoader.image(for: bubble.agent) {
+                            Image(nsImage: logo)
+                                .resizable()
+                                .interpolation(.high)
+                                .aspectRatio(contentMode: .fit)
+                                .frame(width: 15, height: 15)
+                                .clipShape(RoundedRectangle(cornerRadius: 3.5, style: .continuous))
+                        } else {
+                            Circle()
+                                .fill(bubble.statusColor)
+                                .frame(width: 8, height: 8)
+                        }
+
+                        Text(bubble.agentDisplayName)
+                            .font(.system(size: 10.5, weight: .bold, design: .rounded))
+                            .foregroundColor(navyInk)
+
                         Circle()
                             .fill(bubble.statusColor)
-                            .frame(width: 8, height: 8)
-                            .overlay(
-                                Circle()
-                                    .stroke(Color.white.opacity(0.65), lineWidth: 1)
-                            )
-                            .shadow(color: bubble.statusColor.opacity(0.75), radius: 3, x: 0, y: 0)
+                            .frame(width: 6.5, height: 6.5)
 
-                        Text(bubble.agentDisplayName.uppercased())
-                            .font(.system(size: 9.5, weight: .bold, design: .monospaced))
-                            .tracking(0.6)
-                            .foregroundColor(isNeedsInput ? navyInk : Color.white)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 2.5)
-                            .background(
-                                Capsule()
-                                    .fill(isNeedsInput ? voltYellow : Color.white.opacity(0.18))
-                            )
+                        if isNeedsInput {
+                            Text("INPUT")
+                                .font(.system(size: 8.5, weight: .bold, design: .monospaced))
+                                .foregroundColor(navyInk)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1.5)
+                                .background(Capsule().fill(voltYellow))
+                        }
 
                         Spacer(minLength: 4)
 
                         Button(action: onDismiss) {
                             Image(systemName: "xmark")
-                                .font(.system(size: 8.5, weight: .heavy))
-                                .foregroundColor(Color.white.opacity(0.88))
-                                .frame(width: 19, height: 19)
+                                .font(.system(size: 8.5, weight: .bold))
+                                .foregroundColor(navyMuted)
+                                .frame(width: 18, height: 18)
                                 .background(
                                     Circle()
-                                        .fill(Color.white.opacity(0.16))
-                                        .overlay(
-                                            Circle()
-                                                .stroke(Color.white.opacity(0.24), lineWidth: 0.8)
-                                        )
+                                        .fill(cobaltRim.opacity(0.08))
                                 )
                         }
                         .buttonStyle(.plain)
@@ -86,52 +132,36 @@ private struct PetdexBubbleCardView: View {
                     }
 
                     Text(bubble.summary.isEmpty ? bubble.statusDisplayName : bubble.summary)
-                        .font(.system(size: 12.5, weight: .semibold, design: .rounded))
-                        .foregroundColor(.white)
-                        .shadow(color: deepShadow.opacity(0.35), radius: 1, x: 0, y: 1)
+                        .font(.system(size: 12.5, weight: .medium, design: .rounded))
+                        .foregroundColor(navyInk)
                         .lineLimit(3)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
+                .padding(.horizontal, 13)
+                .padding(.vertical, 9.5)
                 .frame(minWidth: 204, maxWidth: 276, alignment: .leading)
                 .background(
                     ZStack {
-                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
                             .fill(
                                 LinearGradient(
-                                    colors: [cobaltTop, cobaltMid, cobaltBottom],
+                                    colors: [whiteTop, pearlBottom],
                                     startPoint: .top,
                                     endPoint: .bottom
                                 )
                             )
 
-                        RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .fill(
-                                RadialGradient(
-                                    colors: [
-                                        Color.white.opacity(0.30),
-                                        Color.white.opacity(0.06),
-                                        Color.clear,
-                                    ],
-                                    center: UnitPoint(x: 0.5, y: 0.0),
-                                    startRadius: 4,
-                                    endRadius: 96
-                                )
-                            )
-
-                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
                             .strokeBorder(
                                 LinearGradient(
                                     colors: [
-                                        Color.white.opacity(0.62),
-                                        Color.white.opacity(0.16),
-                                        lipNavy.opacity(0.55),
+                                        Color.white.opacity(0.95),
+                                        cobaltRim.opacity(0.18),
                                     ],
                                     startPoint: .top,
                                     endPoint: .bottom
                                 ),
-                                lineWidth: 1.4
+                                lineWidth: 1.2
                             )
                     }
                 )
@@ -139,19 +169,19 @@ private struct PetdexBubbleCardView: View {
 
             ZStack {
                 BubbleTailShape()
-                    .fill(lipNavy)
-                    .frame(width: 16, height: 9)
-                    .offset(y: 3)
+                    .fill(lipTint)
+                    .frame(width: 14, height: 7)
+                    .offset(y: 1.5)
 
                 BubbleTailShape()
-                    .fill(cobaltBottom)
-                    .frame(width: 16, height: 9)
+                    .fill(pearlBottom)
+                    .frame(width: 14, height: 7)
             }
             .offset(y: -1)
         }
         .padding(.horizontal, 10)
-        .padding(.top, 8)
-        .padding(.bottom, 12)
+        .padding(.top, 6)
+        .padding(.bottom, 10)
     }
 }
 
@@ -192,14 +222,6 @@ final class PetdexBubblePanel: NSPanel {
         detachAnchorObservers()
         anchorWindow = window
 
-        moveObserver = NotificationCenter.default.addObserver(
-            forName: NSWindow.didMoveNotification,
-            object: window,
-            queue: .main
-        ) { [weak self] _ in
-            self?.reposition()
-        }
-
         resizeObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didResizeNotification,
             object: window,
@@ -214,11 +236,19 @@ final class PetdexBubblePanel: NSPanel {
     }
 
     func update(bubble: ActiveBubble?, enabled: Bool, anchorVisible: Bool) {
+        let unchanged = (bubble == currentBubble) && (enabled == bubblesEnabled)
         currentBubble = bubble
         bubblesEnabled = enabled
 
         guard enabled, anchorVisible, let bubble else {
+            if let anchorWindow {
+                anchorWindow.removeChildWindow(self)
+            }
             orderOut(nil)
+            return
+        }
+
+        if unchanged && isVisible {
             return
         }
 
@@ -245,6 +275,9 @@ final class PetdexBubblePanel: NSPanel {
         )
         setContentSize(size)
         reposition()
+        if let anchorWindow, parent !== anchorWindow {
+            anchorWindow.addChildWindow(self, ordered: .above)
+        }
         orderFrontRegardless()
     }
 

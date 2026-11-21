@@ -31,6 +31,9 @@ let package = Package(
             name: "PetdexMacOS",
             dependencies: ["CPetdexCore"],
             path: "Sources/PetdexMacOS",
+            resources: [
+                .copy("Resources/agents"),
+            ],
             swiftSettings: [
                 .unsafeFlags(["-Xcc", "-I\(coreIncludeDir)"]),
             ],
