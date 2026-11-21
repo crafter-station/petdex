@@ -15,6 +15,12 @@ struct PetdexSettingsActions {
     let onSendTestBubble: () -> Void
     let onSendTestTwoSessions: () -> Void
     let onRefreshAgents: () -> Void
+    var onShufflePet: () -> Void = {}
+    var onHideDockChanged: (Bool) -> Void = { _ in }
+    var onFocusModeChanged: (Bool) -> Void = { _ in }
+    var onBubbleStyleChanged: () -> Void = {}
+    var onCheckUpdates: () -> Void = {}
+    var onOpenRemoteConfig: () -> Void = {}
 }
 
 private enum PetsSubtab: String, CaseIterable, Identifiable {
@@ -648,6 +654,53 @@ struct PetdexSettingsView: View {
                 store.hideCrafterAnnouncements = newValue
             }
         )
+        let waitingSoundBinding = Binding<Bool>(
+            get: { store.waitingSoundEnabled },
+            set: { newValue in
+                store.waitingSoundEnabled = newValue
+            }
+        )
+        let focusModeBinding = Binding<Bool>(
+            get: { store.focusMode },
+            set: { newValue in
+                store.focusMode = newValue
+                actions.onFocusModeChanged(newValue)
+            }
+        )
+        let rotatePetsBinding = Binding<Bool>(
+            get: { store.rotatePets },
+            set: { newValue in
+                store.rotatePets = newValue
+            }
+        )
+        let hideDockIconBinding = Binding<Bool>(
+            get: { store.hideDockIcon },
+            set: { newValue in
+                store.hideDockIcon = newValue
+                actions.onHideDockChanged(newValue)
+            }
+        )
+        let bubbleTextSizeBinding = Binding<Double>(
+            get: { store.bubbleTextSize },
+            set: { newValue in
+                store.bubbleTextSize = newValue
+                actions.onBubbleStyleChanged()
+            }
+        )
+        let bubbleMaxLinesBinding = Binding<Int>(
+            get: { store.bubbleMaxLines },
+            set: { newValue in
+                store.bubbleMaxLines = newValue
+                actions.onBubbleStyleChanged()
+            }
+        )
+        let bubbleLifetimeBinding = Binding<Double>(
+            get: { store.bubbleLifetimeSec },
+            set: { newValue in
+                store.bubbleLifetimeSec = newValue
+                actions.onBubbleStyleChanged()
+            }
+        )
         let stateBinding = Binding<UInt8>(
             get: { store.currentState },
             set: { newValue in
@@ -676,8 +729,18 @@ struct PetdexSettingsView: View {
                         }
 
                         Toggle("Always on top", isOn: alwaysOnTopBinding)
-                        Toggle("Speech bubbles", isOn: bubblesBinding)
-                        Toggle("Stack all active sessions", isOn: showAllSessionsBinding)
+                        Toggle("Hide Dock icon", isOn: hideDockIconBinding)
+                        Toggle("Waiting sound on needs_input", isOn: waitingSoundBinding)
+                        Toggle("Focus mode (silence bubbles)", isOn: focusModeBinding)
+
+                        HStack {
+                            Toggle("Rotate pets automatically", isOn: rotatePetsBinding)
+                            Spacer()
+                            Button("Shuffle Pet") {
+                                actions.onShufflePet()
+                            }
+                            .controlSize(.small)
+                        }
 
                         VStack(alignment: .leading, spacing: 4) {
                             Toggle("Launch at login", isOn: launchAtLoginBinding)
@@ -687,6 +750,60 @@ struct PetdexSettingsView: View {
                                     .foregroundColor(.secondary)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
+                        }
+                    }
+                    .padding(8)
+                }
+
+                GroupBox("Bubbles") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Toggle("Speech bubbles", isOn: bubblesBinding)
+                        Toggle("Stack all active sessions", isOn: showAllSessionsBinding)
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text("Text size")
+                                    .font(.system(size: 13, weight: .medium))
+                                Spacer()
+                                Text(String(format: "%.1fpt", store.bubbleTextSize))
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .foregroundColor(.secondary)
+                            }
+                            Slider(
+                                value: bubbleTextSizeBinding,
+                                in: PetdexSettingsStore.minBubbleTextSize...PetdexSettingsStore.maxBubbleTextSize,
+                                step: 0.2
+                            )
+                        }
+
+                        HStack {
+                            Text("Max lines")
+                                .font(.system(size: 13, weight: .medium))
+                            Spacer()
+                            Stepper(
+                                value: bubbleMaxLinesBinding,
+                                in: PetdexSettingsStore.minBubbleMaxLines...PetdexSettingsStore.maxBubbleMaxLines
+                            ) {
+                                Text("\(store.bubbleMaxLines)")
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text("Auto-hide")
+                                    .font(.system(size: 13, weight: .medium))
+                                Spacer()
+                                Text("\(Int(store.bubbleLifetimeSec.rounded()))s")
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .foregroundColor(.secondary)
+                            }
+                            Slider(
+                                value: bubbleLifetimeBinding,
+                                in: PetdexSettingsStore.minBubbleLifetimeSec...PetdexSettingsStore.maxBubbleLifetimeSec,
+                                step: 1.0
+                            )
                         }
                     }
                     .padding(8)
@@ -794,43 +911,56 @@ struct PetdexSettingsView: View {
     }
 
     private var agentsTab: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            GroupBox {
-                HStack(spacing: 10) {
-                    Circle()
-                        .fill(store.hookServerPort > 0 ? Color.green : Color.red)
-                        .frame(width: 9, height: 9)
+        let autoCheckUpdatesBinding = Binding<Bool>(
+            get: { store.autoCheckUpdates },
+            set: { newValue in
+                store.autoCheckUpdates = newValue
+            }
+        )
+        let apiTokenBinding = Binding<String>(
+            get: { store.apiToken },
+            set: { newValue in
+                store.apiToken = newValue
+            }
+        )
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(store.hookServerPort > 0 ? "Hook Server Running" : "Hook Server Offline")
-                            .font(.system(size: 12, weight: .semibold))
-                        Text(store.hookServerPort > 0 ? "http://127.0.0.1:\(store.hookServerPort)/bubble" : "Not listening")
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(.secondary)
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                GroupBox {
+                    HStack(spacing: 10) {
+                        Circle()
+                            .fill(store.hookServerPort > 0 ? Color.green : Color.red)
+                            .frame(width: 9, height: 9)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(store.hookServerPort > 0 ? "Hook Server Running" : "Hook Server Offline")
+                                .font(.system(size: 12, weight: .semibold))
+                            Text(store.hookServerPort > 0 ? "http://127.0.0.1:\(store.hookServerPort)/bubble" : "Not listening")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(.secondary)
+                        }
+
+                        Spacer()
+
+                        Button(copiedCurl ? "Copied!" : "Copy curl test") {
+                            copyCurlTestCommand()
+                        }
+                        .disabled(store.hookServerPort == 0)
                     }
+                    .padding(6)
+                }
 
+                HStack {
+                    Text("Detected Coding Agents (\(store.detectedAgents.filter(\.installed).count)/\(store.detectedAgents.count))")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.secondary)
                     Spacer()
-
-                    Button(copiedCurl ? "Copied!" : "Copy curl test") {
-                        copyCurlTestCommand()
+                    Button("Rescan") {
+                        actions.onRefreshAgents()
                     }
-                    .disabled(store.hookServerPort == 0)
+                    .controlSize(.small)
                 }
-                .padding(6)
-            }
 
-            HStack {
-                Text("Detected Coding Agents (\(store.detectedAgents.filter(\.installed).count)/\(store.detectedAgents.count))")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.secondary)
-                Spacer()
-                Button("Rescan") {
-                    actions.onRefreshAgents()
-                }
-                .controlSize(.small)
-            }
-
-            ScrollView {
                 VStack(spacing: 6) {
                     ForEach(store.detectedAgents) { agent in
                         HStack(spacing: 10) {
@@ -869,8 +999,79 @@ struct PetdexSettingsView: View {
                         )
                     }
                 }
-                .padding(1)
+
+                GroupBox("Remote SSH Hosts") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if store.remoteHosts.isEmpty {
+                            Text("No remotes configured in ~/.petdex/remote-agents.json")
+                                .font(.system(size: 11.5))
+                                .foregroundColor(.secondary)
+                        } else {
+                            VStack(alignment: .leading, spacing: 6) {
+                                ForEach(store.remoteHosts, id: \.self) { host in
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "network")
+                                            .font(.system(size: 11))
+                                            .foregroundColor(.secondary)
+                                        Text(host)
+                                            .font(.system(size: 11.5, design: .monospaced))
+                                            .foregroundColor(.primary)
+                                            .lineLimit(2)
+                                        Spacer()
+                                    }
+                                }
+                            }
+                        }
+
+                        HStack {
+                            Spacer()
+                            Button("Open Config") {
+                                actions.onOpenRemoteConfig()
+                            }
+                            .controlSize(.small)
+                        }
+                    }
+                    .padding(8)
+                }
+
+                GroupBox("Updates & Account") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Toggle("Auto-check updates", isOn: autoCheckUpdatesBinding)
+
+                        HStack(spacing: 8) {
+                            Button("Check Now") {
+                                actions.onCheckUpdates()
+                            }
+                            .controlSize(.small)
+
+                            Text(store.updateStatusText)
+                                .font(.system(size: 11.5))
+                                .foregroundColor(.secondary)
+                                .lineLimit(2)
+
+                            Spacer()
+
+                            if let downloadURL = store.updateDownloadURL {
+                                Button("Download Update") {
+                                    NSWorkspace.shared.open(downloadURL)
+                                }
+                                .buttonStyle(.link)
+                                .controlSize(.small)
+                            }
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("petdex.dev Library Token (optional)")
+                                .font(.system(size: 12, weight: .medium))
+                            SecureField("Paste API token...", text: apiTokenBinding)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(size: 12))
+                        }
+                    }
+                    .padding(8)
+                }
             }
+            .padding(1)
         }
     }
 

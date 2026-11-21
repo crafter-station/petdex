@@ -36,7 +36,7 @@ final class PetdexFloatingPanel: NSPanel {
         isOpaque = false
         backgroundColor = .clear
         hasShadow = false
-        isMovableByWindowBackground = true
+        isMovableByWindowBackground = false
         hidesOnDeactivate = false
         ignoresMouseEvents = false
     }
@@ -53,6 +53,9 @@ final class PetdexSpriteCanvasView: NSView {
     private var engine: OpaquePointer?
     private var tickTimer: Timer?
     private var spriteAtlas: PetSpriteAtlas?
+    private let physics = PetdexPhysicsController()
+    private var dragPointerOffset: NSPoint?
+    private var preDragState: UInt8?
     private var lastFrame = PetdexFrame(state: 0, row: 0, col: 0, frame_index: 0, frame_dur_ms: 0)
     private var bubblePollAccumulatorMs: UInt32 = 0
     private var lastBubbles: [ActiveBubble] = []
@@ -62,6 +65,7 @@ final class PetdexSpriteCanvasView: NSView {
     var onStateChanged: ((UInt8) -> Void)?
     var onPetChanged: ((InstalledPet?) -> Void)?
     var onBubblesChanged: (([ActiveBubble]) -> Void)?
+    var onPhysicsSettled: ((NSPoint) -> Void)?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -88,7 +92,45 @@ final class PetdexSpriteCanvasView: NSView {
     }
 
     override var isOpaque: Bool { false }
-    override var mouseDownCanMoveWindow: Bool { true }
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    override func mouseDown(with event: NSEvent) {
+        if event.modifierFlags.contains(.control) {
+            super.mouseDown(with: event)
+            return
+        }
+        guard let window else { return }
+        let pointerScreen = NSEvent.mouseLocation
+        let origin = window.frame.origin
+        dragPointerOffset = NSPoint(x: pointerScreen.x - origin.x, y: pointerScreen.y - origin.y)
+        if preDragState == nil {
+            preDragState = lastFrame.state
+        }
+        physics.beginDrag(at: origin)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let window, let offset = dragPointerOffset else { return }
+        let pointerScreen = NSEvent.mouseLocation
+        let newOrigin = NSPoint(x: pointerScreen.x - offset.x, y: pointerScreen.y - offset.y)
+        window.setFrameOrigin(newOrigin)
+        if let suggested = physics.updateDrag(to: newOrigin) {
+            setState(suggested)
+        }
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard let window, dragPointerOffset != nil else { return }
+        dragPointerOffset = nil
+        let isThrowing = physics.endDrag(at: window.frame.origin)
+        if !isThrowing {
+            if let saved = preDragState {
+                preDragState = nil
+                setState(saved)
+            }
+            onPhysicsSettled?(window.frame.origin)
+        }
+    }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -190,6 +232,13 @@ final class PetdexSpriteCanvasView: NSView {
         pollActiveBubbles()
     }
 
+    func reconcileLocalSessions() {
+        guard let engine else { return }
+        let nowMs = UInt64(Date().timeIntervalSince1970 * 1000.0)
+        _ = petdex_engine_reconcile_local(engine, nowMs)
+        pollActiveBubbles()
+    }
+
     func pollActiveBubbles() {
         guard let engine else { return }
         let nowMs = UInt64(Date().timeIntervalSince1970 * 1000.0)
@@ -223,6 +272,25 @@ final class PetdexSpriteCanvasView: NSView {
 
     private func stepFrame(dtMs: UInt32) {
         guard let engine else { return }
+        if physics.isThrowing, let window {
+            let dt = Double(dtMs) / 1000.0
+            let screenBounds = window.screen?.visibleFrame
+                ?? NSScreen.main?.visibleFrame
+                ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+            let result = physics.step(dt: dt, currentFrame: window.frame, screenBounds: screenBounds)
+            window.setFrameOrigin(result.newOrigin)
+            if let suggested = result.suggestedState, suggested != lastFrame.state {
+                setState(suggested)
+            }
+            if result.finished {
+                if let saved = preDragState {
+                    preDragState = nil
+                    setState(saved)
+                }
+                onPhysicsSettled?(window.frame.origin)
+            }
+        }
+
         let previous = lastFrame
         let next = petdex_engine_tick_ms(engine, dtMs)
         lastFrame = next
@@ -396,26 +464,35 @@ final class PetdexSpriteCanvasView: NSView {
 final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
     private let basePanelSize = NSSize(width: 220, height: 238)
     private let settingsStore = PetdexSettingsStore()
+    private let chimePlayer = PetdexChimePlayer()
     private var panel: PetdexFloatingPanel?
     private var canvasView: PetdexSpriteCanvasView?
     private var bubblePanel: PetdexBubblePanel?
     private var settingsWindow: NSWindow?
     private var panelMoveObserver: NSObjectProtocol?
+    private var reconcileTimer: Timer?
+    private var rotatePetsTimer: Timer?
     private var statusItem: NSStatusItem?
     private var petMenuItem: NSMenuItem?
     private var stateMenuItem: NSMenuItem?
     private var hookMenuItem: NSMenuItem?
     private var statusPetsSubmenuItem: NSMenuItem?
+    private var focusModeMenuItem: NSMenuItem?
+    private var lastObservedState: UInt8 = UInt8(PETDEX_STATE_IDLE.rawValue)
     private var installedPets: [InstalledPet] = []
     private var pendingOpenSlugs: [String] = []
 
     deinit {
+        reconcileTimer?.invalidate()
+        rotatePetsTimer?.invalidate()
         if let panelMoveObserver {
             NotificationCenter.default.removeObserver(panelMoveObserver)
         }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(settingsStore.hideDockIcon ? .accessory : .regular)
+
         let scale = settingsStore.scale
         let panelSize = scaledPanelSize(for: scale)
         let origin = resolvedInitialOrigin(for: panelSize)
@@ -430,8 +507,19 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
             self?.buildPanelContextMenu() ?? NSMenu()
         }
         canvas.onStateChanged = { [weak self] state in
-            self?.settingsStore.currentState = state
-            self?.updateStatusLabels(state: state)
+            guard let self else { return }
+            let previous = self.lastObservedState
+            self.lastObservedState = state
+            self.settingsStore.currentState = state
+            self.updateStatusLabels(state: state)
+            let waitingState = UInt8(PETDEX_STATE_WAITING.rawValue)
+            if state == waitingState
+                && previous != waitingState
+                && self.settingsStore.waitingSoundEnabled
+                && !self.settingsStore.focusMode
+            {
+                self.chimePlayer.playWaitingChime(petDirectory: self.canvasView?.activePet?.directoryURL)
+            }
         }
         canvas.onPetChanged = { [weak self] pet in
             self?.settingsStore.activePetId = pet?.id
@@ -440,6 +528,9 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
         canvas.onBubblesChanged = { [weak self] bubbles in
             self?.settingsStore.activeBubbles = bubbles
             self?.syncBubblePanel()
+        }
+        canvas.onPhysicsSettled = { [weak self] settledOrigin in
+            self?.settingsStore.updatePanelOrigin(settledOrigin)
         }
 
         panel.contentView = canvas
@@ -505,11 +596,32 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
         self.panel = panel
         self.canvasView = canvas
         self.bubblePanel = bubblePanel
+        lastObservedState = canvas.currentFrame.state
         settingsStore.currentState = canvas.currentFrame.state
         configureStatusItem(boundPort: boundPort)
         updateStatusLabels(state: canvas.currentFrame.state)
         refreshPetMenuState()
+        reloadRemoteHosts()
         syncBubblePanel()
+
+        if settingsStore.autoCheckUpdates {
+            checkForUpdates()
+        }
+
+        let reconcile = Timer(timeInterval: 10.0, repeats: true) { [weak self] _ in
+            self?.canvasView?.reconcileLocalSessions()
+        }
+        RunLoop.main.add(reconcile, forMode: .common)
+        reconcileTimer = reconcile
+
+        let rotate = Timer(timeInterval: 15.0 * 60.0, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            if self.settingsStore.rotatePets && self.installedPets.count > 1 {
+                self.shufflePet()
+            }
+        }
+        RunLoop.main.add(rotate, forMode: .common)
+        rotatePetsTimer = rotate
 
         if !pendingOpenSlugs.isEmpty {
             let queued = pendingOpenSlugs
@@ -666,13 +778,69 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
         bubblePanel?.update(
             bubbles: settingsStore.activeBubbles,
             showAllSessions: settingsStore.showAllSessions,
-            enabled: settingsStore.bubblesEnabled,
-            anchorVisible: panel?.isVisible ?? false
+            enabled: settingsStore.bubblesEnabled && !settingsStore.focusMode,
+            anchorVisible: panel?.isVisible ?? false,
+            textSize: settingsStore.bubbleTextSize,
+            maxLines: settingsStore.bubbleMaxLines
         )
+        focusModeMenuItem?.state = settingsStore.focusMode ? .on : .off
+    }
+
+    private func reloadRemoteHosts() {
+        let loaded = PetdexRemoteAgentsLoader.load()
+        settingsStore.remoteHosts = loaded.map { r in
+            "\(r.name) (\(r.host)) · \(r.enabledAgents.joined(separator: ", "))"
+        }
+    }
+
+    private func shufflePet() {
+        guard installedPets.count > 1 else { return }
+        let activeId = canvasView?.activePet?.id
+        let candidates = installedPets.filter { $0.id != activeId }
+        guard let next = candidates.randomElement() else { return }
+        canvasView?.selectPet(next)
+    }
+
+    private func checkForUpdates() {
+        settingsStore.updateStatusText = "Checking for updates..."
+        settingsStore.updateDownloadURL = nil
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let status = await PetdexUpdateChecker.checkLatestRelease()
+            switch status {
+            case .idle:
+                self.settingsStore.updateStatusText = "Not checked yet"
+                self.settingsStore.updateDownloadURL = nil
+            case .checking:
+                self.settingsStore.updateStatusText = "Checking for updates..."
+                self.settingsStore.updateDownloadURL = nil
+            case let .upToDate(version):
+                self.settingsStore.updateStatusText = "Up to date (v\(version))"
+                self.settingsStore.updateDownloadURL = nil
+            case let .available(version, downloadURL):
+                self.settingsStore.updateStatusText = "Update available: v\(version)"
+                self.settingsStore.updateDownloadURL = downloadURL
+            case let .failed(message):
+                self.settingsStore.updateStatusText = "Update check failed: \(message)"
+                self.settingsStore.updateDownloadURL = nil
+            }
+        }
+    }
+
+    private func openRemoteConfig() {
+        let configURL = PetdexRemoteAgentsLoader.configURL
+        let petdexDir = configURL.deletingLastPathComponent()
+        try? FileManager.default.createDirectory(at: petdexDir, withIntermediateDirectories: true)
+        if FileManager.default.fileExists(atPath: configURL.path) {
+            NSWorkspace.shared.open(configURL)
+        } else {
+            NSWorkspace.shared.open(petdexDir)
+        }
     }
 
     private func openSettingsWindow() {
         settingsStore.refreshDetectedAgents()
+        reloadRemoteHosts()
         if settingsWindow == nil {
             let actions = PetdexSettingsActions(
                 onSelectPet: { [weak self] pet in
@@ -715,6 +883,25 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
                 },
                 onRefreshAgents: { [weak self] in
                     self?.settingsStore.refreshDetectedAgents()
+                    self?.reloadRemoteHosts()
+                },
+                onShufflePet: { [weak self] in
+                    self?.shufflePet()
+                },
+                onHideDockChanged: { hide in
+                    NSApp.setActivationPolicy(hide ? .accessory : .regular)
+                },
+                onFocusModeChanged: { [weak self] _ in
+                    self?.syncBubblePanel()
+                },
+                onBubbleStyleChanged: { [weak self] in
+                    self?.syncBubblePanel()
+                },
+                onCheckUpdates: { [weak self] in
+                    self?.checkForUpdates()
+                },
+                onOpenRemoteConfig: { [weak self] in
+                    self?.openRemoteConfig()
                 }
             )
 
@@ -862,6 +1049,16 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(petsItem)
         self.statusPetsSubmenuItem = petsItem
 
+        let shuffleItem = NSMenuItem(title: "Shuffle Pet", action: #selector(handleShufflePet), keyEquivalent: "r")
+        shuffleItem.target = self
+        menu.addItem(shuffleItem)
+
+        let focusModeItem = NSMenuItem(title: "Focus Mode", action: #selector(handleToggleFocusMode), keyEquivalent: "f")
+        focusModeItem.target = self
+        focusModeItem.state = settingsStore.focusMode ? .on : .off
+        menu.addItem(focusModeItem)
+        self.focusModeMenuItem = focusModeItem
+
         let cycleItem = NSMenuItem(title: "Cycle State", action: #selector(handleCycleState), keyEquivalent: "c")
         cycleItem.target = self
         menu.addItem(cycleItem)
@@ -1002,6 +1199,15 @@ final class PetdexAppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func handleCycleState() {
         canvasView?.cycleState()
+    }
+
+    @objc private func handleShufflePet() {
+        shufflePet()
+    }
+
+    @objc private func handleToggleFocusMode() {
+        settingsStore.focusMode.toggle()
+        syncBubblePanel()
     }
 
     @objc private func handleSelectState(_ sender: NSMenuItem) {

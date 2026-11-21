@@ -136,6 +136,12 @@ extension InstalledPet: Identifiable {}
 final class PetdexSettingsStore: ObservableObject {
     static let minScale: Double = 0.6
     static let maxScale: Double = 1.4
+    static let minBubbleTextSize: Double = 10.0
+    static let maxBubbleTextSize: Double = 16.0
+    static let minBubbleMaxLines: Int = 1
+    static let maxBubbleMaxLines: Int = 5
+    static let minBubbleLifetimeSec: Double = 4.0
+    static let maxBubbleLifetimeSec: Double = 30.0
 
     private struct PersistedSettings: Codable {
         var activePetId: String?
@@ -145,6 +151,15 @@ final class PetdexSettingsStore: ObservableObject {
         var alwaysOnTop: Bool
         var launchAtLogin: Bool?
         var hideCrafterAnnouncements: Bool?
+        var waitingSoundEnabled: Bool?
+        var focusMode: Bool?
+        var rotatePets: Bool?
+        var hideDockIcon: Bool?
+        var autoCheckUpdates: Bool?
+        var bubbleTextSize: Double?
+        var bubbleMaxLines: Int?
+        var bubbleLifetimeSec: Double?
+        var apiToken: String?
         var panelX: Double?
         var panelY: Double?
     }
@@ -184,6 +199,63 @@ final class PetdexSettingsStore: ObservableObject {
         didSet { persistIfReady() }
     }
 
+    @Published var waitingSoundEnabled: Bool {
+        didSet { persistIfReady() }
+    }
+
+    @Published var focusMode: Bool {
+        didSet { persistIfReady() }
+    }
+
+    @Published var rotatePets: Bool {
+        didSet { persistIfReady() }
+    }
+
+    @Published var hideDockIcon: Bool {
+        didSet { persistIfReady() }
+    }
+
+    @Published var autoCheckUpdates: Bool {
+        didSet { persistIfReady() }
+    }
+
+    @Published var bubbleTextSize: Double {
+        didSet {
+            let clamped = Self.clampBubbleTextSize(bubbleTextSize)
+            if bubbleTextSize != clamped {
+                bubbleTextSize = clamped
+                return
+            }
+            persistIfReady()
+        }
+    }
+
+    @Published var bubbleMaxLines: Int {
+        didSet {
+            let clamped = Self.clampBubbleMaxLines(bubbleMaxLines)
+            if bubbleMaxLines != clamped {
+                bubbleMaxLines = clamped
+                return
+            }
+            persistIfReady()
+        }
+    }
+
+    @Published var bubbleLifetimeSec: Double {
+        didSet {
+            let clamped = Self.clampBubbleLifetimeSec(bubbleLifetimeSec)
+            if bubbleLifetimeSec != clamped {
+                bubbleLifetimeSec = clamped
+                return
+            }
+            persistIfReady()
+        }
+    }
+
+    @Published var apiToken: String {
+        didSet { persistIfReady() }
+    }
+
     @Published var launchAtLoginStatus: String? = nil
 
     @Published var panelX: Double? {
@@ -200,6 +272,9 @@ final class PetdexSettingsStore: ObservableObject {
     @Published var hookToken: String = ""
     @Published var activeBubbles: [ActiveBubble] = []
     @Published var detectedAgents: [DetectedAgent] = []
+    @Published var updateStatusText: String = "Not checked yet"
+    @Published var updateDownloadURL: URL? = nil
+    @Published var remoteHosts: [String] = []
 
     var activeBubble: ActiveBubble? {
         activeBubbles.first
@@ -217,6 +292,15 @@ final class PetdexSettingsStore: ObservableObject {
         self.alwaysOnTop = true
         self.launchAtLogin = false
         self.hideCrafterAnnouncements = false
+        self.waitingSoundEnabled = true
+        self.focusMode = false
+        self.rotatePets = false
+        self.hideDockIcon = true
+        self.autoCheckUpdates = true
+        self.bubbleTextSize = 12.2
+        self.bubbleMaxLines = 2
+        self.bubbleLifetimeSec = 10.0
+        self.apiToken = ""
         self.panelX = nil
         self.panelY = nil
         load()
@@ -232,6 +316,18 @@ final class PetdexSettingsStore: ObservableObject {
 
     static func clampScale(_ value: Double) -> Double {
         min(max(value, minScale), maxScale)
+    }
+
+    static func clampBubbleTextSize(_ value: Double) -> Double {
+        min(max(value, minBubbleTextSize), maxBubbleTextSize)
+    }
+
+    static func clampBubbleMaxLines(_ value: Int) -> Int {
+        min(max(value, minBubbleMaxLines), maxBubbleMaxLines)
+    }
+
+    static func clampBubbleLifetimeSec(_ value: Double) -> Double {
+        min(max(value, minBubbleLifetimeSec), maxBubbleLifetimeSec)
     }
 
     func refreshAgents() {
@@ -296,6 +392,15 @@ final class PetdexSettingsStore: ObservableObject {
         alwaysOnTop = decoded.alwaysOnTop
         launchAtLogin = decoded.launchAtLogin ?? false
         hideCrafterAnnouncements = decoded.hideCrafterAnnouncements ?? false
+        waitingSoundEnabled = decoded.waitingSoundEnabled ?? true
+        focusMode = decoded.focusMode ?? false
+        rotatePets = decoded.rotatePets ?? false
+        hideDockIcon = decoded.hideDockIcon ?? true
+        autoCheckUpdates = decoded.autoCheckUpdates ?? true
+        bubbleTextSize = Self.clampBubbleTextSize(decoded.bubbleTextSize ?? 12.2)
+        bubbleMaxLines = Self.clampBubbleMaxLines(decoded.bubbleMaxLines ?? 2)
+        bubbleLifetimeSec = Self.clampBubbleLifetimeSec(decoded.bubbleLifetimeSec ?? 10.0)
+        apiToken = decoded.apiToken ?? ""
         panelX = decoded.panelX
         panelY = decoded.panelY
     }
@@ -314,6 +419,15 @@ final class PetdexSettingsStore: ObservableObject {
             alwaysOnTop: alwaysOnTop,
             launchAtLogin: launchAtLogin,
             hideCrafterAnnouncements: hideCrafterAnnouncements,
+            waitingSoundEnabled: waitingSoundEnabled,
+            focusMode: focusMode,
+            rotatePets: rotatePets,
+            hideDockIcon: hideDockIcon,
+            autoCheckUpdates: autoCheckUpdates,
+            bubbleTextSize: Self.clampBubbleTextSize(bubbleTextSize),
+            bubbleMaxLines: Self.clampBubbleMaxLines(bubbleMaxLines),
+            bubbleLifetimeSec: Self.clampBubbleLifetimeSec(bubbleLifetimeSec),
+            apiToken: apiToken,
             panelX: panelX,
             panelY: panelY
         )

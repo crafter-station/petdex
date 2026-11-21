@@ -59,10 +59,29 @@ private enum AgentLogoLoader {
     }
 }
 
+private func bubbleCardHeight(textSize: Double, maxLines: Int) -> CGFloat {
+    let clampedLines = max(1, min(maxLines, 5))
+    let clampedSize = max(10.0, min(textSize, 16.0))
+    let baseline: CGFloat = 66
+    if clampedLines > 2 || clampedSize > 13.0 {
+        let computed = ceil(36.0 + CGFloat(clampedLines) * CGFloat(clampedSize) * 1.42)
+        return max(baseline, computed)
+    }
+    return baseline
+}
+
+private func bubblePanelHeight(textSize: Double, maxLines: Int, maxVisibleExpanded: Int = 4) -> CGFloat {
+    let cardHeight = bubbleCardHeight(textSize: textSize, maxLines: maxLines)
+    let cardStep = cardHeight + 10
+    return CGFloat(maxVisibleExpanded) * cardStep + 72
+}
+
 private final class BubblePanelModel: ObservableObject {
     @Published var bubbles: [ActiveBubble] = []
     @Published var showAllSessions: Bool = true
     @Published var isExpanded: Bool = false
+    @Published var textSize: Double = 12.2
+    @Published var maxLines: Int = 2
 }
 
 private struct PetdexBubbleCardView: View {
@@ -70,6 +89,8 @@ private struct PetdexBubbleCardView: View {
     let showTail: Bool
     let extraCount: Int
     let isBackCard: Bool
+    let textSize: Double
+    let maxLines: Int
     let onSelect: () -> Void
     let onDismiss: () -> Void
 
@@ -146,14 +167,14 @@ private struct PetdexBubbleCardView: View {
                 }
 
                 Text(bubble.summary.isEmpty ? bubble.statusDisplayName : bubble.summary)
-                    .font(.system(size: 12.2, weight: .medium, design: .rounded))
+                    .font(.system(size: textSize, weight: .medium, design: .rounded))
                     .foregroundColor(navyInk)
-                    .lineLimit(2)
+                    .lineLimit(maxLines)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.horizontal, 13)
             .padding(.vertical, 9.5)
-            .frame(width: 264, height: 66, alignment: .topLeading)
+            .frame(width: 264, height: bubbleCardHeight(textSize: textSize, maxLines: maxLines), alignment: .topLeading)
             .background(
                 ZStack {
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -218,8 +239,19 @@ private struct PetdexBubbleDeckView: View {
     let onDismiss: (ActiveBubble) -> Void
 
     private let cobaltRim = Color(red: 0.231, green: 0.349, blue: 0.949)
-    private let cardStep: CGFloat = 76
     private let maxVisibleExpanded = 4
+
+    private var cardHeight: CGFloat {
+        bubbleCardHeight(textSize: model.textSize, maxLines: model.maxLines)
+    }
+
+    private var cardStep: CGFloat {
+        cardHeight + 10
+    }
+
+    private var deckHeight: CGFloat {
+        bubblePanelHeight(textSize: model.textSize, maxLines: model.maxLines, maxVisibleExpanded: maxVisibleExpanded)
+    }
 
     private var visibleBubbles: [ActiveBubble] {
         Array(model.bubbles.prefix(maxVisibleExpanded))
@@ -280,6 +312,8 @@ private struct PetdexBubbleDeckView: View {
                     showTail: isFront,
                     extraCount: (!expanded && isFront && model.bubbles.count > 1) ? model.bubbles.count - 1 : 0,
                     isBackCard: !expanded && !isFront,
+                    textSize: model.textSize,
+                    maxLines: model.maxLines,
                     onSelect: {
                         onSelectBubble(bubble)
                     },
@@ -297,7 +331,7 @@ private struct PetdexBubbleDeckView: View {
         .padding(.horizontal, 22)
         .padding(.bottom, 16)
         .padding(.top, 24)
-        .frame(width: 312, height: 376, alignment: .bottom)
+        .frame(width: 312, height: deckHeight, alignment: .bottom)
         .animation(.spring(response: 0.36, dampingFraction: 0.74), value: expanded)
         .animation(.spring(response: 0.32, dampingFraction: 0.78), value: model.bubbles)
         .onHover { hovering in
@@ -360,7 +394,14 @@ final class PetdexBubblePanel: NSPanel {
         level = enabled ? .statusBar : .normal
     }
 
-    func update(bubbles: [ActiveBubble], showAllSessions: Bool, enabled: Bool, anchorVisible: Bool) {
+    func update(
+        bubbles: [ActiveBubble],
+        showAllSessions: Bool,
+        enabled: Bool,
+        anchorVisible: Bool,
+        textSize: Double = 12.2,
+        maxLines: Int = 2
+    ) {
         bubblesEnabled = enabled
 
         guard enabled, anchorVisible, !bubbles.isEmpty else {
@@ -377,18 +418,31 @@ final class PetdexBubblePanel: NSPanel {
 
         ensureHostingView()
 
+        let clampedTextSize = PetdexSettingsStore.clampBubbleTextSize(textSize)
+        let clampedMaxLines = PetdexSettingsStore.clampBubbleMaxLines(maxLines)
+
         if model.bubbles != bubbles {
             model.bubbles = bubbles
         }
         if model.showAllSessions != showAllSessions {
             model.showAllSessions = showAllSessions
         }
+        if model.textSize != clampedTextSize {
+            model.textSize = clampedTextSize
+        }
+        if model.maxLines != clampedMaxLines {
+            model.maxLines = clampedMaxLines
+        }
         if bubbles.count <= 1 && model.isExpanded {
             model.isExpanded = false
         }
 
-        if frame.size != panelSize {
-            setContentSize(panelSize)
+        let targetSize = NSSize(
+            width: panelSize.width,
+            height: bubblePanelHeight(textSize: clampedTextSize, maxLines: clampedMaxLines)
+        )
+        if frame.size != targetSize {
+            setContentSize(targetSize)
         }
         reposition()
         if let anchorWindow, parent !== anchorWindow {
