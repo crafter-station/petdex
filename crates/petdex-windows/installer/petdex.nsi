@@ -4,7 +4,7 @@ Unicode True
 !include "FileFunc.nsh"
 
 !define APP_NAME "Petdex"
-!define APP_VERSION "0.1.0"
+!define APP_VERSION "0.10.0"
 !define APP_PUBLISHER "Crafter Station"
 !define APP_URL "https://petdex.dev"
 !define APP_EXE "petdex-windows.exe"

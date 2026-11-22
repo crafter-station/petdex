@@ -1,6 +1,6 @@
 [package]
 name = "petdex-core"
-version = "0.1.0"
+version = "0.10.0"
 edition = "2021"
 description = "Shared Rust domain core for Petdex Desktop native shells"
 

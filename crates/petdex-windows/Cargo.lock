@@ -154,11 +154,11 @@ dependencies = [
 
 [[package]]
 name = "petdex-core"
-version = "0.1.0"
+version = "0.10.0"
 
 [[package]]
 name = "petdex-windows"
-version = "0.1.0"
+version = "0.10.0"
 dependencies = [
  "image",
  "petdex-core",
