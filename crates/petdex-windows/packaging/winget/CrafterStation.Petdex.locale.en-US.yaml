@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
+PackageIdentifier: CrafterStation.Petdex
+PackageVersion: 0.1.0
+PackageLocale: en-US
+Publisher: Crafter Station
+PublisherUrl: https://crafterstation.com
+PublisherSupportUrl: https://github.com/crafter-station/petdex/issues
+Author: Railly Hugo
+PackageName: Petdex
+PackageUrl: https://petdex.dev
+License: MIT
+LicenseUrl: https://github.com/crafter-station/petdex/blob/main/LICENSE
+ShortDescription: Native Windows desktop companion for Petdex.
+Description: Petdex is a lightweight native Windows desktop pet companion that reacts to coding agent activity with zero external runtime dependencies.
+Tags:
+  - ai-agents
+  - desktop-companion
+  - developer-tools
+  - pet
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0

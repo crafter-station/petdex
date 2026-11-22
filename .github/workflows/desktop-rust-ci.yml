@@ -45,6 +45,11 @@ jobs:
   windows-native:
     name: windows-native
     runs-on: windows-latest
+    env:
+      SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+      SIGNPATH_ORGANIZATION_ID: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
+      SIGNPATH_PROJECT_SLUG: ${{ secrets.SIGNPATH_PROJECT_SLUG }}
+      SIGNPATH_SIGNING_POLICY_SLUG: ${{ secrets.SIGNPATH_SIGNING_POLICY_SLUG }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -145,14 +150,70 @@ jobs:
           path: windows-smoke.png
           if-no-files-found: ignore
 
+      - name: Build NSIS installer
+        shell: pwsh
+        run: |
+          makensis crates/petdex-windows/installer/petdex.nsi
+          Copy-Item -Path "crates/petdex-windows/installer/Petdex-Setup.exe" -Destination "Petdex-Setup.exe" -Force
+
+      - name: Sign Petdex-Setup.exe with SignPath.io (optional)
+        if: ${{ env.SIGNPATH_API_TOKEN != '' }}
+        shell: pwsh
+        run: |
+          $orgId = $env:SIGNPATH_ORGANIZATION_ID
+          $projectSlug = if ($env:SIGNPATH_PROJECT_SLUG) { $env:SIGNPATH_PROJECT_SLUG } else { "petdex" }
+          $policySlug = if ($env:SIGNPATH_SIGNING_POLICY_SLUG) { $env:SIGNPATH_SIGNING_POLICY_SLUG } else { "release-signing" }
+          if (-not $orgId) {
+            throw "SIGNPATH_ORGANIZATION_ID secret is required when SIGNPATH_API_TOKEN is set"
+          }
+
+          $headers = @{ Authorization = "Bearer $($env:SIGNPATH_API_TOKEN)" }
+          $submitUri = "https://app.signpath.io/API/v1/$orgId/SigningRequests"
+          $form = @{
+            ProjectSlug = $projectSlug
+            SigningPolicySlug = $policySlug
+            Artifact = Get-Item -Path "Petdex-Setup.exe"
+          }
+          $response = Invoke-WebRequest -Method Post -Uri $submitUri -Headers $headers -Form $form -UseBasicParsing
+          $requestUrl = $response.Headers["Location"]
+          if (-not $requestUrl) {
+            throw "SignPath did not return a SigningRequest Location header"
+          }
+
+          $signedUrl = $null
+          for ($i = 0; $i -lt 60; $i++) {
+            Start-Sleep -Seconds 5
+            $status = Invoke-RestMethod -Uri $requestUrl -Headers $headers
+            if ($status.status -eq "Completed") {
+              $signedUrl = $status.signedArtifactLink
+              break
+            }
+            if ($status.status -in @("Failed", "Denied", "Canceled")) {
+              throw "SignPath signing request ended with status: $($status.status)"
+            }
+          }
+          if (-not $signedUrl) {
+            throw "Timed out waiting for SignPath signing request"
+          }
+
+          Invoke-WebRequest -Uri $signedUrl -Headers $headers -OutFile "Petdex-Setup.exe" -UseBasicParsing
+          Write-Host "Successfully signed Petdex-Setup.exe via SignPath.io"
+
       - name: Package Windows release binary
         shell: pwsh
         run: |
           Compress-Archive -Path crates/petdex-windows/target/release/petdex-windows.exe -DestinationPath petdex-windows-x86_64.zip -Force
 
-      - name: Upload Windows release artifact
+      - name: Upload Windows release archive artifact
         uses: actions/upload-artifact@v4
         with:
           name: petdex-windows-x86_64
           path: petdex-windows-x86_64.zip
+          if-no-files-found: error
+
+      - name: Upload Windows NSIS installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Petdex-Setup
+          path: Petdex-Setup.exe
           if-no-files-found: error
