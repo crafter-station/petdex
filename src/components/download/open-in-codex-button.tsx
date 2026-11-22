@@ -9,8 +9,10 @@ import {
   isCodexDesktopOs,
   openCodexDeepLink,
 } from "@/lib/codex-desktop-link";
+import { cn } from "@/lib/utils";
 
 import { CodexLogo } from "@/components/download/codex-logo";
+import { buttonVariants } from "@/components/ui/button";
 
 type OpenInCodexButtonProps = {
   displayName: string;
@@ -71,9 +73,12 @@ export function OpenInCodexButton({
       rel="noreferrer"
       onClick={handleClick}
       aria-label={t("ariaLabel", { displayName })}
-      className="group inline-flex w-full items-center gap-3 rounded-2xl border border-border-base bg-surface/80 p-3 text-left backdrop-blur transition-colors hover:border-brand-light/40 hover:bg-surface"
+      className={cn(
+        buttonVariants({ variant: "petdex-secondary" }),
+        "group h-auto w-full justify-start gap-3 rounded-2xl p-3 text-left whitespace-normal",
+      )}
     >
-      <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-surface ring-1 ring-border-base/40">
+      <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-surface ring-1 ring-border-base/40">
         <CodexLogo className="size-5" />
       </span>
 

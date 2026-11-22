@@ -11,6 +11,7 @@ import type {
   PetActionMenuOwnerActions,
   PetActionMenuPet,
 } from "@/components/pets/pet-action-menu-content";
+import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -53,10 +54,6 @@ export function PetActionMenu({ pet, variant = "card", ownerActions }: Props) {
     if (nextOpen) preloadPetActionMenuContent();
     setOpen(nextOpen);
   }, []);
-  const triggerClassName =
-    variant === "detail"
-      ? "inline-flex h-9 items-center justify-center gap-1.5 rounded-full border border-border-base bg-surface/70 px-3.5 text-[13px] font-medium text-muted-2 backdrop-blur transition hover:bg-surface-muted hover:text-foreground"
-      : "inline-flex size-8 items-center justify-center rounded-full border border-border-base bg-surface/70 text-muted-2 backdrop-blur transition hover:bg-surface-muted hover:text-foreground";
   const menuAlign = variant === "detail" ? "start" : "end";
 
   return (
@@ -67,10 +64,14 @@ export function PetActionMenu({ pet, variant = "card", ownerActions }: Props) {
       <DropdownMenu open={open} onOpenChange={handleOpenChange}>
         <DropdownMenuTrigger
           render={
-            <button
+            <Button
               type="button"
+              variant="petdex-pill"
+              size={variant === "detail" ? "lg" : "icon"}
               aria-label={t("moreActions", { name: pet.displayName })}
-              className={triggerClassName}
+              className={
+                variant === "detail" ? "px-3.5 text-[13px]" : undefined
+              }
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();

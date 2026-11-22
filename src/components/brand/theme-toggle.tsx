@@ -6,6 +6,8 @@ import { Moon, Sun } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useTheme } from "next-themes";
 
+import { Button } from "@/components/ui/button";
+
 // Toggles light <-> dark. Renders a sun placeholder until mounted to
 // avoid the hydration flash next-themes warns about.
 export function ThemeToggle({ className }: { className?: string }) {
@@ -31,17 +33,16 @@ export function ThemeToggle({ className }: { className?: string }) {
   const label = !mounted ? t("toggle") : showDark ? t("dark") : t("light");
 
   return (
-    <button
+    <Button
       type="button"
+      variant="petdex-pill"
+      size="icon-lg"
       aria-label={t("ariaLabel", { label })}
       title={t("title", { label })}
       onClick={next}
-      className={
-        className ??
-        "grid size-8 place-items-center rounded-full border border-border-base bg-surface/70 text-muted-2 backdrop-blur transition hover:bg-surface-muted hover:text-foreground"
-      }
+      className={className}
     >
       <Icon className="size-4" />
-    </button>
+    </Button>
   );
 }

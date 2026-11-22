@@ -43,11 +43,12 @@ export function InstallCommandCompact({
           className="!h-12 w-full !rounded-2xl !px-4 !text-[13px]"
         />
         <Button
-          variant="outline"
+          type="button"
+          variant="petdex-secondary"
           onClick={() => setThemeOpen(true)}
-          className="group/theme h-12 max-w-full gap-2 overflow-hidden rounded-2xl border-border-base bg-surface/80 px-3 text-left text-[12px] text-foreground backdrop-blur hover:border-brand-light/40 hover:bg-surface md:px-4"
+          className="group/theme h-12 max-w-full gap-2 overflow-hidden rounded-2xl px-3 text-left text-[12px] md:px-4"
         >
-          <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-surface ring-1 ring-border-base/40">
+          <span className="grid size-7 shrink-0 place-items-center rounded-xl bg-surface ring-1 ring-border-base/40">
             <CodexLogo className="size-4" />
           </span>
           <span className="flex min-w-0 flex-col leading-tight">

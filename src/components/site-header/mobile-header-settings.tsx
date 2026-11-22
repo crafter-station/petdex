@@ -44,8 +44,8 @@ export function MobileHeaderSettings() {
           </>
         ) : (
           <>
-            <span className="size-10 rounded-full border border-border-base bg-surface/70" />
-            <span className="h-10 w-20 rounded-full border border-border-base bg-surface/70" />
+            <span className="size-9 rounded-xl border border-border-base bg-surface/70" />
+            <span className="h-9 w-20 rounded-xl border border-border-base bg-surface/70" />
           </>
         )}
       </div>

@@ -6,6 +6,7 @@ import { MousePointerClick, Package, Terminal } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { CommandLine } from "@/components/download/command-line";
+import { Button } from "@/components/ui/button";
 
 type InstallCommandProps = {
   slug: string;
@@ -106,7 +107,7 @@ export function InstallCommand({ slug, displayName }: InstallCommandProps) {
       <div
         role="tablist"
         aria-label={t("methodAria")}
-        className="mt-3 flex items-center gap-0.5 rounded-full border border-border-base bg-surface/70 p-0.5 self-start w-fit"
+        className="mt-3 flex w-fit items-center gap-1 self-start rounded-2xl border border-border-base bg-surface/70 p-1"
       >
         <TabButton
           icon={<Package className="size-3.5" />}
@@ -195,7 +196,7 @@ function PlatformToggle({
     <div
       role="tablist"
       aria-label={t("platformAria")}
-      className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-border-base bg-surface/70 p-0.5"
+      className="inline-flex shrink-0 items-center gap-1 rounded-2xl border border-border-base bg-surface/70 p-1"
     >
       <PlatformBtn
         active={platform === "macos"}
@@ -231,21 +232,18 @@ function PlatformBtn({
   label: string;
 }) {
   return (
-    <button
+    <Button
       type="button"
       role="tab"
       aria-selected={active}
       aria-label={label}
       onClick={onClick}
       title={label}
-      className={`inline-flex size-7 items-center justify-center rounded-full transition ${
-        active
-          ? "bg-inverse text-on-inverse"
-          : "text-muted-2 hover:text-foreground"
-      }`}
+      variant={active ? "petdex-inverse" : "ghost"}
+      size="icon-sm"
     >
       {icon}
-    </button>
+    </Button>
   );
 }
 
@@ -261,19 +259,17 @@ function TabButton({
   onClick: () => void;
 }) {
   return (
-    <button
+    <Button
       type="button"
       role="tab"
       aria-selected={selected}
       onClick={onClick}
-      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition ${
-        selected
-          ? "bg-inverse text-on-inverse"
-          : "text-muted-2 hover:text-foreground"
-      }`}
+      variant={selected ? "petdex-inverse" : "ghost"}
+      size="sm"
+      className="gap-1.5 px-3"
     >
       {icon}
       {label}
-    </button>
+    </Button>
   );
 }

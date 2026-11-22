@@ -27,10 +27,10 @@ function InstallCommandFallback() {
     <div className="rounded-2xl border border-border-base bg-surface/60 p-5 backdrop-blur">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="h-5 w-32 rounded bg-surface-muted" />
-        <div className="h-8 w-28 rounded-full bg-surface-muted" />
+        <div className="h-8 w-28 rounded-2xl bg-surface-muted" />
       </div>
       <div className="mt-3 h-4 w-3/4 rounded bg-surface-muted" />
-      <div className="mt-3 h-8 w-36 rounded-full bg-surface-muted" />
+      <div className="mt-3 h-8 w-36 rounded-2xl bg-surface-muted" />
       <div className="mt-2 h-12 w-full rounded-2xl bg-surface-muted" />
       <div className="mt-3 rounded-2xl border border-border-base bg-surface-muted/70 px-4 py-3">
         <div className="h-4 w-28 rounded bg-surface" />

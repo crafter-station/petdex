@@ -10,8 +10,10 @@ import {
   useMacArch,
   usePlatform,
 } from "@/lib/use-platform";
+import { cn } from "@/lib/utils";
 
 import { CommandLine } from "@/components/download/command-line";
+import { buttonVariants } from "@/components/ui/button";
 
 const MACOS_ARM64_URL = "/api/desktop/latest-release?asset=darwin-arm64";
 const MACOS_X64_URL = "/api/desktop/latest-release?asset=darwin-x64";
@@ -56,9 +58,9 @@ export function DownloadCTA({
 
   return (
     <div className="mt-8 grid w-full min-w-0 gap-3">
-      <div className="min-w-0 overflow-hidden rounded-lg border border-brand/20 bg-surface p-3 shadow-[0_18px_48px_-38px_rgba(15,23,42,0.55)]">
+      <div className="min-w-0 overflow-hidden rounded-2xl border border-brand/20 bg-surface p-3 shadow-[0_18px_48px_-38px_rgba(15,23,42,0.55)]">
         <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center">
-          <span className="relative grid size-11 shrink-0 place-items-center overflow-hidden rounded-lg border border-brand/20 bg-background shadow-sm">
+          <span className="relative grid size-11 shrink-0 place-items-center overflow-hidden rounded-xl border border-brand/20 bg-background shadow-sm">
             <Image
               src="/brand/petdex-desktop-icon.png"
               alt=""
@@ -78,7 +80,7 @@ export function DownloadCTA({
           <CommandLine
             command={cliCommand}
             source="download-hero-primary"
-            className="!h-10 w-full min-w-0 max-w-full !rounded-lg !border-border-base !bg-background !px-3 !py-2 !text-[12px] sm:w-auto sm:min-w-[260px] sm:max-w-[340px]"
+            className="!h-10 w-full min-w-0 max-w-full !rounded-xl !border-border-base !bg-background !px-3 !py-2 !text-[12px] sm:w-auto sm:min-w-[260px] sm:max-w-[340px]"
           />
         </div>
       </div>
@@ -109,6 +111,14 @@ function ManualDownloadButton({
   manualLabel: string;
   desktopOnlyLabel: string;
 }) {
+  const manualButtonClassName = cn(
+    buttonVariants({
+      variant: "petdex-secondary",
+      size: "petdex-pill",
+    }),
+    "h-11 w-full gap-2 text-sm sm:w-auto sm:min-w-[220px]",
+  );
+
   // SSR / first paint / browser we couldn't classify: render a
   // skeleton-ish neutral pill instead of flashing a wrong CTA.
   // Same height/width as the macOS button to avoid layout shift.
@@ -116,7 +126,7 @@ function ManualDownloadButton({
     return (
       <span
         aria-hidden="true"
-        className="inline-flex h-11 w-full animate-pulse items-center justify-center rounded-lg bg-surface-muted text-sm text-muted-3 sm:w-[220px]"
+        className="inline-flex h-11 w-full animate-pulse items-center justify-center rounded-xl bg-surface-muted text-sm text-muted-3 sm:w-[220px]"
       />
     );
   }
@@ -135,11 +145,7 @@ function ManualDownloadButton({
           ? " (Apple Silicon)"
           : "";
     return (
-      <a
-        href={href}
-        rel="noreferrer"
-        className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-border-base bg-surface px-4 text-sm font-medium text-foreground transition hover:border-border-strong hover:bg-surface-muted sm:w-auto sm:min-w-[220px]"
-      >
+      <a href={href} rel="noreferrer" className={manualButtonClassName}>
         <ArrowDownToLine className="size-4" />
         {manualLabel}
         {labelSuffix ? (
@@ -156,7 +162,7 @@ function ManualDownloadButton({
       <a
         href={WINDOWS_X64_URL}
         rel="noreferrer"
-        className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-border-base bg-surface px-4 text-sm font-medium text-foreground transition hover:border-border-strong hover:bg-surface-muted sm:w-auto sm:min-w-[220px]"
+        className={manualButtonClassName}
       >
         <ArrowDownToLine className="size-4" />
         {manualLabel}
@@ -172,7 +178,7 @@ function ManualDownloadButton({
       <a
         href={LINUX_X64_URL}
         rel="noreferrer"
-        className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-border-base bg-surface px-4 text-sm font-medium text-foreground transition hover:border-border-strong hover:bg-surface-muted sm:w-auto sm:min-w-[220px]"
+        className={manualButtonClassName}
       >
         <ArrowDownToLine className="size-4" />
         {manualLabel}
@@ -184,7 +190,10 @@ function ManualDownloadButton({
   return (
     <span
       aria-disabled="true"
-      className="inline-flex h-11 w-full cursor-not-allowed items-center justify-center gap-2 rounded-lg border border-border-base bg-surface-muted px-4 text-sm font-medium text-muted-2 sm:w-auto sm:min-w-[220px]"
+      className={cn(
+        manualButtonClassName,
+        "pointer-events-none cursor-not-allowed opacity-60",
+      )}
     >
       <Apple className="size-4" />
       {desktopOnlyLabel}

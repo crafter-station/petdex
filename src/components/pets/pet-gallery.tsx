@@ -324,15 +324,17 @@ export function PetGallery({
         {filtersActive ? (
           <div className="flex items-center gap-2 font-mono text-[10px] tracking-[0.18em] text-stone-500 uppercase">
             <span>{t("matches", { count: total })}</span>
-            <button
+            <Button
               type="button"
+              variant="petdex-pill"
+              size="xs"
               onClick={() => {
                 clearFilters();
               }}
-              className="rounded-full border border-border-base bg-surface px-2.5 py-1 text-muted-2 transition hover:border-border-strong hover:text-black dark:hover:text-stone-100"
+              className="px-2.5 font-mono text-[10px] tracking-[0.18em] uppercase"
             >
               {t("clearAll")}
-            </button>
+            </Button>
           </div>
         ) : null}
       </div>
@@ -343,7 +345,7 @@ export function PetGallery({
  single primary action region. */}
       <div className="sticky top-16 z-30 rounded-2xl border border-border-base bg-background/85 p-3 backdrop-blur-md md:p-4">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <InputGroup className="h-10 flex-1 rounded-full border-border-base bg-background/40">
+          <InputGroup className="h-10 flex-1 rounded-xl border-border-base bg-background/40">
             <InputGroupAddon align="inline-start">
               <Search className="size-4 text-muted-3" />
             </InputGroupAddon>
@@ -356,23 +358,27 @@ export function PetGallery({
             />
             {query.length > 0 ? (
               <InputGroupAddon align="inline-end">
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="icon-xs"
                   onClick={() => setQuery("")}
                   aria-label={t("clearSearchAria")}
-                  className="grid size-6 place-items-center rounded-full text-muted-4 transition hover:bg-surface-muted hover:text-foreground"
+                  className="text-muted-4"
                 >
                   <X className="size-3.5" />
-                </button>
+                </Button>
               </InputGroupAddon>
             ) : null}
           </InputGroup>
 
-          <button
+          <Button
             type="button"
+            variant="petdex-pill"
+            size="petdex-pill"
             onClick={() => setFiltersOpen((v) => !v)}
             aria-expanded={filtersOpen}
-            className="hidden h-10 shrink-0 items-center gap-1.5 rounded-full border border-border-base bg-surface/70 px-4 text-[13px] font-medium text-muted-2 backdrop-blur transition hover:bg-surface-muted hover:text-foreground aria-expanded:border-brand/40 aria-expanded:bg-brand/15 aria-expanded:text-brand md:inline-flex"
+            className="hidden shrink-0 gap-1.5 aria-expanded:border-brand/40 aria-expanded:bg-brand/15 aria-expanded:text-brand md:inline-flex"
           >
             <SlidersHorizontal className="size-3.5" />
             Filters
@@ -384,7 +390,7 @@ export function PetGallery({
             <ChevronDown
               className={`size-3.5 transition-transform duration-200 ${filtersOpen ? "rotate-180" : ""}`}
             />
-          </button>
+          </Button>
           <Select
             value={sort}
             onValueChange={(next) => {
@@ -394,7 +400,7 @@ export function PetGallery({
           >
             <SelectTrigger
               aria-label={t("sortAria")}
-              className="h-10 w-full shrink-0 rounded-full border-border-base bg-surface/70 text-[13px] backdrop-blur hover:bg-surface-muted sm:w-auto sm:min-w-[180px]"
+              className="h-10 w-full shrink-0 rounded-xl text-[13px] sm:w-auto sm:min-w-[180px]"
             >
               <span className="text-muted-3">Sort:</span>
               <span className="text-foreground">{SORT_LABELS[sort]}</span>
@@ -690,13 +696,15 @@ export function PetGallery({
               Loading more
             </span>
           ) : (
-            <button
+            <Button
               type="button"
+              variant="petdex-secondary"
+              size="petdex-pill"
               onClick={loadMore}
-              className="rounded-full border border-border-base bg-surface px-4 py-2 font-mono text-[11px] tracking-[0.12em] text-muted-2 uppercase transition hover:border-black/30 dark:hover:border-white/30"
+              className="font-mono text-[11px] tracking-[0.12em] uppercase"
             >
               Load more
-            </button>
+            </Button>
           )}
         </div>
       ) : pets.length > 0 ? (
@@ -782,13 +790,15 @@ function FilterChips({
         );
       })}
       {hidden > 0 ? (
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="sm"
           onClick={() => setExpanded(true)}
-          className="inline-flex h-7 items-center rounded-full px-2 font-mono text-[10px] text-muted-3 transition hover:text-foreground"
+          className="px-2 font-mono text-[10px] text-muted-3"
         >
           +{hidden} more
-        </button>
+        </Button>
       ) : null}
     </>
   );
@@ -1291,15 +1301,17 @@ function NoResults({
               <span className="font-medium">"{query}"</span>? Request it and
               other people can upvote.
             </p>
-            <button
+            <Button
               type="button"
+              variant="petdex-cta"
+              size="petdex-pill"
               onClick={submitRequest}
               disabled={state.tag === "submitting"}
-              className="inline-flex h-10 items-center gap-1.5 rounded-full bg-brand px-4 text-sm font-medium text-white transition hover:bg-brand-deep disabled:opacity-60"
+              className="text-sm"
             >
               <Plus className="size-4" />
               {state.tag === "submitting" ? "Sending…" : "Request this pet"}
-            </button>
+            </Button>
             {state.tag === "error" ? (
               <p className="font-mono text-[10px] tracking-[0.12em] text-rose-700 uppercase dark:text-rose-300">
                 {state.reason}
@@ -1308,13 +1320,15 @@ function NoResults({
           </div>
         )
       ) : filtersActive ? (
-        <button
+        <Button
           type="button"
+          variant="petdex-secondary"
+          size="lg"
           onClick={onClearFilters}
-          className="mt-3 inline-flex h-9 items-center justify-center rounded-full border border-black/10 bg-white px-4 text-xs font-medium text-stone-700 transition hover:border-black/30 dark:border-white/10 dark:bg-stone-900 dark:text-stone-300 dark:hover:border-white/30"
+          className="mt-3 px-4"
         >
           Clear filters
-        </button>
+        </Button>
       ) : null}
     </div>
   );

@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { Check, Copy, Loader2 } from "lucide-react";
 
 import { CodexLogo } from "@/components/download/codex-logo";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -194,10 +195,12 @@ function ThemeColumn({
           </p>
         </div>
       </div>
-      <button
+      <Button
         type="button"
+        variant="petdex-inverse"
+        size="lg"
         onClick={onCopy}
-        className="inline-flex h-9 items-center justify-center gap-1.5 rounded-full bg-inverse px-3 text-xs font-medium text-on-inverse transition hover:bg-inverse-hover"
+        className="w-full"
       >
         {copied ? (
           <>
@@ -210,7 +213,7 @@ function ThemeColumn({
             Copy {label}
           </>
         )}
-      </button>
+      </Button>
     </div>
   );
 }

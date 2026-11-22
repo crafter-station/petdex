@@ -21,7 +21,8 @@ const variantClassName = {
   mobile: cn(
     buttonVariants({
       variant: "petdex-inverse",
-      className: "mt-1 flex rounded-xl px-3 py-2.5 text-sm",
+      size: "petdex-pill",
+      className: "mt-1 w-full justify-center text-sm",
     }),
   ),
 } as const;

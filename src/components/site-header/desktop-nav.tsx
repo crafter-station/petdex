@@ -37,7 +37,7 @@ export function DesktopNav({ primary, secondary, moreLabel }: DesktopNavProps) {
     <NavigationMenu className="hidden xl:flex">
       <NavigationMenuList>
         <NavigationMenuItem>
-          <NavigationMenuTrigger className="h-8 rounded-full bg-transparent px-2.5 text-[13px] font-medium text-muted-2 hover:text-foreground data-[popup-open]:text-foreground">
+          <NavigationMenuTrigger className="h-8 rounded-xl bg-transparent px-2.5 text-[13px] font-medium text-muted-2 hover:text-foreground data-[popup-open]:text-foreground">
             {moreLabel}
           </NavigationMenuTrigger>
           <NavigationMenuContent>
@@ -46,7 +46,7 @@ export function DesktopNav({ primary, secondary, moreLabel }: DesktopNavProps) {
                 <li key={item.href}>
                   <NavigationMenuLink
                     render={<Link href={item.href} prefetch={false} />}
-                    className="flex rounded-lg px-3 py-2 text-[13px] font-medium text-foreground transition hover:bg-brand/10 hover:text-brand"
+                    className="flex rounded-xl px-3 py-2 text-[13px] font-medium text-foreground transition hover:bg-brand/10 hover:text-brand"
                   >
                     {item.label}
                   </NavigationMenuLink>
@@ -61,7 +61,7 @@ export function DesktopNav({ primary, secondary, moreLabel }: DesktopNavProps) {
               render={<Link href={item.href} prefetch={false} />}
               className={navigationMenuTriggerStyle({
                 className:
-                  "h-8 rounded-full bg-transparent px-2.5 text-[13px] font-medium text-muted-2 hover:text-foreground",
+                  "h-8 rounded-xl bg-transparent px-2.5 text-[13px] font-medium text-muted-2 hover:text-foreground",
               })}
             >
               {item.label}
