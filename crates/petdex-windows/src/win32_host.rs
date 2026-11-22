@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -7,7 +8,14 @@ use petdex_core::{
 };
 
 use crate::bubble_window::{BubbleContent, BubbleWindow};
-use crate::settings_window::SettingsWindow;
+use crate::physics::PetPhysics;
+use crate::popup_menu::PopupMenu;
+#[cfg(not(test))]
+use crate::settings_window::default_settings_path;
+use crate::settings_window::{
+    apply_launch_at_login, clamp_scale_percent, step_scale_percent, PersistedWindowsSettings,
+    SettingsState, SettingsWindow, DEFAULT_SCALE_PERCENT,
+};
 use crate::sprite_loader::{
     discover_pets, DecodedFrame, InstalledWindowsPet, SpriteAtlas,
 };
@@ -37,6 +45,12 @@ pub const CMD_RESET_POSITION: usize = 1003;
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub const CMD_QUIT: usize = 1004;
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub const CMD_SHUFFLE_PET: usize = 1005;
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub const CMD_TOGGLE_FOCUS_MODE: usize = 1006;
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub const CMD_SEND_TEST_BUBBLE: usize = 1007;
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub const CMD_PET_BASE: usize = 2000;
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub const CMD_AGENT_BASE: usize = 3000;
@@ -45,6 +59,61 @@ pub const CMD_AGENT_BASE: usize = 3000;
 pub const WM_PETDEX_SYNC_VISUALS: u32 = 0x8002;
 #[cfg(target_os = "windows")]
 pub const WM_PETDEX_SYNC_TOPMOST: u32 = 0x8003;
+#[cfg(target_os = "windows")]
+pub const WM_PETDEX_SYNC_SCALE: u32 = 0x8004;
+
+pub const fn scaled_window_dimensions(
+    base_width: i32,
+    base_height: i32,
+    scale_percent: u32,
+) -> (i32, i32) {
+    let clamped = clamp_scale_percent(scale_percent);
+    let safe_w = if base_width < 1 { 1 } else { base_width } as u32;
+    let safe_h = if base_height < 1 { 1 } else { base_height } as u32;
+    let scaled_w = (safe_w * clamped) / 100;
+    let scaled_h = (safe_h * clamped) / 100;
+    (
+        if scaled_w < 1 { 1 } else { scaled_w as i32 },
+        if scaled_h < 1 { 1 } else { scaled_h as i32 },
+    )
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub const fn compute_resized_bottom_center_placement(
+    current: WindowPlacement,
+    new_width: i32,
+    new_height: i32,
+    work_area: WorkArea,
+) -> WindowPlacement {
+    let safe_w = if new_width < 1 { 1 } else { new_width };
+    let safe_h = if new_height < 1 { 1 } else { new_height };
+    let anchor_center_x = current.x.saturating_add(current.width / 2);
+    let anchor_bottom_y = current.y.saturating_add(current.height);
+    let desired = WindowPlacement {
+        x: anchor_center_x.saturating_sub(safe_w / 2),
+        y: anchor_bottom_y.saturating_sub(safe_h),
+        width: safe_w,
+        height: safe_h,
+    };
+    clamp_placement_to_work_area(desired, work_area)
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub fn pick_shuffle_index(total: usize, current: Option<usize>, seed: u64) -> Option<usize> {
+    if total == 0 {
+        return None;
+    }
+    if total == 1 {
+        return Some(0);
+    }
+    match current {
+        Some(curr) if curr < total => {
+            let offset = ((seed % ((total - 1) as u64)) as usize) + 1;
+            Some((curr + offset) % total)
+        }
+        _ => Some((seed % (total as u64)) as usize),
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AtlasRect {
@@ -274,6 +343,14 @@ impl Default for Win32HostConfig {
 
 pub struct Win32PetHost {
     config: Win32HostConfig,
+    base_width: i32,
+    base_height: i32,
+    scale_percent: u32,
+    bubbles_enabled: bool,
+    focus_mode: bool,
+    launch_at_login: bool,
+    settings_path: Option<PathBuf>,
+    shuffle_counter: u64,
     coordinator: Arc<Mutex<AttentionCoordinator>>,
     engine: PetAnimationEngine,
     server: HookServer,
@@ -284,6 +361,15 @@ pub struct Win32PetHost {
     installed_pets: Vec<InstalledWindowsPet>,
     active_pet_index: Option<usize>,
     atlas: Option<SpriteAtlas>,
+    physics: PetPhysics,
+    dragging: bool,
+    drag_offset_x: i32,
+    drag_offset_y: i32,
+    pre_drag_state: Option<PetState>,
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    last_tick_ms: u64,
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    popup_menu: PopupMenu,
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     bubble_window: BubbleWindow,
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
@@ -291,7 +377,19 @@ pub struct Win32PetHost {
 }
 
 impl Win32PetHost {
-    pub fn start(mut config: Win32HostConfig, update_token: impl Into<String>) -> std::io::Result<Self> {
+    pub fn start(config: Win32HostConfig, update_token: impl Into<String>) -> std::io::Result<Self> {
+        #[cfg(not(test))]
+        let settings_path = default_settings_path();
+        #[cfg(test)]
+        let settings_path = None;
+        Self::start_with_settings_path(config, update_token, settings_path)
+    }
+
+    pub fn start_with_settings_path(
+        mut config: Win32HostConfig,
+        update_token: impl Into<String>,
+        settings_path: Option<PathBuf>,
+    ) -> std::io::Result<Self> {
         let coordinator = Arc::new(Mutex::new(AttentionCoordinator::new()));
         let server = HookServer::start(
             HookServerConfig::new(config.hook_port, update_token),
@@ -299,24 +397,100 @@ impl Win32PetHost {
         )?;
         let engine = PetAnimationEngine::new();
         let last_frame = engine.current_frame();
-        let topmost = (config.ex_style & WS_EX_TOPMOST) != 0;
+        let base_width = config.width.max(1);
+        let base_height = config.height.max(1);
+
+        let loaded_settings = settings_path
+            .as_deref()
+            .filter(|path| path.exists())
+            .map(PersistedWindowsSettings::load_from_path);
+
+        let scale_percent = loaded_settings
+            .as_ref()
+            .map(|s| clamp_scale_percent(s.scale_percent))
+            .unwrap_or(DEFAULT_SCALE_PERCENT);
+        let (scaled_w, scaled_h) = scaled_window_dimensions(base_width, base_height, scale_percent);
+        config.width = scaled_w;
+        config.height = scaled_h;
+
+        let topmost = loaded_settings
+            .as_ref()
+            .map(|s| s.always_on_top)
+            .unwrap_or((config.ex_style & WS_EX_TOPMOST) != 0);
+        if topmost {
+            config.ex_style |= WS_EX_TOPMOST;
+        } else {
+            config.ex_style &= !WS_EX_TOPMOST;
+        }
+
+        let bubbles_enabled = loaded_settings
+            .as_ref()
+            .map(|s| s.bubbles_enabled)
+            .unwrap_or(true);
+        let focus_mode = loaded_settings
+            .as_ref()
+            .map(|s| s.focus_mode)
+            .unwrap_or(false);
+        let launch_at_login = loaded_settings
+            .as_ref()
+            .map(|s| s.launch_at_login)
+            .unwrap_or(false);
+        let preferred_pet_id = loaded_settings
+            .as_ref()
+            .and_then(|s| s.active_pet.clone());
 
         let installed_pets = discover_pets();
         let mut active_pet_index = None;
         let mut atlas = None;
-        for (idx, pet) in installed_pets.iter().enumerate() {
-            if let Ok(loaded) = SpriteAtlas::from_file(&pet.spritesheet_path) {
-                let (sw, sh) = loaded.sheet_dimensions();
-                config.atlas.sheet_width = sw;
-                config.atlas.sheet_height = sh;
-                active_pet_index = Some(idx);
-                atlas = Some(loaded);
-                break;
+
+        if let Some(ref preferred_id) = preferred_pet_id {
+            if let Some((idx, pet)) = installed_pets
+                .iter()
+                .enumerate()
+                .find(|(_, pet)| pet.id.eq_ignore_ascii_case(preferred_id))
+            {
+                if let Ok(loaded) = SpriteAtlas::from_file(&pet.spritesheet_path) {
+                    let (sw, sh) = loaded.sheet_dimensions();
+                    config.atlas.sheet_width = sw;
+                    config.atlas.sheet_height = sh;
+                    active_pet_index = Some(idx);
+                    atlas = Some(loaded);
+                }
             }
         }
 
+        if atlas.is_none() {
+            for (idx, pet) in installed_pets.iter().enumerate() {
+                if let Ok(loaded) = SpriteAtlas::from_file(&pet.spritesheet_path) {
+                    let (sw, sh) = loaded.sheet_dimensions();
+                    config.atlas.sheet_width = sw;
+                    config.atlas.sheet_height = sh;
+                    active_pet_index = Some(idx);
+                    atlas = Some(loaded);
+                    break;
+                }
+            }
+        }
+
+        let settings_state = SettingsState::with_options(
+            topmost,
+            active_pet_index,
+            scale_percent,
+            bubbles_enabled,
+            focus_mode,
+            launch_at_login,
+        );
+
         Ok(Self {
             config,
+            base_width,
+            base_height,
+            scale_percent,
+            bubbles_enabled,
+            focus_mode,
+            launch_at_login,
+            settings_path,
+            shuffle_counter: 0,
             coordinator,
             engine,
             server,
@@ -326,8 +500,15 @@ impl Win32PetHost {
             installed_pets,
             active_pet_index,
             atlas,
+            physics: PetPhysics::new(),
+            dragging: false,
+            drag_offset_x: 0,
+            drag_offset_y: 0,
+            pre_drag_state: None,
+            last_tick_ms: now_ms(),
+            popup_menu: PopupMenu::new(),
             bubble_window: BubbleWindow::new(),
-            settings_window: SettingsWindow::new(topmost, active_pet_index),
+            settings_window: SettingsWindow::with_state(settings_state),
         })
     }
 
@@ -340,20 +521,159 @@ impl Win32PetHost {
     }
 
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn scale_percent(&self) -> u32 {
+        self.scale_percent
+    }
+
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn set_scale_percent(&mut self, scale_percent: u32) -> u32 {
+        let clamped = clamp_scale_percent(scale_percent);
+        self.scale_percent = clamped;
+        let (w, h) = scaled_window_dimensions(self.base_width, self.base_height, clamped);
+        self.config.width = w;
+        self.config.height = h;
+        self.settings_window
+            .state_mut()
+            .set_scale_percent(clamped);
+        self.persist_settings();
+        clamped
+    }
+
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn step_scale(&mut self, delta: i32) -> u32 {
+        let next = step_scale_percent(self.scale_percent, delta);
+        self.set_scale_percent(next)
+    }
+
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     pub fn is_topmost(&self) -> bool {
         self.topmost
     }
 
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     pub fn toggle_topmost(&mut self) -> bool {
-        self.topmost = !self.topmost;
-        self.topmost
+        let next = !self.topmost;
+        self.set_topmost(next)
     }
 
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     pub fn set_topmost(&mut self, topmost: bool) -> bool {
         self.topmost = topmost;
+        if topmost {
+            self.config.ex_style |= WS_EX_TOPMOST;
+        } else {
+            self.config.ex_style &= !WS_EX_TOPMOST;
+        }
+        self.settings_window
+            .state_mut()
+            .set_always_on_top(topmost);
+        self.persist_settings();
         self.topmost
+    }
+
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn bubbles_enabled(&self) -> bool {
+        self.bubbles_enabled
+    }
+
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn set_bubbles_enabled(&mut self, enabled: bool) -> bool {
+        self.bubbles_enabled = enabled;
+        self.settings_window
+            .state_mut()
+            .set_bubbles_enabled(enabled);
+        self.persist_settings();
+        self.bubbles_enabled
+    }
+
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn focus_mode(&self) -> bool {
+        self.focus_mode
+    }
+
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn set_focus_mode(&mut self, enabled: bool) -> bool {
+        self.focus_mode = enabled;
+        self.settings_window
+            .state_mut()
+            .set_focus_mode(enabled);
+        self.persist_settings();
+        self.focus_mode
+    }
+
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn should_show_bubbles(&self) -> bool {
+        self.bubbles_enabled && !self.focus_mode
+    }
+
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn launch_at_login(&self) -> bool {
+        self.launch_at_login
+    }
+
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn set_launch_at_login(&mut self, enabled: bool) -> bool {
+        if let Err(err) = apply_launch_at_login(enabled) {
+            eprintln!("petdex-windows: failed to update launch at login: {err}");
+            return self.launch_at_login;
+        }
+        self.launch_at_login = enabled;
+        self.settings_window
+            .state_mut()
+            .set_launch_at_login(enabled);
+        self.persist_settings();
+        self.launch_at_login
+    }
+
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn persisted_settings(&self) -> PersistedWindowsSettings {
+        let active_pet = self
+            .active_pet_index
+            .and_then(|idx| self.installed_pets.get(idx))
+            .map(|pet| pet.id.clone());
+        PersistedWindowsSettings {
+            scale_percent: self.scale_percent,
+            active_pet,
+            always_on_top: self.topmost,
+            bubbles_enabled: self.bubbles_enabled,
+            focus_mode: self.focus_mode,
+            launch_at_login: self.launch_at_login,
+        }
+    }
+
+    fn persist_settings(&self) {
+        if let Some(ref path) = self.settings_path {
+            if let Err(err) = self.persisted_settings().save_to_path(path) {
+                eprintln!(
+                    "petdex-windows: failed to save settings to {}: {err}",
+                    path.display()
+                );
+            }
+        }
+    }
+
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn shuffle_pet(&mut self) -> Option<usize> {
+        let total = self.installed_pets.len();
+        if total == 0 {
+            return None;
+        }
+        self.shuffle_counter = self.shuffle_counter.wrapping_add(1);
+        let seed = now_ms().wrapping_add(self.shuffle_counter);
+        let start_idx = pick_shuffle_index(total, self.active_pet_index, seed)?;
+        for step in 0..total {
+            let candidate = (start_idx + step) % total;
+            if total > 1 && self.active_pet_index == Some(candidate) {
+                continue;
+            }
+            if self.select_pet(candidate) {
+                return Some(candidate);
+            }
+        }
+        if total == 1 && self.select_pet(0) {
+            return Some(0);
+        }
+        None
     }
 
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
@@ -415,6 +735,7 @@ impl Win32PetHost {
         let Some(pet) = self.installed_pets.get(index) else {
             return false;
         };
+        let total = self.installed_pets.len();
         match SpriteAtlas::from_file(&pet.spritesheet_path) {
             Ok(loaded) => {
                 let (sw, sh) = loaded.sheet_dimensions();
@@ -422,6 +743,8 @@ impl Win32PetHost {
                 self.config.atlas.sheet_height = sh;
                 self.atlas = Some(loaded);
                 self.active_pet_index = Some(index);
+                self.settings_window.state_mut().select_pet(index, total);
+                self.persist_settings();
                 true
             }
             Err(err) => {
@@ -452,12 +775,138 @@ impl Win32PetHost {
 
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     pub fn active_bubble_content(&self) -> Option<BubbleContent> {
+        if self.focus_mode || !self.bubbles_enabled {
+            return None;
+        }
         let now = now_ms();
         let bubbles = {
             let guard = self.coordinator.lock().unwrap_or_else(|e| e.into_inner());
             guard.active_bubbles(now)
         };
         BubbleContent::from_active_bubbles(&bubbles)
+    }
+
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn active_bubbles_content(&self) -> Vec<BubbleContent> {
+        if self.focus_mode || !self.bubbles_enabled {
+            return Vec::new();
+        }
+        let now = now_ms();
+        let bubbles = {
+            let guard = self.coordinator.lock().unwrap_or_else(|e| e.into_inner());
+            guard.active_bubbles(now)
+        };
+        BubbleContent::vec_from_active_bubbles(&bubbles)
+    }
+
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn is_dragging(&self) -> bool {
+        self.dragging
+    }
+
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn is_throwing(&self) -> bool {
+        self.physics.is_throwing()
+    }
+
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn begin_drag(&mut self, cursor_x: i32, cursor_y: i32, win_x: i32, win_y: i32, now: u64) {
+        self.dragging = true;
+        self.drag_offset_x = cursor_x - win_x;
+        self.drag_offset_y = cursor_y - win_y;
+        if self.pre_drag_state.is_none() {
+            self.pre_drag_state = Some(self.engine.state());
+        }
+        self.physics.begin_drag(win_x as f64, win_y as f64, now);
+    }
+
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn update_drag(&mut self, cursor_x: i32, cursor_y: i32, now: u64) -> (i32, i32) {
+        let new_x = cursor_x - self.drag_offset_x;
+        let new_y = cursor_y - self.drag_offset_y;
+        if let Some(dir_state) = self.physics.update_drag(new_x as f64, new_y as f64, now) {
+            self.manual_override = Some(dir_state);
+            self.engine.set_state(dir_state);
+            self.last_frame = self.engine.current_frame();
+        }
+        (new_x, new_y)
+    }
+
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn end_drag(&mut self, cursor_x: i32, cursor_y: i32, now: u64) -> bool {
+        self.dragging = false;
+        let new_x = cursor_x - self.drag_offset_x;
+        let new_y = cursor_y - self.drag_offset_y;
+        let launched = self.physics.end_drag(new_x as f64, new_y as f64, now);
+        if !launched {
+            self.restore_pre_drag_state();
+        }
+        launched
+    }
+
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn cancel_drag(&mut self) {
+        self.dragging = false;
+        self.physics.stop();
+        self.restore_pre_drag_state();
+    }
+
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn restore_pre_drag_state(&mut self) {
+        if let Some(prev) = self.pre_drag_state.take() {
+            self.manual_override = if prev == PetState::Idle {
+                None
+            } else {
+                Some(prev)
+            };
+            self.engine.set_state(prev);
+            self.last_frame = self.engine.current_frame();
+        }
+    }
+
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn step_throw(
+        &mut self,
+        dt_sec: f64,
+        placement: WindowPlacement,
+        work_area: WorkArea,
+    ) -> Option<(i32, i32)> {
+        if !self.physics.is_throwing() {
+            return None;
+        }
+        let step = self.physics.step(
+            dt_sec,
+            placement.x as f64,
+            placement.y as f64,
+            placement.width,
+            placement.height,
+            (
+                work_area.left,
+                work_area.top,
+                work_area.right,
+                work_area.bottom,
+            ),
+        );
+        if step.finished {
+            self.restore_pre_drag_state();
+        } else if let Some(dir_state) = step.suggested_state {
+            self.manual_override = Some(dir_state);
+            self.engine.set_state(dir_state);
+        }
+        Some((step.x.round() as i32, step.y.round() as i32))
+    }
+
+    #[cfg(target_os = "windows")]
+    pub(crate) fn consume_tick_dt_sec(&mut self) -> f64 {
+        let now = now_ms();
+        let elapsed_ms = now.saturating_sub(self.last_tick_ms);
+        self.last_tick_ms = now;
+        (elapsed_ms.clamp(1, 50) as f64) / 1000.0
+    }
+
+    #[cfg(target_os = "windows")]
+    pub(crate) fn popup_menu_mut(&mut self) -> &mut PopupMenu {
+        &mut self.popup_menu
     }
 
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
@@ -526,13 +975,14 @@ mod platform {
     use std::mem::{size_of, zeroed};
     use std::ptr::{copy_nonoverlapping, null, null_mut};
 
-    use petdex_core::hook_installer::{detect_agent_status, AgentInstallStatus};
     use petdex_core::CodingAgent;
 
     use super::{
-        compute_bottom_right_placement, Win32PetHost, WindowPlacement, WorkArea, CMD_AGENT_BASE,
-        CMD_CYCLE_STATE, CMD_OPEN_SETTINGS, CMD_PET_BASE, CMD_QUIT, CMD_RESET_POSITION,
-        CMD_TOGGLE_TOPMOST, WM_PETDEX_SYNC_TOPMOST, WM_PETDEX_SYNC_VISUALS,
+        compute_bottom_right_placement, compute_resized_bottom_center_placement, now_ms,
+        Win32PetHost, WindowPlacement, WorkArea, CMD_AGENT_BASE, CMD_CYCLE_STATE,
+        CMD_OPEN_SETTINGS, CMD_PET_BASE, CMD_QUIT, CMD_RESET_POSITION, CMD_SEND_TEST_BUBBLE,
+        CMD_SHUFFLE_PET, CMD_TOGGLE_FOCUS_MODE, CMD_TOGGLE_TOPMOST, WM_PETDEX_SYNC_SCALE,
+        WM_PETDEX_SYNC_TOPMOST, WM_PETDEX_SYNC_VISUALS,
     };
 
     type Handle = *mut c_void;
@@ -552,21 +1002,22 @@ mod platform {
     const WS_VISIBLE: u32 = 0x1000_0000;
     const SW_SHOW: i32 = 5;
 
-    const WM_NULL: u32 = 0x0000;
     const WM_CREATE: u32 = 0x0001;
     const WM_DESTROY: u32 = 0x0002;
     const WM_MOVE: u32 = 0x0003;
     const WM_NCCREATE: u32 = 0x0081;
-    const WM_NCHITTEST: u32 = 0x0084;
     const WM_NCRBUTTONUP: u32 = 0x00A5;
     const WM_COMMAND: u32 = 0x0111;
     const WM_TIMER: u32 = 0x0113;
+    const WM_MOUSEMOVE: u32 = 0x0200;
+    const WM_LBUTTONDOWN: u32 = 0x0201;
+    const WM_LBUTTONUP: u32 = 0x0202;
     const WM_LBUTTONDBLCLK: u32 = 0x0203;
     const WM_RBUTTONUP: u32 = 0x0205;
+    const WM_CAPTURECHANGED: u32 = 0x0215;
     const WM_APP: u32 = 0x8000;
     const WM_TRAYICON: u32 = WM_APP + 1;
 
-    const HTCAPTION: isize = 2;
     const GWLP_USERDATA: i32 = -21;
 
     const ULW_ALPHA: u32 = 0x0000_0002;
@@ -574,13 +1025,6 @@ mod platform {
     const AC_SRC_ALPHA: u8 = 0x01;
     const BI_RGB: u32 = 0;
     const DIB_RGB_COLORS: u32 = 0;
-
-    const MF_STRING: u32 = 0x0000_0000;
-    const MF_GRAYED: u32 = 0x0000_0001;
-    const MF_CHECKED: u32 = 0x0000_0008;
-    const MF_POPUP: u32 = 0x0000_0010;
-    const MF_SEPARATOR: u32 = 0x0000_0800;
-    const TPM_RIGHTBUTTON: u32 = 0x0002;
 
     const NIM_ADD: u32 = 0x0000_0000;
     const NIM_DELETE: u32 = 0x0000_0002;
@@ -601,14 +1045,6 @@ mod platform {
 
     const TIMER_ID: usize = 1;
     const TRAY_ICON_ID: u32 = 1;
-
-    const HOOKABLE_AGENTS: [CodingAgent; 5] = [
-        CodingAgent::ClaudeCode,
-        CodingAgent::Codex,
-        CodingAgent::Gemini,
-        CodingAgent::OpenCode,
-        CodingAgent::Hermes,
-    ];
 
     #[repr(C)]
     #[derive(Clone, Copy)]
@@ -762,7 +1198,8 @@ mod platform {
         fn TranslateMessage(lp_msg: *const Msg) -> i32;
         fn DispatchMessageW(lp_msg: *const Msg) -> isize;
         fn PostQuitMessage(n_exit_code: i32);
-        fn PostMessageW(hwnd: Hwnd, msg: u32, wparam: usize, lparam: isize) -> i32;
+        fn SetCapture(hwnd: Hwnd) -> Hwnd;
+        fn ReleaseCapture() -> i32;
         fn SetTimer(
             hwnd: Hwnd,
             n_id_event: usize,
@@ -772,7 +1209,6 @@ mod platform {
         fn KillTimer(hwnd: Hwnd, u_id_event: usize) -> i32;
         fn GetWindowRect(hwnd: Hwnd, lp_rect: *mut Rect) -> i32;
         fn GetCursorPos(lp_point: *mut Point) -> i32;
-        fn SetForegroundWindow(hwnd: Hwnd) -> i32;
         fn SetWindowPos(
             hwnd: Hwnd,
             hwnd_insert_after: Hwnd,
@@ -788,23 +1224,6 @@ mod platform {
             pv_param: *mut c_void,
             f_win_ini: u32,
         ) -> i32;
-        fn CreatePopupMenu() -> Hmenu;
-        fn AppendMenuW(
-            h_menu: Hmenu,
-            u_flags: u32,
-            u_id_new_item: usize,
-            lp_new_item: *const u16,
-        ) -> i32;
-        fn TrackPopupMenu(
-            h_menu: Hmenu,
-            u_flags: u32,
-            x: i32,
-            y: i32,
-            n_reserved: i32,
-            hwnd: Hwnd,
-            prc_rect: *const Rect,
-        ) -> i32;
-        fn DestroyMenu(h_menu: Hmenu) -> i32;
         fn LoadCursorW(h_instance: Hinstance, lp_cursor_name: *const u16) -> Hcursor;
         fn LoadIconW(h_instance: Hinstance, lp_icon_name: *const u16) -> Hicon;
         fn GetDC(hwnd: Hwnd) -> Hdc;
@@ -919,13 +1338,13 @@ mod platform {
         }
     }
 
-    unsafe fn sync_bubble(hwnd: Hwnd, host: &mut Win32PetHost) {
+    unsafe fn sync_bubble(hwnd: Hwnd, host: &mut Win32PetHost, dt_sec: f32) {
         let pet_placement = query_pet_placement(hwnd, host);
         let work_area = query_work_area();
-        let content = host.active_bubble_content();
+        let bubbles = host.active_bubbles_content();
         let topmost = host.is_topmost();
         host.bubble_window_mut()
-            .sync(pet_placement, work_area, content.as_ref(), topmost);
+            .sync_deck(pet_placement, work_area, &bubbles, topmost, dt_sec);
     }
 
     unsafe fn present_pet_frame(hwnd: Hwnd, host: &mut Win32PetHost) {
@@ -1043,93 +1462,39 @@ mod platform {
             0,
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
         );
-        sync_bubble(hwnd, host);
+        sync_bubble(hwnd, host, 0.0);
     }
 
-    unsafe fn show_context_menu(hwnd: Hwnd, host: &Win32PetHost) {
-        let menu = CreatePopupMenu();
-        if menu.is_null() {
-            return;
-        }
+    unsafe fn apply_scale_resize(hwnd: Hwnd, host: &mut Win32PetHost) {
+        let current = query_pet_placement(hwnd, host);
+        let work_area = query_work_area();
+        let resized = compute_resized_bottom_center_placement(
+            current,
+            host.config().width,
+            host.config().height,
+            work_area,
+        );
+        SetWindowPos(
+            hwnd,
+            null_mut(),
+            resized.x,
+            resized.y,
+            resized.width,
+            resized.height,
+            SWP_NOZORDER | SWP_NOACTIVATE,
+        );
+        present_pet_frame(hwnd, host);
+        sync_bubble(hwnd, host, 0.0);
+    }
 
-        let settings_label = wide_null("Settings...");
-        AppendMenuW(menu, MF_STRING, CMD_OPEN_SETTINGS, settings_label.as_ptr());
-        AppendMenuW(menu, MF_SEPARATOR, 0, null());
-
-        let pets_menu = CreatePopupMenu();
-        if !pets_menu.is_null() {
-            if host.installed_pets().is_empty() {
-                let empty_label = wide_null("Cobalt Fallback (No pets installed)");
-                AppendMenuW(pets_menu, MF_STRING | MF_GRAYED, 0, empty_label.as_ptr());
-            } else {
-                for (idx, pet) in host.installed_pets().iter().enumerate() {
-                    let flags = if host.active_pet_index() == Some(idx) {
-                        MF_STRING | MF_CHECKED
-                    } else {
-                        MF_STRING
-                    };
-                    let label = wide_null(&pet.display_name);
-                    AppendMenuW(pets_menu, flags, CMD_PET_BASE + idx, label.as_ptr());
-                }
-            }
-            let pets_title = wide_null("Pets");
-            AppendMenuW(menu, MF_POPUP, pets_menu as usize, pets_title.as_ptr());
-        }
-
-        let agents_menu = CreatePopupMenu();
-        if !agents_menu.is_null() {
-            for agent in HOOKABLE_AGENTS {
-                let spec = agent.spec();
-                let status = detect_agent_status(agent);
-                let (flags, text) = match status {
-                    AgentInstallStatus::Connected => (
-                        MF_STRING | MF_CHECKED,
-                        format!("{}: Disconnect", spec.display_name),
-                    ),
-                    AgentInstallStatus::Detected => {
-                        (MF_STRING, format!("{}: Connect", spec.display_name))
-                    }
-                    AgentInstallStatus::NotFound => (
-                        MF_STRING,
-                        format!("{}: Connect (Not detected)", spec.display_name),
-                    ),
-                };
-                let label = wide_null(&text);
-                AppendMenuW(
-                    agents_menu,
-                    flags,
-                    CMD_AGENT_BASE + (agent as usize),
-                    label.as_ptr(),
-                );
-            }
-            let agents_title = wide_null("Agents");
-            AppendMenuW(menu, MF_POPUP, agents_menu as usize, agents_title.as_ptr());
-        }
-
-        AppendMenuW(menu, MF_SEPARATOR, 0, null());
-
-        let cycle_label = wide_null("Cycle Pet State");
-        let topmost_label = wide_null("Always on Top");
-        let reset_label = wide_null("Reset Position");
-        let quit_label = wide_null("Quit Petdex");
-
-        AppendMenuW(menu, MF_STRING, CMD_CYCLE_STATE, cycle_label.as_ptr());
-        let topmost_flags = if host.is_topmost() {
-            MF_STRING | MF_CHECKED
-        } else {
-            MF_STRING
-        };
-        AppendMenuW(menu, topmost_flags, CMD_TOGGLE_TOPMOST, topmost_label.as_ptr());
-        AppendMenuW(menu, MF_STRING, CMD_RESET_POSITION, reset_label.as_ptr());
-        AppendMenuW(menu, MF_SEPARATOR, 0, null());
-        AppendMenuW(menu, MF_STRING, CMD_QUIT, quit_label.as_ptr());
-
+    unsafe fn show_context_menu(hwnd: Hwnd, host: &mut Win32PetHost) {
         let mut pt = Point { x: 0, y: 0 };
         GetCursorPos(&mut pt);
-        SetForegroundWindow(hwnd);
-        TrackPopupMenu(menu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, null());
-        PostMessageW(hwnd, WM_NULL, 0, 0);
-        DestroyMenu(menu);
+        let work_area = query_work_area();
+        let always_on_top = host.is_topmost();
+        let focus_mode = host.focus_mode();
+        host.popup_menu_mut()
+            .show(hwnd, pt.x, pt.y, work_area, always_on_top, focus_mode);
     }
 
     unsafe extern "system" fn wnd_proc(
@@ -1157,16 +1522,71 @@ mod platform {
                 add_tray_icon(hwnd);
                 0
             }
-            WM_NCHITTEST => HTCAPTION,
+            WM_LBUTTONDOWN => {
+                if !host_ptr.is_null() {
+                    let host = &mut *host_ptr;
+                    host.popup_menu_mut().dismiss();
+                    SetCapture(hwnd);
+                    let mut pt = Point { x: 0, y: 0 };
+                    GetCursorPos(&mut pt);
+                    let placement = query_pet_placement(hwnd, host);
+                    host.begin_drag(pt.x, pt.y, placement.x, placement.y, now_ms());
+                }
+                0
+            }
+            WM_MOUSEMOVE => {
+                if !host_ptr.is_null() {
+                    let host = &mut *host_ptr;
+                    if host.is_dragging() {
+                        let mut pt = Point { x: 0, y: 0 };
+                        GetCursorPos(&mut pt);
+                        let (nx, ny) = host.update_drag(pt.x, pt.y, now_ms());
+                        SetWindowPos(
+                            hwnd,
+                            null_mut(),
+                            nx,
+                            ny,
+                            0,
+                            0,
+                            SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+                        );
+                        sync_bubble(hwnd, host, 0.0);
+                    }
+                }
+                0
+            }
+            WM_LBUTTONUP => {
+                if !host_ptr.is_null() {
+                    let host = &mut *host_ptr;
+                    if host.is_dragging() {
+                        ReleaseCapture();
+                        let mut pt = Point { x: 0, y: 0 };
+                        GetCursorPos(&mut pt);
+                        host.end_drag(pt.x, pt.y, now_ms());
+                        present_pet_frame(hwnd, host);
+                    }
+                }
+                0
+            }
+            WM_CAPTURECHANGED => {
+                if !host_ptr.is_null() {
+                    let host = &mut *host_ptr;
+                    if host.is_dragging() {
+                        host.cancel_drag();
+                        present_pet_frame(hwnd, host);
+                    }
+                }
+                0
+            }
             WM_MOVE => {
                 if !host_ptr.is_null() {
-                    sync_bubble(hwnd, &mut *host_ptr);
+                    sync_bubble(hwnd, &mut *host_ptr, 0.0);
                 }
                 0
             }
             WM_RBUTTONUP | WM_NCRBUTTONUP => {
                 if !host_ptr.is_null() {
-                    show_context_menu(hwnd, &*host_ptr);
+                    show_context_menu(hwnd, &mut *host_ptr);
                 }
                 0
             }
@@ -1174,7 +1594,7 @@ mod platform {
                 let mouse_msg = (lparam as u32) & 0xFFFF;
                 if !host_ptr.is_null() {
                     if mouse_msg == WM_RBUTTONUP {
-                        show_context_menu(hwnd, &*host_ptr);
+                        show_context_menu(hwnd, &mut *host_ptr);
                     } else if mouse_msg == WM_LBUTTONDBLCLK {
                         open_settings_window(hwnd, host_ptr);
                     }
@@ -1189,6 +1609,21 @@ mod platform {
                         CMD_OPEN_SETTINGS => {
                             open_settings_window(hwnd, host_ptr);
                         }
+                        CMD_SHUFFLE_PET => {
+                            if host.shuffle_pet().is_some() {
+                                present_pet_frame(hwnd, host);
+                            }
+                        }
+                        CMD_TOGGLE_FOCUS_MODE => {
+                            let next = !host.focus_mode();
+                            host.set_focus_mode(next);
+                            sync_bubble(hwnd, host, 0.0);
+                        }
+                        CMD_SEND_TEST_BUBBLE => {
+                            host.send_test_bubble();
+                            present_pet_frame(hwnd, host);
+                            sync_bubble(hwnd, host, 0.0);
+                        }
                         CMD_CYCLE_STATE => {
                             host.cycle_state();
                             present_pet_frame(hwnd, host);
@@ -1201,6 +1636,7 @@ mod platform {
                             apply_topmost(hwnd, host);
                         }
                         CMD_RESET_POSITION => {
+                            host.cancel_drag();
                             let work_area = query_work_area();
                             let placement = compute_bottom_right_placement(
                                 work_area,
@@ -1217,7 +1653,8 @@ mod platform {
                                 placement.height,
                                 SWP_NOZORDER | SWP_NOACTIVATE,
                             );
-                            sync_bubble(hwnd, host);
+                            present_pet_frame(hwnd, host);
+                            sync_bubble(hwnd, host, 0.0);
                         }
                         CMD_QUIT => {
                             DestroyWindow(hwnd);
@@ -1246,12 +1683,28 @@ mod platform {
             WM_TIMER => {
                 if wparam == TIMER_ID && !host_ptr.is_null() {
                     let host = &mut *host_ptr;
+                    let dt_sec = host.consume_tick_dt_sec();
+                    if host.is_throwing() {
+                        let placement = query_pet_placement(hwnd, host);
+                        let work_area = query_work_area();
+                        if let Some((nx, ny)) = host.step_throw(dt_sec, placement, work_area) {
+                            SetWindowPos(
+                                hwnd,
+                                null_mut(),
+                                nx,
+                                ny,
+                                0,
+                                0,
+                                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+                            );
+                        }
+                    }
                     let prev = host.last_frame();
                     let next = host.step(host.config().tick_interval_ms);
                     if next != prev {
                         present_pet_frame(hwnd, host);
                     }
-                    sync_bubble(hwnd, host);
+                    sync_bubble(hwnd, host, dt_sec as f32);
                 }
                 0
             }
@@ -1259,7 +1712,7 @@ mod platform {
                 if !host_ptr.is_null() {
                     let host = &mut *host_ptr;
                     present_pet_frame(hwnd, host);
-                    sync_bubble(hwnd, host);
+                    sync_bubble(hwnd, host, 0.0);
                 }
                 0
             }
@@ -1269,8 +1722,15 @@ mod platform {
                 }
                 0
             }
+            WM_PETDEX_SYNC_SCALE => {
+                if !host_ptr.is_null() {
+                    apply_scale_resize(hwnd, &mut *host_ptr);
+                }
+                0
+            }
             WM_DESTROY => {
                 if !host_ptr.is_null() {
+                    (*host_ptr).popup_menu_mut().destroy();
                     (*host_ptr).settings_window_mut().destroy();
                     (*host_ptr).bubble_window_mut().destroy();
                 }
@@ -1339,7 +1799,7 @@ mod platform {
             }
 
             present_pet_frame(hwnd, host);
-            sync_bubble(hwnd, host);
+            sync_bubble(hwnd, host, 0.0);
             ShowWindow(hwnd, SW_SHOW);
 
             eprintln!(
@@ -1653,5 +2113,140 @@ mod tests {
         let bubble = host.active_bubble_content().expect("test bubble active");
         assert_eq!(bubble.summary, "Test bubble from Petdex Settings!");
         assert_eq!(host.last_frame().state, PetState::Review);
+    }
+
+    #[test]
+    fn scaled_dimensions_and_bottom_center_resize_anchor_preserve_position() {
+        assert_eq!(scaled_window_dimensions(160, 160, 60), (96, 96));
+        assert_eq!(scaled_window_dimensions(160, 160, 100), (160, 160));
+        assert_eq!(scaled_window_dimensions(160, 160, 140), (224, 224));
+        assert_eq!(scaled_window_dimensions(160, 160, 20), (96, 96));
+        assert_eq!(scaled_window_dimensions(160, 160, 200), (224, 224));
+
+        assert_eq!(scaled_window_dimensions(192, 208, 100), (192, 208));
+        assert_eq!(scaled_window_dimensions(192, 208, 60), (115, 124));
+        assert_eq!(scaled_window_dimensions(192, 208, 140), (268, 291));
+
+        let work_area = WorkArea {
+            left: 0,
+            top: 0,
+            right: 1920,
+            bottom: 1040,
+        };
+        let current = WindowPlacement {
+            x: 1000,
+            y: 700,
+            width: 160,
+            height: 160,
+        };
+        let resized = compute_resized_bottom_center_placement(current, 224, 224, work_area);
+        assert_eq!(resized.x + resized.width / 2, current.x + current.width / 2);
+        assert_eq!(resized.y + resized.height, current.y + current.height);
+        assert_eq!(resized.width, 224);
+        assert_eq!(resized.height, 224);
+    }
+
+    #[test]
+    fn focus_mode_and_bubbles_toggle_suppress_active_bubbles() {
+        let config = Win32HostConfig {
+            hook_port: 0,
+            ..Win32HostConfig::default()
+        };
+        let mut host = Win32PetHost::start(config, "focus-token").expect("start host");
+        host.send_test_bubble();
+        assert!(host.should_show_bubbles());
+        assert!(host.active_bubble_content().is_some());
+
+        host.set_focus_mode(true);
+        assert!(!host.should_show_bubbles());
+        assert!(host.active_bubble_content().is_none());
+
+        host.set_focus_mode(false);
+        assert!(host.should_show_bubbles());
+        assert!(host.active_bubble_content().is_some());
+
+        host.set_bubbles_enabled(false);
+        assert!(!host.should_show_bubbles());
+        assert!(host.active_bubble_content().is_none());
+
+        host.set_bubbles_enabled(true);
+        assert!(host.should_show_bubbles());
+        assert!(host.active_bubble_content().is_some());
+    }
+
+    #[test]
+    fn shuffle_pet_index_avoids_current_pet_when_multiple_installed() {
+        assert_eq!(pick_shuffle_index(0, None, 42), None);
+        assert_eq!(pick_shuffle_index(1, Some(0), 42), Some(0));
+
+        for current in 0..4 {
+            for seed in 0..12 {
+                let picked = pick_shuffle_index(4, Some(current), seed).expect("picked index");
+                assert!(picked < 4);
+                assert_ne!(picked, current);
+            }
+        }
+    }
+
+    #[test]
+    fn host_live_scale_and_settings_persistence_roundtrip() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "petdex-win-host-persist-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        let settings_path = temp_dir.join("windows-settings.json");
+
+        {
+            let config = Win32HostConfig {
+                hook_port: 0,
+                ..Win32HostConfig::default()
+            };
+            let mut host = Win32PetHost::start_with_settings_path(
+                config,
+                "persist-token-1",
+                Some(settings_path.clone()),
+            )
+            .expect("start host 1");
+
+            assert_eq!(host.scale_percent(), 100);
+            assert_eq!(host.step_scale(20), 120);
+            assert_eq!(host.config().width, 192);
+            assert_eq!(host.config().height, 192);
+
+            let frame = host.current_decoded_frame();
+            assert_eq!(frame.width, 192);
+            assert_eq!(frame.height, 192);
+
+            host.set_topmost(false);
+            host.set_bubbles_enabled(false);
+            host.set_focus_mode(true);
+            host.set_launch_at_login(true);
+        }
+
+        {
+            let config = Win32HostConfig {
+                hook_port: 0,
+                ..Win32HostConfig::default()
+            };
+            let host = Win32PetHost::start_with_settings_path(
+                config,
+                "persist-token-2",
+                Some(settings_path.clone()),
+            )
+            .expect("start host 2");
+
+            assert_eq!(host.scale_percent(), 120);
+            assert_eq!(host.config().width, 192);
+            assert_eq!(host.config().height, 192);
+            assert!(!host.is_topmost());
+            assert_eq!(host.config().ex_style & WS_EX_TOPMOST, 0);
+            assert!(!host.bubbles_enabled());
+            assert!(host.focus_mode());
+            assert!(host.launch_at_login());
+        }
+
+        let _ = std::fs::remove_file(&settings_path);
+        let _ = std::fs::remove_dir(&temp_dir);
     }
 }

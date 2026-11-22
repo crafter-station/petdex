@@ -7,12 +7,132 @@ use crate::win32_host::{
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub const BUBBLE_EX_STYLE: u32 = WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW;
-#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+#[allow(dead_code)]
 pub const DEFAULT_BUBBLE_WIDTH: i32 = 248;
-#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+#[allow(dead_code)]
 pub const DEFAULT_BUBBLE_HEIGHT: i32 = 72;
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub const DEFAULT_BUBBLE_GAP: i32 = 8;
+
+const DECK_MAX_VISIBLE_CARDS: usize = 4;
+const DECK_CARD_WIDTH: f32 = 248.0;
+const DECK_CARD_HEIGHT: f32 = 64.0;
+const DECK_CARD_RADIUS: f32 = 16.0;
+const DECK_TAIL_HEIGHT: f32 = 8.0;
+const DECK_LIP_OFFSET: f32 = 2.0;
+const DECK_EXPANDED_STEP: f32 = 74.0;
+const DECK_MARGIN_X: f32 = 20.0;
+const DECK_MARGIN_TOP: f32 = 24.0;
+const DECK_MARGIN_BOTTOM: f32 = 18.0;
+
+const SPRING_STIFFNESS: f32 = 280.0;
+const SPRING_DAMPING: f32 = 28.0;
+const SPRING_MAX_SUBSTEP: f32 = 1.0 / 120.0;
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub fn spring_step(pos: f32, vel: f32, target: f32, dt: f32) -> (f32, f32) {
+    if !dt.is_finite() || dt <= 0.0 {
+        return (pos, vel);
+    }
+
+    let mut remaining = dt.min(0.25);
+    let mut p = pos;
+    let mut v = vel;
+
+    while remaining > 0.0 {
+        let step = remaining.min(SPRING_MAX_SUBSTEP);
+        let accel = SPRING_STIFFNESS * (target - p) - SPRING_DAMPING * v;
+        v += accel * step;
+        p += v * step;
+        remaining -= step;
+    }
+
+    (p, v)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub struct BubbleSpringState {
+    pub progress: f32,
+    pub velocity: f32,
+    pub hovered: bool,
+}
+
+impl Default for BubbleSpringState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+impl BubbleSpringState {
+    pub const fn new() -> Self {
+        Self {
+            progress: 0.0,
+            velocity: 0.0,
+            hovered: false,
+        }
+    }
+
+    pub fn set_hovered(&mut self, hovered: bool) {
+        self.hovered = hovered;
+    }
+
+    pub fn is_settled(&self) -> bool {
+        let target = if self.hovered { 1.0 } else { 0.0 };
+        (self.progress - target).abs() < 0.001 && self.velocity.abs() < 0.005
+    }
+
+    pub fn step(&mut self, dt_sec: f32) -> f32 {
+        let target = if self.hovered { 1.0 } else { 0.0 };
+        let (next_pos, next_vel) = spring_step(self.progress, self.velocity, target, dt_sec);
+        if (next_pos - target).abs() < 0.001 && next_vel.abs() < 0.005 {
+            self.progress = target;
+            self.velocity = 0.0;
+        } else {
+            self.progress = next_pos.clamp(0.0, 1.0);
+            self.velocity = next_vel;
+        }
+        self.progress
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub struct DeckCardLayout {
+    pub index: usize,
+    pub scale: f32,
+    pub y_offset: f32,
+    pub alpha: f32,
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub fn compute_deck_card_layouts(count: usize, expand_progress: f32) -> Vec<DeckCardLayout> {
+    let visible = count.min(DECK_MAX_VISIBLE_CARDS);
+    let t = expand_progress.clamp(0.0, 1.0);
+    let mut layouts = Vec::with_capacity(visible);
+
+    for index in 0..visible {
+        let (collapsed_scale, collapsed_y, collapsed_alpha) = match index {
+            0 => (1.0_f32, 0.0_f32, 1.0_f32),
+            1 => (0.94_f32, -9.0_f32, 0.90_f32),
+            2 => (0.88_f32, -17.0_f32, 0.74_f32),
+            _ => (0.82_f32, -22.0_f32, 0.0_f32),
+        };
+        let expanded_scale = 1.0_f32;
+        let expanded_y = -(index as f32) * DECK_EXPANDED_STEP;
+        let expanded_alpha = 1.0_f32;
+
+        layouts.push(DeckCardLayout {
+            index,
+            scale: collapsed_scale + (expanded_scale - collapsed_scale) * t,
+            y_offset: collapsed_y + (expanded_y - collapsed_y) * t,
+            alpha: collapsed_alpha + (expanded_alpha - collapsed_alpha) * t,
+        });
+    }
+
+    layouts
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BubbleContent {
@@ -38,6 +158,33 @@ impl BubbleContent {
             summary,
             extra_count: bubbles.len().saturating_sub(1),
         })
+    }
+
+    pub fn vec_from_active_bubbles(bubbles: &[BubbleEntry]) -> Vec<Self> {
+        let total = bubbles.len();
+        bubbles
+            .iter()
+            .enumerate()
+            .map(|(idx, entry)| {
+                let agent_name = entry.agent.spec().display_name.to_string();
+                let trimmed = entry.summary.trim();
+                let summary = if trimmed.is_empty() {
+                    default_summary_for(entry.status).to_string()
+                } else {
+                    trimmed.to_string()
+                };
+                Self {
+                    agent_name,
+                    status: entry.status,
+                    summary,
+                    extra_count: if idx == 0 {
+                        total.saturating_sub(1)
+                    } else {
+                        0
+                    },
+                }
+            })
+            .collect()
     }
 
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
@@ -123,7 +270,7 @@ pub const fn compute_bubble_placement(
     }
 }
 
-#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+#[allow(dead_code)]
 pub fn render_pearl_bubble_frame(width: u32, height: u32, status: SessionStatus) -> DecodedFrame {
     let w = width.max(16);
     let h = height.max(16);
@@ -206,13 +353,317 @@ pub fn render_pearl_bubble_frame(width: u32, height: u32, status: SessionStatus)
     }
 }
 
+#[inline]
+fn status_dot_rgb(status: SessionStatus) -> (u8, u8, u8) {
+    match status {
+        SessionStatus::NeedsInput => (245, 196, 48),
+        SessionStatus::Failed => (224, 72, 88),
+        SessionStatus::Running => (59, 89, 242),
+        SessionStatus::Completed => (44, 176, 128),
+        SessionStatus::Idle => (132, 148, 184),
+    }
+}
+
+#[inline]
+fn rounded_rect_sdf(px: f32, py: f32, cx: f32, cy: f32, half_w: f32, half_h: f32, radius: f32) -> f32 {
+    let r = radius.min(half_w).min(half_h);
+    let qx = (px - cx).abs() - (half_w - r);
+    let qy = (py - cy).abs() - (half_h - r);
+    let ox = qx.max(0.0);
+    let oy = qy.max(0.0);
+    (ox * ox + oy * oy).sqrt() + qx.max(qy).min(0.0) - r
+}
+
+#[inline]
+fn blend_over_premul_bgra(dst: &mut [u8], r: u8, g: u8, b: u8, alpha: f32) {
+    let a = alpha.clamp(0.0, 1.0);
+    if a <= 0.0 {
+        return;
+    }
+    let src_b = (b as f32) * a;
+    let src_g = (g as f32) * a;
+    let src_r = (r as f32) * a;
+    let src_a = 255.0 * a;
+    let inv_a = 1.0 - a;
+
+    dst[0] = (src_b + (dst[0] as f32) * inv_a).clamp(0.0, 255.0) as u8;
+    dst[1] = (src_g + (dst[1] as f32) * inv_a).clamp(0.0, 255.0) as u8;
+    dst[2] = (src_r + (dst[2] as f32) * inv_a).clamp(0.0, 255.0) as u8;
+    dst[3] = (src_a + (dst[3] as f32) * inv_a).clamp(0.0, 255.0) as u8;
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub fn render_pearl_bubble_deck_frame(
+    bubbles: &[BubbleContent],
+    expand_progress: f32,
+) -> DecodedFrame {
+    let t = expand_progress.clamp(0.0, 1.0);
+    let canvas_w = (DECK_CARD_WIDTH + DECK_MARGIN_X * 2.0).round() as u32;
+
+    if bubbles.is_empty() {
+        let canvas_h = (DECK_MARGIN_TOP + DECK_CARD_HEIGHT + DECK_TAIL_HEIGHT + DECK_MARGIN_BOTTOM)
+            .round() as u32;
+        return DecodedFrame {
+            width: canvas_w,
+            height: canvas_h,
+            bgra: vec![0u8; (canvas_w as usize) * (canvas_h as usize) * 4],
+        };
+    }
+
+    let layouts = compute_deck_card_layouts(bubbles.len(), t);
+    let min_y_offset = layouts
+        .iter()
+        .filter(|layout| layout.alpha > 0.005)
+        .map(|layout| layout.y_offset)
+        .fold(0.0_f32, f32::min);
+
+    let canvas_h = (DECK_MARGIN_TOP
+        + (-min_y_offset)
+        + DECK_CARD_HEIGHT
+        + DECK_TAIL_HEIGHT
+        + DECK_MARGIN_BOTTOM)
+        .ceil() as u32;
+
+    let mut bgra = vec![0u8; (canvas_w as usize) * (canvas_h as usize) * 4];
+    let center_x = (canvas_w as f32) * 0.5;
+    let front_top_y = (canvas_h as f32) - DECK_MARGIN_BOTTOM - DECK_TAIL_HEIGHT - DECK_CARD_HEIGHT;
+
+    for layout in layouts.iter().rev() {
+        if layout.alpha <= 0.005 {
+            continue;
+        }
+
+        let is_front = layout.index == 0;
+        let card_w = DECK_CARD_WIDTH * layout.scale;
+        let card_h = DECK_CARD_HEIGHT * layout.scale;
+        let half_w = card_w * 0.5;
+        let half_h = card_h * 0.5;
+        let card_top = front_top_y + layout.y_offset;
+        let card_cy = card_top + half_h;
+        let radius = DECK_CARD_RADIUS * layout.scale;
+        let lip_offset = DECK_LIP_OFFSET * layout.scale;
+
+        let shadow_offset_y = if is_front { 4.0 } else { 2.0 };
+        let shadow_radius = if is_front { 9.0 } else { 6.0 };
+        let shadow_peak_alpha = (if is_front { 0.14 } else { 0.08 }) * layout.alpha;
+
+        let min_px = ((center_x - half_w - shadow_radius - 2.0).floor().max(1.0)) as u32;
+        let max_px = ((center_x + half_w + shadow_radius + 2.0)
+            .ceil()
+            .min((canvas_w - 1) as f32)) as u32;
+        let min_py = ((card_top - shadow_radius - 2.0).floor().max(1.0)) as u32;
+        let max_py = ((card_top + card_h + lip_offset + shadow_offset_y + shadow_radius + 2.0)
+            .ceil()
+            .min((canvas_h - 1) as f32)) as u32;
+
+        // 1. Soft drop shadow (navy ink, never clips outer margin).
+        for py in min_py..max_py {
+            let yf = py as f32 + 0.5;
+            for px in min_px..max_px {
+                let xf = px as f32 + 0.5;
+                let sd = rounded_rect_sdf(
+                    xf,
+                    yf,
+                    center_x,
+                    card_cy + shadow_offset_y,
+                    half_w,
+                    half_h,
+                    radius,
+                );
+                if sd < shadow_radius {
+                    let norm = (sd.max(0.0) / shadow_radius).clamp(0.0, 1.0);
+                    let falloff = (1.0 - norm) * (1.0 - norm);
+                    let idx = ((py as usize) * (canvas_w as usize) + (px as usize)) * 4;
+                    blend_over_premul_bgra(
+                        &mut bgra[idx..idx + 4],
+                        21,
+                        30,
+                        71,
+                        shadow_peak_alpha * falloff,
+                    );
+                }
+            }
+        }
+
+        // 2. Slim 2px bottom lip + glossy pearl body + rim border + status dot.
+        let (dot_r, dot_g, dot_b) = status_dot_rgb(bubbles[layout.index].status);
+        let dot_cx = (center_x - half_w) + 16.0 * layout.scale;
+        let dot_cy = card_top + 16.0 * layout.scale;
+        let dot_rad = 4.0 * layout.scale;
+
+        let show_pill = is_front && bubbles.len() > 1 && t < 0.85;
+        let pill_alpha = if show_pill {
+            ((0.85 - t) / 0.85).clamp(0.0, 1.0) * layout.alpha
+        } else {
+            0.0
+        };
+        let pill_half_w = 13.0 * layout.scale;
+        let pill_half_h = 7.5 * layout.scale;
+        let pill_cx = (center_x + half_w) - 24.0 * layout.scale;
+        let pill_cy = card_top + 16.0 * layout.scale;
+
+        for py in min_py..max_py {
+            let yf = py as f32 + 0.5;
+            let grad_t = ((yf - card_top) / card_h).clamp(0.0, 1.0);
+            let fill_r = (255.0 - grad_t * 10.0) as u8;
+            let fill_g = (255.0 - grad_t * 7.0) as u8;
+            let fill_b = 255u8;
+
+            for px in min_px..max_px {
+                let xf = px as f32 + 0.5;
+                let idx = ((py as usize) * (canvas_w as usize) + (px as usize)) * 4;
+
+                let lip_sd = rounded_rect_sdf(
+                    xf,
+                    yf,
+                    center_x,
+                    card_cy + lip_offset,
+                    half_w,
+                    half_h,
+                    radius,
+                );
+                let body_sd = rounded_rect_sdf(xf, yf, center_x, card_cy, half_w, half_h, radius);
+
+                if lip_sd <= 0.5 && body_sd > -0.2 {
+                    let cov = (0.5 - lip_sd).clamp(0.0, 1.0);
+                    blend_over_premul_bgra(
+                        &mut bgra[idx..idx + 4],
+                        213,
+                        221,
+                        245,
+                        cov * layout.alpha,
+                    );
+                }
+
+                if body_sd <= 0.5 {
+                    let cov = (0.5 - body_sd).clamp(0.0, 1.0);
+                    let mut r = fill_r;
+                    let mut g = fill_g;
+                    let mut b = fill_b;
+
+                    // Subtle glossy rim stroke along card perimeter.
+                    if body_sd > -1.3 {
+                        let rim_t = grad_t;
+                        r = (255.0 * (1.0 - rim_t * 0.22) + 59.0 * (rim_t * 0.22)) as u8;
+                        g = (255.0 * (1.0 - rim_t * 0.22) + 89.0 * (rim_t * 0.22)) as u8;
+                        b = (255.0 * (1.0 - rim_t * 0.22) + 242.0 * (rim_t * 0.22)) as u8;
+                    } else if grad_t < 0.18 {
+                        // Subtle top specular pearl gloss.
+                        let gloss = (1.0 - grad_t / 0.18) * 0.25;
+                        r = (r as f32 + (255.0 - r as f32) * gloss).min(255.0) as u8;
+                        g = (g as f32 + (255.0 - g as f32) * gloss).min(255.0) as u8;
+                        b = 255;
+                    }
+
+                    // Status dot in header.
+                    let ddx = xf - dot_cx;
+                    let ddy = yf - dot_cy;
+                    if ddx * ddx + ddy * ddy <= dot_rad * dot_rad {
+                        r = dot_r;
+                        g = dot_g;
+                        b = dot_b;
+                    }
+
+                    blend_over_premul_bgra(
+                        &mut bgra[idx..idx + 4],
+                        r,
+                        g,
+                        b,
+                        cov * layout.alpha,
+                    );
+
+                    // Cobalt +N pill on front card when collapsed with multiple bubbles.
+                    if pill_alpha > 0.01 {
+                        let pill_sd = rounded_rect_sdf(
+                            xf,
+                            yf,
+                            pill_cx,
+                            pill_cy,
+                            pill_half_w,
+                            pill_half_h,
+                            pill_half_h,
+                        );
+                        if pill_sd <= 0.5 {
+                            let pill_cov = (0.5 - pill_sd).clamp(0.0, 1.0);
+                            blend_over_premul_bgra(
+                                &mut bgra[idx..idx + 4],
+                                59,
+                                89,
+                                242,
+                                pill_cov * pill_alpha,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Bottom speech tail on front card (2px lip + pearl fill).
+        if is_front {
+            let tail_top = card_top + card_h - 1.0;
+            let tail_bottom = tail_top + DECK_TAIL_HEIGHT + 2.0;
+            let tail_min_y = (tail_top.floor().max(1.0)) as u32;
+            let tail_max_y = (tail_bottom.ceil().min((canvas_h - 1) as f32)) as u32;
+            let tail_min_x = ((center_x - 10.0).floor().max(1.0)) as u32;
+            let tail_max_x = ((center_x + 10.0).ceil().min((canvas_w - 1) as f32)) as u32;
+
+            for py in tail_min_y..tail_max_y {
+                let yf = py as f32 + 0.5;
+                let ty = yf - tail_top;
+                let lip_ty = yf - (tail_top + 1.5);
+                for px in tail_min_x..tail_max_x {
+                    let xf = px as f32 + 0.5;
+                    let dx = (xf - center_x).abs();
+                    let idx = ((py as usize) * (canvas_w as usize) + (px as usize)) * 4;
+
+                    if (0.0..=DECK_TAIL_HEIGHT).contains(&lip_ty) {
+                        let half_span = ((DECK_TAIL_HEIGHT - lip_ty) / DECK_TAIL_HEIGHT) * 7.0;
+                        if dx <= half_span {
+                            let cov = (half_span - dx + 0.5).clamp(0.0, 1.0);
+                            blend_over_premul_bgra(
+                                &mut bgra[idx..idx + 4],
+                                213,
+                                221,
+                                245,
+                                cov * layout.alpha,
+                            );
+                        }
+                    }
+
+                    if (0.0..=DECK_TAIL_HEIGHT).contains(&ty) {
+                        let half_span = ((DECK_TAIL_HEIGHT - ty) / DECK_TAIL_HEIGHT) * 7.0;
+                        if dx <= half_span {
+                            let cov = (half_span - dx + 0.5).clamp(0.0, 1.0);
+                            blend_over_premul_bgra(
+                                &mut bgra[idx..idx + 4],
+                                245,
+                                248,
+                                255,
+                                cov * layout.alpha,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    DecodedFrame {
+        width: canvas_w,
+        height: canvas_h,
+        bgra,
+    }
+}
+
 #[cfg(target_os = "windows")]
 pub struct BubbleWindow {
     hwnd: *mut std::ffi::c_void,
     h_instance: *mut std::ffi::c_void,
     class_registered: bool,
     visible: bool,
-    last_content: Option<BubbleContent>,
+    spring: BubbleSpringState,
+    last_bubbles: Vec<BubbleContent>,
+    last_progress_milli: i32,
     last_placement: Option<WindowPlacement>,
 }
 
@@ -223,8 +674,9 @@ mod platform {
     use std::ptr::{copy_nonoverlapping, null, null_mut};
 
     use super::{
-        compute_bubble_placement, render_pearl_bubble_frame, BubbleContent, BubbleWindow,
-        BUBBLE_EX_STYLE, DEFAULT_BUBBLE_GAP, DEFAULT_BUBBLE_HEIGHT, DEFAULT_BUBBLE_WIDTH,
+        compute_bubble_placement, compute_deck_card_layouts, render_pearl_bubble_deck_frame,
+        BubbleContent, BubbleSpringState, BubbleWindow, BUBBLE_EX_STYLE, DECK_CARD_HEIGHT,
+        DECK_CARD_WIDTH, DECK_MARGIN_BOTTOM, DECK_TAIL_HEIGHT, DEFAULT_BUBBLE_GAP,
     };
     use crate::win32_host::{WindowPlacement, WorkArea};
 
@@ -251,6 +703,8 @@ mod platform {
 
     const TRANSPARENT_BK: i32 = 1;
     const DT_LEFT: u32 = 0x0000_0000;
+    const DT_CENTER: u32 = 0x0000_0001;
+    const DT_VCENTER: u32 = 0x0000_0004;
     const DT_SINGLELINE: u32 = 0x0000_0020;
     const DT_END_ELLIPSIS: u32 = 0x0000_8000;
     const DT_NOPREFIX: u32 = 0x0000_0800;
@@ -366,6 +820,8 @@ mod platform {
             cy: i32,
             u_flags: u32,
         ) -> i32;
+        fn GetWindowRect(hwnd: Hwnd, lp_rect: *mut Rect) -> i32;
+        fn GetCursorPos(lp_point: *mut Point) -> i32;
         fn DefWindowProcW(hwnd: Hwnd, msg: u32, wparam: usize, lparam: isize) -> isize;
         fn GetDC(hwnd: Hwnd) -> Hdc;
         fn ReleaseDC(hwnd: Hwnd, hdc: Hdc) -> i32;
@@ -427,6 +883,23 @@ mod platform {
         s.encode_utf16().chain(std::iter::once(0)).collect()
     }
 
+    unsafe fn cursor_inside_hwnd(hwnd: Hwnd) -> bool {
+        if hwnd.is_null() {
+            return false;
+        }
+        let mut pt = Point { x: 0, y: 0 };
+        let mut rect = Rect {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
+        if GetCursorPos(&mut pt) == 0 || GetWindowRect(hwnd, &mut rect) == 0 {
+            return false;
+        }
+        pt.x >= rect.left && pt.x < rect.right && pt.y >= rect.top && pt.y < rect.bottom
+    }
+
     unsafe extern "system" fn bubble_wnd_proc(
         hwnd: Hwnd,
         msg: u32,
@@ -445,7 +918,9 @@ mod platform {
                 h_instance: null_mut(),
                 class_registered: false,
                 visible: false,
-                last_content: None,
+                spring: BubbleSpringState::new(),
+                last_bubbles: Vec::new(),
+                last_progress_milli: -1,
                 last_placement: None,
             }
         }
@@ -501,29 +976,42 @@ mod platform {
             }
         }
 
-        pub fn sync(
+        pub fn sync_deck(
             &mut self,
             pet_placement: WindowPlacement,
             work_area: WorkArea,
-            content: Option<&BubbleContent>,
+            bubbles: &[BubbleContent],
             topmost: bool,
+            dt_sec: f32,
         ) {
-            let Some(content) = content else {
+            if bubbles.is_empty() {
                 if self.visible && !self.hwnd.is_null() {
                     unsafe {
                         ShowWindow(self.hwnd, SW_HIDE);
                     }
                     self.visible = false;
                 }
-                self.last_content = None;
+                self.spring = BubbleSpringState::new();
+                self.last_bubbles.clear();
+                self.last_progress_milli = -1;
                 return;
-            };
+            }
 
+            let hovered = if self.visible && bubbles.len() > 1 {
+                unsafe { cursor_inside_hwnd(self.hwnd) }
+            } else {
+                false
+            };
+            self.spring.set_hovered(hovered);
+            let progress = self.spring.step(dt_sec);
+            let progress_milli = (progress * 1000.0).round() as i32;
+
+            let frame = render_pearl_bubble_deck_frame(bubbles, progress);
             let placement = compute_bubble_placement(
                 pet_placement,
                 work_area,
-                DEFAULT_BUBBLE_WIDTH,
-                DEFAULT_BUBBLE_HEIGHT,
+                frame.width as i32,
+                frame.height as i32,
                 DEFAULT_BUBBLE_GAP,
             );
 
@@ -531,13 +1019,14 @@ mod platform {
                 return;
             }
 
-            let needs_redraw = self.last_content.as_ref() != Some(content)
+            let needs_redraw = self.last_bubbles.as_slice() != bubbles
+                || self.last_progress_milli != progress_milli
                 || self.last_placement != Some(placement)
                 || !self.visible;
 
             if needs_redraw {
                 unsafe {
-                    self.render_layered(placement, content);
+                    self.render_layered_deck(placement, bubbles, progress, &frame);
                     let insert_after = if topmost { HWND_TOPMOST } else { HWND_NOTOPMOST };
                     SetWindowPos(
                         self.hwnd,
@@ -553,15 +1042,24 @@ mod platform {
                         self.visible = true;
                     }
                 }
-                self.last_content = Some(content.clone());
+                self.last_bubbles = bubbles.to_vec();
+                self.last_progress_milli = progress_milli;
                 self.last_placement = Some(placement);
             }
         }
 
-        unsafe fn render_layered(&self, placement: WindowPlacement, content: &BubbleContent) {
-            let w = placement.width.max(16) as u32;
-            let h = placement.height.max(16) as u32;
-            let frame = render_pearl_bubble_frame(w, h, content.status);
+        unsafe fn render_layered_deck(
+            &self,
+            placement: WindowPlacement,
+            bubbles: &[BubbleContent],
+            expand_progress: f32,
+            frame: &crate::sprite_loader::DecodedFrame,
+        ) {
+            let w = frame.width;
+            let h = frame.height;
+            if w == 0 || h == 0 {
+                return;
+            }
 
             let screen_dc = GetDC(null_mut());
             if screen_dc.is_null() {
@@ -633,68 +1131,140 @@ mod platform {
                 DEFAULT_PITCH,
                 font_face.as_ptr(),
             );
-
-            let header = wide_null(&content.header_line());
-            let mut header_rect = Rect {
-                left: 24,
-                top: 8,
-                right: (w as i32) - 10,
-                bottom: 26,
-            };
-            let old_font = if !header_font.is_null() {
-                SelectObject(mem_dc, header_font)
-            } else {
-                null_mut()
-            };
-            SetTextColor(mem_dc, 0x0047_1E15);
-            DrawTextW(
-                mem_dc,
-                header.as_ptr(),
-                (header.len().saturating_sub(1)) as i32,
-                &mut header_rect,
-                DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
+            let pill_font = CreateFontW(
+                -11,
+                0,
+                0,
+                0,
+                FW_SEMIBOLD,
+                0,
+                0,
+                0,
+                DEFAULT_CHARSET,
+                OUT_DEFAULT_PRECIS,
+                CLIP_DEFAULT_PRECIS,
+                CLEARTYPE_QUALITY,
+                DEFAULT_PITCH,
+                font_face.as_ptr(),
             );
 
-            let summary = wide_null(&content.summary);
-            let mut body_rect = Rect {
-                left: 12,
-                top: 28,
-                right: (w as i32) - 10,
-                bottom: (h as i32) - 14,
-            };
-            if !body_font.is_null() {
-                SelectObject(mem_dc, body_font);
-            }
-            SetTextColor(mem_dc, 0x0091_6354);
-            DrawTextW(
-                mem_dc,
-                summary.as_ptr(),
-                (summary.len().saturating_sub(1)) as i32,
-                &mut body_rect,
-                DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
-            );
+            let layouts = compute_deck_card_layouts(bubbles.len(), expand_progress);
+            let center_x = (w as f32) * 0.5;
+            let front_top_y = (h as f32) - DECK_MARGIN_BOTTOM - DECK_TAIL_HEIGHT - DECK_CARD_HEIGHT;
+            let t = expand_progress.clamp(0.0, 1.0);
+            let pixels = std::slice::from_raw_parts_mut(bits.cast::<u8>(), frame.bgra.len());
 
-            if !old_font.is_null() {
-                SelectObject(mem_dc, old_font);
+            for layout in layouts.iter().rev() {
+                if layout.alpha < 0.45 {
+                    continue;
+                }
+                let Some(card) = bubbles.get(layout.index) else {
+                    continue;
+                };
+                let is_front = layout.index == 0;
+                let card_w = DECK_CARD_WIDTH * layout.scale;
+                let card_h = DECK_CARD_HEIGHT * layout.scale;
+                let card_left = (center_x - card_w * 0.5).round() as i32;
+                let card_right = (center_x + card_w * 0.5).round() as i32;
+                let card_top = (front_top_y + layout.y_offset).round() as i32;
+                let card_bottom = (card_top as f32 + card_h).round() as i32;
+
+                let show_pill = is_front && bubbles.len() > 1 && t < 0.85;
+                let header_right = if show_pill {
+                    card_right - 44
+                } else {
+                    card_right - 12
+                };
+
+                let header = wide_null(&card.header_line());
+                let mut header_rect = Rect {
+                    left: card_left + 26,
+                    top: card_top + 8,
+                    right: header_right.max(card_left + 32),
+                    bottom: card_top + 26,
+                };
+                let old_font = if !header_font.is_null() {
+                    SelectObject(mem_dc, header_font)
+                } else {
+                    null_mut()
+                };
+                SetTextColor(mem_dc, 0x0047_1E15);
+                DrawTextW(
+                    mem_dc,
+                    header.as_ptr(),
+                    (header.len().saturating_sub(1)) as i32,
+                    &mut header_rect,
+                    DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
+                );
+
+                let summary = wide_null(&card.summary);
+                let mut body_rect = Rect {
+                    left: card_left + 14,
+                    top: card_top + 29,
+                    right: (card_right - 12).max(card_left + 24),
+                    bottom: (card_bottom - 8).max(card_top + 44),
+                };
+                if !body_font.is_null() {
+                    SelectObject(mem_dc, body_font);
+                }
+                SetTextColor(mem_dc, 0x0091_6354);
+                DrawTextW(
+                    mem_dc,
+                    summary.as_ptr(),
+                    (summary.len().saturating_sub(1)) as i32,
+                    &mut body_rect,
+                    DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
+                );
+
+                if show_pill {
+                    let pill_text = wide_null(&format!("+{}", bubbles.len().saturating_sub(1)));
+                    let mut pill_rect = Rect {
+                        left: card_right - 38,
+                        top: card_top + 8,
+                        right: card_right - 10,
+                        bottom: card_top + 24,
+                    };
+                    if !pill_font.is_null() {
+                        SelectObject(mem_dc, pill_font);
+                    }
+                    SetTextColor(mem_dc, 0x00FF_FFFF);
+                    DrawTextW(
+                        mem_dc,
+                        pill_text.as_ptr(),
+                        (pill_text.len().saturating_sub(1)) as i32,
+                        &mut pill_rect,
+                        DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
+                    );
+                }
+
+                if !old_font.is_null() {
+                    SelectObject(mem_dc, old_font);
+                }
+
+                // Restore opaque alpha inside the interior card text region after GDI DrawTextW.
+                let alpha_byte = (layout.alpha.clamp(0.0, 1.0) * 255.0).round() as u8;
+                let min_x = (card_left + 10).clamp(0, w as i32) as usize;
+                let max_x = (card_right - 10).clamp(0, w as i32) as usize;
+                let min_y = (card_top + 6).clamp(0, h as i32) as usize;
+                let max_y = (card_bottom - 6).clamp(0, h as i32) as usize;
+                for py in min_y..max_y {
+                    for px in min_x..max_x {
+                        let idx = (py * (w as usize) + px) * 4;
+                        if pixels[idx + 3] < alpha_byte {
+                            pixels[idx + 3] = alpha_byte;
+                        }
+                    }
+                }
             }
+
             if !header_font.is_null() {
                 DeleteObject(header_font);
             }
             if !body_font.is_null() {
                 DeleteObject(body_font);
             }
-
-            // Restore opaque alpha inside the interior card text region after GDI DrawTextW.
-            let pixels = std::slice::from_raw_parts_mut(bits.cast::<u8>(), frame.bgra.len());
-            let min_x = 10usize.min(w as usize);
-            let max_x = (w as usize).saturating_sub(10);
-            let min_y = 6usize.min(h as usize);
-            let max_y = (h as usize).saturating_sub(12);
-            for py in min_y..max_y {
-                for px in min_x..max_x {
-                    let idx = (py * (w as usize) + px) * 4;
-                    pixels[idx + 3] = 255;
-                }
+            if !pill_font.is_null() {
+                DeleteObject(pill_font);
             }
 
             let pt_dst = Point {
@@ -752,7 +1322,8 @@ mod platform {
 #[allow(dead_code)]
 pub struct BubbleWindow {
     visible: bool,
-    last_content: Option<BubbleContent>,
+    spring: BubbleSpringState,
+    last_bubbles: Vec<BubbleContent>,
     last_placement: Option<WindowPlacement>,
 }
 
@@ -762,40 +1333,42 @@ impl BubbleWindow {
     pub fn new() -> Self {
         Self {
             visible: false,
-            last_content: None,
+            spring: BubbleSpringState::new(),
+            last_bubbles: Vec::new(),
             last_placement: None,
         }
     }
 
-    pub fn sync(
+    pub fn sync_deck(
         &mut self,
         pet_placement: WindowPlacement,
         work_area: WorkArea,
-        content: Option<&BubbleContent>,
+        bubbles: &[BubbleContent],
         _topmost: bool,
+        dt_sec: f32,
     ) {
-        match content {
-            Some(c) => {
-                self.visible = true;
-                self.last_content = Some(c.clone());
-                self.last_placement = Some(compute_bubble_placement(
-                    pet_placement,
-                    work_area,
-                    DEFAULT_BUBBLE_WIDTH,
-                    DEFAULT_BUBBLE_HEIGHT,
-                    DEFAULT_BUBBLE_GAP,
-                ));
-            }
-            None => {
-                self.visible = false;
-                self.last_content = None;
-            }
+        if bubbles.is_empty() {
+            self.visible = false;
+            self.spring = BubbleSpringState::new();
+            self.last_bubbles.clear();
+            return;
         }
+        let progress = self.spring.step(dt_sec);
+        let frame = render_pearl_bubble_deck_frame(bubbles, progress);
+        self.visible = true;
+        self.last_bubbles = bubbles.to_vec();
+        self.last_placement = Some(compute_bubble_placement(
+            pet_placement,
+            work_area,
+            frame.width as i32,
+            frame.height as i32,
+            DEFAULT_BUBBLE_GAP,
+        ));
     }
 
     pub fn destroy(&mut self) {
         self.visible = false;
-        self.last_content = None;
+        self.last_bubbles.clear();
     }
 }
 
@@ -918,5 +1491,133 @@ mod tests {
         let center = &frame.bgra[center_idx..center_idx + 4];
         assert_eq!(center[3], 255);
         assert!(center[0] >= 240 && center[1] >= 240 && center[2] >= 240);
+    }
+
+    fn make_bubble_content(name: &str, status: SessionStatus, summary: &str) -> BubbleContent {
+        BubbleContent {
+            agent_name: name.to_string(),
+            status,
+            summary: summary.to_string(),
+            extra_count: 0,
+        }
+    }
+
+    #[test]
+    fn collapsed_pearl_deck_renders_peeking_cards_cobalt_pill_and_unclipped_margins() {
+        let bubbles = vec![
+            make_bubble_content("Claude Code", SessionStatus::NeedsInput, "Approve command"),
+            make_bubble_content("Codex", SessionStatus::Running, "Building"),
+            make_bubble_content("Gemini", SessionStatus::Completed, "Done"),
+        ];
+
+        let layouts = compute_deck_card_layouts(bubbles.len(), 0.0);
+        assert_eq!(layouts.len(), 3);
+        assert!((layouts[0].scale - 1.0).abs() < 1e-6);
+        assert!((layouts[1].scale - 0.94).abs() < 1e-6);
+        assert!((layouts[1].y_offset + 9.0).abs() < 1e-6);
+        assert!((layouts[2].scale - 0.88).abs() < 1e-6);
+        assert!((layouts[2].y_offset + 17.0).abs() < 1e-6);
+
+        let single = render_pearl_bubble_deck_frame(&bubbles[..1], 0.0);
+        let deck = render_pearl_bubble_deck_frame(&bubbles, 0.0);
+        assert_eq!(deck.width, single.width);
+        assert!(
+            deck.height > single.height,
+            "3-card collapsed deck ({}) should be taller than 1-card ({}) to fit peeking cards",
+            deck.height,
+            single.height
+        );
+
+        let w = deck.width as usize;
+        let h = deck.height as usize;
+
+        // Outer 1px border must be completely transparent so shadows never clip.
+        for x in 0..w {
+            assert_eq!(deck.bgra[x * 4 + 3], 0, "top edge clipped at x={x}");
+            assert_eq!(
+                deck.bgra[((h - 1) * w + x) * 4 + 3],
+                0,
+                "bottom edge clipped at x={x}"
+            );
+        }
+        for y in 0..h {
+            assert_eq!(deck.bgra[(y * w) * 4 + 3], 0, "left edge clipped at y={y}");
+            assert_eq!(
+                deck.bgra[(y * w + (w - 1)) * 4 + 3],
+                0,
+                "right edge clipped at y={y}"
+            );
+        }
+
+        // Peeking back card region above front card has visible non-zero alpha.
+        let front_top_y = h - (DECK_MARGIN_BOTTOM + DECK_TAIL_HEIGHT + DECK_CARD_HEIGHT) as usize;
+        let peek_y = front_top_y - 12;
+        let peek_idx = (peek_y * w + w / 2) * 4;
+        assert!(
+            deck.bgra[peek_idx + 3] > 150,
+            "expected visible peeking card pixel at y={peek_y}"
+        );
+
+        // Cobalt +N pill on front card top-right has strong blue channel.
+        let pill_x = (w / 2) + (DECK_CARD_WIDTH as usize / 2) - 24;
+        let pill_y = front_top_y + 16;
+        let pill_idx = (pill_y * w + pill_x) * 4;
+        let pill_px = &deck.bgra[pill_idx..pill_idx + 4];
+        assert_eq!(pill_px[3], 255);
+        assert!(pill_px[0] > 200 && pill_px[2] < 100, "expected cobalt pill pixel, got {pill_px:?}");
+    }
+
+    #[test]
+    fn expanded_pearl_deck_grows_height_for_up_to_four_cards() {
+        let bubbles = vec![
+            make_bubble_content("Claude Code", SessionStatus::NeedsInput, "1"),
+            make_bubble_content("Codex", SessionStatus::Running, "2"),
+            make_bubble_content("Gemini", SessionStatus::Completed, "3"),
+            make_bubble_content("OpenCode", SessionStatus::Failed, "4"),
+            make_bubble_content("Extra", SessionStatus::Idle, "5"),
+        ];
+
+        let collapsed = render_pearl_bubble_deck_frame(&bubbles, 0.0);
+        let mid = render_pearl_bubble_deck_frame(&bubbles, 0.5);
+        let expanded = render_pearl_bubble_deck_frame(&bubbles, 1.0);
+
+        assert!(mid.height > collapsed.height);
+        assert!(expanded.height > mid.height);
+
+        let layouts = compute_deck_card_layouts(bubbles.len(), 1.0);
+        assert_eq!(layouts.len(), 4);
+        for (i, layout) in layouts.iter().enumerate() {
+            assert!((layout.scale - 1.0).abs() < 1e-6);
+            assert!((layout.alpha - 1.0).abs() < 1e-6);
+            assert!((layout.y_offset + (i as f32) * DECK_EXPANDED_STEP).abs() < 1e-5);
+        }
+    }
+
+    #[test]
+    fn bubble_spring_state_converges_on_hover_and_collapse() {
+        let mut spring = BubbleSpringState::new();
+        assert_eq!(spring.progress, 0.0);
+        assert!(spring.is_settled());
+
+        spring.set_hovered(true);
+        assert!(!spring.is_settled());
+
+        let first = spring.step(1.0 / 60.0);
+        assert!(first > 0.0 && first < 1.0);
+
+        for _ in 0..120 {
+            spring.step(1.0 / 60.0);
+        }
+        assert!(spring.is_settled());
+        assert_eq!(spring.progress, 1.0);
+        assert_eq!(spring.velocity, 0.0);
+
+        spring.set_hovered(false);
+        for _ in 0..120 {
+            spring.step(1.0 / 60.0);
+        }
+        assert!(spring.is_settled());
+        assert_eq!(spring.progress, 0.0);
+        assert_eq!(spring.velocity, 0.0);
     }
 }
