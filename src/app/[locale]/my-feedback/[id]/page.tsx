@@ -6,11 +6,13 @@ import { asc, eq } from "drizzle-orm";
 import { getTranslations } from "next-intl/server";
 
 import { db, schema } from "@/lib/db/client";
+import { cn } from "@/lib/utils";
 
 import { FullAuthProviders } from "@/components/auth/auth-providers";
 import { FeedbackThread } from "@/components/feedback/feedback-thread";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
+import { buttonVariants } from "@/components/ui/button";
 
 export const dynamic = "force-dynamic";
 
@@ -63,31 +65,36 @@ export default async function MyFeedbackThreadPage({
   return (
     <FullAuthProviders>
       <SiteHeader />
-      <main className="min-h-dvh pb-20">
+      <main className="min-h-dvh bg-background pb-20 text-foreground">
         <section className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-5 pt-10 pb-12 md:px-8 md:pt-14">
           <Link
             href="/my-feedback"
-            className="font-mono text-[11px] tracking-[0.18em] text-muted-3 uppercase hover:text-stone-900 dark:hover:text-stone-100"
+            className={cn(
+              buttonVariants({ variant: "pearl", size: "sm" }),
+              "w-fit",
+            )}
           >
             {t("back")}
           </Link>
-          <FeedbackThread
-            feedback={{
-              id: row.id,
-              kind: row.kind,
-              status: row.status,
-              message: row.message,
-              createdAt: row.createdAt.toISOString(),
-              notifyEmail: row.notifyEmail,
-            }}
-            initialReplies={replies.map((r) => ({
-              id: r.id,
-              authorKind: r.authorKind,
-              body: r.body,
-              createdAt: r.createdAt.toISOString(),
-            }))}
-            viewerKind="user"
-          />
+          <div className="toy-shell rounded-3xl p-5 sm:p-6">
+            <FeedbackThread
+              feedback={{
+                id: row.id,
+                kind: row.kind,
+                status: row.status,
+                message: row.message,
+                createdAt: row.createdAt.toISOString(),
+                notifyEmail: row.notifyEmail,
+              }}
+              initialReplies={replies.map((r) => ({
+                id: r.id,
+                authorKind: r.authorKind,
+                body: r.body,
+                createdAt: r.createdAt.toISOString(),
+              }))}
+              viewerKind="user"
+            />
+          </div>
         </section>
       </main>
       <SiteFooter />

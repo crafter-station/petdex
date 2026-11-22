@@ -12,9 +12,11 @@ import {
 import { getTranslations } from "next-intl/server";
 
 import { buildLocaleAlternates } from "@/lib/locale-routing";
+import { cn } from "@/lib/utils";
 
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
+import { buttonVariants } from "@/components/ui/button";
 
 import { hasLocale } from "@/i18n/config";
 
@@ -50,10 +52,10 @@ export default async function CreatePage() {
       <section className="petdex-hero relative -mt-14 overflow-clip pt-14">
         <div className="relative mx-auto flex w-full max-w-5xl flex-col gap-10 px-5 pb-12 md:px-8 md:pb-16">
           <header className="mt-6 max-w-3xl">
-            <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
+            <p className="toy-tag inline-block rounded-full bg-toy-volt px-2.5 py-1 text-[#101944] shadow-[0_2px_0_#C9A91F]">
               {t("eyebrow")}
             </p>
-            <h1 className="mt-3 text-5xl leading-tight font-medium tracking-tight md:text-7xl">
+            <h1 className="mt-4 font-heading text-5xl leading-tight font-semibold tracking-tight md:text-7xl">
               {t("title")}
             </h1>
             <p className="mt-5 max-w-2xl text-lg leading-8 text-muted-2">
@@ -143,8 +145,8 @@ export default async function CreatePage() {
             </Step>
           </ol>
 
-          <div className="rounded-2xl border border-border-base bg-surface/60 p-5 backdrop-blur md:p-6">
-            <h2 className="text-lg font-semibold tracking-tight">
+          <div className="toy-shell rounded-3xl p-6 md:p-8">
+            <h2 className="font-heading text-xl font-semibold tracking-tight">
               {t("guide.title")}
             </h2>
             <ul className="mt-3 space-y-2 text-sm leading-6 text-muted-2">
@@ -168,9 +170,9 @@ export default async function CreatePage() {
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
-            <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border-base bg-surface/60 p-5 backdrop-blur">
+            <div className="toy-shell flex flex-wrap items-center justify-between gap-4 rounded-3xl p-6">
               <div>
-                <p className="text-base font-semibold text-foreground">
+                <p className="font-heading text-base font-semibold text-foreground">
                   {t("cards.submit.title")}
                 </p>
                 <p className="mt-1 text-sm text-muted-2">
@@ -179,7 +181,10 @@ export default async function CreatePage() {
               </div>
               <Link
                 href="/submit"
-                className="btn-3d-inverse inline-flex h-10 items-center justify-center gap-2 rounded-full bg-inverse px-4 text-[13px] font-medium text-on-inverse transition hover:bg-inverse-hover"
+                className={cn(
+                  buttonVariants({ variant: "cobalt", size: "petdex-pill" }),
+                  "gap-2",
+                )}
               >
                 {t("cards.submit.cta")}
                 <ArrowRight className="size-4" />
@@ -189,9 +194,9 @@ export default async function CreatePage() {
             {/* Steers users without Codex tokens (or who prefer the queue
               path) toward /requests so the catalog grows even from
               folks who can't run Hatch Pet themselves. */}
-            <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border-base bg-surface/60 p-5 backdrop-blur">
+            <div className="toy-shell flex flex-wrap items-center justify-between gap-4 rounded-3xl p-6">
               <div>
-                <p className="text-base font-semibold text-foreground">
+                <p className="font-heading text-base font-semibold text-foreground">
                   {t("cards.request.title")}
                 </p>
                 <p className="mt-1 text-sm text-muted-2">
@@ -200,7 +205,10 @@ export default async function CreatePage() {
               </div>
               <Link
                 href="/requests"
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-border-base bg-surface/70 px-4 text-[13px] font-medium text-muted-2 backdrop-blur transition hover:bg-surface-muted hover:text-foreground"
+                className={cn(
+                  buttonVariants({ variant: "pearl", size: "petdex-pill" }),
+                  "gap-2",
+                )}
               >
                 {t("cards.request.cta")}
                 <ArrowRight className="size-4" />
@@ -212,15 +220,15 @@ export default async function CreatePage() {
             studio. Brand-tinted so it reads as forward-looking, not as
             another action card. Kept below the request queue so it
             doesn't compete with the primary path (Hatch Pet via Codex). */}
-          <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-brand/30 bg-brand/10 p-5 backdrop-blur">
+          <div className="toy-shell flex flex-wrap items-center justify-between gap-4 rounded-3xl border border-toy-cobalt/25 p-6">
             <div className="flex items-start gap-3">
-              <span className="grid size-9 shrink-0 place-items-center rounded-full bg-brand/15 text-brand">
+              <span className="grid size-10 shrink-0 place-items-center rounded-2xl bg-brand-tint text-toy-cobalt dark:bg-brand-tint-dark dark:text-[#9BB2FF]">
                 <Palette className="size-4" />
               </span>
               <div>
-                <p className="flex flex-wrap items-center gap-2 text-base font-semibold text-foreground">
+                <p className="flex flex-wrap items-center gap-2 font-heading text-base font-semibold text-foreground">
                   {t("creator.title")}
-                  <span className="inline-flex items-center gap-1 rounded-full bg-brand/15 px-2 py-0.5 font-mono text-[10px] tracking-[0.15em] text-brand uppercase ring-1 ring-brand/25">
+                  <span className="toy-tag inline-flex items-center gap-1 rounded-full bg-toy-volt px-2.5 py-0.5 text-[#101944] shadow-[0_2px_0_#C9A91F]">
                     <Sparkles className="size-3" />
                     {t("creator.soon")}
                   </span>
@@ -251,12 +259,12 @@ function Step({
   children: React.ReactNode;
 }) {
   return (
-    <li className="flex flex-col gap-2 rounded-2xl border border-border-base bg-surface/60 p-5 backdrop-blur">
-      <div className="flex items-center gap-2">
-        <span className="grid size-6 place-items-center rounded-full bg-inverse font-mono text-[11px] text-on-inverse">
+    <li className="toy-shell flex flex-col gap-2.5 rounded-3xl p-6">
+      <div className="flex items-center gap-2.5">
+        <span className="toy-tag grid size-7 shrink-0 place-items-center rounded-full bg-toy-volt text-[#101944] shadow-[0_2px_0_#C9A91F]">
           {n}
         </span>
-        <span className="inline-flex items-center gap-1.5 text-sm font-semibold tracking-tight text-foreground">
+        <span className="inline-flex items-center gap-1.5 font-heading text-base font-semibold tracking-tight text-foreground">
           {icon}
           {title}
         </span>

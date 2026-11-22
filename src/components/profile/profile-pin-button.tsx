@@ -5,6 +5,10 @@ import { useEffect, useRef, useState, useTransition } from "react";
 
 import { Pin, PinOff } from "lucide-react";
 
+import { cn } from "@/lib/utils";
+
+import { Button } from "@/components/ui/button";
+
 // One-click pin/unpin for an approved pet on the owner's /u/[handle]
 // page. Calls /api/profile with a pin or unpin action so the server
 // reads the current set, applies the diff, and re-validates.
@@ -98,28 +102,26 @@ export function ProfilePinButton({
         : "Pin to profile";
 
   return (
-    <button
+    <Button
       type="button"
+      variant={optimisticPinned && appearance !== "subtle" ? "cobalt" : "pearl"}
+      size="icon"
       onClick={toggle}
       disabled={disabled || capReached}
       title={title}
       aria-label={title}
       style={{ zIndex: 30 }}
-      className={`inline-flex size-8 items-center justify-center rounded-full border backdrop-blur transition disabled:cursor-not-allowed disabled:opacity-60 ${
-        appearance === "subtle"
-          ? optimisticPinned
-            ? "border-border-base bg-surface/90 text-brand hover:border-brand/30 hover:bg-brand-tint"
-            : "border-black/10 bg-surface/90 text-muted-2 hover:border-border-strong hover:text-black"
-          : optimisticPinned
-            ? "border-brand/40 bg-brand text-white hover:bg-brand-deep"
-            : "border-black/10 bg-surface/90 text-muted-2 hover:border-border-strong hover:text-black"
-      }`}
+      className={cn(
+        appearance === "subtle" &&
+          optimisticPinned &&
+          "border-[#3B59F2]/40 text-[#2943CC] dark:text-[#8CA3FF]",
+      )}
     >
       {optimisticPinned ? (
         <PinOff className="size-3.5" />
       ) : (
         <Pin className="size-3.5" />
       )}
-    </button>
+    </Button>
   );
 }

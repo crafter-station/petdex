@@ -31,6 +31,7 @@ import { useTranslations } from "next-intl";
 import type { PetWithMetrics } from "@/lib/pets";
 
 import { PetSprite } from "@/components/pets/pet-sprite";
+import { Button } from "@/components/ui/button";
 
 type Props = {
   pets: PetWithMetrics[];
@@ -143,14 +144,15 @@ export function GalleryReorderGrid({ pets, children }: Props) {
     return (
       <div className="space-y-3">
         <div className="flex items-center justify-end">
-          <button
+          <Button
             type="button"
+            variant="pearl"
+            size="default"
             onClick={() => setEditing(true)}
-            className="inline-flex h-8 items-center gap-1.5 rounded-full border border-border-base bg-surface/70 px-3 text-xs font-medium text-muted-2 transition hover:border-border-strong hover:text-foreground"
           >
             <Pencil className="size-3" />
             {tProfile("editOrder")}
-          </button>
+          </Button>
         </div>
         {children}
       </div>
@@ -159,26 +161,28 @@ export function GalleryReorderGrid({ pets, children }: Props) {
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-brand/30 bg-brand-tint/60 px-3 py-2 dark:bg-brand-tint-dark/60">
+      <div className="toy-shell flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-[#3B59F2]/35 px-4 py-2.5">
         <p className="text-xs text-muted-2">{t("dragInstruction")}</p>
         <div className="flex items-center gap-2">
           {error ? (
             <span className="text-xs text-destructive">{error}</span>
           ) : null}
-          <button
+          <Button
             type="button"
+            variant="pearl"
+            size="default"
             onClick={cancel}
             disabled={saveState === "saving"}
-            className="inline-flex h-8 items-center gap-1.5 rounded-full border border-border-base bg-surface/80 px-3 text-xs font-medium text-muted-2 transition hover:border-border-strong hover:text-foreground disabled:opacity-50"
           >
             <X className="size-3" />
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="cobalt"
+            size="default"
             onClick={save}
             disabled={saveState === "saving"}
-            className="inline-flex h-8 items-center gap-1.5 rounded-full bg-inverse px-3 text-xs font-medium text-on-inverse transition hover:bg-inverse-hover disabled:opacity-50"
           >
             {saveState === "saving" ? (
               <Loader2 className="size-3 animate-spin" />
@@ -186,7 +190,7 @@ export function GalleryReorderGrid({ pets, children }: Props) {
               <Check className="size-3" />
             )}
             {saveState === "saving" ? "Saving…" : "Done"}
-          </button>
+          </Button>
         </div>
       </div>
       <DndContext
@@ -242,21 +246,23 @@ function ReorderItem({
     <div
       ref={setNodeRef}
       style={style}
-      className={`relative flex flex-col items-center gap-2 rounded-2xl border bg-surface/80 p-3 transition ${
+      className={`toy-shell relative flex flex-col items-center gap-2 rounded-2xl border p-3 transition ${
         isActive
-          ? "border-brand shadow-lg"
-          : "border-border-base hover:border-border-strong"
+          ? "border-[#3B59F2] shadow-lg"
+          : "border-[#D4DCF4] hover:border-[#3B59F2]/40 dark:border-white/12"
       }`}
     >
-      <button
+      <Button
         type="button"
+        variant="pearl"
+        size="icon-sm"
         aria-label={`Drag ${pet.displayName} to reorder`}
-        className="absolute top-2 right-2 inline-flex size-7 items-center justify-center rounded-full border border-border-base bg-surface text-muted-2 transition hover:border-border-strong hover:text-foreground"
+        className="absolute top-2 right-2 cursor-grab active:cursor-grabbing"
         {...attributes}
         {...listeners}
       >
         <GripVertical className="size-3.5" />
-      </button>
+      </Button>
       <div className="pet-sprite-stage flex h-24 w-24 items-center justify-center">
         <PetSprite
           src={pet.spritesheetPath}

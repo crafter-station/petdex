@@ -9,6 +9,7 @@ import { ExternalLink, Loader2, Pencil, Pin, Star, X } from "lucide-react";
 import { MAX_PINNED_PETS } from "@/lib/profiles";
 
 import { useHeaderState } from "@/components/layout/header-state-provider";
+import { Button, buttonVariants } from "@/components/ui/button";
 
 type ApprovedPet = {
   slug: string;
@@ -114,7 +115,7 @@ export function ProfileCard({ profile }: { profile: ProfileData }) {
   return (
     <section
       id="profile"
-      className="rounded-3xl border border-border-base bg-surface/76 p-5 backdrop-blur md:p-6"
+      className="toy-shell rounded-3xl border border-[#D4DCF4] p-5 md:p-6 dark:border-white/12"
     >
       <div className="flex flex-wrap items-center gap-4">
         {profile.avatarUrl ? (
@@ -130,9 +131,7 @@ export function ProfileCard({ profile }: { profile: ProfileData }) {
           </div>
         )}
         <div className="min-w-0 flex-1">
-          <p className="font-mono text-[10px] tracking-[0.22em] text-brand uppercase">
-            Public profile
-          </p>
+          <p className="toy-tag text-brand">Public profile</p>
           <p className="mt-1 truncate text-base font-medium text-foreground">
             {profile.displayName ?? `@${profile.handle}`}
           </p>
@@ -146,19 +145,20 @@ export function ProfileCard({ profile }: { profile: ProfileData }) {
             prefetch={false}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex h-9 items-center gap-1.5 rounded-full border border-border-base bg-surface px-3 text-xs font-medium text-muted-2 transition hover:border-border-strong"
+            className={buttonVariants({ variant: "pearl", size: "lg" })}
           >
             <ExternalLink className="size-3.5" />
             View public
           </Link>
-          <button
+          <Button
             type="button"
+            variant="cobalt"
+            size="lg"
             onClick={() => setOpen(true)}
-            className="inline-flex h-9 items-center gap-1.5 rounded-full bg-inverse px-3 text-xs font-medium text-on-inverse transition hover:bg-inverse-hover"
           >
             <Pencil className="size-3.5" />
             Customize
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -221,7 +221,7 @@ export function ProfileCard({ profile }: { profile: ProfileData }) {
             if (e.key === "Escape") setOpen(false);
           }}
         >
-          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-surface p-6 shadow-xl">
+          <div className="toy-shell max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-3xl border border-[#D4DCF4] p-6 dark:border-white/12">
             <div className="mb-4 flex items-start justify-between gap-3">
               <div>
                 <h2 className="text-xl font-medium tracking-tight">
@@ -232,13 +232,14 @@ export function ProfileCard({ profile }: { profile: ProfileData }) {
                   instantly. No admin review.
                 </p>
               </div>
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon-sm"
                 onClick={() => setOpen(false)}
-                className="rounded-full p-1 text-muted-4 hover:bg-surface-muted hover:text-foreground"
               >
                 <X className="size-4" />
-              </button>
+              </Button>
             </div>
 
             <form
@@ -327,9 +328,11 @@ export function ProfileCard({ profile }: { profile: ProfileData }) {
                       const capped =
                         !active && pinned.length >= MAX_PINNED_PETS;
                       return (
-                        <button
+                        <Button
                           type="button"
                           key={p.slug}
+                          variant={active ? "cobalt" : "pearl"}
+                          size="sm"
                           onClick={() => togglePin(p.slug)}
                           disabled={capped}
                           title={
@@ -339,15 +342,10 @@ export function ProfileCard({ profile }: { profile: ProfileData }) {
                                 ? "Click to unpin"
                                 : "Click to pin"
                           }
-                          className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${
-                            active
-                              ? "border-brand bg-brand text-white hover:bg-brand-deep"
-                              : "border-black/10 bg-surface text-muted-2 hover:border-black/30"
-                          }`}
                         >
                           <Pin className="size-3" />
                           {p.displayName}
-                        </button>
+                        </Button>
                       );
                     })}
                   </div>
@@ -365,21 +363,23 @@ export function ProfileCard({ profile }: { profile: ProfileData }) {
               ) : null}
 
               <div className="flex items-center justify-end gap-2 pt-2">
-                <button
+                <Button
                   type="button"
+                  variant="pearl"
+                  size="lg"
                   onClick={() => setOpen(false)}
-                  className="inline-flex h-9 items-center rounded-full border border-border-base bg-surface px-3 text-xs font-medium text-muted-2 transition hover:border-border-strong"
                 >
                   Cancel
-                </button>
-                <button
+                </Button>
+                <Button
                   type="submit"
+                  variant="cobalt"
+                  size="lg"
                   disabled={busy}
-                  className="inline-flex h-9 items-center gap-1.5 rounded-full bg-inverse px-4 text-xs font-medium text-on-inverse transition hover:bg-stone-800 disabled:opacity-60"
                 >
                   {busy ? <Loader2 className="size-3.5 animate-spin" /> : null}
                   Save
-                </button>
+                </Button>
               </div>
             </form>
           </div>

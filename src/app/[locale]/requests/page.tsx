@@ -13,6 +13,7 @@ import {
 } from "@/components/requests/requests-view";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
+import { buttonVariants } from "@/components/ui/button";
 
 import { hasLocale } from "@/i18n/config";
 
@@ -200,10 +201,10 @@ export default async function RequestsPage() {
       <SiteHeader />
       <section className="petdex-hero relative -mt-14 overflow-clip pt-14">
         <header className="mx-auto w-full max-w-3xl space-y-3 px-5 pt-10 pb-8 md:px-8 md:pt-14">
-          <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
+          <p className="toy-tag inline-block rounded-full bg-toy-volt px-2.5 py-1 text-[#101944] shadow-[0_2px_0_#C9A91F]">
             {t("eyebrow")}
           </p>
-          <h1 className="text-balance text-4xl font-semibold tracking-tight text-foreground md:text-5xl">
+          <h1 className="font-heading text-balance text-4xl font-semibold tracking-tight text-foreground md:text-5xl">
             {t("title")}
           </h1>
           <p className="max-w-2xl text-base leading-7 text-muted-2">
@@ -211,14 +212,16 @@ export default async function RequestsPage() {
           </p>
           <Link
             href="/#gallery"
-            className="inline-flex h-9 items-center rounded-full border border-border-base bg-surface/70 px-3.5 text-[13px] font-medium text-muted-2 backdrop-blur transition hover:bg-surface-muted hover:text-foreground"
+            className={buttonVariants({ variant: "pearl", size: "lg" })}
           >
             {t("backToGallery")}
           </Link>
         </header>
       </section>
       <section className="mx-auto flex w-full max-w-3xl flex-col px-5 pt-6 pb-20 md:px-8">
-        <RequestsView initial={initial} />
+        <div className="toy-shell rounded-3xl p-4 sm:p-6 md:p-8">
+          <RequestsView initial={initial} />
+        </div>
       </section>
       <SiteFooter />
     </main>

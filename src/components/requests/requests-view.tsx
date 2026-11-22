@@ -23,8 +23,11 @@ import {
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 
+import { cn } from "@/lib/utils";
+
 import { useAuthIntent } from "@/components/auth/auth-intent";
 import { ClaimRequestButton } from "@/components/auth/claim-request-button";
+import { Button, buttonVariants } from "@/components/ui/button";
 
 type ClerkInfo = {
   handle: string;
@@ -343,10 +346,10 @@ export function RequestsView({ initial }: { initial: RequestRow[] }) {
       {/* Always-visible request form */}
       <form
         onSubmit={submitForm}
-        className="space-y-4 rounded-2xl border border-border-base bg-surface/60 px-4 py-4 backdrop-blur"
+        className="toy-shell space-y-4 rounded-3xl border border-[#D4DCF4] p-5 dark:border-white/12"
       >
         <div className="flex items-center gap-2">
-          <span className="grid size-7 place-items-center rounded-full border border-brand/30 bg-brand/15 text-brand">
+          <span className="grid size-7 place-items-center rounded-xl border border-[#3B59F2]/30 bg-[#EEF2FF] text-[#2943CC] dark:bg-[#3B59F2]/15 dark:text-[#8CA3FF]">
             <Sparkles className="size-3.5" />
           </span>
           <p className="text-sm font-semibold text-foreground">
@@ -374,7 +377,7 @@ export function RequestsView({ initial }: { initial: RequestRow[] }) {
             ? t("form.bodyCollection")
             : t("form.bodyPet")}
         </p>
-        <p className="rounded-xl border border-border-base bg-surface-muted/60 px-3 py-2 text-xs leading-5 text-muted-2">
+        <p className="rounded-xl border border-[#D4DCF4] bg-surface-muted/60 px-3 py-2 text-xs leading-5 text-muted-2 dark:border-white/12">
           {requestKind === "collection"
             ? t("form.collectionHint")
             : t("form.petHint")}
@@ -394,16 +397,18 @@ export function RequestsView({ initial }: { initial: RequestRow[] }) {
                   : t("form.placeholderPet")
               }
               maxLength={MAX_LEN}
-              className="h-11 w-full rounded-full border border-border-base bg-background px-4 text-sm text-foreground outline-none transition placeholder:text-muted-4 focus:border-brand/60 focus:ring-2 focus:ring-brand/15"
+              className="h-11 w-full rounded-xl border border-[#D4DCF4] bg-background px-4 text-sm text-foreground outline-none transition placeholder:text-muted-4 focus:border-[#3B59F2] focus:ring-2 focus:ring-[#3B59F2]/20 dark:border-white/12"
             />
             <span className="-translate-y-1/2 pointer-events-none absolute top-1/2 right-3 font-mono text-[10px] text-muted-4">
               {draft.length}/{MAX_LEN}
             </span>
           </label>
-          <button
+          <Button
             type="submit"
+            variant="cobalt"
+            size="petdex-pill"
             disabled={submitting || draft.trim().length < MIN_LEN}
-            className="btn-3d-brand inline-flex h-11 items-center justify-center gap-1.5 rounded-full bg-brand-deep px-5 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-50 dark:text-[#0b0b18]"
+            className="h-11 px-5 text-sm"
           >
             <Plus className="size-4" />
             {submitting
@@ -411,10 +416,10 @@ export function RequestsView({ initial }: { initial: RequestRow[] }) {
               : requestKind === "collection"
                 ? t("form.submitCollection")
                 : t("form.submitPet")}
-          </button>
+          </Button>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <label className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-full border border-border-base bg-surface px-3 text-xs font-medium text-muted-2 transition hover:bg-surface-muted hover:text-foreground">
+          <label className={buttonVariants({ variant: "pearl", size: "lg" })}>
             <ImageIcon className="size-3.5" />
             {t("form.imageLabel")}
             <input
@@ -432,17 +437,18 @@ export function RequestsView({ initial }: { initial: RequestRow[] }) {
           </label>
           <span className="text-xs text-muted-3">{t("form.imageBody")}</span>
           {imageFile ? (
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="sm"
               onClick={() => {
                 setImageFile(null);
                 setFileInputKey((key) => key + 1);
               }}
-              className="inline-flex h-8 items-center gap-1 rounded-full bg-surface-muted px-2.5 text-xs text-muted-2 transition hover:text-foreground"
             >
               <X className="size-3.5" />
               {imageFile.name}
-            </button>
+            </Button>
           ) : null}
         </div>
         {formError ? (
@@ -493,7 +499,7 @@ export function RequestsView({ initial }: { initial: RequestRow[] }) {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder={t("sort.searchPlaceholder")}
-              className="h-9 w-full rounded-full border border-border-base bg-surface pr-3 pl-8 text-xs text-foreground outline-none placeholder:text-muted-4 focus:border-brand/60"
+              className="h-9 w-full rounded-xl border border-[#D4DCF4] bg-surface pr-3 pl-8 text-xs text-foreground outline-none placeholder:text-muted-4 focus:border-[#3B59F2] dark:border-white/12"
             />
           </label>
         </div>
@@ -509,11 +515,11 @@ export function RequestsView({ initial }: { initial: RequestRow[] }) {
       {requests.length === 0 ? (
         <EmptyState />
       ) : visible.length === 0 ? (
-        <div className="rounded-3xl border border-dashed border-border-base bg-surface/70 p-8 text-center text-sm text-muted-2">
+        <div className="toy-shell rounded-3xl border border-dashed border-[#D4DCF4] p-8 text-center text-sm text-muted-2 dark:border-white/12">
           {search ? t("empty.noMatches", { search }) : t("empty.nothingInView")}
         </div>
       ) : (
-        <ul className="space-y-2.5">
+        <ul className="space-y-3">
           {visible.map((r) => (
             <RequestCard
               key={r.id}
@@ -544,25 +550,22 @@ function SortTab({
   count: number;
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant={active ? "cobalt" : "pearl"}
+      size="lg"
       onClick={onClick}
-      className={`inline-flex h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-medium backdrop-blur transition ${
-        active
-          ? "border-brand/40 bg-brand/15 text-brand"
-          : "border-border-base bg-surface/70 text-muted-2 hover:bg-surface-muted hover:text-foreground"
-      }`}
     >
       {icon}
       {label}
       <span
         className={`font-mono text-[10px] ${
-          active ? "text-brand/70" : "text-muted-4"
+          active ? "text-white/80" : "text-muted-4"
         }`}
       >
         {count}
       </span>
-    </button>
+    </Button>
   );
 }
 
@@ -581,14 +584,15 @@ function RequestKindButton({
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-2xl border px-3 py-2 text-left transition ${
+      className={cn(
+        "cursor-pointer rounded-2xl border px-3.5 py-2.5 text-left transition",
         active
-          ? "border-brand/40 bg-brand/10 text-foreground"
-          : "border-border-base bg-surface/60 text-muted-2 hover:bg-surface-muted hover:text-foreground"
-      }`}
+          ? "border-[#3B59F2]/50 bg-[#EEF2FF]/80 text-foreground shadow-[inset_0_1.5px_0_rgb(255_255_255/0.8),0_2px_0_#CBD4EE] dark:bg-[#3B59F2]/15 dark:shadow-none"
+          : "border-[#D4DCF4] bg-surface/70 text-muted-2 hover:border-[#3B59F2]/40 hover:text-foreground dark:border-white/12",
+      )}
     >
       <span
-        className={`block text-xs font-semibold ${active ? "text-brand" : ""}`}
+        className={`block text-xs font-semibold ${active ? "text-[#2943CC] dark:text-[#8CA3FF]" : ""}`}
       >
         {title}
       </span>
@@ -624,27 +628,25 @@ function RequestCard({
   return (
     <li
       ref={itemRef}
-      className={`group rounded-2xl border bg-surface/60 px-4 py-3.5 backdrop-blur transition ${
+      className={cn(
+        "toy-shell group rounded-2xl border px-4 py-3.5 transition",
         fulfilled
-          ? "border-emerald-200 hover:border-emerald-300 dark:border-emerald-900/50 dark:hover:border-emerald-800"
-          : "border-border-base hover:border-brand/35 hover:bg-surface"
-      }`}
+          ? "border-emerald-300/80 dark:border-emerald-800/70"
+          : "border-[#D4DCF4] hover:border-[#3B59F2]/40 dark:border-white/12",
+      )}
     >
       <div className="flex items-start gap-3">
         {/* Vote button */}
-        <button
+        <Button
           type="button"
+          variant={request.voted ? "cobalt" : "pearl"}
           onClick={(e) => {
             e.preventDefault();
             upvote();
           }}
           disabled={busy || request.voted || fulfilled}
           aria-label={t("upvoteAria", { query: parsedRequest.label })}
-          className={`flex shrink-0 flex-col items-center gap-0.5 rounded-xl border px-3 py-2 transition ${
-            request.voted
-              ? "border-brand/40 bg-brand/15 text-brand"
-              : "border-border-base bg-surface/60 text-muted-2 hover:border-brand/40 hover:bg-brand/10 hover:text-brand"
-          } disabled:cursor-not-allowed disabled:opacity-60`}
+          className="h-auto shrink-0 flex-col gap-0.5 rounded-xl px-3 py-2"
         >
           {request.voted ? (
             <Check className="size-4" />
@@ -654,7 +656,7 @@ function RequestCard({
           <span className="font-mono text-sm font-semibold leading-none">
             {request.upvoteCount}
           </span>
-        </button>
+        </Button>
 
         {/* Body */}
         <div className="min-w-0 flex-1 space-y-2">
@@ -770,7 +772,10 @@ function RequestCard({
             {fulfilled && request.fulfilledPet ? (
               <Link
                 href={`/pets/${request.fulfilledPet.slug}`}
-                className="ml-auto inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-chip-success-bg px-2.5 py-1 font-mono text-[11px] tracking-[0.04em] text-chip-success-fg transition hover:border-emerald-300 hover:bg-emerald-100 dark:border-emerald-800/60 dark:hover:border-emerald-700 dark:hover:bg-emerald-900/40"
+                className={cn(
+                  buttonVariants({ variant: "pearl", size: "sm" }),
+                  "ml-auto font-mono text-[11px]",
+                )}
               >
                 <Sparkles className="size-3" />
                 {request.fulfilledPet.displayName}
@@ -829,8 +834,8 @@ function EmptyState() {
   const t = useTranslations("requests.view");
 
   return (
-    <div className="space-y-3 rounded-3xl border border-dashed border-border-base bg-surface/70 p-8 text-center">
-      <span className="mx-auto grid size-10 place-items-center rounded-full bg-brand-tint text-brand dark:bg-brand-tint-dark">
+    <div className="toy-shell space-y-3 rounded-3xl border border-dashed border-[#D4DCF4] p-8 text-center dark:border-white/12">
+      <span className="mx-auto grid size-10 place-items-center rounded-2xl bg-brand-tint text-brand dark:bg-brand-tint-dark">
         <Sparkles className="size-4" />
       </span>
       <p className="text-sm font-medium text-foreground">{t("empty.title")}</p>

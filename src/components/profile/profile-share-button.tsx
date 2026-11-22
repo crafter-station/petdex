@@ -12,6 +12,8 @@ import { Check, X as CloseIcon, Link2, Share2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { createPortal } from "react-dom";
 
+import { Button } from "@/components/ui/button";
+
 const SITE_URL = "https://petdex.dev";
 
 type Props = {
@@ -149,20 +151,19 @@ export function ProfileShareButton({ handle, displayName }: Props) {
         ref={menuRef}
         role="menu"
         style={{ position: "fixed", top: menuPos.top, left: menuPos.left }}
-        className="z-[100] w-64 overflow-hidden rounded-2xl border border-border-base bg-surface shadow-xl shadow-blue-950/15"
+        className="toy-shell z-[100] w-64 overflow-hidden rounded-2xl border border-[#D4DCF4] dark:border-white/12"
       >
-        <div className="flex items-center justify-between border-b border-black/[0.06] px-3 py-2 dark:border-white/[0.06]">
-          <span className="font-mono text-[10px] tracking-[0.18em] text-muted-3 uppercase">
-            {t("eyebrow")}
-          </span>
-          <button
+        <div className="flex items-center justify-between border-b border-[#D4DCF4] px-3 py-2 dark:border-white/12">
+          <span className="toy-tag text-muted-3">{t("eyebrow")}</span>
+          <Button
             type="button"
+            variant="ghost"
+            size="icon-xs"
             aria-label={t("close")}
             onClick={() => setOpen(false)}
-            className="grid size-6 place-items-center rounded-full text-muted-4 transition hover:bg-surface-muted hover:text-foreground"
           >
             <CloseIcon className="size-3.5" />
-          </button>
+          </Button>
         </div>
         <ul className="py-1">
           <li>
@@ -238,20 +239,21 @@ export function ProfileShareButton({ handle, displayName }: Props) {
 
   return (
     <div ref={wrapRef} className="relative inline-flex">
-      <button
+      <Button
         ref={triggerRef}
         type="button"
+        variant="pearl"
+        size="petdex-pill"
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={(e) => {
           e.preventDefault();
           setOpen((v) => !v);
         }}
-        className="inline-flex h-10 items-center gap-2 rounded-full border border-border-base bg-surface px-4 text-sm font-medium text-muted-2 transition hover:border-border-strong hover:text-foreground"
       >
         <Share2 className="size-4" />
         {t("share")}
-      </button>
+      </Button>
       {mounted && menuNode ? createPortal(menuNode, document.body) : null}
     </div>
   );

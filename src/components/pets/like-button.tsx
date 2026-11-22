@@ -60,13 +60,14 @@ export function LikeButton({ slug }: LikeButtonProps) {
 
   return (
     <Button
-      variant="outline"
+      variant="pearl"
+      size="lg"
       onClick={requestAuth}
       aria-busy={loading || undefined}
-      className="h-9 gap-1.5 rounded-full border border-border-base bg-surface/70 px-3.5 text-[13px] font-medium text-muted-2 backdrop-blur transition hover:border-rose-400/40 hover:text-rose-500 disabled:opacity-60"
+      className="gap-1.5 rounded-xl px-3.5 text-[13px] font-medium disabled:opacity-60"
     >
       <Heart className="size-4 transition" />
-      <span className="font-mono text-xs tracking-[0.08em]">
+      <span className="font-hardware text-[11px] tracking-[0.08em]">
         {count === null ? "-" : formatLocalizedNumber(count, locale)}
       </span>
     </Button>

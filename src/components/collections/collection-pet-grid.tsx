@@ -9,6 +9,7 @@ import type { PetWithMetrics } from "@/lib/pets";
 import { cn } from "@/lib/utils";
 
 import { PetCard } from "@/components/pets/pet-gallery";
+import { Button } from "@/components/ui/button";
 
 const PAGE_SIZE = 24;
 
@@ -61,7 +62,7 @@ export function CollectionPetGrid({ pets, dexMap, caughtSlugs = [] }: Props) {
 
   if (pets.length === 0) {
     return (
-      <div className="rounded-3xl border border-dashed border-border-base bg-surface/60 p-10 text-center text-sm text-muted-2">
+      <div className="toy-shell rounded-3xl border border-dashed border-[#D4DCF4] p-10 text-center text-sm text-muted-2 dark:border-white/12">
         {t("empty")}
       </div>
     );
@@ -80,23 +81,25 @@ export function CollectionPetGrid({ pets, dexMap, caughtSlugs = [] }: Props) {
             onChange={(e) => onQueryChange(e.target.value)}
             placeholder={t("searchPlaceholder")}
             aria-label={t("searchAria")}
-            className="h-11 w-full rounded-2xl border border-border-base bg-surface/60 pr-10 pl-11 text-sm text-foreground outline-none placeholder:text-muted-3 focus:border-foreground/30"
+            className="h-11 w-full rounded-xl border border-[#D4DCF4] bg-surface/80 pr-10 pl-11 text-sm text-foreground outline-none placeholder:text-muted-3 focus:border-[#3B59F2] focus:ring-2 focus:ring-[#3B59F2]/20 dark:border-white/12"
           />
           {query ? (
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon-xs"
               onClick={() => onQueryChange("")}
               aria-label={t("clearSearchAria")}
-              className="absolute top-1/2 right-3 -translate-y-1/2 rounded-full p-1 text-muted-3 hover:text-foreground"
+              className="absolute top-1/2 right-2.5 -translate-y-1/2"
             >
-              <X className="size-4" />
-            </button>
+              <X className="size-3.5" />
+            </Button>
           ) : null}
         </div>
       ) : null}
 
       {filtered.length === 0 ? (
-        <div className="rounded-3xl border border-dashed border-border-base bg-surface/60 p-10 text-center text-sm text-muted-2">
+        <div className="toy-shell rounded-3xl border border-dashed border-[#D4DCF4] p-10 text-center text-sm text-muted-2 dark:border-white/12">
           {t("noResults", { query })}
         </div>
       ) : (

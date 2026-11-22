@@ -12,6 +12,8 @@ import {
   MAX_COLLECTION_PETS,
 } from "@/lib/collection-constants";
 
+import { Button } from "@/components/ui/button";
+
 type ApprovedPet = {
   slug: string;
   displayName: string;
@@ -54,26 +56,25 @@ export function OwnerCollectionsManager({
     <div className="space-y-5">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="font-mono text-[11px] tracking-[0.22em] text-brand uppercase">
-            {t("title")}
-          </p>
+          <p className="toy-tag text-brand">{t("title")}</p>
           <p className="mt-1 text-sm text-muted-3">
             {t("description")} {personalCount}/{maxCollections} used.
           </p>
         </div>
-        <button
+        <Button
           type="button"
+          variant="cobalt"
+          size="petdex-pill"
           onClick={() => setCreating(true)}
           disabled={atCap || creating || approvedPets.length === 0}
-          className="inline-flex h-10 items-center gap-1.5 rounded-full bg-inverse px-4 text-sm font-medium text-on-inverse transition hover:bg-inverse-hover disabled:opacity-50"
         >
           <Plus className="size-4" />
           New collection
-        </button>
+        </Button>
       </header>
 
       {approvedPets.length === 0 ? (
-        <div className="rounded-3xl border border-dashed border-border-base bg-surface/60 p-8 text-center text-sm text-muted-2">
+        <div className="toy-shell rounded-3xl border border-dashed border-[#D4DCF4] p-8 text-center text-sm text-muted-2 dark:border-white/12">
           You need at least one approved pet to create a collection.
         </div>
       ) : null}
@@ -89,7 +90,7 @@ export function OwnerCollectionsManager({
 
       <div className="space-y-3">
         {collections.length === 0 && !creating ? (
-          <div className="rounded-3xl border border-dashed border-border-base bg-surface/60 p-8 text-center text-sm text-muted-2">
+          <div className="toy-shell rounded-3xl border border-dashed border-[#D4DCF4] p-8 text-center text-sm text-muted-2 dark:border-white/12">
             No collections yet. Group your pets into themed sets that show up on
             your profile.
           </div>
@@ -158,20 +159,20 @@ function CollectionCard({
   }
 
   return (
-    <article className="flex items-start gap-4 rounded-2xl border border-border-base bg-surface/70 p-4">
+    <article className="toy-shell flex items-start gap-4 rounded-2xl border border-[#D4DCF4] p-4 dark:border-white/12">
       <div className="flex-1 min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           {collection.featured ? (
-            <span className="inline-flex items-center gap-1 rounded-full bg-brand-tint px-2 py-0.5 font-mono text-[9px] tracking-[0.18em] text-brand-deep uppercase dark:bg-brand-tint-dark dark:text-brand-light">
+            <span className="toy-tag inline-flex items-center gap-1 rounded-xl bg-brand-tint px-2 py-0.5 text-brand-deep dark:bg-brand-tint-dark dark:text-brand-light">
               <Lock className="size-2.5" />
               Curated
             </span>
           ) : (
-            <span className="inline-flex items-center rounded-full border border-border-base bg-surface px-2 py-0.5 font-mono text-[9px] tracking-[0.18em] text-muted-3 uppercase">
+            <span className="toy-tag inline-flex items-center rounded-xl border border-[#D4DCF4] bg-surface px-2 py-0.5 text-muted-3 dark:border-white/12">
               Personal
             </span>
           )}
-          <span className="font-mono text-[10px] tracking-[0.18em] text-muted-3 uppercase">
+          <span className="toy-tag text-muted-3">
             {collection.petCount} pets
           </span>
         </div>
@@ -190,28 +191,30 @@ function CollectionCard({
         ) : null}
       </div>
       {!collection.featured ? (
-        <div className="flex shrink-0 items-center gap-1">
-          <button
+        <div className="flex shrink-0 items-center gap-1.5">
+          <Button
             type="button"
+            variant="pearl"
+            size="icon"
             onClick={onEdit}
             aria-label={t("editAria")}
-            className="inline-flex size-8 items-center justify-center rounded-full border border-border-base bg-surface text-muted-2 transition hover:border-border-strong hover:text-foreground"
           >
             <Pencil className="size-3.5" />
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="destructive"
+            size="icon"
             onClick={handleDelete}
             disabled={deleting}
             aria-label={t("deleteAria")}
-            className="inline-flex size-8 items-center justify-center rounded-full border border-border-base bg-surface text-muted-2 transition hover:border-destructive/40 hover:text-destructive disabled:opacity-50"
           >
             {deleting ? (
               <Loader2 className="size-3.5 animate-spin" />
             ) : (
               <Trash2 className="size-3.5" />
             )}
-          </button>
+          </Button>
         </div>
       ) : null}
     </article>
@@ -323,26 +326,25 @@ function CollectionForm({
   return (
     <form
       onSubmit={handleSubmit}
-      className="rounded-2xl border border-brand/30 bg-brand-tint/50 p-5 space-y-4 dark:bg-brand-tint-dark/50"
+      className="toy-shell space-y-4 rounded-3xl border border-[#3B59F2]/40 p-5"
     >
       <header className="flex items-center justify-between">
-        <p className="font-mono text-[11px] tracking-[0.22em] text-brand-deep uppercase dark:text-brand-light">
+        <p className="toy-tag text-brand-deep dark:text-brand-light">
           {mode === "create" ? "New collection" : "Edit collection"}
         </p>
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="icon-sm"
           onClick={onCancel}
-          className="inline-flex size-7 items-center justify-center rounded-full border border-border-base bg-surface text-muted-2 transition hover:border-border-strong hover:text-foreground"
           aria-label={t("cancelAria")}
         >
           <X className="size-3.5" />
-        </button>
+        </Button>
       </header>
 
       <label className="block">
-        <span className="font-mono text-[10px] tracking-[0.18em] text-muted-3 uppercase">
-          Title
-        </span>
+        <span className="toy-tag text-muted-3">Title</span>
         <input
           type="text"
           value={title}
@@ -351,21 +353,19 @@ function CollectionForm({
           minLength={2}
           maxLength={80}
           placeholder={t("namePlaceholder")}
-          className="mt-1 h-10 w-full rounded-full border border-border-base bg-surface px-4 text-sm focus:outline-none focus:ring-1 focus:ring-brand"
+          className="mt-1 h-10 w-full rounded-xl border border-[#D4DCF4] bg-surface px-3.5 text-sm focus:border-[#3B59F2] focus:outline-none focus:ring-2 focus:ring-[#3B59F2]/20 dark:border-white/12"
         />
       </label>
 
       <label className="block">
-        <span className="font-mono text-[10px] tracking-[0.18em] text-muted-3 uppercase">
-          Description (optional)
-        </span>
+        <span className="toy-tag text-muted-3">Description (optional)</span>
         <textarea
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           maxLength={280}
           rows={2}
           placeholder="What ties them together?"
-          className="mt-1 w-full rounded-2xl border border-border-base bg-surface px-4 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand"
+          className="mt-1 w-full rounded-xl border border-[#D4DCF4] bg-surface px-3.5 py-2 text-sm focus:border-[#3B59F2] focus:outline-none focus:ring-2 focus:ring-[#3B59F2]/20 dark:border-white/12"
         />
         <span className="mt-1 block text-right text-[10px] text-muted-3">
           {description.length}/280
@@ -417,22 +417,24 @@ function CollectionForm({
       ) : null}
 
       <div className="flex items-center justify-end gap-2">
-        <button
+        <Button
           type="button"
+          variant="pearl"
+          size="lg"
           onClick={onCancel}
           disabled={saving}
-          className="inline-flex h-9 items-center rounded-full border border-border-base bg-surface px-4 text-xs font-medium text-muted-2 transition hover:border-border-strong hover:text-foreground disabled:opacity-50"
         >
           Cancel
-        </button>
-        <button
+        </Button>
+        <Button
           type="submit"
+          variant="cobalt"
+          size="lg"
           disabled={saving || title.trim().length < 2 || selected.size === 0}
-          className="inline-flex h-9 items-center gap-1.5 rounded-full bg-inverse px-4 text-xs font-medium text-on-inverse transition hover:bg-inverse-hover disabled:opacity-50"
         >
           {saving ? <Loader2 className="size-3.5 animate-spin" /> : null}
           {mode === "create" ? "Create" : "Save"}
-        </button>
+        </Button>
       </div>
     </form>
   );

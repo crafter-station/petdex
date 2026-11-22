@@ -976,13 +976,13 @@ function PetCardImpl({
     <article
       data-slot="card"
       style={accentStyle}
-      className="group relative flex h-full flex-col overflow-hidden rounded-2xl border border-border-base bg-surface/70 backdrop-blur transition has-[[aria-expanded=true]]:z-30 has-[[aria-expanded=true]]:border-brand/30 has-[[aria-expanded=true]]:bg-surface hover:-translate-y-0.5 hover:border-brand/30 hover:bg-surface"
+      className="toy-shell group relative flex h-full flex-col overflow-hidden rounded-2xl! border border-[#D4DCF4] transition duration-200 [transition-timing-function:var(--ease-bounce)] has-[[aria-expanded=true]]:z-30 has-[[aria-expanded=true]]:border-[#3B59F2]/45 hover:-translate-y-1 hover:border-[#3B59F2]/45 dark:border-white/12 dark:has-[[aria-expanded=true]]:border-[#8CA3FF]/45 dark:hover:border-[#8CA3FF]/45"
     >
       <Link
         href={href}
         prefetch={false}
         aria-label={`Open ${pet.displayName}`}
-        className="flex flex-1 flex-col rounded-3xl"
+        className="flex flex-1 flex-col rounded-2xl"
       >
         <div
           className="pet-sprite-stage relative flex items-center justify-center overflow-hidden px-5 py-7"
@@ -998,7 +998,7 @@ function PetCardImpl({
               : undefined
           }
         >
-          <span className="pointer-events-none absolute top-2.5 left-3.5 font-mono text-[9px] tracking-[0.2em] text-muted-4 uppercase">
+          <span className="pointer-events-none absolute top-2.5 left-3 rounded-lg border border-[#D4DCF4] bg-white/85 px-2 py-0.5 font-hardware text-[9px] tracking-[0.14em] text-[#101944]/80 uppercase shadow-xs dark:border-white/12 dark:bg-[#101944]/80 dark:text-[#CBD4EE]">
             No. {dexLabel}
           </span>
           <PetSprite
@@ -1037,9 +1037,9 @@ function PetCardImpl({
             : null}
         </div>
 
-        <div className="flex flex-1 flex-col gap-1.5 border-t border-black/[0.05] px-4 pt-3 pb-2.5 dark:border-white/[0.05]">
+        <div className="flex flex-1 flex-col gap-1.5 border-t border-[#D4DCF4]/70 px-4 pt-3 pb-2.5 dark:border-white/10">
           <div className="flex items-center justify-between gap-2">
-            <h3 className="flex min-w-0 items-center gap-2 text-[15px] font-semibold tracking-tight text-foreground">
+            <h3 className="flex min-w-0 items-center gap-2 font-heading text-[15px] font-bold tracking-tight text-foreground">
               {pet.dominantColor ? (
                 <span
                   aria-hidden
@@ -1051,18 +1051,18 @@ function PetCardImpl({
               {pet.featured ? (
                 <span
                   title={t("featuredTitle")}
-                  className="font-mono text-[10px] text-brand"
+                  className="font-hardware text-[10px] text-toy-cobalt dark:text-[#8CA3FF]"
                 >
                   ★
                 </span>
               ) : null}
             </h3>
             <div className="flex shrink-0 items-center gap-1.5">
-              <span className="rounded-full bg-black px-2 py-1 font-mono text-[10px] leading-none font-semibold tracking-[0.06em] text-white shadow-sm">
+              <span className="rounded-lg bg-[#101944] px-2 py-0.5 font-hardware text-[9px] leading-none font-semibold tracking-[0.08em] text-white shadow-xs dark:bg-white/15">
                 v{pet.spriteVersionNumber}
               </span>
               {installCount > 0 ? (
-                <span className="font-mono text-[10px] tracking-[0.12em] text-muted-4">
+                <span className="font-hardware text-[9px] tracking-[0.12em] text-muted-3">
                   ↓ {formattedInstallCount}
                 </span>
               ) : null}

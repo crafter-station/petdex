@@ -2,6 +2,10 @@
 
 import { ExternalLink } from "lucide-react";
 
+import { cn } from "@/lib/utils";
+
+import { buttonVariants } from "@/components/ui/button";
+
 export function ProfileExternalLink({
   url,
   label,
@@ -15,7 +19,10 @@ export function ProfileExternalLink({
       href={url}
       target="_blank"
       rel="noreferrer"
-      className="inline-flex h-8 items-center gap-1.5 rounded-full border border-border-base bg-surface/80 px-3 font-mono text-[11px] tracking-[0.06em] text-muted-2 transition hover:border-border-strong hover:bg-white dark:hover:bg-stone-800"
+      className={cn(
+        buttonVariants({ variant: "pearl", size: "default" }),
+        "font-mono text-[11px] tracking-[0.06em]",
+      )}
     >
       <ExternalLink className="size-3" />
       {label}

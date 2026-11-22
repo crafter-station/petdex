@@ -28,7 +28,9 @@ import {
   type PetLicenseChoice,
 } from "@/lib/submissions-validation";
 import { PET_ASSET_MAX_BYTES } from "@/lib/upload-limits";
+import { cn } from "@/lib/utils";
 
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -614,9 +616,10 @@ export function PetSubmitForm() {
   return (
     <div className="grid gap-5 lg:grid-cols-[1fr_360px]">
       <fieldset
-        className={`glass-panel flex min-h-80 flex-col items-center justify-center rounded-3xl p-8 text-center transition ${
-          isDragging ? "bg-white/95 ring-2 ring-black/40 ring-offset-2" : ""
-        }`}
+        className={cn(
+          "toy-shell flex min-h-80 flex-col items-center justify-center rounded-3xl border border-[#D4DCF4] p-8 text-center transition dark:border-white/12",
+          isDragging && "ring-2 ring-[#3B59F2]/50 ring-offset-2",
+        )}
         onDragOver={(event) => {
           event.preventDefault();
           event.dataTransfer.dropEffect = "copy";
@@ -636,7 +639,7 @@ export function PetSubmitForm() {
         }}
       >
         <legend className="sr-only">{t("drop.ariaLabel")}</legend>
-        <span className="grid size-16 place-items-center rounded-2xl bg-inverse text-on-inverse">
+        <span className="grid size-16 place-items-center rounded-2xl border border-[#2A42C2] bg-gradient-to-b from-[#5876FF] via-[#3B59F2] to-[#2943CC] text-white shadow-[inset_0_1.5px_0_rgb(255_255_255/0.32),0_3px_0_#1A2C8A]">
           <Upload className="size-7" />
         </span>
         <span className="mt-6 text-2xl font-medium text-foreground">
@@ -662,7 +665,7 @@ export function PetSubmitForm() {
         </span>
 
         <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
-          <label className="inline-flex h-9 cursor-pointer items-center justify-center gap-1.5 rounded-full bg-inverse px-4 text-xs font-medium text-on-inverse transition hover:bg-inverse-hover">
+          <label className={buttonVariants({ variant: "cobalt", size: "lg" })}>
             <Upload className="size-3.5" />
             {t("drop.pickFolder")}
             <input
@@ -679,7 +682,7 @@ export function PetSubmitForm() {
               }
             />
           </label>
-          <label className="inline-flex h-9 cursor-pointer items-center justify-center gap-1.5 rounded-full border border-border-base bg-surface/70 px-4 text-xs font-medium text-foreground transition hover:bg-surface">
+          <label className={buttonVariants({ variant: "pearl", size: "lg" })}>
             <FileArchive className="size-3.5" />
             {t("drop.pickZip")}
             <input
@@ -693,7 +696,7 @@ export function PetSubmitForm() {
               }
             />
           </label>
-          <label className="inline-flex h-9 cursor-pointer items-center justify-center gap-1.5 rounded-full border border-border-base bg-surface/70 px-4 text-xs font-medium text-foreground transition hover:bg-surface">
+          <label className={buttonVariants({ variant: "pearl", size: "lg" })}>
             <Upload className="size-3.5" />
             {t("drop.pickSpritesheet")}
             <input
@@ -710,13 +713,13 @@ export function PetSubmitForm() {
         </div>
 
         {!isLoaded ? null : !isSignedIn ? (
-          <span className="mt-5 inline-flex items-center gap-2 rounded-full bg-chip-warning-bg px-3 py-1 font-mono text-[10px] tracking-[0.18em] text-chip-warning-fg uppercase">
+          <span className="toy-tag mt-5 inline-flex items-center gap-2 rounded-xl bg-chip-warning-bg px-3 py-1 text-chip-warning-fg">
             {t("auth.signIn")}
           </span>
         ) : null}
       </fieldset>
 
-      <aside className="rounded-3xl border border-border-base bg-surface/80 p-5 shadow-sm shadow-blue-950/5 backdrop-blur">
+      <aside className="toy-shell rounded-3xl border border-[#D4DCF4] p-5 dark:border-white/12">
         <div className="flex items-center gap-2 text-sm font-medium text-foreground">
           <FileArchive className="size-4" />
           {t("check.title")}
@@ -736,7 +739,7 @@ export function PetSubmitForm() {
               <div>
                 <label
                   htmlFor="pet-display-name"
-                  className="font-mono text-[10px] tracking-[0.18em] text-muted-4 uppercase"
+                  className="toy-tag text-muted-3"
                 >
                   {t("edit.displayNameLabel")}
                 </label>
@@ -753,7 +756,7 @@ export function PetSubmitForm() {
               <div>
                 <label
                   htmlFor="pet-description"
-                  className="font-mono text-[10px] tracking-[0.18em] text-muted-4 uppercase"
+                  className="toy-tag text-muted-3"
                 >
                   {t("edit.descriptionLabel")}
                 </label>
@@ -768,15 +771,12 @@ export function PetSubmitForm() {
                 />
               </div>
               <div>
-                <label
-                  htmlFor="pet-license"
-                  className="font-mono text-[10px] tracking-[0.18em] text-muted-4 uppercase"
-                >
+                <label htmlFor="pet-license" className="toy-tag text-muted-3">
                   {t("edit.licenseLabel")}
                 </label>
                 <select
                   id="pet-license"
-                  className="mt-1 h-9 w-full rounded-xl border border-border-base bg-surface px-3 text-sm"
+                  className="mt-1 h-9 w-full rounded-xl border border-[#D4DCF4] bg-surface px-3 text-sm dark:border-white/12"
                   value={license}
                   onChange={(event) =>
                     setLicense(event.target.value as PetLicenseChoice | "")
@@ -966,7 +966,7 @@ function CopyPathButton({ path }: { path: string }) {
     return () => window.clearTimeout(t);
   }, [copied]);
 
-  async function handleClick(event: React.MouseEvent<HTMLButtonElement>) {
+  async function handleClick(event: React.MouseEvent<HTMLElement>) {
     event.preventDefault();
     event.stopPropagation();
     try {
@@ -990,15 +990,16 @@ function CopyPathButton({ path }: { path: string }) {
   }
 
   return (
-    <button
+    <Button
       type="button"
+      variant="pearl"
+      size="xs"
       aria-label={copied ? t("ariaCopied") : t("ariaCopy")}
       onClick={(e) => void handleClick(e)}
-      className="inline-flex items-center gap-1 rounded-full border border-border-base bg-surface/70 px-2 py-0.5 text-[11px] font-medium text-[#3a3a44] transition hover:bg-white dark:hover:bg-stone-800"
     >
       {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
       {copied ? t("copied") : t("copy")}
-    </button>
+    </Button>
   );
 }
 
@@ -1024,11 +1025,13 @@ function SubmitButton({
         : t("idle");
 
   return (
-    <button
+    <Button
       type="button"
+      variant="cobalt"
+      size="petdex-pill"
       onClick={onSubmit}
       disabled={disabled}
-      className="inline-flex h-11 items-center justify-center gap-2 rounded-full bg-inverse px-5 text-sm font-medium text-on-inverse transition hover:bg-inverse-hover disabled:cursor-not-allowed disabled:opacity-60"
+      className="h-11 w-full px-5 text-sm"
     >
       {submission.kind === "uploading" ? (
         <Loader2 className="size-4 animate-spin" />
@@ -1038,7 +1041,7 @@ function SubmitButton({
         <Send className="size-4" />
       )}
       {label}
-    </button>
+    </Button>
   );
 }
 
@@ -1055,7 +1058,7 @@ function SpritePreview({ src }: { src: string }) {
   }, []);
 
   return (
-    <div className="w-fit rounded-2xl border border-border-base bg-background p-3">
+    <div className="w-fit rounded-2xl border border-[#D4DCF4] bg-background p-3 dark:border-white/12">
       <div
         className="pet-sprite-frame"
         role="img"

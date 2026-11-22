@@ -4,11 +4,13 @@ import { ArrowRight, Hammer } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 
 import { buildLocaleAlternates } from "@/lib/locale-routing";
+import { cn } from "@/lib/utils";
 
 import { FullAuthProviders } from "@/components/auth/auth-providers";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { PetSubmitForm } from "@/components/submit/pet-submit-form";
+import { buttonVariants } from "@/components/ui/button";
 
 import { hasLocale } from "@/i18n/config";
 
@@ -39,17 +41,20 @@ export default async function SubmitPage() {
         <SiteHeader hideSubmitCta />
         <section className="petdex-hero relative -mt-14 overflow-clip pt-14">
           <div className="relative mx-auto flex w-full max-w-6xl flex-col gap-10 px-5 pb-12 md:px-8 md:pb-16">
-            <header className="max-w-3xl">
-              <p className="text-sm font-medium text-brand-light">
+            <header className="mt-6 max-w-3xl">
+              <p className="toy-tag inline-block rounded-full bg-toy-volt px-2.5 py-1 text-[#101944] shadow-[0_2px_0_#C9A91F]">
                 {t("eyebrow")}
               </p>
-              <h1 className="mt-4 text-5xl leading-tight font-medium tracking-normal text-foreground md:text-7xl">
+              <h1 className="mt-4 font-heading text-5xl leading-tight font-semibold tracking-tight text-foreground md:text-7xl">
                 {t("title")}
               </h1>
               <p className="mt-6 text-lg leading-8 text-muted-2">{t("body")}</p>
               <Link
                 href="/create"
-                className="mt-5 inline-flex items-center gap-2 rounded-full border border-border-base bg-surface/70 px-4 py-2 text-sm font-medium text-muted-2 backdrop-blur transition hover:bg-white hover:text-foreground dark:hover:bg-stone-800"
+                className={cn(
+                  buttonVariants({ variant: "pearl", size: "petdex-pill" }),
+                  "mt-5 gap-2",
+                )}
               >
                 <Hammer className="size-4" />
                 {t("createCta")}

@@ -6,6 +6,9 @@ import { Sticker } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 
 import { withLocale } from "@/lib/locale-routing";
+import { cn } from "@/lib/utils";
+
+import { buttonVariants } from "@/components/ui/button";
 
 import { hasLocale } from "@/i18n/config";
 
@@ -29,7 +32,10 @@ export function SaveAsSticker({ slug, displayName, collectionSlug }: Props) {
     <Link
       href={`${withLocale(`/stickers/${collectionSlug}`, locale)}?${params.toString()}`}
       aria-label={`${t("openExplorer")} · ${displayName}`}
-      className="inline-flex h-9 items-center justify-center gap-2 rounded-full border border-border-base bg-surface/70 px-3.5 text-[13px] font-medium text-muted-2 backdrop-blur transition hover:bg-brand/10 hover:text-brand"
+      className={cn(
+        buttonVariants({ variant: "pearl", size: "lg" }),
+        "gap-2 rounded-xl px-3.5 text-[13px] font-medium",
+      )}
     >
       <Sticker className="size-4" />
       {t("openExplorer")}

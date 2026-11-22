@@ -9,6 +9,7 @@ import { getDexNumberMap } from "@/lib/dex";
 import { formatLocalizedNumber } from "@/lib/format-number";
 import { buildLocaleAlternates } from "@/lib/locale-routing";
 import { getStoredPublicProfileForUser } from "@/lib/owner-credit";
+import { cn } from "@/lib/utils";
 
 import { CollectionCaughtProgress } from "@/components/collections/collection-caught-progress";
 import { CollectionPetGrid } from "@/components/collections/collection-pet-grid";
@@ -16,6 +17,7 @@ import { JsonLd } from "@/components/layout/json-ld";
 import { PetSprite } from "@/components/pets/pet-sprite";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
+import { buttonVariants } from "@/components/ui/button";
 
 import { defaultLocale, hasLocale } from "@/i18n/config";
 
@@ -121,17 +123,20 @@ export default async function CollectionPage({ params }: PageProps) {
           <div className="mt-6">
             <Link
               href="/collections"
-              className="inline-flex h-8 items-center rounded-full border border-border-base bg-surface/70 px-3 text-xs font-medium text-muted-2 backdrop-blur transition hover:bg-surface-muted hover:text-foreground"
+              className={cn(
+                buttonVariants({ variant: "pearl", size: "default" }),
+                "rounded-xl px-3.5 text-xs font-medium",
+              )}
             >
               {t("backToCollections")}
             </Link>
           </div>
           <div className="mt-6 grid gap-8 md:mt-10 lg:grid-cols-[1fr_420px] lg:items-center">
             <div>
-              <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
+              <p className="toy-tag inline-block rounded-full bg-toy-volt px-2.5 py-1 text-[#101944] shadow-[0_2px_0_#C9A91F]">
                 Featured collection
               </p>
-              <h1 className="mt-3 text-balance text-[44px] leading-[0.98] font-semibold tracking-tight md:text-[72px]">
+              <h1 className="mt-4 font-heading text-balance text-[44px] leading-[0.96] font-extrabold tracking-tight md:text-[72px]">
                 {collection.title}
               </h1>
               <p className="mt-5 max-w-2xl text-balance text-base leading-7 text-muted-1 md:text-lg">
@@ -143,7 +148,13 @@ export default async function CollectionPage({ params }: PageProps) {
                   <Link
                     href={ownerHref}
                     prefetch={false}
-                    className="inline-flex h-10 items-center rounded-full bg-inverse px-4 text-sm font-medium text-on-inverse transition hover:bg-inverse-hover"
+                    className={cn(
+                      buttonVariants({
+                        variant: "cobalt",
+                        size: "petdex-pill",
+                      }),
+                      "px-4 text-sm font-semibold",
+                    )}
                   >
                     View creator
                   </Link>
@@ -153,7 +164,10 @@ export default async function CollectionPage({ params }: PageProps) {
                     href={collection.externalUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex h-9 items-center gap-1.5 rounded-full border border-border-base bg-surface/70 px-3.5 text-[13px] font-medium text-muted-2 backdrop-blur transition hover:bg-surface-muted hover:text-foreground"
+                    className={cn(
+                      buttonVariants({ variant: "pearl", size: "petdex-pill" }),
+                      "gap-1.5 px-4 text-[13px] font-medium",
+                    )}
                   >
                     <ExternalLink className="size-4" />
                     Visit IP site
@@ -161,7 +175,7 @@ export default async function CollectionPage({ params }: PageProps) {
                 ) : null}
               </div>
 
-              <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 font-mono text-[11px] tracking-[0.18em] text-muted-3 uppercase">
+              <div className="toy-shell mt-6 inline-flex flex-wrap items-center gap-x-5 gap-y-2 rounded-3xl border border-[#D4DCF4] px-5 py-3 font-hardware text-[10px] tracking-[0.16em] text-muted-2 uppercase dark:border-white/12">
                 <span>{collection.pets.length} pets</span>
                 <CollectionCaughtProgress petSlugs={petSlugs} />
                 {totalLikes > 0 ? (
@@ -179,15 +193,17 @@ export default async function CollectionPage({ params }: PageProps) {
               </div>
             </div>
 
-            <div className="pet-sprite-stage relative grid aspect-square place-items-center overflow-hidden rounded-2xl border border-border-base bg-surface/70">
-              {leadPet ? (
-                <PetSprite
-                  src={leadPet.spritesheetPath}
-                  cycleStates
-                  scale={1}
-                  label={`${leadPet.displayName} animated`}
-                />
-              ) : null}
+            <div className="toy-shell rounded-3xl border border-[#D4DCF4] p-3 dark:border-white/12">
+              <div className="pet-sprite-stage relative grid aspect-square place-items-center overflow-hidden rounded-2xl border border-[#D4DCF4]/70 bg-surface/70 dark:border-white/10">
+                {leadPet ? (
+                  <PetSprite
+                    src={leadPet.spritesheetPath}
+                    cycleStates
+                    scale={1}
+                    label={`${leadPet.displayName} animated`}
+                  />
+                ) : null}
+              </div>
             </div>
           </div>
         </div>
@@ -196,16 +212,19 @@ export default async function CollectionPage({ params }: PageProps) {
       <section className="mx-auto flex w-full max-w-[1440px] flex-col gap-6 px-5 py-12 md:px-8 md:py-16">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <p className="font-mono text-[11px] tracking-[0.22em] text-brand uppercase">
+            <p className="toy-tag text-toy-cobalt dark:text-[#9BB2FF]">
               Set contents
             </p>
-            <h2 className="mt-2 text-2xl font-semibold tracking-tight">
+            <h2 className="mt-2 font-heading text-2xl font-bold tracking-tight">
               Catch the full collection
             </h2>
           </div>
           <Link
             href="/collections"
-            className="inline-flex h-9 items-center rounded-full border border-border-base bg-surface/70 px-3.5 text-[13px] font-medium text-muted-2 backdrop-blur transition hover:bg-surface-muted hover:text-foreground"
+            className={cn(
+              buttonVariants({ variant: "pearl", size: "lg" }),
+              "rounded-xl px-3.5 text-[13px] font-medium",
+            )}
           >
             All collections
           </Link>

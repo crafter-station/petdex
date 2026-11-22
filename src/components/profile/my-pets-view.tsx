@@ -35,6 +35,7 @@ import {
   type ProfileData,
 } from "@/components/profile/profile-card";
 import { ActionButton } from "@/components/ui/action-button";
+import { Button, buttonVariants } from "@/components/ui/button";
 
 type Submission = {
   id: string;
@@ -188,7 +189,10 @@ export function MyPetsView({
         ) : null}
         <Link
           href="/submit"
-          className="ml-auto inline-flex h-9 items-center gap-2 rounded-full bg-inverse px-4 text-xs font-medium text-on-inverse transition hover:bg-inverse-hover"
+          className={cn(
+            buttonVariants({ variant: "cobalt", size: "lg" }),
+            "ml-auto",
+          )}
         >
           <Plus className="size-3.5" />
           {t("submitAnother")}
@@ -196,7 +200,7 @@ export function MyPetsView({
       </div>
 
       {filtered.length === 0 ? (
-        <p className="rounded-2xl border border-dashed border-border-base bg-surface/70 p-10 text-center text-sm text-muted-2">
+        <p className="toy-shell rounded-3xl border border-dashed border-[#D4DCF4] p-10 text-center text-sm text-muted-2 dark:border-white/12">
           {t("emptyState")}
         </p>
       ) : (
@@ -216,10 +220,8 @@ function AlbumProgress({
   catchProgress: { caught: number; total: number; pct: number };
 }) {
   return (
-    <section className="rounded-3xl border border-black/10 bg-surface/80 p-5 backdrop-blur dark:border-white/10">
-      <p className="font-mono text-[10px] tracking-[0.22em] text-brand uppercase">
-        Your album
-      </p>
+    <section className="toy-shell rounded-3xl border border-[#D4DCF4] p-5 dark:border-white/12">
+      <p className="toy-tag text-brand">Your album</p>
       <p className="mt-2 font-mono text-2xl font-semibold tracking-tight text-foreground">
         {catchProgress.caught}/{catchProgress.total} ({catchProgress.pct}%)
       </p>
@@ -361,11 +363,12 @@ export function SubmissionCard({ submission }: { submission: Submission }) {
 
   return (
     <article
-      className={`group relative flex flex-col rounded-3xl border bg-surface/76 backdrop-blur transition focus-within:z-30 ${
+      className={cn(
+        "toy-shell group relative flex flex-col rounded-3xl border transition focus-within:z-30",
         submission.featured
-          ? "border-brand-light/45 shadow-[0_0_0_1px_rgba(100,120,246,0.18),0_18px_45px_-22px_rgba(82,102,234,0.5)]"
-          : "border-border-base shadow-sm shadow-blue-950/5"
-      }`}
+          ? "border-[#3B59F2]/50"
+          : "border-[#D4DCF4] dark:border-white/12",
+      )}
     >
       <div className="flex items-center justify-between border-b border-black/[0.06] px-5 pt-4 pb-3 dark:border-white/[0.06]">
         <span
@@ -448,7 +451,7 @@ export function SubmissionCard({ submission }: { submission: Submission }) {
             <>
               <Link
                 href={`/pets/${submission.slug}`}
-                className="inline-flex h-9 items-center justify-center gap-2 rounded-full bg-inverse px-3 text-xs font-medium text-on-inverse transition hover:bg-inverse-hover"
+                className={buttonVariants({ variant: "cobalt", size: "lg" })}
               >
                 View public page
               </Link>
@@ -465,18 +468,18 @@ export function SubmissionCard({ submission }: { submission: Submission }) {
           ) : submission.status === "rejected" ? (
             <Link
               href="/submit"
-              className="inline-flex h-9 items-center justify-center gap-2 rounded-full bg-inverse px-3 text-xs font-medium text-on-inverse transition hover:bg-inverse-hover"
+              className={buttonVariants({ variant: "cobalt", size: "lg" })}
             >
               Submit a new version
             </Link>
           ) : (
             <ActionButton
               type="button"
-              variant="outline"
+              variant="destructive"
+              size="lg"
               onClick={handleWithdraw}
               pending={isPending}
               pendingLabel="Withdrawing…"
-              className="inline-flex h-9 items-center justify-center gap-1.5 rounded-full border border-rose-200 bg-rose-50 px-3 text-xs font-medium text-rose-800 transition hover:border-rose-300 hover:bg-rose-100 disabled:opacity-50 dark:border-rose-800/60 dark:bg-rose-950/40 dark:text-rose-300 dark:hover:border-rose-700 dark:hover:bg-rose-900/40"
             >
               <Trash2 className="size-3.5" />
               Withdraw
@@ -521,30 +524,31 @@ function TabButton({
   count: number;
   tone?: "default" | "amber" | "emerald" | "rose";
 }) {
-  const toneClass = active
-    ? "border-inverse bg-inverse text-on-inverse"
-    : tone === "amber"
-      ? "border-chip-warning-fg/25 bg-chip-warning-bg text-chip-warning-fg hover:border-chip-warning-fg/45"
-      : tone === "emerald"
-        ? "border-chip-success-fg/25 bg-chip-success-bg text-chip-success-fg hover:border-chip-success-fg/45"
-        : tone === "rose"
-          ? "border-chip-danger-fg/25 bg-chip-danger-bg text-chip-danger-fg hover:border-chip-danger-fg/45"
-          : "border-border-base bg-surface text-foreground hover:border-border-strong";
+  const inactiveToneClass =
+    !active && tone === "amber"
+      ? "text-chip-warning-fg"
+      : !active && tone === "emerald"
+        ? "text-chip-success-fg"
+        : !active && tone === "rose"
+          ? "text-chip-danger-fg"
+          : undefined;
 
   return (
-    <button
+    <Button
       type="button"
+      variant={active ? "cobalt" : "pearl"}
+      size="lg"
       onClick={onClick}
       aria-pressed={active}
-      className={`inline-flex h-9 items-center gap-1.5 rounded-full border px-3.5 text-xs font-medium transition ${toneClass}`}
+      className={inactiveToneClass}
     >
       {label}
       <span
-        className={`text-[10px] ${active ? "text-on-inverse/60" : "opacity-60"}`}
+        className={`text-[10px] ${active ? "text-white/80" : "opacity-60"}`}
       >
         {count}
       </span>
-    </button>
+    </Button>
   );
 }
 
@@ -621,17 +625,17 @@ export function ClaimableBanner() {
   }
 
   return (
-    <div className="rounded-3xl border border-amber-200 bg-amber-50/60 p-5 dark:border-amber-800/60 dark:bg-amber-950/40">
+    <div className="toy-shell rounded-3xl border border-[#D8B822]/60 p-5">
       <div className="flex items-start gap-3">
-        <span className="grid size-8 shrink-0 place-items-center rounded-full bg-amber-100 text-amber-800 ring-1 ring-amber-200">
+        <span className="grid size-8 shrink-0 place-items-center rounded-xl bg-amber-100 text-amber-800 ring-1 ring-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:ring-amber-800/60">
           <Mail className="size-4" />
         </span>
         <div className="flex-1 space-y-2">
-          <p className="text-sm font-semibold text-amber-900 dark:text-amber-300">
+          <p className="text-sm font-semibold text-foreground">
             We found {remaining.length} pet
             {remaining.length === 1 ? "" : "s"} that look like yours
           </p>
-          <p className="text-sm leading-6 text-amber-900/80">
+          <p className="text-sm leading-6 text-muted-2">
             Matched via{" "}
             {email ? <span className="font-mono">{email}</span> : null}
             {email && githubUrl ? " or " : null}
@@ -647,22 +651,21 @@ export function ClaimableBanner() {
             {remaining.map((pet) => (
               <li
                 key={pet.id}
-                className="flex items-center justify-between gap-3 rounded-2xl bg-surface/80 px-3 py-2"
+                className="flex items-center justify-between gap-3 rounded-2xl border border-[#D4DCF4] bg-surface/80 px-3 py-2 dark:border-white/12"
               >
                 <div className="flex items-center gap-2 text-sm text-foreground">
                   <span className="font-semibold">{pet.displayName}</span>
-                  <span className="font-mono text-[10px] tracking-[0.18em] text-muted-3 uppercase">
-                    {pet.status}
-                  </span>
+                  <span className="toy-tag text-muted-3">{pet.status}</span>
                 </div>
-                <button
+                <Button
                   type="button"
+                  variant="volt"
+                  size="default"
                   onClick={() => claim(pet.id)}
                   disabled={claiming !== null}
-                  className="inline-flex h-8 items-center rounded-full bg-amber-900 px-3 text-xs font-medium text-amber-50 transition hover:bg-amber-800 disabled:opacity-50"
                 >
                   {claiming === pet.id ? "Claiming…" : "Claim"}
-                </button>
+                </Button>
               </li>
             ))}
           </ul>
@@ -671,13 +674,15 @@ export function ClaimableBanner() {
               {error}
             </p>
           ) : null}
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="xs"
             onClick={() => setDismissed(true)}
-            className="mt-1 text-xs font-medium text-amber-900/60 transition hover:text-amber-900"
+            className="mt-1 text-muted-3"
           >
             Not mine, dismiss
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -688,14 +693,12 @@ function EmptyState() {
   return (
     <div className="space-y-6">
       <header>
-        <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
-          Dashboard
-        </p>
+        <p className="toy-tag text-brand">Dashboard</p>
         <h1 className="mt-2 text-balance text-4xl font-semibold tracking-tight text-foreground md:text-5xl">
           No submissions yet
         </h1>
       </header>
-      <div className="rounded-3xl border border-dashed border-border-base bg-surface/70 p-10">
+      <div className="toy-shell rounded-3xl border border-dashed border-[#D4DCF4] p-10 dark:border-white/12">
         <p className="text-base leading-7 text-muted-2">
           Send your first animated companion to Petdex. Submissions go through a
           quick review and land here while they wait. Once approved they show up
@@ -703,7 +706,10 @@ function EmptyState() {
         </p>
         <Link
           href="/submit"
-          className="mt-6 inline-flex h-11 items-center justify-center gap-2 rounded-full bg-inverse px-5 text-sm font-medium text-on-inverse transition hover:bg-inverse-hover"
+          className={cn(
+            buttonVariants({ variant: "cobalt", size: "petdex-pill" }),
+            "mt-6",
+          )}
         >
           <Plus className="size-4" />
           Submit your first pet

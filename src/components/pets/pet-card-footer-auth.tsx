@@ -154,27 +154,23 @@ function PetCardFooterImpl({
   );
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2 border-t border-black/[0.05] px-2 py-2 dark:border-white/[0.05]">
-      <div className="flex min-w-0 flex-wrap items-center gap-0.5">
+    <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#D4DCF4]/70 px-2.5 py-2 dark:border-white/10">
+      <div className="flex min-w-0 flex-wrap items-center gap-1">
         <Button
-          variant="ghost"
+          variant={liked ? "volt" : "ghost"}
+          size="default"
           onClick={toggleLike}
           aria-label={`${liked ? "Unlike" : "Like"} ${displayName}`}
           title={`${liked ? "Unlike" : "Like"} ${displayName}`}
-          className={cn(
-            "h-8 gap-1 rounded-full px-2",
-            liked
-              ? "bg-stone-100 text-stone-900 dark:text-stone-100"
-              : "text-stone-500 hover:bg-surface-muted hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-100",
-          )}
+          className={cn("h-8 gap-1 rounded-xl px-2", !liked && "text-muted-2")}
         >
           <Heart
-            className={`size-3.5 ${liked ? "fill-rose-500 text-rose-500" : ""}`}
+            className={`size-3.5 ${liked ? "fill-[#E54269] text-[#E54269]" : ""}`}
           />
           {count > 0 ? (
             <span
-              className={`font-mono text-[11px] ${
-                liked ? "text-rose-600" : "text-stone-500"
+              className={`font-hardware text-[10px] ${
+                liked ? "text-[#101944]" : "text-muted-3"
               }`}
             >
               {formattedLikeCount}
@@ -183,20 +179,16 @@ function PetCardFooterImpl({
         </Button>
 
         <Button
-          variant="ghost"
+          variant={copied ? "volt" : "ghost"}
+          size="default"
           onClick={copyInstall}
           aria-label={`Copy install for ${displayName}`}
           title={`Copy install for ${displayName}`}
-          className={cn(
-            "h-8 gap-1 rounded-full px-2",
-            copied
-              ? "bg-stone-100 text-stone-900 dark:text-stone-100"
-              : "text-stone-500 hover:bg-surface-muted hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-100",
-          )}
+          className={cn("h-8 gap-1 rounded-xl px-2", !copied && "text-muted-2")}
         >
           <TerminalSquare className="size-3.5" />
           {installCount > 0 ? (
-            <span className="font-mono text-[11px] text-muted-3">
+            <span className="font-hardware text-[10px] text-muted-3">
               {formattedInstallCount}
             </span>
           ) : null}
@@ -205,10 +197,11 @@ function PetCardFooterImpl({
         {zipUrl ? (
           <Button
             variant="ghost"
+            size="icon"
             onClick={download}
             aria-label={`Download ${displayName}`}
             title={`Download ${displayName}`}
-            className="h-8 gap-1 rounded-full px-2 text-stone-500 hover:bg-surface-muted hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-100"
+            className="rounded-xl text-muted-2"
           >
             <Download className="size-3.5" />
           </Button>
@@ -220,10 +213,11 @@ function PetCardFooterImpl({
 
         <Button
           variant="ghost"
+          size="icon"
           onClick={share}
           aria-label={`Share ${displayName}`}
           title={`Share ${displayName}`}
-          className="h-8 gap-1 rounded-full px-2 text-stone-500 hover:bg-surface-muted hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-100"
+          className="rounded-xl text-muted-2"
         >
           <Share2 className="size-3.5" />
         </Button>

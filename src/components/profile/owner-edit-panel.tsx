@@ -9,6 +9,8 @@ import { useTranslations } from "next-intl";
 import { parseSpriteVersionNumber } from "@/lib/sprite-version";
 import { PET_ASSET_MAX_BYTES } from "@/lib/upload-limits";
 
+import { Button } from "@/components/ui/button";
+
 type Pending = {
   displayName: string | null;
   description: string | null;
@@ -349,21 +351,24 @@ export function OwnerEditPanel({
               : ""}
             {t("submittedSuffix")}
           </span>
-          <button
+          <Button
             type="button"
+            variant="pearl"
+            size="sm"
             onClick={() => setOpen(true)}
-            className="ml-auto inline-flex h-7 items-center rounded-full border border-amber-300 bg-surface px-2.5 text-[11px] font-medium text-amber-900 transition hover:bg-amber-100 dark:text-amber-300 dark:hover:bg-amber-900/40"
+            className="ml-auto"
           >
             {t("viewEdit")}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="pearl"
+            size="sm"
             onClick={() => void withdraw()}
             disabled={busy}
-            className="inline-flex h-7 items-center rounded-full border border-amber-300 bg-surface px-2.5 text-[11px] font-medium text-amber-900 transition hover:bg-amber-100 disabled:opacity-60 dark:text-amber-300 dark:hover:bg-amber-900/40"
           >
             {t("withdraw")}
-          </button>
+          </Button>
         </div>
       ) : rejection ? (
         <div className="mb-4 flex flex-wrap items-center gap-2 rounded-2xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-xs text-rose-900 dark:border-rose-800/60 dark:text-rose-300">
@@ -371,13 +376,15 @@ export function OwnerEditPanel({
             {t("rejected")}
           </span>
           <span>{rejection}</span>
-          <button
+          <Button
             type="button"
+            variant="pearl"
+            size="sm"
             onClick={() => setOpen(true)}
-            className="ml-auto inline-flex h-7 items-center rounded-full border border-rose-300 bg-surface px-2.5 text-[11px] font-medium text-rose-900 transition hover:bg-rose-100 dark:text-rose-300 dark:hover:bg-rose-900/40"
+            className="ml-auto"
           >
             {t("tryAgain")}
-          </button>
+          </Button>
         </div>
       ) : null}
 
@@ -396,14 +403,15 @@ export function OwnerEditPanel({
       ) : null}
 
       {!open ? (
-        <button
+        <Button
           type="button"
+          variant="pearl"
+          size="lg"
           onClick={() => setOpen(true)}
-          className="inline-flex h-9 items-center gap-1.5 rounded-full border border-border-base bg-surface px-3 text-xs font-medium text-muted-2 transition hover:border-black/40 dark:hover:border-white/40"
         >
           <Pencil className="size-3.5" />
           {t("open")}
-        </button>
+        </Button>
       ) : null}
 
       {open ? (
@@ -420,7 +428,7 @@ export function OwnerEditPanel({
           tabIndex={-1}
         >
           <div
-            className="w-full max-w-lg overflow-y-auto rounded-2xl bg-surface p-6 shadow-xl"
+            className="toy-shell w-full max-w-lg overflow-y-auto rounded-3xl border border-[#D4DCF4] p-6 dark:border-white/12"
             style={{ maxHeight: "calc(100vh - 2rem)" }}
           >
             <div className="mb-4 flex items-start justify-between gap-3">
@@ -430,13 +438,14 @@ export function OwnerEditPanel({
                 </h2>
                 <p className="mt-1 text-xs text-muted-3">{t("modalBody")}</p>
               </div>
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon-sm"
                 onClick={() => setOpen(false)}
-                className="rounded-full p-1 text-muted-4 hover:bg-surface-muted hover:text-foreground"
               >
                 <X className="size-4" />
-              </button>
+              </Button>
             </div>
 
             <form
@@ -620,21 +629,23 @@ export function OwnerEditPanel({
               ) : null}
 
               <div className="flex items-center justify-end gap-2 pt-2">
-                <button
+                <Button
                   type="button"
+                  variant="pearl"
+                  size="lg"
                   onClick={() => setOpen(false)}
-                  className="inline-flex h-9 items-center rounded-full border border-border-base bg-surface px-3 text-xs font-medium text-muted-2 transition hover:border-border-strong"
                 >
                   {t("actions.cancel")}
-                </button>
-                <button
+                </Button>
+                <Button
                   type="submit"
+                  variant="cobalt"
+                  size="lg"
                   disabled={busy || Boolean(spriteError) || Boolean(metaError)}
-                  className="inline-flex h-9 items-center gap-1.5 rounded-full bg-inverse px-4 text-xs font-medium text-on-inverse transition hover:bg-stone-800 disabled:opacity-60"
                 >
                   {busy ? <Loader2 className="size-3.5 animate-spin" /> : null}
                   {busy ? t("uploading") : t("actions.submit")}
-                </button>
+                </Button>
               </div>
             </form>
           </div>

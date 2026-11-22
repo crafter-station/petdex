@@ -65,46 +65,52 @@ export default async function TelemetryPrivacyPage({
       <SiteHeader />
       <section className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-5 pt-8 pb-12 md:px-8 md:pb-16">
         <header>
-          <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
+          <p className="toy-tag inline-block rounded-full bg-toy-volt px-2.5 py-1 text-[#101944] shadow-[0_2px_0_#C9A91F]">
             {t("eyebrow")}
           </p>
-          <h1 className="mt-3 text-4xl font-semibold tracking-tight md:text-5xl">
+          <h1 className="mt-4 font-heading text-4xl font-semibold tracking-tight md:text-5xl">
             {t("title")}
           </h1>
           <p className="mt-4 text-base leading-7 text-muted-2">{t("intro")}</p>
         </header>
 
-        <section className="space-y-3 rounded-2xl border border-border-base bg-surface/76 p-6 backdrop-blur">
-          <h2 className="text-lg font-semibold">{t("collectTitle")}</h2>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border-base text-left font-mono text-xs text-muted-3">
-                <th className="pb-2 pr-4">{t("table.field")}</th>
-                <th className="pb-2 pr-4">{t("table.type")}</th>
-                <th className="pb-2">{t("table.description")}</th>
-              </tr>
-            </thead>
-            <tbody className="text-muted-2">
-              {FIELD_ROWS.map(([field, type, key], index) => (
-                <tr
-                  key={field}
-                  className={
-                    index === FIELD_ROWS.length - 1
-                      ? undefined
-                      : "border-b border-border-base/50"
-                  }
-                >
-                  <td className="py-2 pr-4 font-mono text-xs">{field}</td>
-                  <td className="py-2 pr-4 font-mono text-xs">{type}</td>
-                  <td className="py-2">{t.rich(`fields.${key}`, rich)}</td>
+        <section className="toy-shell space-y-3 rounded-3xl p-6 md:p-8">
+          <h2 className="font-heading text-lg font-semibold">
+            {t("collectTitle")}
+          </h2>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="toy-tag border-b border-border-base text-left text-toy-cobalt dark:text-[#9BB2FF]">
+                  <th className="pb-2 pr-4">{t("table.field")}</th>
+                  <th className="pb-2 pr-4">{t("table.type")}</th>
+                  <th className="pb-2">{t("table.description")}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="text-muted-2">
+                {FIELD_ROWS.map(([field, type, key], index) => (
+                  <tr
+                    key={field}
+                    className={
+                      index === FIELD_ROWS.length - 1
+                        ? undefined
+                        : "border-b border-border-base/50"
+                    }
+                  >
+                    <td className="py-2 pr-4 font-mono text-xs">{field}</td>
+                    <td className="py-2 pr-4 font-mono text-xs">{type}</td>
+                    <td className="py-2">{t.rich(`fields.${key}`, rich)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
 
-        <section className="space-y-3 rounded-2xl border border-border-base bg-surface/76 p-6 backdrop-blur">
-          <h2 className="text-lg font-semibold">{t("notCollectTitle")}</h2>
+        <section className="toy-shell space-y-3 rounded-3xl p-6 md:p-8">
+          <h2 className="font-heading text-lg font-semibold">
+            {t("notCollectTitle")}
+          </h2>
           <ul className="list-disc space-y-1.5 pl-5 text-sm leading-6 text-muted-2">
             {NOT_COLLECT_KEYS.map((key) => (
               <li key={key}>{t(`notCollect.${key}`)}</li>
@@ -112,17 +118,19 @@ export default async function TelemetryPrivacyPage({
           </ul>
         </section>
 
-        <section className="space-y-3 rounded-2xl border border-border-base bg-surface/76 p-6 backdrop-blur">
-          <h2 className="text-lg font-semibold">{t("optOutTitle")}</h2>
+        <section className="toy-shell space-y-3 rounded-3xl p-6 md:p-8">
+          <h2 className="font-heading text-lg font-semibold">
+            {t("optOutTitle")}
+          </h2>
           <p className="text-sm leading-6 text-muted-2">
             {t.rich("optOutIntro", rich)}
           </p>
-          <div className="rounded-xl bg-background/60 px-4 py-3 font-mono text-sm">
-            <p className="text-muted-3">{t("codeComments.disable")}</p>
+          <div className="toy-screen px-4 py-3.5 font-mono text-sm text-[#EAF0FF]">
+            <p className="text-[#9BB2FF]/75">{t("codeComments.disable")}</p>
             <p>petdex telemetry off</p>
-            <p className="mt-2 text-muted-3">{t("codeComments.enable")}</p>
+            <p className="mt-2 text-[#9BB2FF]/75">{t("codeComments.enable")}</p>
             <p>petdex telemetry on</p>
-            <p className="mt-2 text-muted-3">{t("codeComments.status")}</p>
+            <p className="mt-2 text-[#9BB2FF]/75">{t("codeComments.status")}</p>
             <p>petdex telemetry status</p>
           </div>
           <p className="text-sm leading-6 text-muted-2">
@@ -130,8 +138,10 @@ export default async function TelemetryPrivacyPage({
           </p>
         </section>
 
-        <section className="space-y-3 rounded-2xl border border-border-base bg-surface/76 p-6 backdrop-blur">
-          <h2 className="text-lg font-semibold">{t("retentionTitle")}</h2>
+        <section className="toy-shell space-y-3 rounded-3xl p-6 md:p-8">
+          <h2 className="font-heading text-lg font-semibold">
+            {t("retentionTitle")}
+          </h2>
           <p className="text-sm leading-6 text-muted-2">{t("retentionBody")}</p>
         </section>
       </section>

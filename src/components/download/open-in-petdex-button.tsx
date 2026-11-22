@@ -11,6 +11,9 @@ import {
   openPetdexDeepLink,
 } from "@/lib/petdex-desktop-link";
 import { usePlatform } from "@/lib/use-platform";
+import { cn } from "@/lib/utils";
+
+import { buttonVariants } from "@/components/ui/button";
 
 type OpenInPetdexButtonProps = {
   slug: string;
@@ -63,14 +66,17 @@ export function OpenInPetdexButton({ slug }: OpenInPetdexButtonProps) {
       prefetch={false}
       onClick={handleClick}
       aria-label={t("ariaLabel", { slug })}
-      className="group relative isolate inline-flex w-full items-center gap-3 overflow-hidden rounded-2xl border border-brand/30 bg-gradient-to-br from-brand/15 via-brand-light/10 to-brand-deep/15 p-3 text-left shadow-[0_8px_32px_-8px_oklch(from_var(--brand)_l_c_h/0.35)] transition-all hover:border-brand/50 hover:shadow-[0_12px_40px_-8px_oklch(from_var(--brand)_l_c_h/0.45)] active:scale-[0.99]"
+      className={cn(
+        buttonVariants({ variant: "cobalt" }),
+        "group relative isolate h-auto w-full justify-start gap-3 overflow-hidden rounded-2xl p-3 text-left whitespace-normal",
+      )}
     >
       <span
         aria-hidden="true"
-        className="-translate-x-full pointer-events-none absolute inset-0 bg-gradient-to-r from-transparent via-white/15 to-transparent transition-transform duration-700 group-hover:translate-x-full dark:via-white/8"
+        className="-translate-x-full pointer-events-none absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent transition-transform duration-700 group-hover:translate-x-full"
       />
 
-      <span className="relative grid size-12 shrink-0 place-items-center rounded-xl bg-surface shadow-md ring-1 ring-border-base/40">
+      <span className="relative grid size-12 shrink-0 place-items-center rounded-xl bg-white/95 shadow-sm ring-1 ring-white/40">
         <Image
           src="/brand/petdex-desktop-icon.png"
           alt=""
@@ -82,23 +88,23 @@ export function OpenInPetdexButton({ slug }: OpenInPetdexButtonProps) {
 
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="flex items-center gap-1.5">
-          <span className="font-mono text-[9px] tracking-[0.2em] text-brand uppercase">
+          <span className="font-hardware text-[9px] tracking-[0.18em] text-[#FFE259] uppercase">
             {t("eyebrow")}
           </span>
           <span className="relative grid size-1.5 place-items-center">
-            <span className="absolute inline-flex size-full animate-ping rounded-full bg-brand opacity-70" />
-            <span className="relative inline-flex size-full rounded-full bg-brand" />
+            <span className="absolute inline-flex size-full animate-ping rounded-full bg-[#FFE259] opacity-75" />
+            <span className="relative inline-flex size-full rounded-full bg-[#FFE259]" />
           </span>
         </span>
-        <span className="font-semibold text-foreground text-sm leading-tight">
+        <span className="font-heading text-sm leading-tight font-bold text-white">
           {t("label")}
         </span>
-        <span className="text-muted-2 text-xs leading-tight">
+        <span className="text-xs leading-tight text-white/80">
           {t("subtitle")}
         </span>
       </span>
 
-      <ArrowRight className="relative size-4 shrink-0 text-brand transition-transform group-hover:translate-x-0.5" />
+      <ArrowRight className="relative size-4 shrink-0 text-white/90 transition-transform group-hover:translate-x-0.5" />
     </Link>
   );
 }

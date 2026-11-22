@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { Layers, Shuffle, Sparkles } from "lucide-react";
+import { ArrowUpRight, Shuffle } from "lucide-react";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 
 import { BRAND_JSON_LD, BRAND_SITE_URL } from "@/lib/brand-kit";
@@ -11,11 +11,11 @@ import { buildLocaleAlternates } from "@/lib/locale-routing";
 import { resolveStoredOwnerCreditForSlug } from "@/lib/owner-credit";
 import { getPet, getStaticPetSlugs } from "@/lib/pets";
 import { getPetStickerAvailability } from "@/lib/sticker-export";
+import { cn } from "@/lib/utils";
 import { getVariantsFor } from "@/lib/variants";
 
 import { ClaimCTA } from "@/components/auth/claim-cta";
 import { InstallCommandCompact } from "@/components/download/install-command-compact";
-import { InstallCommandLazy } from "@/components/download/install-command-lazy";
 import { OpenInCodexButton } from "@/components/download/open-in-codex-button";
 import { OpenInPetdexButton } from "@/components/download/open-in-petdex-button";
 import { JsonLd } from "@/components/layout/json-ld";
@@ -23,19 +23,16 @@ import { ReducedMotionHint } from "@/components/onboarding/reduced-motion-hint";
 import { LikeButton } from "@/components/pets/like-button";
 import { PetActionMenu } from "@/components/pets/pet-action-menu";
 import { PetCountersBar } from "@/components/pets/pet-counters-bar";
-import { PetFloater } from "@/components/pets/pet-floater";
 import { PetKeyboardNav } from "@/components/pets/pet-keyboard-nav";
-import { PetRadarClient } from "@/components/pets/pet-radar-client";
 import { PetSoundButton } from "@/components/pets/pet-sound-button";
-import { PetSprite } from "@/components/pets/pet-sprite";
-import { PetStateViewerLazy } from "@/components/pets/pet-state-viewer-lazy";
 import { PetTakedownReportButton } from "@/components/pets/pet-takedown-report-button";
+import { PetVitrineStage } from "@/components/pets/pet-vitrine-stage";
 import { SaveAsSticker } from "@/components/pets/save-as-sticker";
 import { StaticPetSprite } from "@/components/pets/static-pet-sprite";
-import { SubmittedBy } from "@/components/pets/submitted-by";
 import { OwnerPetControls } from "@/components/profile/owner-pet-controls";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
+import { buttonVariants } from "@/components/ui/button";
 
 import { defaultLocale, hasLocale } from "@/i18n/config";
 
@@ -255,13 +252,9 @@ export default async function PetPage({ params }: PageProps) {
       />
 
       <SiteHeader />
-      {/* Hero — single full-width section on the petdex-hero surface.
-          Two-column lockup on lg+: animated sprite (the product) on the
-          left, identity + CTAs on the right. Mobile collapses to a
-          natural vertical stack: dex nav, sprite, info+CTAs. */}
+
       <section className="petdex-hero relative -mt-14 overflow-visible pt-14">
-        <div className="relative mx-auto flex w-full max-w-6xl flex-col gap-4 px-5 pt-5 pb-8 md:gap-6 md:px-8 md:pt-8 md:pb-14">
-          {/* Dex nav strip — Pokédex chrome at the top. */}
+        <div className="relative mx-auto flex w-full max-w-6xl flex-col gap-8 px-5 pt-5 pb-12 md:gap-10 md:px-8 md:pt-8 md:pb-16">
           <nav
             aria-label={tPet("navigation.ariaLabel")}
             className="flex flex-wrap items-center justify-between gap-3"
@@ -270,336 +263,258 @@ export default async function PetPage({ params }: PageProps) {
             <Link
               href={shuffleHref}
               prefetch={false}
-              className="inline-flex h-9 items-center gap-1.5 rounded-full border border-border-base bg-surface/70 px-3.5 text-[13px] font-medium text-muted-2 backdrop-blur transition hover:bg-surface-muted hover:text-foreground"
               title={tPet("navigation.shuffleTitle")}
+              className={buttonVariants({
+                variant: "pearl",
+                size: "lg",
+                className: "text-[13px]",
+              })}
             >
-              <Shuffle className="size-4" />
+              <Shuffle />
               Shuffle
-              <kbd className="ml-1 rounded border border-border-base bg-surface px-1.5 py-0.5 font-mono text-[10px] tracking-[0.05em] text-muted-3">
+              <kbd className="ml-0.5 rounded-md border border-border-base bg-surface px-1.5 py-0.5 font-mono text-[10px] tracking-[0.05em] text-muted-3">
                 Space
               </kbd>
             </Link>
             <DexNavPill pet={nextPet} direction="next" />
           </nav>
 
-          {/* Two-column hero. lg breakpoint splits sprite and info
-              side-by-side; on mobile the floater stage shrinks to a
-              short banner above the info so the title isn't pushed
-              off-screen. The full state viewer (sprite + state tabs)
-              renders below the hero. */}
-          <div className="mt-4 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-start lg:gap-10">
-            {/* Left column: pet sprite stage.
-                - Mobile: a static centered PetSprite (PetFloater
-                  disables itself below 768px because the drag/portal
-                  logic doesn't make sense on a phone).
-                - md+: interactive PetFloater that wanders, idle-cycles
-                  states, and reacts to drag inside this card.
-                .petdex-floater-stage scopes the floater's bounds.
-                Sticky on lg+ so it stays visible while the right
-                column scrolls. */}
-            <div className="lg:sticky lg:top-24">
-              <div className="toy-shell petdex-floater-stage pet-sprite-stage relative h-56 w-full overflow-hidden rounded-3xl sm:h-72 lg:aspect-square lg:h-auto">
-                {/* Static fallback for mobile + first paint. Anchored
-                    upper-left so the pet reads like a peeking
-                    character, not a centered specimen photo. Hidden
-                    on md+ where the floater takes over. */}
-                <span className="absolute top-2 left-3 md:hidden">
-                  <PetSprite
-                    src={pet.spritesheetPath}
-                    state="idle"
-                    scale={0.95}
-                    label={`${pet.displayName} idle`}
-                  />
-                </span>
-                {/* Interactive floater on md+ only. PetFloater
-                    self-positions inside the stage. */}
-                <span className="hidden md:block">
-                  <PetFloater
-                    src={pet.spritesheetPath}
-                    petName={pet.displayName}
-                    size={180}
-                    initialFraction={{ x: 0.5, y: 0.5 }}
-                  />
-                </span>
-              </div>
-            </div>
-
-            {/* Right column: identity + CTAs + meta. Order is intentional:
-                eyebrow → name → description → primary CTA (Open in
-                Petdex) → tertiary CTA (Open in Codex) → secondary CTA
-                (install command) → quick actions (like/sound/menu +
-                stats) → tags → collections. */}
-            <header className="flex flex-col gap-5">
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                <p className="toy-tag inline-block rounded-full bg-toy-volt px-2.5 py-1 text-[#101944] shadow-[0_2px_0_#C9A91F]">
-                  {pet.featured ? "Featured" : "Petdex entry"}
-                </p>
-                {currentDexNumber != null ? (
-                  <p className="toy-tag text-toy-cobalt dark:text-[#9BB2FF]">
-                    No. {formatDexNumber(currentDexNumber)}
-                  </p>
-                ) : null}
-                <Link
-                  href={`/kind/${pet.kind}`}
-                  prefetch={false}
-                  className="toy-tag text-muted-3 transition hover:text-brand"
-                >
-                  {pet.kind}
-                </Link>
-                <p className="toy-tag rounded-full bg-black px-2.5 py-1 font-semibold text-white shadow-sm">
-                  v{pet.spriteVersionNumber}
-                </p>
-              </div>
-
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <h1 className="text-balance text-[34px] leading-[0.95] font-semibold tracking-tight text-foreground sm:text-[40px] md:text-[56px]">
-                  {pet.displayName}
-                </h1>
-                <OwnerPetControls
-                  slug={pet.slug}
-                  currentDisplayName={pet.displayName}
-                  currentDescription={pet.description}
-                />
-              </div>
-
-              <p className="text-balance text-base leading-7 text-muted-1 md:text-lg">
-                {pet.description}
-              </p>
-
-              <OpenInPetdexButton slug={pet.slug} />
-
-              <OpenInCodexButton
-                displayName={pet.displayName}
-                description={pet.description}
-                spritesheetUrl={pet.spritesheetPath}
-              />
-
-              {/* Secondary CTA: single-line npx command + link to the
-                  full install guide. The verbose tabs/instructions
-                  live under the state viewer so they don't crowd the
-                  hero — anyone who needs them is already scrolling. */}
-              <InstallCommandCompact
-                slug={pet.slug}
-                displayName={pet.displayName}
-              />
-
-              {/* Quick actions row: like / sound / share / sticker share
-                  one pill rung. Passive meta (counters) and the rare
-                  action (report) live on a quieter second line so the
-                  row reads as four choices, not seven. */}
-              <div className="flex flex-col gap-2.5 pt-1">
-                <div className="flex flex-wrap items-center gap-2.5">
-                  <LikeButton slug={pet.slug} />
-                  {pet.soundUrl ? (
+          <div className="grid items-start gap-6 lg:grid-cols-12">
+            <div className="flex min-w-0 flex-col gap-3 lg:col-span-7">
+              <PetVitrineStage
+                src={pet.spritesheetPath}
+                petName={pet.displayName}
+                dexNumber={
+                  currentDexNumber != null
+                    ? formatDexNumber(currentDexNumber)
+                    : null
+                }
+                kind={pet.kind}
+                utilitySlot={
+                  pet.soundUrl ? (
                     <PetSoundButton
                       soundUrl={pet.soundUrl}
                       displayName={pet.displayName}
                       labelPrefix="Play signature sound for"
                     />
-                  ) : null}
-                  <PetActionMenu
-                    pet={{
-                      slug: pet.slug,
-                      displayName: pet.displayName,
-                      zipUrl: pet.zipUrl,
-                      description: pet.description,
-                    }}
-                    variant="detail"
-                  />
-                  {stickerAvailability.available &&
-                  stickerAvailability.collectionSlug ? (
-                    <SaveAsSticker
+                  ) : null
+                }
+              />
+              {/* Lets users who disabled animations in OS settings know
+                  the static sprite is intentional, not a bug. Reported
+                  via feedback on /zh/pets/nyami. */}
+              <ReducedMotionHint />
+            </div>
+
+            <aside className="flex min-w-0 flex-col gap-4 lg:col-span-5">
+              <div className="toy-shell flex flex-col gap-5 rounded-3xl p-6">
+                <header className="flex flex-col gap-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="toy-tag rounded-lg bg-toy-volt px-2.5 py-1 text-[#101944] shadow-[0_2px_0_#C9A91F]">
+                      {pet.featured ? "Featured" : "Petdex entry"}
+                    </p>
+                    <Link
+                      href={`/kind/${pet.kind}`}
+                      prefetch={false}
+                      className="toy-tag text-muted-3 transition hover:text-toy-cobalt dark:hover:text-[#8CA3FF]"
+                    >
+                      {pet.kind}
+                    </Link>
+                    <p className="toy-tag rounded-lg border border-toy-ink/15 px-2 py-0.5 text-muted-2">
+                      v{pet.spriteVersionNumber}
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <h1 className="min-w-0 font-heading text-3xl leading-[0.98] font-extrabold tracking-tight text-balance break-words text-foreground sm:text-4xl">
+                      {pet.displayName}
+                    </h1>
+                    <OwnerPetControls
                       slug={pet.slug}
-                      displayName={pet.displayName}
-                      collectionSlug={stickerAvailability.collectionSlug}
+                      currentDisplayName={pet.displayName}
+                      currentDescription={pet.description}
                     />
-                  ) : null}
-                </div>
-                <div className="flex flex-wrap items-center gap-3">
-                  <PetCountersBar slug={pet.slug} />
-                  <PetTakedownReportButton
-                    pet={{ slug: pet.slug, displayName: pet.displayName }}
+                  </div>
+
+                  <p className="text-sm leading-relaxed text-pretty text-muted-1">
+                    {pet.description}
+                  </p>
+
+                  <p className="text-xs text-muted-2">
+                    {ownerCredit ? (
+                      <>
+                        Made by{" "}
+                        <Link
+                          href={`/u/${ownerCredit.handle}`}
+                          prefetch={false}
+                          className="font-semibold text-foreground underline decoration-toy-volt decoration-2 underline-offset-4 transition hover:decoration-toy-cobalt"
+                        >
+                          {ownerCredit.name}
+                        </Link>
+                        {ownerCredit.username ? (
+                          <span className="ml-1.5 font-mono text-xs text-muted-3">
+                            @{ownerCredit.username}
+                          </span>
+                        ) : null}
+                      </>
+                    ) : (
+                      "Curated by Petdex"
+                    )}
+                  </p>
+                </header>
+
+                <div className="flex flex-col gap-2.5">
+                  <OpenInPetdexButton slug={pet.slug} />
+                  <OpenInCodexButton
+                    displayName={pet.displayName}
+                    description={pet.description}
+                    spritesheetUrl={pet.spritesheetPath}
                   />
+                  <InstallCommandCompact
+                    slug={pet.slug}
+                    displayName={pet.displayName}
+                  />
+                </div>
+
+                <div className="flex flex-col gap-3 border-t border-toy-ink/10 pt-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <LikeButton slug={pet.slug} />
+                    <PetActionMenu
+                      pet={{
+                        slug: pet.slug,
+                        displayName: pet.displayName,
+                        zipUrl: pet.zipUrl,
+                        description: pet.description,
+                      }}
+                      variant="detail"
+                    />
+                    {stickerAvailability.available &&
+                    stickerAvailability.collectionSlug ? (
+                      <SaveAsSticker
+                        slug={pet.slug}
+                        displayName={pet.displayName}
+                        collectionSlug={stickerAvailability.collectionSlug}
+                      />
+                    ) : null}
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                    <PetCountersBar slug={pet.slug} />
+                    <PetTakedownReportButton
+                      pet={{ slug: pet.slug, displayName: pet.displayName }}
+                    />
+                  </div>
                 </div>
               </div>
 
-              {/* Tags + collections collapsed into compact metadata. */}
-              {pet.tags.length > 0 ? (
-                <div className="flex flex-wrap gap-2">
-                  {pet.tags.map((tag) => (
-                    <span
-                      key={tag}
-                      className="rounded-full border border-border-base bg-surface/70 px-2.5 py-1 text-[12px] font-medium text-muted-2 backdrop-blur"
-                    >
-                      {tag}
-                    </span>
-                  ))}
+              {pet.vibes.length > 0 || pet.tags.length > 0 ? (
+                <div className="toy-shell flex flex-col gap-3 rounded-3xl p-5">
+                  <div className="flex flex-wrap gap-1.5">
+                    {pet.vibes.map((vibe) => (
+                      <Link
+                        key={vibe}
+                        href={`/vibe/${vibe}`}
+                        prefetch={false}
+                        className="rounded-xl bg-toy-volt/90 px-2.5 py-1 text-xs font-semibold text-[#101944] transition hover:brightness-95"
+                      >
+                        {vibe}
+                      </Link>
+                    ))}
+                    {pet.tags.map((tag) => (
+                      <span
+                        key={tag}
+                        className="rounded-xl border border-toy-ink/12 bg-background/60 px-2.5 py-1 text-xs font-medium text-muted-1"
+                      >
+                        #{tag}
+                      </span>
+                    ))}
+                  </div>
+                  {ownerCredit && ownerCreditResult?.ownerIsProxy ? (
+                    <div className="border-t border-toy-ink/10 pt-3">
+                      <ClaimCTA
+                        petName={pet.displayName}
+                        authorLabel={ownerCredit.name}
+                        githubUrl={
+                          ownerCredit.externals.find(
+                            (e) => e.provider === "github",
+                          )?.url ?? null
+                        }
+                      />
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
-
-              {memberOfCollections.length > 0 ? (
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="toy-tag inline-flex items-center gap-1.5 text-muted-3">
-                    <Layers className="size-3.5" />
-                    Part of
-                  </span>
-                  {memberOfCollections.map((col) => (
-                    <Link
-                      key={col.slug}
-                      href={`/collections/${col.slug}`}
-                      prefetch={false}
-                      className="rounded-full border border-border-base bg-surface/70 px-2.5 py-1 text-[12px] font-medium text-muted-2 backdrop-blur transition hover:bg-brand/15 hover:text-brand"
-                    >
-                      {col.title}
-                    </Link>
-                  ))}
-                </div>
-              ) : null}
-            </header>
+            </aside>
           </div>
-
-          {/* Keyboard hint strip — full-width footer of the hero, only
-              on pointer-fine media. */}
-          <p className="mt-2 hidden flex-wrap items-center gap-3 font-mono text-[11px] tracking-[0.18em] text-muted-3 uppercase md:flex">
-            <span>{tPet("keyboardHint.tip")}</span>
-            <span className="inline-flex items-center gap-1">
-              <kbd className="rounded border border-border-base bg-surface px-1.5 py-0.5 text-[10px] text-muted-2">
-                ←
-              </kbd>
-              <kbd className="rounded border border-border-base bg-surface px-1.5 py-0.5 text-[10px] text-muted-2">
-                →
-              </kbd>
-              {tPet("keyboardHint.browse")}
-            </span>
-            <span className="inline-flex items-center gap-1">
-              <kbd className="rounded border border-border-base bg-surface px-1.5 py-0.5 text-[10px] text-muted-2">
-                Space
-              </kbd>
-              {tPet("keyboardHint.shuffle")}
-            </span>
-          </p>
         </div>
       </section>
 
-      <section className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-5 py-10 md:gap-8 md:px-8 md:py-12">
-        {/* Lets users on Windows / macOS who disabled animations in OS
-            settings know the static sprite is intentional, not a bug.
-            Reported via feedback on /zh/pets/nyami where the user
-            could not see the animation in Edge + Chrome. */}
-        <ReducedMotionHint />
-
-        {/* Full state viewer — sprite + state tabs lockup. Lives below
-            the hero so its internal 2-column layout has the full content
-            width to breathe. The hero idle preview keeps users grounded
-            while they scroll into the state grid. */}
-        <PetStateViewerLazy
-          src={pet.spritesheetPath}
-          petName={pet.displayName}
-        />
-
-        {/* Full install guide. CLI + Curl tabs, platform-specific
-            terminal instructions, "Activate in Codex" steps. Lives
-            under the state viewer so it doesn't crowd the hero where
-            the primary CTA (Open in Petdex Desktop) plus a compact
-            one-line npx command already cover the common path. */}
-        <div id="install" className="scroll-mt-24">
-          <InstallCommandLazy slug={pet.slug} displayName={pet.displayName} />
-        </div>
-
-        {/* Credit + stats stack on the left, variants on the right so
-            the short cards share a column instead of each floating in
-            its own full-width band. Single column when no variants. */}
-        <div
-          className={
-            variants.length > 0
-              ? "grid items-start gap-6 md:grid-cols-2"
-              : "grid gap-6"
-          }
-        >
-          <div className="flex flex-col gap-6">
-            {ownerCredit ? (
-              <div className="flex flex-col gap-3">
-                <SubmittedBy credit={ownerCredit} />
-                {ownerCreditResult?.ownerIsProxy ? (
-                  <ClaimCTA
-                    petName={pet.displayName}
-                    authorLabel={ownerCredit.name}
-                    githubUrl={
-                      ownerCredit.externals.find((e) => e.provider === "github")
-                        ?.url ?? null
-                    }
-                  />
-                ) : null}
-              </div>
-            ) : (
-              <InfoCard
-                title="Submission"
-                icon={<Sparkles className="size-4" />}
-              >
-                <p>Curated entry.</p>
-                <p>Updated {new Date(pet.importedAt).toLocaleDateString()}</p>
-              </InfoCard>
-            )}
-
-            <InfoCard
-              title={tPet("stats.title")}
-              icon={<Sparkles className="size-4" />}
-            >
-              <div className="flex items-center justify-center">
-                <PetRadarClient
-                  slug={pet.slug}
-                  importedAt={pet.importedAt}
-                  ariaLabel={tPet("stats.ariaLabel")}
-                  labels={{
-                    vibrance: tPet("stats.vibrance"),
-                    popularity: tPet("stats.popularity"),
-                    loved: tPet("stats.loved"),
-                    freshness: tPet("stats.freshness"),
-                  }}
-                />
-              </div>
-            </InfoCard>
-          </div>
-
+      {variants.length > 0 || memberOfCollections.length > 0 ? (
+        <div className="mx-auto flex w-full max-w-6xl flex-col gap-12 px-5 pb-20 md:px-8 md:pb-24">
           {variants.length > 0 ? (
-            <section className="toy-shell rounded-3xl p-5">
-              <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                <Sparkles className="size-4" />
-                {tPet("variants.title")}
+            <section className="space-y-5">
+              <div className="space-y-1.5">
+                <Eyebrow>Colorways</Eyebrow>
+                <h2 className="font-heading text-2xl font-bold tracking-tight text-foreground">
+                  {tPet("variants.title")}
+                </h2>
               </div>
-              <p className="mt-1.5 text-[13px] text-muted-2">
-                {tPet("variants.description")}
-              </p>
-              <div className="mt-3 grid gap-2.5 sm:grid-cols-2">
+              <ul className="-mx-1 flex snap-x gap-3 overflow-x-auto px-1 pt-1 pb-3">
                 {variants.map((variant) => (
-                  <Link
-                    key={variant.slug}
-                    href={`/pets/${variant.slug}`}
-                    prefetch={false}
-                    className="group flex items-center gap-3 rounded-2xl border border-border-base bg-background/70 p-3 transition hover:-translate-y-0.5 hover:border-brand/35 hover:bg-background"
-                  >
-                    <div className="shrink-0 rounded-2xl border border-border-base bg-surface p-2">
+                  <li key={variant.slug} className="shrink-0 snap-start">
+                    <Link
+                      href={`/pets/${variant.slug}`}
+                      prefetch={false}
+                      className="toy-shell group flex w-36 flex-col items-center gap-2 rounded-2xl px-3 pt-4 pb-3 outline-none transition-[transform,border-color,box-shadow] hover:-translate-y-0.5 hover:border-toy-cobalt focus-visible:ring-2 focus-visible:ring-toy-cobalt/40"
+                    >
                       <StaticPetSprite
                         src={variant.spritesheetUrl}
-                        scale={0.45}
+                        scale={0.5}
                         label={variant.displayName}
                       />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-foreground transition group-hover:text-brand">
+                      <span className="w-full truncate text-center text-[13px] font-semibold text-foreground">
                         {variant.displayName}
-                      </p>
-                      <p className="toy-tag mt-1 text-muted-3">
-                        #{formatDexNumber(variant.dexNumber)}
-                      </p>
-                    </div>
-                  </Link>
+                      </span>
+                      <span className="toy-tag text-muted-3">
+                        No. {formatDexNumber(variant.dexNumber)}
+                      </span>
+                    </Link>
+                  </li>
                 ))}
+              </ul>
+            </section>
+          ) : null}
+
+          {memberOfCollections.length > 0 ? (
+            <section className="toy-shell rounded-3xl p-6">
+              <div className="mb-4 space-y-1">
+                <Eyebrow>On display in</Eyebrow>
+                <h2 className="font-heading text-2xl font-bold tracking-tight text-foreground">
+                  Collections
+                </h2>
               </div>
+              <ul className="divide-y divide-toy-ink/10">
+                {memberOfCollections.map((col, index) => (
+                  <li key={col.slug}>
+                    <Link
+                      href={`/collections/${col.slug}`}
+                      prefetch={false}
+                      className="group flex items-center gap-4 py-3.5 text-foreground outline-none transition-colors hover:text-toy-cobalt focus-visible:text-toy-cobalt dark:hover:text-[#8CA3FF] dark:focus-visible:text-[#8CA3FF]"
+                    >
+                      <span className="font-hardware text-[10px] text-muted-3">
+                        {String(index + 1).padStart(2, "0")}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate font-heading text-lg font-semibold tracking-tight">
+                        {col.title}
+                      </span>
+                      <ArrowUpRight className="size-4 opacity-40 transition group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:opacity-100" />
+                    </Link>
+                  </li>
+                ))}
+              </ul>
             </section>
           ) : null}
         </div>
-      </section>
+      ) : null}
 
       <SiteFooter />
     </main>
@@ -619,36 +534,29 @@ function DexNavPill({
     <Link
       href={`/pets/${pet.slug}`}
       prefetch={false}
-      className={`inline-flex h-9 items-center gap-2 rounded-full border border-border-base bg-surface/70 px-3.5 text-[13px] font-medium text-muted-2 backdrop-blur transition hover:bg-surface-muted hover:text-foreground ${direction === "next" ? "ml-auto" : ""}`}
+      className={buttonVariants({
+        variant: "pearl",
+        size: "lg",
+        className: cn(
+          "max-w-[46%] text-[13px]",
+          direction === "next" && "ml-auto",
+        ),
+      })}
     >
       {direction === "prev" ? <span aria-hidden="true">←</span> : null}
-      <span className="font-mono text-[11px] tracking-[0.16em] text-muted-3">
-        #{formatDexNumber(pet.dexNumber)}
+      <span className="font-hardware text-[10px] tracking-[0.12em] text-muted-3">
+        {formatDexNumber(pet.dexNumber)}
       </span>
-      <span>{pet.displayName}</span>
+      <span className="truncate">{pet.displayName}</span>
       {direction === "next" ? <span aria-hidden="true">→</span> : null}
     </Link>
   );
 }
 
-function InfoCard({
-  title,
-  icon,
-  children,
-}: {
-  title: string;
-  icon: React.ReactNode;
-  children: React.ReactNode;
-}) {
+function Eyebrow({ children }: { children: React.ReactNode }) {
   return (
-    <div className="toy-shell rounded-3xl p-5">
-      <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-        {icon}
-        {title}
-      </div>
-      <div className="mt-3 space-y-2 break-words text-sm leading-6 text-muted-2">
-        {children}
-      </div>
-    </div>
+    <p className="font-hardware text-[10px] tracking-[0.14em] text-toy-cobalt uppercase dark:text-[#8CA3FF]">
+      {children}
+    </p>
   );
 }

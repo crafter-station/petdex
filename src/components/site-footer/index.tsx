@@ -10,7 +10,7 @@ export function SiteFooter() {
 
   return (
     <footer className="mx-auto w-full max-w-[1440px] px-5 py-10 md:px-8">
-      <div className="flex flex-col items-start justify-between gap-3 border-t border-border-base pt-6 text-xs text-muted-3 md:flex-row md:items-center">
+      <div className="flex flex-col items-start justify-between gap-3 border-t border-[#D4DCF4] pt-6 text-xs text-muted-3 md:flex-row md:items-center dark:border-white/12">
         <div className="space-y-1">
           <p>{t("rightsNotice")}</p>
           <p className="text-muted-3">
@@ -19,7 +19,7 @@ export function SiteFooter() {
               href="https://railly.dev"
               target="_blank"
               rel="noreferrer"
-              className="font-medium text-foreground underline underline-offset-4 transition hover:text-brand"
+              className="font-medium text-foreground underline underline-offset-4 transition hover:text-[#2943CC] dark:hover:text-[#8CA3FF]"
             >
               Railly Hugo
             </a>{" "}
@@ -28,7 +28,7 @@ export function SiteFooter() {
               href="https://crafter.run"
               target="_blank"
               rel="noreferrer"
-              className="font-medium text-foreground underline underline-offset-4 transition hover:text-brand"
+              className="font-medium text-foreground underline underline-offset-4 transition hover:text-[#2943CC] dark:hover:text-[#8CA3FF]"
             >
               Crafter Station
             </a>
@@ -39,21 +39,21 @@ export function SiteFooter() {
           <Link
             href="/leaderboard"
             prefetch={false}
-            className="underline underline-offset-4 transition hover:text-foreground"
+            className="underline underline-offset-4 transition hover:text-[#2943CC] dark:hover:text-[#8CA3FF]"
           >
             {t("topCreators")}
           </Link>
           <Link
             href="/legal/takedown"
             prefetch={false}
-            className="underline underline-offset-4 transition hover:text-foreground"
+            className="underline underline-offset-4 transition hover:text-[#2943CC] dark:hover:text-[#8CA3FF]"
           >
             {t("takedown")}
           </Link>
           <Link
             href="/brand"
             prefetch={false}
-            className="underline underline-offset-4 transition hover:text-foreground"
+            className="underline underline-offset-4 transition hover:text-[#2943CC] dark:hover:text-[#8CA3FF]"
           >
             {t("brand")}
           </Link>
@@ -61,7 +61,7 @@ export function SiteFooter() {
             href="https://github.com/crafter-station/petdex"
             target="_blank"
             rel="noreferrer"
-            className="underline underline-offset-4 transition hover:text-foreground"
+            className="underline underline-offset-4 transition hover:text-[#2943CC] dark:hover:text-[#8CA3FF]"
           >
             {t("github")}
           </a>
@@ -69,7 +69,7 @@ export function SiteFooter() {
             <DiscordLink
               href={process.env.NEXT_PUBLIC_DISCORD_INVITE_URL}
               source="footer"
-              className="underline underline-offset-4 transition hover:text-foreground"
+              className="underline underline-offset-4 transition hover:text-[#2943CC] dark:hover:text-[#8CA3FF]"
             >
               {t("discord")}
             </DiscordLink>

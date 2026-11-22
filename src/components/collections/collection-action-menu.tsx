@@ -22,6 +22,7 @@ import {
 import { usePlatform } from "@/lib/use-platform";
 
 import { CodexLogo } from "@/components/download/codex-logo";
+import { buttonVariants } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -111,13 +112,13 @@ export function CollectionActionMenu({ collection }: Props) {
       <DropdownMenu>
         <DropdownMenuTrigger
           aria-label={t("moreActions", { title: collection.title })}
-          className="inline-flex size-8 items-center justify-center rounded-full border border-border-base bg-surface/70 text-muted-2 backdrop-blur transition hover:bg-surface-muted hover:text-foreground data-popup-open:bg-surface-muted data-popup-open:text-foreground"
+          className={buttonVariants({ variant: "pearl", size: "icon" })}
         >
           <MoreHorizontal className="size-4" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" sideOffset={8} className="w-72 p-0">
           <DropdownMenuGroup>
-            <DropdownMenuLabel className="flex items-center gap-1.5 border-b border-foreground/[0.06] px-3 py-2 font-mono text-[10px] tracking-[0.18em] text-muted-3 uppercase">
+            <DropdownMenuLabel className="toy-tag flex items-center gap-1.5 border-b border-foreground/[0.06] px-3 py-2 text-muted-3">
               <Layers className="size-3" />
               {collection.title}
             </DropdownMenuLabel>

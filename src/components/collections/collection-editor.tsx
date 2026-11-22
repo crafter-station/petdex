@@ -18,6 +18,8 @@ import {
   MAX_COLLECTION_PETS,
 } from "@/lib/collection-constants";
 
+import { Button, buttonVariants } from "@/components/ui/button";
+
 type PetOption = {
   slug: string;
   displayName: string;
@@ -150,12 +152,10 @@ export function CollectionEditor({
   }
 
   return (
-    <section className="rounded-2xl border border-border-base bg-surface/60 p-5 backdrop-blur">
+    <section className="toy-shell rounded-3xl border border-[#D4DCF4] p-5 md:p-6 dark:border-white/12">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="font-mono text-[10px] tracking-[0.22em] text-brand uppercase">
-            Featured collection
-          </p>
+          <p className="toy-tag text-brand">Featured collection</p>
           <h2 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
             Your creator set
           </h2>
@@ -169,7 +169,7 @@ export function CollectionEditor({
             href={`/collections/${initial.slug}`}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex h-9 items-center rounded-full border border-border-base px-3 text-xs font-medium text-muted-2 transition hover:bg-surface-muted hover:text-foreground"
+            className={buttonVariants({ variant: "pearl", size: "lg" })}
           >
             View public collection
           </a>
@@ -179,9 +179,7 @@ export function CollectionEditor({
       <div className="mt-5 grid gap-4 md:grid-cols-[1fr_240px]">
         <div className="space-y-3">
           <label className="block">
-            <span className="font-mono text-[10px] tracking-[0.16em] text-muted-3 uppercase">
-              Brand name
-            </span>
+            <span className="toy-tag text-muted-3">Brand name</span>
             <input
               value={title}
               onChange={(event) => {
@@ -189,13 +187,11 @@ export function CollectionEditor({
                 setTitle(event.target.value);
               }}
               maxLength={80}
-              className="mt-1 h-11 w-full rounded-2xl border border-border-base bg-background px-3 text-sm text-foreground outline-none transition focus:border-brand/60 focus:ring-2 focus:ring-brand/15"
+              className="mt-1 h-11 w-full rounded-xl border border-[#D4DCF4] bg-background px-3 text-sm text-foreground outline-none transition focus:border-[#3B59F2] focus:ring-2 focus:ring-[#3B59F2]/20 dark:border-white/12"
             />
           </label>
           <label className="block">
-            <span className="font-mono text-[10px] tracking-[0.16em] text-muted-3 uppercase">
-              Description
-            </span>
+            <span className="toy-tag text-muted-3">Description</span>
             <textarea
               value={description}
               onChange={(event) => {
@@ -204,14 +200,12 @@ export function CollectionEditor({
               }}
               maxLength={280}
               rows={3}
-              className="mt-1 w-full resize-none rounded-2xl border border-border-base bg-background px-3 py-2 text-sm leading-6 text-foreground outline-none transition focus:border-brand/60 focus:ring-2 focus:ring-brand/15"
+              className="mt-1 w-full resize-none rounded-xl border border-[#D4DCF4] bg-background px-3 py-2 text-sm leading-6 text-foreground outline-none transition focus:border-[#3B59F2] focus:ring-2 focus:ring-[#3B59F2]/20 dark:border-white/12"
             />
           </label>
           <label className="block">
-            <span className="font-mono text-[10px] tracking-[0.16em] text-muted-3 uppercase">
-              Visit IP site URL
-            </span>
-            <div className="mt-1 flex h-11 items-center gap-2 rounded-2xl border border-border-base bg-background px-3 focus-within:border-brand/60 focus-within:ring-2 focus-within:ring-brand/15">
+            <span className="toy-tag text-muted-3">Visit IP site URL</span>
+            <div className="mt-1 flex h-11 items-center gap-2 rounded-xl border border-[#D4DCF4] bg-background px-3 focus-within:border-[#3B59F2] focus-within:ring-2 focus-within:ring-[#3B59F2]/20 dark:border-white/12">
               <LinkIcon className="size-4 text-muted-4" />
               <input
                 value={externalUrl}
@@ -226,10 +220,8 @@ export function CollectionEditor({
           </label>
         </div>
 
-        <div className="rounded-2xl border border-border-base bg-background/70 p-3">
-          <span className="font-mono text-[10px] tracking-[0.16em] text-muted-3 uppercase">
-            Hero pet
-          </span>
+        <div className="rounded-2xl border border-[#D4DCF4] bg-background/70 p-3 dark:border-white/12">
+          <span className="toy-tag text-muted-3">Hero pet</span>
           <select
             value={coverPetSlug ?? ""}
             onChange={(event) => {
@@ -237,7 +229,7 @@ export function CollectionEditor({
               setCoverPetSlug(event.target.value || null);
             }}
             disabled={selectedPets.length === 0}
-            className="mt-1 h-10 w-full rounded-xl border border-border-base bg-surface px-2 text-xs text-foreground outline-none disabled:opacity-50"
+            className="mt-1 h-10 w-full rounded-xl border border-[#D4DCF4] bg-surface px-2 text-xs text-foreground outline-none disabled:opacity-50 dark:border-white/12"
           >
             {selectedPets.length === 0 ? (
               <option value="">{t("selectPetsFirst")}</option>
@@ -248,7 +240,7 @@ export function CollectionEditor({
               </option>
             ))}
           </select>
-          <div className="mt-3 rounded-2xl border border-dashed border-border-base bg-surface-muted/50 p-3 text-center">
+          <div className="mt-3 rounded-2xl border border-dashed border-[#D4DCF4] bg-surface-muted/50 p-3 text-center dark:border-white/12">
             <Sparkles className="mx-auto size-5 text-brand" />
             <p className="mt-2 text-xs leading-5 text-muted-2">
               This pet anchors the collection hero on your profile and the
@@ -259,15 +251,13 @@ export function CollectionEditor({
       </div>
 
       {approvedPets.length === 0 ? (
-        <p className="mt-5 rounded-2xl border border-dashed border-border-base bg-background/70 p-5 text-sm text-muted-2">
+        <p className="mt-5 rounded-2xl border border-dashed border-[#D4DCF4] bg-background/70 p-5 text-sm text-muted-2 dark:border-white/12">
           You need at least one approved pet before you can build a collection.
         </p>
       ) : (
         <div className="mt-5 grid gap-4 lg:grid-cols-[1fr_1fr]">
           <div>
-            <p className="font-mono text-[10px] tracking-[0.16em] text-muted-3 uppercase">
-              Pets in collection
-            </p>
+            <p className="toy-tag text-muted-3">Pets in collection</p>
             {approvedPets.length > MAX_COLLECTION_PETS ? (
               <p className="mt-1 text-xs text-muted-3">
                 {t("petLimitHint", { max: MAX_COLLECTION_PETS })}
@@ -285,10 +275,10 @@ export function CollectionEditor({
                     onClick={() => togglePet(pet.slug)}
                     disabled={selectionFull}
                     aria-pressed={selected}
-                    className={`flex h-11 items-center justify-between rounded-2xl border px-3 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-45 ${
+                    className={`flex h-11 cursor-pointer items-center justify-between rounded-xl border px-3 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-45 ${
                       selected
-                        ? "border-brand/40 bg-brand/15 text-brand"
-                        : "border-border-base bg-background text-muted-2 hover:bg-surface-muted hover:text-foreground"
+                        ? "border-[#3B59F2]/50 bg-[#EEF2FF]/80 text-[#2943CC] dark:bg-[#3B59F2]/15 dark:text-[#8CA3FF]"
+                        : "border-[#D4DCF4] bg-background text-muted-2 hover:border-[#3B59F2]/40 hover:text-foreground dark:border-white/12"
                     }`}
                   >
                     <span className="min-w-0 truncate">{pet.displayName}</span>
@@ -300,12 +290,10 @@ export function CollectionEditor({
           </div>
 
           <div>
-            <p className="font-mono text-[10px] tracking-[0.16em] text-muted-3 uppercase">
-              Featured order
-            </p>
+            <p className="toy-tag text-muted-3">Featured order</p>
             <div className="mt-2 space-y-2">
               {selectedPets.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-border-base bg-background/70 p-5 text-sm text-muted-2">
+                <div className="rounded-2xl border border-dashed border-[#D4DCF4] bg-background/70 p-5 text-sm text-muted-2 dark:border-white/12">
                   Select pets to order the collection.
                 </div>
               ) : (
@@ -321,7 +309,7 @@ export function CollectionEditor({
                       setDragIndex(null);
                     }}
                     onDragEnd={() => setDragIndex(null)}
-                    className="flex h-11 w-full cursor-grab items-center gap-2 rounded-2xl border border-border-base bg-background px-3 text-left text-sm text-foreground active:cursor-grabbing"
+                    className="flex h-11 w-full cursor-grab items-center gap-2 rounded-xl border border-[#D4DCF4] bg-background px-3 text-left text-sm text-foreground active:cursor-grabbing dark:border-white/12"
                   >
                     <GripVertical className="size-4 text-muted-4" />
                     <span className="font-mono text-[10px] text-muted-4">
@@ -331,7 +319,7 @@ export function CollectionEditor({
                       {pet.displayName}
                     </span>
                     {pet.slug === coverPetSlug ? (
-                      <span className="rounded-full bg-brand/15 px-2 py-0.5 font-mono text-[9px] tracking-[0.12em] text-brand uppercase ring-1 ring-brand/25">
+                      <span className="toy-tag rounded-xl bg-brand/15 px-2 py-0.5 text-brand ring-1 ring-brand/25">
                         Hero
                       </span>
                     ) : null}
@@ -355,8 +343,10 @@ export function CollectionEditor({
             Saved
           </p>
         ) : null}
-        <button
+        <Button
           type="button"
+          variant="cobalt"
+          size="petdex-pill"
           onClick={save}
           disabled={
             pending ||
@@ -364,7 +354,6 @@ export function CollectionEditor({
             title.trim().length > 80 ||
             description.length > 280
           }
-          className="inline-flex h-10 items-center gap-2 rounded-full bg-inverse px-4 text-sm font-medium text-on-inverse transition hover:bg-inverse-hover disabled:cursor-not-allowed disabled:opacity-50"
         >
           {pending ? (
             <Loader2 className="size-4 animate-spin" />
@@ -372,7 +361,7 @@ export function CollectionEditor({
             <Save className="size-4" />
           )}
           Save collection
-        </button>
+        </Button>
       </div>
     </section>
   );

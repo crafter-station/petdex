@@ -37,6 +37,7 @@ import {
   refreshPinnedOrderItems,
   shouldResetPinnedOrderFromProps,
 } from "@/components/profile/profile-pinning-state";
+import { Button } from "@/components/ui/button";
 
 type PinnedReorderGridProps = {
   pets: PetWithMetrics[];
@@ -244,23 +245,21 @@ export function PinnedReorderGrid({
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="font-mono text-[11px] tracking-[0.22em] text-brand uppercase">
-          ★ Pinned
-        </p>
+        <p className="toy-tag text-brand">★ Pinned</p>
         <div className="flex flex-wrap items-center justify-end gap-2">
           {statusLabel ? (
             <span
-              className={`inline-flex h-7 items-center gap-1.5 rounded-full border px-3 text-[11px] font-medium ${
+              className={`inline-flex h-7 items-center gap-1.5 rounded-xl border px-3 text-[11px] font-medium ${
                 saveState === "error"
                   ? "border-red-300 bg-red-50 text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300"
-                  : "border-border-base bg-surface text-muted-2"
+                  : "border-[#D4DCF4] bg-surface text-muted-2 dark:border-white/12"
               }`}
             >
               {saveState === "saved" ? <Check className="size-3" /> : null}
               {statusLabel}
             </span>
           ) : null}
-          <p className="font-mono text-[10px] tracking-[0.18em] text-muted-4 uppercase">
+          <p className="toy-tag text-muted-4">
             {order.length} of {MAX_PINNED_PETS}
           </p>
         </div>
@@ -270,23 +269,25 @@ export function PinnedReorderGrid({
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
           <p>{t("saveError", { error })}</p>
           <div className="flex items-center gap-2">
-            <button
+            <Button
               type="button"
+              variant="pearl"
+              size="sm"
               onClick={retrySave}
               disabled={isSaving}
-              className="inline-flex h-7 items-center gap-1 rounded-full border border-red-300/70 bg-white/70 px-2.5 font-medium transition hover:bg-white disabled:opacity-50 dark:border-red-800 dark:bg-red-950/50"
             >
               <RefreshCcw className="size-3" />
               Retry
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              variant="pearl"
+              size="sm"
               onClick={restoreSavedOrder}
               disabled={isSaving}
-              className="inline-flex h-7 items-center rounded-full border border-red-300/70 bg-white/70 px-2.5 font-medium transition hover:bg-white disabled:opacity-50 dark:border-red-800 dark:bg-red-950/50"
             >
               Restore saved order
-            </button>
+            </Button>
           </div>
         </div>
       ) : null}

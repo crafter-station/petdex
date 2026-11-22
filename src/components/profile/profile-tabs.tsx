@@ -22,6 +22,7 @@ import {
   type OwnerCollection,
   OwnerCollectionsManager,
 } from "@/components/profile/owner-collections-manager";
+import { Button, buttonVariants } from "@/components/ui/button";
 
 // Tabs surface for /u/<handle>. Owner sees Pets (all statuses with
 // badges), Liked, Collections (with editor). Visitor sees Pets
@@ -164,7 +165,10 @@ export function ProfileTabs(props: ProfileTabsProps) {
         {isOwner ? (
           <Link
             href="/submit"
-            className="ml-auto inline-flex h-9 items-center gap-2 rounded-full bg-inverse px-4 text-xs font-medium text-on-inverse transition hover:bg-inverse-hover"
+            className={cn(
+              buttonVariants({ variant: "cobalt", size: "lg" }),
+              "ml-auto",
+            )}
           >
             {t("submitPet")}
           </Link>
@@ -243,10 +247,8 @@ function PetsPanel({
     rejectedSubmissions.length === 0
   ) {
     return (
-      <div className="rounded-3xl border border-dashed border-border-base bg-surface/60 p-12 text-center">
-        <p className="font-mono text-xs tracking-[0.22em] text-muted-3 uppercase">
-          No pets yet
-        </p>
+      <div className="toy-shell rounded-3xl border border-dashed border-[#D4DCF4] p-12 text-center dark:border-white/12">
+        <p className="toy-tag text-muted-3">No pets yet</p>
         <p className="mt-3 text-base text-muted-2">
           {isOwner
             ? "Once you submit a pet and it gets approved, it shows up here."
@@ -255,7 +257,10 @@ function PetsPanel({
         {isOwner ? (
           <Link
             href="/submit"
-            className="mt-5 inline-flex h-10 items-center rounded-full bg-inverse px-4 text-sm font-medium text-on-inverse transition hover:bg-inverse-hover"
+            className={cn(
+              buttonVariants({ variant: "cobalt", size: "petdex-pill" }),
+              "mt-5",
+            )}
           >
             Submit your first pet
           </Link>
@@ -520,7 +525,7 @@ function CollectionsPanel({
   const visibleCollections = ownerCollections ?? [];
   if (visibleCollections.length === 0 && !collection) {
     return (
-      <div className="rounded-3xl border border-dashed border-border-base bg-surface/60 p-10 text-center text-sm text-muted-2">
+      <div className="toy-shell rounded-3xl border border-dashed border-[#D4DCF4] p-10 text-center text-sm text-muted-2 dark:border-white/12">
         No collections yet.
       </div>
     );
@@ -532,21 +537,19 @@ function CollectionsPanel({
         {visibleCollections.map((c) => (
           <article
             key={c.id}
-            className="rounded-3xl border border-border-base bg-surface/80 p-5 backdrop-blur"
+            className="toy-shell rounded-3xl border border-[#D4DCF4] p-5 dark:border-white/12"
           >
             <div className="flex flex-wrap items-center gap-2">
               {c.featured ? (
-                <span className="inline-flex items-center rounded-full bg-brand-tint px-2 py-0.5 font-mono text-[9px] tracking-[0.18em] text-brand-deep uppercase dark:bg-brand-tint-dark dark:text-brand-light">
+                <span className="toy-tag inline-flex items-center rounded-xl bg-brand-tint px-2 py-0.5 text-brand-deep dark:bg-brand-tint-dark dark:text-brand-light">
                   Curated
                 </span>
               ) : (
-                <span className="inline-flex items-center rounded-full border border-border-base bg-surface px-2 py-0.5 font-mono text-[9px] tracking-[0.18em] text-muted-3 uppercase">
+                <span className="toy-tag inline-flex items-center rounded-xl border border-[#D4DCF4] bg-surface px-2 py-0.5 text-muted-3 dark:border-white/12">
                   Personal
                 </span>
               )}
-              <span className="font-mono text-[10px] tracking-[0.18em] text-muted-3 uppercase">
-                {c.petCount} pets
-              </span>
+              <span className="toy-tag text-muted-3">{c.petCount} pets</span>
             </div>
             <h3 className="mt-2 text-lg font-semibold tracking-tight text-foreground">
               <Link
@@ -571,10 +574,8 @@ function CollectionsPanel({
   // Legacy fallback: only one collection in the prop pipeline. Render
   // the old hero card.
   return (
-    <section className="rounded-3xl border border-border-base bg-surface/80 p-6 backdrop-blur md:p-8">
-      <p className="font-mono text-[10px] tracking-[0.22em] text-brand uppercase">
-        Featured collection
-      </p>
+    <section className="toy-shell rounded-3xl border border-[#D4DCF4] p-6 md:p-8 dark:border-white/12">
+      <p className="toy-tag text-brand">Featured collection</p>
       <h3 className="mt-3 text-2xl font-semibold tracking-tight text-foreground md:text-3xl">
         {collection?.title}
       </h3>
@@ -585,7 +586,7 @@ function CollectionsPanel({
         <Link
           href={`/collections/${collection?.slug}`}
           prefetch={false}
-          className="inline-flex h-10 items-center rounded-full bg-inverse px-4 text-sm font-medium text-on-inverse transition hover:bg-inverse-hover"
+          className={buttonVariants({ variant: "cobalt", size: "petdex-pill" })}
         >
           View collection
         </Link>
@@ -612,23 +613,20 @@ function TabButton({
   count: number;
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant={active ? "cobalt" : "pearl"}
+      size="lg"
       onClick={onClick}
       aria-pressed={active}
-      className={`inline-flex h-9 items-center gap-1.5 rounded-full border px-3.5 text-xs font-medium transition ${
-        active
-          ? "border-inverse bg-inverse text-on-inverse"
-          : "border-border-base bg-surface text-foreground hover:border-border-strong"
-      }`}
     >
       {icon}
       {label}
       <span
-        className={`text-[10px] ${active ? "text-on-inverse/60" : "opacity-60"}`}
+        className={`text-[10px] ${active ? "text-white/80" : "opacity-60"}`}
       >
         {count}
       </span>
-    </button>
+    </Button>
   );
 }

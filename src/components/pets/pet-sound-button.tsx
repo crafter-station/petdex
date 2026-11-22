@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 
 import { Loader2, Volume2 } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
+
 let activeAudio: HTMLAudioElement | null = null;
 let activeToken: string | null = null;
 
@@ -31,7 +33,7 @@ export function PetSoundButton({
     };
   }, [token]);
 
-  async function handleClick(event: React.MouseEvent<HTMLButtonElement>) {
+  async function handleClick(event: React.MouseEvent<HTMLElement>) {
     event.preventDefault();
     event.stopPropagation();
 
@@ -87,22 +89,21 @@ export function PetSoundButton({
   }
 
   return (
-    <button
+    <Button
       type="button"
+      variant={playing ? "cobalt" : "pearl"}
+      size="icon-lg"
       onClick={handleClick}
       aria-label={`${labelPrefix} ${displayName}`}
+      aria-pressed={playing}
       title={`${labelPrefix} ${displayName}`}
-      className={`inline-flex size-9 items-center justify-center rounded-full border backdrop-blur transition ${
-        playing
-          ? "border-brand/30 bg-brand/15 text-brand"
-          : "border-border-base bg-surface/70 text-muted-2 hover:bg-surface-muted hover:text-foreground"
-      }`}
+      className="rounded-xl"
     >
       {busy ? (
         <Loader2 className="size-4 animate-spin" />
       ) : (
         <Volume2 className="size-4" />
       )}
-    </button>
+    </Button>
   );
 }

@@ -133,21 +133,18 @@ export function LikeButton({ slug }: LikeButtonProps) {
 
   return (
     <Button
-      variant="outline"
+      variant={liked ? "volt" : "pearl"}
+      size="lg"
       onClick={handleClick}
       aria-pressed={liked}
       aria-busy={disabled || undefined}
       disabled={disabled}
-      className={`h-9 gap-1.5 rounded-full border px-3.5 text-[13px] font-medium backdrop-blur transition disabled:opacity-60 ${
-        liked
-          ? "border-rose-400/30 bg-rose-500/10 text-rose-500 hover:bg-rose-500/15"
-          : "border-border-base bg-surface/70 text-muted-2 hover:border-rose-400/40 hover:text-rose-500"
-      }`}
+      className="gap-1.5 rounded-xl px-3.5 text-[13px] font-medium disabled:opacity-60"
     >
       <Heart
-        className={`size-4 transition ${liked ? "fill-rose-500 text-rose-500" : ""}`}
+        className={`size-4 transition ${liked ? "fill-[#E54269] text-[#E54269]" : ""}`}
       />
-      <span className="font-mono text-xs tracking-[0.08em]">
+      <span className="font-hardware text-[11px] tracking-[0.08em]">
         {count === null ? "—" : formatLocalizedNumber(count, locale)}
       </span>
     </Button>

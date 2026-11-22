@@ -10,6 +10,7 @@ import { petStates } from "@/lib/pet-states";
 
 import type { CollectionCoverPet } from "@/components/collections/collection-cover";
 import { StaticPetSprite } from "@/components/pets/static-pet-sprite";
+import { buttonVariants } from "@/components/ui/button";
 
 type StaticCollectionCardProps = {
   collection: {
@@ -41,7 +42,7 @@ export function StaticCollectionCard({
   return (
     <article
       data-slot="card"
-      className="group relative flex h-full flex-col overflow-hidden rounded-2xl border border-border-base bg-surface/60 backdrop-blur transition hover:border-brand/35 hover:bg-surface"
+      className="toy-shell group relative flex h-full flex-col overflow-hidden rounded-3xl border border-[#D4DCF4] transition-transform duration-200 hover:-translate-y-0.5 dark:border-white/12"
     >
       <Link
         href={`/collections/${collection.slug}`}
@@ -55,16 +56,14 @@ export function StaticCollectionCard({
           scale={0.55}
         />
       </Link>
-      <div className="flex flex-1 flex-col gap-2 border-t border-border-base px-5 pt-4 pb-5">
+      <div className="flex flex-1 flex-col gap-2 border-t border-[#D4DCF4] px-5 pt-4 pb-5 dark:border-white/12">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center rounded-full bg-brand/15 px-2 py-0.5 font-mono text-[9px] tracking-[0.18em] text-brand uppercase ring-1 ring-brand/25">
+              <span className="toy-tag inline-flex items-center rounded-xl bg-brand/15 px-2 py-0.5 text-brand ring-1 ring-brand/25">
                 {labels.kind[kind]}
               </span>
-              <span className="font-mono text-[10px] tracking-[0.18em] text-muted-3 uppercase">
-                {labels.petCount}
-              </span>
+              <span className="toy-tag text-muted-3">{labels.petCount}</span>
             </div>
             <h3 className="mt-2 text-lg font-semibold tracking-tight text-foreground">
               <Link href={`/collections/${collection.slug}`} prefetch={false}>
@@ -77,7 +76,7 @@ export function StaticCollectionCard({
               href={collection.externalUrl}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex h-8 items-center justify-center rounded-full border border-border-base bg-surface/70 px-3 text-muted-2 text-xs backdrop-blur transition hover:bg-surface-muted hover:text-foreground"
+              className={buttonVariants({ variant: "pearl", size: "sm" })}
             >
               {labels.siteLink}
             </Link>
@@ -87,7 +86,7 @@ export function StaticCollectionCard({
           {collection.description}
         </p>
         {owner && labels.byOwner ? (
-          <div className="mt-auto border-t border-border-base pt-2">
+          <div className="mt-auto border-t border-[#D4DCF4] pt-2 dark:border-white/12">
             <Link
               href={`/u/${owner.handle}`}
               prefetch={false}

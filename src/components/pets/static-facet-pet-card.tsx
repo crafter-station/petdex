@@ -42,7 +42,7 @@ export function StaticFacetPetCard({
     <article
       data-slot="card"
       style={accentStyle}
-      className="group relative flex h-full flex-col overflow-hidden rounded-3xl border border-black/10 bg-surface/76 shadow-sm shadow-blue-950/5 backdrop-blur transition hover:-translate-y-0.5 hover:bg-white hover:shadow-xl hover:shadow-blue-950/10 dark:border-white/10 dark:hover:bg-stone-800"
+      className="toy-shell group relative flex h-full flex-col overflow-hidden rounded-2xl! border border-[#D4DCF4] transition duration-200 [transition-timing-function:var(--ease-bounce)] hover:-translate-y-1 hover:border-[#3B59F2]/45 dark:border-white/12 dark:hover:border-[#8CA3FF]/45"
     >
       <div
         aria-hidden
@@ -59,16 +59,16 @@ export function StaticFacetPetCard({
         href={href}
         prefetch={false}
         aria-label={`Open ${pet.displayName}`}
-        className="flex flex-1 flex-col rounded-3xl"
+        className="flex flex-1 flex-col rounded-2xl"
       >
-        <div className="flex items-center justify-between rounded-t-3xl border-b border-black/[0.06] px-5 pt-4 pr-5 pb-3 dark:border-white/[0.06]">
-          <span className="font-mono text-[11px] tracking-[0.22em] text-muted-3 uppercase">
+        <div className="flex items-center justify-between border-b border-[#D4DCF4]/70 px-4 pt-3.5 pb-2.5 dark:border-white/10">
+          <span className="rounded-lg border border-[#D4DCF4] bg-white/85 px-2 py-0.5 font-hardware text-[10px] tracking-[0.14em] text-[#101944]/80 uppercase shadow-xs dark:border-white/12 dark:bg-[#101944]/80 dark:text-[#CBD4EE]">
             No. {dexLabel}
           </span>
           {pet.featured ? (
             <span
               title="Featured"
-              className="rounded-md bg-amber-500 px-1.5 py-0.5 font-bold text-[#0a0e1f] text-[10px] leading-none dark:bg-amber-400"
+              className="toy-tag rounded-md bg-toy-volt px-1.5 py-0.5 font-bold text-[#101944] text-[10px] leading-none shadow-[0_2px_0_#C9A91F]"
             >
               ★ FEATURED
             </span>
@@ -93,27 +93,27 @@ export function StaticFacetPetCard({
             label={`${pet.displayName} sprite`}
           />
           {installCount > 0 ? (
-            <span className="pointer-events-none absolute right-5 bottom-2 font-mono text-[10px] tracking-[0.22em] text-muted-4 uppercase">
+            <span className="pointer-events-none absolute right-4 bottom-2 font-hardware text-[9px] tracking-[0.16em] text-muted-3 uppercase">
               {formattedInstallCount} install
               {installCount === 1 ? "" : "s"}
             </span>
           ) : null}
         </div>
 
-        <div className="flex flex-1 flex-col gap-2 border-t border-black/[0.06] px-5 pt-4 pb-4 dark:border-white/[0.06]">
+        <div className="flex flex-1 flex-col gap-2 border-t border-[#D4DCF4]/70 px-4 pt-3.5 pb-4 dark:border-white/10">
           <div className="flex items-center justify-between gap-2">
-            <h3 className="flex min-w-0 items-center gap-1.5 text-lg font-semibold tracking-tight text-foreground">
+            <h3 className="flex min-w-0 items-center gap-1.5 font-heading text-lg font-bold tracking-tight text-foreground">
               <span className="truncate">{pet.displayName}</span>
               {pet.featured ? (
                 <span
                   title="Featured"
-                  className="font-mono text-[10px] text-brand"
+                  className="font-hardware text-[10px] text-toy-cobalt dark:text-[#8CA3FF]"
                 >
                   ★
                 </span>
               ) : null}
             </h3>
-            <span className="font-mono text-[10px] tracking-[0.18em] text-muted-4 uppercase">
+            <span className="font-hardware text-[10px] tracking-[0.14em] text-muted-3 uppercase">
               {pet.kind}
             </span>
           </div>

@@ -138,10 +138,8 @@ export function ProfilePinningSurface({
         ) : (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <p className="font-mono text-[11px] tracking-[0.22em] text-brand uppercase">
-                ★ Pinned
-              </p>
-              <p className="font-mono text-[10px] tracking-[0.18em] text-muted-4 uppercase">
+              <p className="toy-tag text-brand">★ Pinned</p>
+              <p className="toy-tag text-muted-4">
                 {featuredPets.length} of {MAX_PINNED_PETS}
               </p>
             </div>
@@ -211,7 +209,7 @@ function FeaturedPin({
       href={`/pets/${pet.slug}`}
       prefetch={false}
       aria-label={`Open ${pet.displayName}`}
-      className="featured-pin-card group relative flex flex-col overflow-hidden rounded-3xl border border-brand-light/45 bg-surface/80 backdrop-blur transition hover:bg-white md:flex-row md:items-stretch dark:hover:bg-stone-800"
+      className="toy-shell featured-pin-card group relative flex flex-col overflow-hidden rounded-3xl border border-[#3B59F2]/40 transition-transform duration-200 hover:-translate-y-0.5 md:flex-row md:items-stretch"
     >
       <div className="pet-sprite-stage featured-pin-stage flex shrink-0 items-center justify-center px-8 py-10 md:w-[420px] md:py-14">
         <PetSprite
@@ -221,10 +219,8 @@ function FeaturedPin({
           label={`${pet.displayName} animated`}
         />
       </div>
-      <div className="flex flex-1 flex-col justify-center gap-3 border-t border-black/[0.06] p-6 md:border-t-0 md:border-l dark:border-white/[0.06]">
-        <span className="font-mono text-[11px] tracking-[0.22em] text-brand uppercase">
-          ★ Pinned
-        </span>
+      <div className="flex flex-1 flex-col justify-center gap-3 border-t border-[#D4DCF4] p-6 md:border-t-0 md:border-l dark:border-white/12">
+        <span className="toy-tag text-brand">★ Pinned</span>
         <h2 className="text-3xl font-semibold tracking-tight text-foreground md:text-4xl">
           {pet.displayName}
         </h2>

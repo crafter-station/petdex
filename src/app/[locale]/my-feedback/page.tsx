@@ -183,10 +183,10 @@ export default async function MyFeedbackPage({
         <SiteHeader />
         <section className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-5 pt-8 pb-20 md:px-8">
           <header className="space-y-3">
-            <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
+            <p className="toy-tag inline-block rounded-full bg-toy-volt px-2.5 py-1 text-[#101944] shadow-[0_2px_0_#C9A91F]">
               {t("eyebrow")}
             </p>
-            <h1 className="text-4xl font-medium tracking-tight md:text-5xl">
+            <h1 className="font-heading text-4xl font-semibold tracking-tight md:text-5xl">
               {t("title")}
             </h1>
             <p className="text-sm text-muted-2">{t("subtitle")}</p>
@@ -199,15 +199,15 @@ export default async function MyFeedbackPage({
           </header>
 
           {decorated.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-border-base bg-surface/60 p-10 text-center text-sm text-stone-600 dark:text-stone-400">
+            <div className="toy-shell rounded-3xl p-10 text-center text-sm text-muted-2">
               {t("empty")}
             </div>
           ) : visible.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-border-base bg-surface/60 p-10 text-center text-sm text-muted-2">
+            <div className="toy-shell rounded-3xl p-10 text-center text-sm text-muted-2">
               {t("emptyFiltered")}
             </div>
           ) : (
-            <ul className="space-y-2">
+            <ul className="space-y-3">
               {visible.map(({ row: r, agg, unread, replied, waiting }) => {
                 const meta = KIND_META[r.kind] ?? KIND_META.other;
                 const lastAdminAt = agg?.latestAdminAt ?? null;
@@ -218,35 +218,33 @@ export default async function MyFeedbackPage({
                   <li key={r.id}>
                     <Link
                       href={`/my-feedback/${r.id}`}
-                      className={`block rounded-2xl border p-4 transition hover:bg-white ${
-                        unread
-                          ? "border-brand/40 bg-white shadow-[0_0_0_1px_rgba(82,102,234,0.18),0_18px_45px_-26px_rgba(82,102,234,0.4)]"
-                          : "border-black/10 bg-surface/80 hover:border-black/30 dark:border-white/10 dark:hover:border-white/30"
+                      className={`toy-shell block rounded-2xl p-4 transition-transform duration-200 [transition-timing-function:var(--ease-bounce)] hover:-translate-y-0.5 sm:p-5 ${
+                        unread ? "ring-2 ring-toy-cobalt/35" : ""
                       }`}
                     >
                       <div className="flex items-start gap-3">
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2">
                             <span
-                              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-mono text-[10px] tracking-[0.12em] uppercase ring-1 ${meta.tone}`}
+                              className={`toy-tag inline-flex items-center gap-1 rounded-full px-2 py-0.5 ring-1 ${meta.tone}`}
                             >
                               {meta.icon}
                               {meta.label}
                             </span>
                             {unread ? (
-                              <span className="inline-flex items-center gap-1 rounded-full bg-brand px-2 py-0.5 font-mono text-[10px] tracking-[0.12em] text-white uppercase">
+                              <span className="toy-tag inline-flex items-center gap-1 rounded-full bg-toy-cobalt px-2 py-0.5 text-white">
                                 {t("badges.newReply")}
                               </span>
                             ) : replied ? (
-                              <span className="inline-flex items-center gap-1 rounded-full bg-chip-success-bg px-2 py-0.5 font-mono text-[10px] tracking-[0.12em] text-chip-success-fg uppercase ring-1 ring-chip-success-fg/20">
+                              <span className="toy-tag inline-flex items-center gap-1 rounded-full bg-chip-success-bg px-2 py-0.5 text-chip-success-fg ring-1 ring-chip-success-fg/20">
                                 {t("badges.replied")}
                               </span>
                             ) : waiting ? (
-                              <span className="inline-flex items-center gap-1 rounded-full bg-chip-warning-bg px-2 py-0.5 font-mono text-[10px] tracking-[0.12em] text-chip-warning-fg uppercase ring-1 ring-chip-warning-fg/20">
+                              <span className="toy-tag inline-flex items-center gap-1 rounded-full bg-chip-warning-bg px-2 py-0.5 text-chip-warning-fg ring-1 ring-chip-warning-fg/20">
                                 {t("badges.waiting")}
                               </span>
                             ) : null}
-                            <span className="ml-auto font-mono text-[10px] tracking-[0.12em] text-muted-4 uppercase">
+                            <span className="toy-tag ml-auto text-muted-4">
                               {new Date(r.createdAt).toLocaleDateString()}
                             </span>
                           </div>
@@ -257,11 +255,11 @@ export default async function MyFeedbackPage({
 
                           {lastAdminBody ? (
                             <div className="mt-3 flex items-start gap-2 rounded-xl border border-emerald-200/60 bg-emerald-50/40 p-2.5 dark:border-emerald-800/40 dark:bg-emerald-950/30">
-                              <div className="grid size-6 shrink-0 place-items-center rounded-full bg-emerald-600 font-mono text-[10px] font-semibold text-white">
+                              <div className="grid size-6 shrink-0 place-items-center rounded-full bg-emerald-600 font-hardware text-[10px] font-semibold text-white">
                                 H
                               </div>
                               <div className="min-w-0 flex-1">
-                                <div className="flex items-center gap-1.5 font-mono text-[10px] tracking-[0.12em] text-emerald-900/70 uppercase">
+                                <div className="toy-tag flex items-center gap-1.5 text-emerald-900/70 dark:text-emerald-300/80">
                                   {t("replyAuthor")}
                                   {lastAdminAt ? (
                                     <span>

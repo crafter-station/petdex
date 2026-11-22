@@ -15,14 +15,12 @@ export function IdeasQueue({ ideas }: IdeasQueueProps) {
     <section className="space-y-4">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <p className="text-sm font-semibold tracking-[0.18em] text-brand uppercase">
-            Hatch queue
-          </p>
+          <p className="toy-tag text-brand">Hatch queue</p>
           <h2 className="mt-2 text-2xl font-semibold text-foreground">
             Planned pets
           </h2>
         </div>
-        <div className="rounded-md border border-border-base bg-surface px-3 py-2 text-sm font-medium text-muted-2">
+        <div className="rounded-xl border border-[#D4DCF4] bg-surface px-3 py-1.5 text-xs font-medium text-muted-2 dark:border-white/12">
           {ideas.length} ideas
         </div>
       </div>
@@ -31,13 +29,13 @@ export function IdeasQueue({ ideas }: IdeasQueueProps) {
         {ideas.map((idea) => (
           <article
             key={idea.id}
-            className="rounded-lg border border-border-base bg-surface p-4"
+            className="toy-shell rounded-2xl border border-[#D4DCF4] p-4 dark:border-white/12"
           >
             <div className="flex items-start justify-between gap-3">
-              <div className="rounded-md bg-amber-50 p-2 text-amber-800 dark:bg-amber-950/40">
+              <div className="rounded-xl bg-amber-50 p-2 text-amber-800 dark:bg-amber-950/40">
                 <Lightbulb className="size-4" />
               </div>
-              <span className="rounded-md bg-surface-muted px-2 py-1 text-xs font-semibold text-muted-2">
+              <span className="toy-tag rounded-xl bg-surface-muted px-2 py-1 text-muted-2">
                 {idea.featured ? "featured" : idea.status}
               </span>
             </div>
@@ -49,7 +47,7 @@ export function IdeasQueue({ ideas }: IdeasQueueProps) {
               {idea.tags.slice(0, 3).map((tag) => (
                 <span
                   key={tag}
-                  className="rounded-md bg-cyan-50 px-2 py-1 text-xs font-medium text-cyan-800"
+                  className="rounded-xl bg-cyan-50 px-2 py-1 text-xs font-medium text-cyan-800 dark:bg-cyan-950/40 dark:text-cyan-300"
                 >
                   {tag}
                 </span>

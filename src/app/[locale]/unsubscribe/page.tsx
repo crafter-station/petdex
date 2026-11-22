@@ -51,10 +51,10 @@ export default async function UnsubscribePage({
       <SiteHeader />
       <section className="mx-auto flex w-full max-w-2xl flex-col gap-8 px-5 pt-8 pb-12 md:px-8 md:pb-16">
         <header>
-          <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
+          <p className="toy-tag inline-block rounded-full bg-toy-volt px-2.5 py-1 text-[#101944] shadow-[0_2px_0_#C9A91F]">
             {t("eyebrow")}
           </p>
-          <h1 className="mt-3 text-3xl font-semibold tracking-tight md:text-4xl">
+          <h1 className="mt-4 font-heading text-3xl font-semibold tracking-tight md:text-4xl">
             {t("title")}
           </h1>
         </header>
@@ -66,8 +66,10 @@ export default async function UnsubscribePage({
             initiallyUnsubscribed={pref.unsubscribedMarketing}
           />
         ) : (
-          <div className="space-y-3 rounded-2xl border border-border-base bg-surface/76 p-6 backdrop-blur">
-            <p className="text-base font-semibold">{t("invalidTitle")}</p>
+          <div className="toy-shell space-y-3 rounded-3xl p-6 md:p-8">
+            <p className="font-heading text-base font-semibold">
+              {t("invalidTitle")}
+            </p>
             <p className="text-sm leading-6 text-muted-2">{t("invalidBody")}</p>
           </div>
         )}

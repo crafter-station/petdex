@@ -94,28 +94,30 @@ export default async function StickerCollectionPage({
     <main className="min-h-dvh bg-background text-foreground">
       <SiteHeader />
       <section className="mx-auto w-full max-w-[1440px] px-5 py-10 md:px-8 md:py-16">
-        <p className="font-mono text-xs tracking-[0.22em] text-brand uppercase">
+        <p className="toy-tag inline-block rounded-full bg-toy-volt px-2.5 py-1 text-[#101944] shadow-[0_2px_0_#C9A91F]">
           {t("eyebrow")}
         </p>
-        <div className="mt-3 mb-8 flex flex-col justify-between gap-4 md:flex-row md:items-end">
+        <div className="mt-4 mb-8 flex flex-col justify-between gap-4 md:flex-row md:items-end">
           <div>
-            <h1 className="text-balance text-4xl font-semibold tracking-tight md:text-6xl">
+            <h1 className="font-heading text-balance text-4xl font-extrabold tracking-tight md:text-6xl">
               {t("title", { collection: collection.title })}
             </h1>
             <p className="mt-3 max-w-2xl text-base leading-7 text-muted-1 md:text-lg">
               {t("description")}
             </p>
           </div>
-          <p className="font-mono text-xs text-muted-2">
+          <p className="toy-tag shrink-0 rounded-full border border-[#D4DCF4] bg-surface/80 px-3 py-1.5 text-toy-cobalt dark:border-white/12 dark:text-[#9BB2FF]">
             {t("count", { count: collection.pets.length })}
           </p>
         </div>
-        <StickerExplorer
-          collection={collection}
-          initialQuery={initialQuery}
-          labels={labels}
-          demo={demo}
-        />
+        <div className="toy-shell rounded-3xl border border-[#D4DCF4] p-4 sm:p-6 dark:border-white/12">
+          <StickerExplorer
+            collection={collection}
+            initialQuery={initialQuery}
+            labels={labels}
+            demo={demo}
+          />
+        </div>
       </section>
       <SiteFooter />
     </main>

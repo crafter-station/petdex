@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 
-import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+
+import { buttonVariants } from "@/components/ui/button";
 
 type SubmitCTAProps = {
   className?: string;
@@ -20,14 +22,15 @@ export function SubmitCTA({
   variant = "petdex-cta",
 }: SubmitCTAProps) {
   return (
-    <Button
-      variant={variant}
-      size="petdex-pill"
-      className={className}
-      nativeButton={false}
-      render={<Link href={href} prefetch={false} />}
+    <Link
+      href={href}
+      prefetch={false}
+      className={cn(
+        buttonVariants({ variant, size: "petdex-pill" }),
+        className,
+      )}
     >
       {children}
-    </Button>
+    </Link>
   );
 }
