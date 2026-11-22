@@ -307,7 +307,7 @@ fn render_oauth_callback_html(error: &str) -> String {
     };
 
     format!(
-        r#"<!DOCTYPE html>
+        r##"<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -399,7 +399,7 @@ fn render_oauth_callback_html(error: &str) -> String {
     <div class="foot">Petdex · Crafter Station</div>
   </main>
 </body>
-</html>"#
+</html>"##
     )
 }
 
