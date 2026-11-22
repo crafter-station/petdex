@@ -10,11 +10,39 @@ struct InstalledPet: Equatable {
 }
 
 final class PetSpriteAtlas {
-    static let columns = 8
-    static let rows = 9
+    static let defaultColumns = 8
+    static let defaultRows = 9
+    static let canonicalFrameWidth = 192.0
+    static let canonicalFrameHeight = 208.0
+
+    private struct AtlasMetadata: Decodable {
+        struct FrameSize: Decodable {
+            let width: Int?
+            let height: Int?
+        }
+
+        struct Grid: Decodable {
+            let cols: Int?
+            let rows: Int?
+        }
+
+        let frameWidth: Int?
+        let frameHeight: Int?
+        let frameSize: FrameSize?
+        let grid: Grid?
+    }
+
+    struct ResolvedLayout: Equatable {
+        let columns: Int
+        let rows: Int
+        let frameWidth: Int
+        let frameHeight: Int
+    }
 
     let pet: InstalledPet
     let sheetImage: CGImage
+    let columns: Int
+    let rows: Int
     let frameWidth: Int
     let frameHeight: Int
     private var frameCache: [Int: CGImage] = [:]
@@ -27,22 +55,113 @@ final class PetSpriteAtlas {
             return nil
         }
 
-        let width = image.width / Self.columns
-        let height = image.height / Self.rows
-        guard width > 0, height > 0 else {
+        let metadataURL = pet.spritesheetURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("pet.json", isDirectory: false)
+        guard let layout = Self.resolveLayout(
+            imageWidth: image.width,
+            imageHeight: image.height,
+            metadataURL: metadataURL
+        ) else {
             return nil
         }
 
         self.pet = pet
         self.sheetImage = image
-        self.frameWidth = width
-        self.frameHeight = height
+        self.columns = layout.columns
+        self.rows = layout.rows
+        self.frameWidth = layout.frameWidth
+        self.frameHeight = layout.frameHeight
+    }
+
+    static func resolveLayout(
+        imageWidth: Int,
+        imageHeight: Int,
+        metadataURL: URL?
+    ) -> ResolvedLayout? {
+        guard imageWidth > 0, imageHeight > 0 else {
+            return nil
+        }
+
+        if let metadataURL,
+           let data = try? Data(contentsOf: metadataURL),
+           let metadata = try? JSONDecoder().decode(AtlasMetadata.self, from: data)
+        {
+            if let fw = metadata.frameWidth,
+               let fh = metadata.frameHeight,
+               fw > 0, fh > 0, fw <= imageWidth, fh <= imageHeight
+            {
+                let cols = imageWidth / fw
+                let rows = imageHeight / fh
+                if cols > 0, rows > 0 {
+                    return ResolvedLayout(columns: cols, rows: rows, frameWidth: fw, frameHeight: fh)
+                }
+            }
+
+            if let fw = metadata.frameSize?.width,
+               let fh = metadata.frameSize?.height,
+               fw > 0, fh > 0, fw <= imageWidth, fh <= imageHeight
+            {
+                let cols = imageWidth / fw
+                let rows = imageHeight / fh
+                if cols > 0, rows > 0 {
+                    return ResolvedLayout(columns: cols, rows: rows, frameWidth: fw, frameHeight: fh)
+                }
+            }
+
+            if let cols = metadata.grid?.cols,
+               let rows = metadata.grid?.rows,
+               cols > 0, rows > 0, cols <= imageWidth, rows <= imageHeight
+            {
+                let fw = imageWidth / cols
+                let fh = imageHeight / rows
+                if fw > 0, fh > 0 {
+                    return ResolvedLayout(columns: cols, rows: rows, frameWidth: fw, frameHeight: fh)
+                }
+            }
+        }
+
+        let cols = Self.defaultColumns
+        let frameWidth = imageWidth / cols
+        guard frameWidth > 0 else {
+            return nil
+        }
+
+        let expectedFrameHeight = Int((Double(frameWidth) * Self.canonicalFrameHeight / Self.canonicalFrameWidth).rounded())
+        if expectedFrameHeight > 0 {
+            let computedRows = imageHeight / expectedFrameHeight
+            let exactMultiple = computedRows > 0 && (imageHeight % expectedFrameHeight == 0)
+            let roundedRows = Int((Double(imageHeight) / Double(expectedFrameHeight)).rounded())
+            let nearMultiple = computedRows >= Self.defaultRows
+                && abs(imageHeight - expectedFrameHeight * roundedRows) <= 4
+            if exactMultiple || nearMultiple {
+                return ResolvedLayout(
+                    columns: cols,
+                    rows: computedRows,
+                    frameWidth: frameWidth,
+                    frameHeight: expectedFrameHeight
+                )
+            }
+        }
+
+        let fallbackRows = Self.defaultRows
+        let fallbackFrameHeight = imageHeight / fallbackRows
+        guard fallbackFrameHeight > 0 else {
+            return nil
+        }
+
+        return ResolvedLayout(
+            columns: cols,
+            rows: fallbackRows,
+            frameWidth: frameWidth,
+            frameHeight: fallbackFrameHeight
+        )
     }
 
     func frameImage(row: UInt32, col: UInt32) -> CGImage? {
-        let clampedRow = min(Int(row), Self.rows - 1)
-        let clampedCol = min(Int(col), Self.columns - 1)
-        let cacheKey = clampedRow * Self.columns + clampedCol
+        let clampedRow = min(Int(row), rows - 1)
+        let clampedCol = min(Int(col), columns - 1)
+        let cacheKey = clampedRow * columns + clampedCol
 
         if let cached = frameCache[cacheKey] {
             return cached

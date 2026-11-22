@@ -2,11 +2,12 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use petdex_core::{
-    AttentionCoordinator, CodingAgent, FrameOutput, HookServer, HookServerConfig,
-    PetAnimationEngine, PetState, DEFAULT_HOOK_PORT,
+    AgentEvent, AttentionCoordinator, CodingAgent, FrameOutput, HookServer, HookServerConfig,
+    OAuthCallback, PetAnimationEngine, PetState, SessionStatus, DEFAULT_HOOK_PORT,
 };
 
 use crate::bubble_window::{BubbleContent, BubbleWindow};
+use crate::settings_window::SettingsWindow;
 use crate::sprite_loader::{
     discover_pets, DecodedFrame, InstalledWindowsPet, SpriteAtlas,
 };
@@ -26,6 +27,8 @@ pub const DEFAULT_SCREEN_MARGIN: i32 = 24;
 pub const DEFAULT_TICK_INTERVAL_MS: u32 = 16;
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub const CMD_OPEN_SETTINGS: usize = 1000;
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub const CMD_CYCLE_STATE: usize = 1001;
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub const CMD_TOGGLE_TOPMOST: usize = 1002;
@@ -37,6 +40,11 @@ pub const CMD_QUIT: usize = 1004;
 pub const CMD_PET_BASE: usize = 2000;
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub const CMD_AGENT_BASE: usize = 3000;
+
+#[cfg(target_os = "windows")]
+pub const WM_PETDEX_SYNC_VISUALS: u32 = 0x8002;
+#[cfg(target_os = "windows")]
+pub const WM_PETDEX_SYNC_TOPMOST: u32 = 0x8003;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AtlasRect {
@@ -278,6 +286,8 @@ pub struct Win32PetHost {
     atlas: Option<SpriteAtlas>,
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     bubble_window: BubbleWindow,
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    settings_window: SettingsWindow,
 }
 
 impl Win32PetHost {
@@ -317,6 +327,7 @@ impl Win32PetHost {
             active_pet_index,
             atlas,
             bubble_window: BubbleWindow::new(),
+            settings_window: SettingsWindow::new(topmost, active_pet_index),
         })
     }
 
@@ -337,6 +348,48 @@ impl Win32PetHost {
     pub fn toggle_topmost(&mut self) -> bool {
         self.topmost = !self.topmost;
         self.topmost
+    }
+
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn set_topmost(&mut self, topmost: bool) -> bool {
+        self.topmost = topmost;
+        self.topmost
+    }
+
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn take_oauth_callback(&self) -> Option<OAuthCallback> {
+        self.server.take_oauth_callback()
+    }
+
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn refresh_pets(&mut self) {
+        let current_id = self
+            .active_pet_index
+            .and_then(|idx| self.installed_pets.get(idx))
+            .map(|pet| pet.id.clone());
+        self.installed_pets = discover_pets();
+        self.active_pet_index = current_id.and_then(|id| {
+            self.installed_pets
+                .iter()
+                .position(|pet| pet.id.eq_ignore_ascii_case(&id))
+        });
+    }
+
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn send_test_bubble(&mut self) {
+        let now = now_ms();
+        let event = AgentEvent {
+            session_id: "petdex-settings-test".to_string(),
+            agent: CodingAgent::ClaudeCode,
+            status: SessionStatus::Completed,
+            summary: "Test bubble from Petdex Settings!".to_string(),
+        };
+        {
+            let mut guard = self.coordinator.lock().unwrap_or_else(|e| e.into_inner());
+            guard.ingest(event, now);
+        }
+        self.manual_override = None;
+        self.step(self.config.tick_interval_ms);
     }
 
     pub fn last_frame(&self) -> FrameOutput {
@@ -422,6 +475,11 @@ impl Win32PetHost {
         &mut self.bubble_window
     }
 
+    #[cfg(target_os = "windows")]
+    pub(crate) fn settings_window_mut(&mut self) -> &mut SettingsWindow {
+        &mut self.settings_window
+    }
+
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     pub fn cycle_state(&mut self) -> FrameOutput {
         let next = self.engine.state().next();
@@ -473,7 +531,8 @@ mod platform {
 
     use super::{
         compute_bottom_right_placement, Win32PetHost, WindowPlacement, WorkArea, CMD_AGENT_BASE,
-        CMD_CYCLE_STATE, CMD_PET_BASE, CMD_QUIT, CMD_RESET_POSITION, CMD_TOGGLE_TOPMOST,
+        CMD_CYCLE_STATE, CMD_OPEN_SETTINGS, CMD_PET_BASE, CMD_QUIT, CMD_RESET_POSITION,
+        CMD_TOGGLE_TOPMOST, WM_PETDEX_SYNC_TOPMOST, WM_PETDEX_SYNC_VISUALS,
     };
 
     type Handle = *mut c_void;
@@ -502,6 +561,7 @@ mod platform {
     const WM_NCRBUTTONUP: u32 = 0x00A5;
     const WM_COMMAND: u32 = 0x0111;
     const WM_TIMER: u32 = 0x0113;
+    const WM_LBUTTONDBLCLK: u32 = 0x0203;
     const WM_RBUTTONUP: u32 = 0x0205;
     const WM_APP: u32 = 0x8000;
     const WM_TRAYICON: u32 = WM_APP + 1;
@@ -964,11 +1024,37 @@ mod platform {
         Shell_NotifyIconW(NIM_DELETE, &mut nid);
     }
 
+    unsafe fn open_settings_window(hwnd: Hwnd, host_ptr: *mut Win32PetHost) {
+        crate::settings_window::open_settings_dialog(hwnd, host_ptr);
+    }
+
+    unsafe fn apply_topmost(hwnd: Hwnd, host: &mut Win32PetHost) {
+        let insert_after = if host.is_topmost() {
+            HWND_TOPMOST
+        } else {
+            HWND_NOTOPMOST
+        };
+        SetWindowPos(
+            hwnd,
+            insert_after,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+        );
+        sync_bubble(hwnd, host);
+    }
+
     unsafe fn show_context_menu(hwnd: Hwnd, host: &Win32PetHost) {
         let menu = CreatePopupMenu();
         if menu.is_null() {
             return;
         }
+
+        let settings_label = wide_null("Settings...");
+        AppendMenuW(menu, MF_STRING, CMD_OPEN_SETTINGS, settings_label.as_ptr());
+        AppendMenuW(menu, MF_SEPARATOR, 0, null());
 
         let pets_menu = CreatePopupMenu();
         if !pets_menu.is_null() {
@@ -1086,8 +1172,12 @@ mod platform {
             }
             WM_TRAYICON => {
                 let mouse_msg = (lparam as u32) & 0xFFFF;
-                if mouse_msg == WM_RBUTTONUP && !host_ptr.is_null() {
-                    show_context_menu(hwnd, &*host_ptr);
+                if !host_ptr.is_null() {
+                    if mouse_msg == WM_RBUTTONUP {
+                        show_context_menu(hwnd, &*host_ptr);
+                    } else if mouse_msg == WM_LBUTTONDBLCLK {
+                        open_settings_window(hwnd, host_ptr);
+                    }
                 }
                 0
             }
@@ -1096,26 +1186,19 @@ mod platform {
                 if !host_ptr.is_null() {
                     let host = &mut *host_ptr;
                     match cmd_id {
+                        CMD_OPEN_SETTINGS => {
+                            open_settings_window(hwnd, host_ptr);
+                        }
                         CMD_CYCLE_STATE => {
                             host.cycle_state();
                             present_pet_frame(hwnd, host);
                         }
                         CMD_TOGGLE_TOPMOST => {
-                            let insert_after = if host.toggle_topmost() {
-                                HWND_TOPMOST
-                            } else {
-                                HWND_NOTOPMOST
-                            };
-                            SetWindowPos(
-                                hwnd,
-                                insert_after,
-                                0,
-                                0,
-                                0,
-                                0,
-                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-                            );
-                            sync_bubble(hwnd, host);
+                            let enabled = host.toggle_topmost();
+                            host.settings_window_mut()
+                                .state_mut()
+                                .set_always_on_top(enabled);
+                            apply_topmost(hwnd, host);
                         }
                         CMD_RESET_POSITION => {
                             let work_area = query_work_area();
@@ -1172,8 +1255,23 @@ mod platform {
                 }
                 0
             }
+            WM_PETDEX_SYNC_VISUALS => {
+                if !host_ptr.is_null() {
+                    let host = &mut *host_ptr;
+                    present_pet_frame(hwnd, host);
+                    sync_bubble(hwnd, host);
+                }
+                0
+            }
+            WM_PETDEX_SYNC_TOPMOST => {
+                if !host_ptr.is_null() {
+                    apply_topmost(hwnd, &mut *host_ptr);
+                }
+                0
+            }
             WM_DESTROY => {
                 if !host_ptr.is_null() {
+                    (*host_ptr).settings_window_mut().destroy();
                     (*host_ptr).bubble_window_mut().destroy();
                 }
                 KillTimer(hwnd, TIMER_ID);
@@ -1521,5 +1619,39 @@ mod tests {
         assert_eq!(stepped.state, PetState::RunningRight);
         let rect = host.current_frame_rect();
         assert_eq!(rect.y, rect.height);
+    }
+
+    #[test]
+    fn settings_oauth_callback_and_test_bubble_flow_end_to_end() {
+        let config = Win32HostConfig {
+            hook_port: 0,
+            ..Win32HostConfig::default()
+        };
+        let mut host = Win32PetHost::start(config, "settings-token").expect("start host");
+        let port = host.port();
+
+        let mut settings = crate::settings_window::SettingsState::new(host.is_topmost(), None);
+        let challenge = settings.begin_sign_in(port);
+        assert!(challenge
+            .authorize_url
+            .contains(&format!("redirect_uri=http%3A%2F%2F127.0.0.1%3A{port}%2Fcallback")));
+        assert_eq!(settings.account.status_label(), "Waiting for browser...");
+
+        let req = format!(
+            "GET /callback?code=clerk_code_42&state={} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+            challenge.state
+        );
+        let (status, body) = send_http(port, &req);
+        assert_eq!(status, 200);
+        assert!(body.contains("Signed in to Petdex!"));
+
+        let callback = host.take_oauth_callback().expect("oauth callback queued");
+        assert!(settings.handle_oauth_callback(callback));
+        assert_eq!(settings.account.status_label(), "Signed in!");
+
+        host.send_test_bubble();
+        let bubble = host.active_bubble_content().expect("test bubble active");
+        assert_eq!(bubble.summary, "Test bubble from Petdex Settings!");
+        assert_eq!(host.last_frame().state, PetState::Review);
     }
 }

@@ -1,6 +1,7 @@
 #![cfg_attr(all(target_os = "windows", not(test)), windows_subsystem = "windows")]
 
 mod bubble_window;
+mod settings_window;
 mod sprite_loader;
 mod win32_host;
 

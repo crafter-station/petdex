@@ -363,11 +363,11 @@ struct PetdexSettingsView: View {
                 Image(systemName: section.symbolName)
                     .font(.system(size: 12, weight: .semibold))
                     .frame(width: 16, alignment: .center)
-                    .foregroundColor(isSelected ? .white : .secondary)
+                    .foregroundColor(isSelected ? cobalt : .secondary)
 
                 Text(section.rawValue)
                     .font(.system(size: 12.5, weight: isSelected ? .semibold : .medium))
-                    .foregroundColor(isSelected ? .white : .primary)
+                    .foregroundColor(.primary)
                     .lineLimit(1)
 
                 Spacer(minLength: 4)
@@ -375,12 +375,12 @@ struct PetdexSettingsView: View {
                 if let badgeCount {
                     Text("\(badgeCount)")
                         .font(.system(size: 10, weight: .semibold, design: .rounded))
-                        .foregroundColor(isSelected ? .white : .secondary)
+                        .foregroundColor(isSelected ? cobalt : .secondary)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 1.5)
                         .background(
                             Capsule()
-                                .fill(isSelected ? Color.white.opacity(0.24) : Color.secondary.opacity(0.14))
+                                .fill(isSelected ? cobalt.opacity(0.16) : Color.secondary.opacity(0.14))
                         )
                 }
             }
@@ -389,19 +389,7 @@ struct PetdexSettingsView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(
-                        isSelected
-                            ? LinearGradient(
-                                colors: [cobalt, cobaltDeep],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                            : LinearGradient(
-                                colors: [Color.clear, Color.clear],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                    )
+                    .fill(isSelected ? Color.primary.opacity(0.09) : Color.clear)
             )
             .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }

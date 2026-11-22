@@ -6,6 +6,16 @@ use petdex_core::PetState;
 
 pub const DEFAULT_SPRITE_COLS: u32 = 8;
 pub const DEFAULT_SPRITE_ROWS: u32 = 9;
+pub const CANONICAL_FRAME_WIDTH: f64 = 192.0;
+pub const CANONICAL_FRAME_HEIGHT: f64 = 208.0;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResolvedAtlasLayout {
+    pub cols: u32,
+    pub rows: u32,
+    pub frame_width: u32,
+    pub frame_height: u32,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstalledWindowsPet {
@@ -216,12 +226,215 @@ fn extract_json_string_field(content: &str, field: &str) -> Option<String> {
     None
 }
 
+fn extract_json_u32_field(content: &str, field: &str) -> Option<u32> {
+    let needle = format!("\"{field}\"");
+    let mut search_from = 0;
+    while let Some(rel) = content[search_from..].find(&needle) {
+        let after_key_idx = search_from + rel + needle.len();
+        let rest = content[after_key_idx..].trim_start();
+        if let Some(after_colon) = rest.strip_prefix(':') {
+            let trimmed = after_colon.trim_start();
+            let digits_len = trimmed
+                .bytes()
+                .take_while(|b| b.is_ascii_digit())
+                .count();
+            if digits_len > 0 {
+                let next_byte = trimmed.as_bytes().get(digits_len).copied();
+                if next_byte != Some(b'.') {
+                    if let Ok(value) = trimmed[..digits_len].parse::<u32>() {
+                        return Some(value);
+                    }
+                }
+            }
+        }
+        search_from = after_key_idx;
+    }
+    None
+}
+
+fn extract_json_object_body<'a>(content: &'a str, field: &str) -> Option<&'a str> {
+    let needle = format!("\"{field}\"");
+    let mut search_from = 0;
+    while let Some(rel) = content[search_from..].find(&needle) {
+        let after_key_idx = search_from + rel + needle.len();
+        let rest = &content[after_key_idx..];
+        let trimmed = rest.trim_start();
+        if let Some(after_colon) = trimmed.strip_prefix(':') {
+            let after_ws = after_colon.trim_start();
+            if let Some(body_start) = after_ws.strip_prefix('{') {
+                let mut depth = 1usize;
+                let mut in_string = false;
+                let mut escaped = false;
+                for (idx, ch) in body_start.char_indices() {
+                    if in_string {
+                        if escaped {
+                            escaped = false;
+                        } else if ch == '\\' {
+                            escaped = true;
+                        } else if ch == '"' {
+                            in_string = false;
+                        }
+                    } else {
+                        match ch {
+                            '"' => in_string = true,
+                            '{' => depth += 1,
+                            '}' => {
+                                depth -= 1;
+                                if depth == 0 {
+                                    return Some(&body_start[..idx]);
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+        search_from = after_key_idx;
+    }
+    None
+}
+
+fn resolve_layout_from_pet_json(
+    content: &str,
+    image_width: u32,
+    image_height: u32,
+) -> Option<ResolvedAtlasLayout> {
+    if let (Some(fw), Some(fh)) = (
+        extract_json_u32_field(content, "frameWidth"),
+        extract_json_u32_field(content, "frameHeight"),
+    ) {
+        if fw > 0 && fh > 0 && fw <= image_width && fh <= image_height {
+            let cols = image_width / fw;
+            let rows = image_height / fh;
+            if cols > 0 && rows > 0 {
+                return Some(ResolvedAtlasLayout {
+                    cols,
+                    rows,
+                    frame_width: fw,
+                    frame_height: fh,
+                });
+            }
+        }
+    }
+
+    if let Some(frame_size_body) = extract_json_object_body(content, "frameSize") {
+        if let (Some(fw), Some(fh)) = (
+            extract_json_u32_field(frame_size_body, "width"),
+            extract_json_u32_field(frame_size_body, "height"),
+        ) {
+            if fw > 0 && fh > 0 && fw <= image_width && fh <= image_height {
+                let cols = image_width / fw;
+                let rows = image_height / fh;
+                if cols > 0 && rows > 0 {
+                    return Some(ResolvedAtlasLayout {
+                        cols,
+                        rows,
+                        frame_width: fw,
+                        frame_height: fh,
+                    });
+                }
+            }
+        }
+    }
+
+    if let Some(grid_body) = extract_json_object_body(content, "grid") {
+        if let (Some(cols), Some(rows)) = (
+            extract_json_u32_field(grid_body, "cols"),
+            extract_json_u32_field(grid_body, "rows"),
+        ) {
+            if cols > 0 && rows > 0 && cols <= image_width && rows <= image_height {
+                let fw = image_width / cols;
+                let fh = image_height / rows;
+                if fw > 0 && fh > 0 {
+                    return Some(ResolvedAtlasLayout {
+                        cols,
+                        rows,
+                        frame_width: fw,
+                        frame_height: fh,
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
+pub fn resolve_atlas_layout(
+    image_width: u32,
+    image_height: u32,
+    pet_json_path: Option<&Path>,
+) -> Result<ResolvedAtlasLayout, String> {
+    if image_width == 0 || image_height == 0 {
+        return Err(format!(
+            "invalid spritesheet dimensions {}x{}",
+            image_width, image_height
+        ));
+    }
+
+    if let Some(json_path) = pet_json_path {
+        if let Ok(content) = fs::read_to_string(json_path) {
+            if let Some(layout) = resolve_layout_from_pet_json(&content, image_width, image_height)
+            {
+                return Ok(layout);
+            }
+        }
+    }
+
+    let cols = DEFAULT_SPRITE_COLS;
+    let frame_width = image_width / cols;
+    if frame_width == 0 {
+        return Err(format!(
+            "spritesheet width {} is smaller than {} columns",
+            image_width, cols
+        ));
+    }
+
+    let expected_frame_height =
+        ((frame_width as f64) * CANONICAL_FRAME_HEIGHT / CANONICAL_FRAME_WIDTH).round() as u32;
+    if expected_frame_height > 0 {
+        let computed_rows = image_height / expected_frame_height;
+        let exact_multiple = computed_rows > 0 && (image_height % expected_frame_height == 0);
+        let rounded_rows =
+            ((image_height as f64) / (expected_frame_height as f64)).round() as i64;
+        let diff = (image_height as i64 - (expected_frame_height as i64) * rounded_rows).abs();
+        let near_multiple = computed_rows >= DEFAULT_SPRITE_ROWS && diff <= 4;
+        if exact_multiple || near_multiple {
+            return Ok(ResolvedAtlasLayout {
+                cols,
+                rows: computed_rows,
+                frame_width,
+                frame_height: expected_frame_height,
+            });
+        }
+    }
+
+    let fallback_rows = DEFAULT_SPRITE_ROWS;
+    let fallback_frame_height = image_height / fallback_rows;
+    if fallback_frame_height == 0 {
+        return Err(format!(
+            "spritesheet height {} is smaller than {} rows",
+            image_height, fallback_rows
+        ));
+    }
+
+    Ok(ResolvedAtlasLayout {
+        cols,
+        rows: fallback_rows,
+        frame_width,
+        frame_height: fallback_frame_height,
+    })
+}
+
 pub struct SpriteAtlas {
     sheet_rgba: Vec<u8>,
     sheet_width: u32,
     sheet_height: u32,
     cols: u32,
     rows: u32,
+    frame_width: u32,
+    frame_height: u32,
     cache: HashMap<(u32, u32, u32, u32), DecodedFrame>,
 }
 
@@ -231,15 +444,29 @@ impl SpriteAtlas {
             .map_err(|err| format!("failed to decode {}: {err}", path.display()))?
             .to_rgba8();
         let (width, height) = decoded.dimensions();
-        Self::from_rgba(
-            decoded.into_raw(),
-            width,
-            height,
-            DEFAULT_SPRITE_COLS,
-            DEFAULT_SPRITE_ROWS,
+        let pet_json_path = path.parent().map(|dir| dir.join("pet.json"));
+        Self::from_rgba_auto(decoded.into_raw(), width, height, pet_json_path.as_deref())
+    }
+
+    pub fn from_rgba_auto(
+        sheet_rgba: Vec<u8>,
+        sheet_width: u32,
+        sheet_height: u32,
+        pet_json_path: Option<&Path>,
+    ) -> Result<Self, String> {
+        let layout = resolve_atlas_layout(sheet_width, sheet_height, pet_json_path)?;
+        Self::from_rgba_with_frame_size(
+            sheet_rgba,
+            sheet_width,
+            sheet_height,
+            layout.cols,
+            layout.rows,
+            layout.frame_width,
+            layout.frame_height,
         )
     }
 
+    #[allow(dead_code)]
     pub fn from_rgba(
         sheet_rgba: Vec<u8>,
         sheet_width: u32,
@@ -249,6 +476,37 @@ impl SpriteAtlas {
     ) -> Result<Self, String> {
         if cols == 0 || rows == 0 {
             return Err("atlas cols and rows must be non-zero".to_string());
+        }
+        if sheet_width < cols || sheet_height < rows {
+            return Err(format!(
+                "spritesheet {}x{} is smaller than {}x{} grid",
+                sheet_width, sheet_height, cols, rows
+            ));
+        }
+        let frame_width = sheet_width / cols;
+        let frame_height = sheet_height / rows;
+        Self::from_rgba_with_frame_size(
+            sheet_rgba,
+            sheet_width,
+            sheet_height,
+            cols,
+            rows,
+            frame_width,
+            frame_height,
+        )
+    }
+
+    pub fn from_rgba_with_frame_size(
+        sheet_rgba: Vec<u8>,
+        sheet_width: u32,
+        sheet_height: u32,
+        cols: u32,
+        rows: u32,
+        frame_width: u32,
+        frame_height: u32,
+    ) -> Result<Self, String> {
+        if cols == 0 || rows == 0 || frame_width == 0 || frame_height == 0 {
+            return Err("atlas cols, rows, and frame dimensions must be non-zero".to_string());
         }
         let expected_len = (sheet_width as usize)
             .saturating_mul(sheet_height as usize)
@@ -260,10 +518,12 @@ impl SpriteAtlas {
                 expected_len
             ));
         }
-        if sheet_width < cols || sheet_height < rows {
+        if cols.saturating_mul(frame_width) > sheet_width
+            || rows.saturating_mul(frame_height) > sheet_height
+        {
             return Err(format!(
-                "spritesheet {}x{} is smaller than {}x{} grid",
-                sheet_width, sheet_height, cols, rows
+                "spritesheet {}x{} cannot fit {}x{} grid of {}x{} frames",
+                sheet_width, sheet_height, cols, rows, frame_width, frame_height
             ));
         }
 
@@ -273,6 +533,8 @@ impl SpriteAtlas {
             sheet_height,
             cols,
             rows,
+            frame_width,
+            frame_height,
             cache: HashMap::new(),
         })
     }
@@ -282,11 +544,11 @@ impl SpriteAtlas {
     }
 
     pub fn cell_width(&self) -> u32 {
-        self.sheet_width / self.cols
+        self.frame_width
     }
 
     pub fn cell_height(&self) -> u32 {
-        self.sheet_height / self.rows
+        self.frame_height
     }
 
     pub fn frame_scaled(
@@ -527,5 +789,126 @@ mod tests {
         assert_eq!(pets[1].display_name, "alpha");
 
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn sprite_atlas_1536x2080_ten_row_boba_slices_192x208_without_row_bleed() {
+        let sheet_w = 1536u32;
+        let sheet_h = 2080u32;
+        let mut rgba = vec![0u8; (sheet_w * sheet_h * 4) as usize];
+
+        for y in 0..208u32 {
+            for x in 0..192u32 {
+                let idx = ((y * sheet_w + x) * 4) as usize;
+                rgba[idx] = 20;
+                rgba[idx + 1] = 200;
+                rgba[idx + 2] = 60;
+                rgba[idx + 3] = 255;
+            }
+        }
+
+        for y in 208..231u32 {
+            for x in 0..192u32 {
+                let idx = ((y * sheet_w + x) * 4) as usize;
+                rgba[idx] = 220;
+                rgba[idx + 1] = 30;
+                rgba[idx + 2] = 30;
+                rgba[idx + 3] = 255;
+            }
+        }
+
+        let mut atlas = SpriteAtlas::from_rgba_auto(rgba, sheet_w, sheet_h, None)
+            .expect("build 1536x2080 10-row atlas");
+        assert_eq!(atlas.cell_width(), 192);
+        assert_eq!(atlas.cell_height(), 208);
+        assert_eq!(atlas.cols, 8);
+        assert_eq!(atlas.rows, 10);
+
+        let frame = atlas.frame_scaled(0, 0, 192, 208);
+        assert_eq!(frame.width, 192);
+        assert_eq!(frame.height, 208);
+        let expected_row0 = premultiply_rgba_pixel(20, 200, 60, 255);
+        for px in frame.bgra.chunks_exact(4) {
+            assert_eq!(px, expected_row0);
+        }
+
+        let row1_top = atlas.frame_scaled(1, 0, 192, 208);
+        let expected_row1 = premultiply_rgba_pixel(220, 30, 30, 255);
+        assert_eq!(&row1_top.bgra[0..4], &expected_row1);
+    }
+
+    #[test]
+    fn resolve_atlas_layout_prefers_pet_json_then_aspect_ratio_then_fallback() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!(
+            "petdex-win-layout-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).expect("create temp layout dir");
+        let pet_json = dir.join("pet.json");
+
+        fs::write(&pet_json, r#"{"frameWidth": 128, "frameHeight": 160}"#).expect("write json");
+        let explicit = resolve_atlas_layout(1024, 1600, Some(&pet_json)).expect("explicit layout");
+        assert_eq!(
+            explicit,
+            ResolvedAtlasLayout {
+                cols: 8,
+                rows: 10,
+                frame_width: 128,
+                frame_height: 160,
+            }
+        );
+
+        fs::write(&pet_json, r#"{"frameSize": {"width": 192, "height": 208}}"#).expect("write json");
+        let frame_size =
+            resolve_atlas_layout(1536, 2288, Some(&pet_json)).expect("frameSize layout");
+        assert_eq!(
+            frame_size,
+            ResolvedAtlasLayout {
+                cols: 8,
+                rows: 11,
+                frame_width: 192,
+                frame_height: 208,
+            }
+        );
+
+        fs::write(&pet_json, r#"{"grid": {"cols": 8, "rows": 10}}"#).expect("write json");
+        let grid = resolve_atlas_layout(1536, 2080, Some(&pet_json)).expect("grid layout");
+        assert_eq!(
+            grid,
+            ResolvedAtlasLayout {
+                cols: 8,
+                rows: 10,
+                frame_width: 192,
+                frame_height: 208,
+            }
+        );
+
+        let v2 = resolve_atlas_layout(1536, 2288, None).expect("v2 layout");
+        assert_eq!(
+            v2,
+            ResolvedAtlasLayout {
+                cols: 8,
+                rows: 11,
+                frame_width: 192,
+                frame_height: 208,
+            }
+        );
+
+        let fallback = resolve_atlas_layout(512, 576, None).expect("fallback layout");
+        assert_eq!(
+            fallback,
+            ResolvedAtlasLayout {
+                cols: 8,
+                rows: 9,
+                frame_width: 64,
+                frame_height: 64,
+            }
+        );
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }
