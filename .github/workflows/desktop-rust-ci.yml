@@ -153,7 +153,16 @@ jobs:
       - name: Build NSIS installer
         shell: pwsh
         run: |
-          makensis crates/petdex-windows/installer/petdex.nsi
+          $makensis = (Get-Command makensis -ErrorAction SilentlyContinue)?.Source
+          if (-not $makensis -and (Test-Path "C:\Program Files (x86)\NSIS\makensis.exe")) {
+            $makensis = "C:\Program Files (x86)\NSIS\makensis.exe"
+          }
+          if (-not $makensis) {
+            choco install nsis -y --no-progress
+            $makensis = "C:\Program Files (x86)\NSIS\makensis.exe"
+          }
+          & $makensis crates/petdex-windows/installer/petdex.nsi
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Copy-Item -Path "crates/petdex-windows/installer/Petdex-Setup.exe" -Destination "Petdex-Setup.exe" -Force
 
       - name: Sign Petdex-Setup.exe with SignPath.io (optional)
