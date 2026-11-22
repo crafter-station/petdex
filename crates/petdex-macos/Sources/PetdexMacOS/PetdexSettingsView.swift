@@ -626,10 +626,12 @@ struct PetdexSettingsView: View {
                             switch phase {
                             case .success(let image):
                                 image
-                                    .interpolation(.none)
+                                    .interpolation(.high)
                                     .resizable()
                                     .aspectRatio(contentMode: .fit)
-                                    .frame(width: 58, height: 58)
+                                    .scaleEffect(1.06)
+                                    .frame(width: 56, height: 56)
+                                    .clipped()
                             case .failure:
                                 Image(systemName: "pawprint.fill")
                                     .font(.system(size: 22))
@@ -861,10 +863,12 @@ struct PetdexSettingsView: View {
                             switch phase {
                             case .success(let image):
                                 image
-                                    .interpolation(.none)
+                                    .interpolation(.high)
                                     .resizable()
                                     .aspectRatio(contentMode: .fit)
-                                    .frame(width: 58, height: 58)
+                                    .scaleEffect(1.06)
+                                    .frame(width: 56, height: 56)
+                                    .clipped()
                             case .failure:
                                 Image(systemName: "pawprint.fill")
                                     .font(.system(size: 22))

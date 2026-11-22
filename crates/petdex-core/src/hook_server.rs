@@ -288,19 +288,21 @@ fn escape_html(input: &str) -> String {
 }
 
 fn render_oauth_callback_html(error: &str) -> String {
-    let (badge, heading, message, accent) = if error.is_empty() {
+    let (badge, heading, message, badge_bg, badge_fg) = if error.is_empty() {
         (
             "PETDEX READY",
             "Signed in to Petdex!",
             "You can close this tab and return to Petdex.".to_string(),
-            "#5B8C5A",
+            "#3B59F2",
+            "#FFFFFF",
         )
     } else {
         (
             "SIGN-IN ERROR",
             "Could not sign in to Petdex",
             format!("Error: {}", escape_html(error)),
-            "#C85A53",
+            "#FF7AA2",
+            "#101944",
         )
     };
 
@@ -318,48 +320,83 @@ fn render_oauth_callback_html(error: &str) -> String {
     display: flex;
     align-items: center;
     justify-content: center;
-    background: #F4EFE6;
-    color: #2C2621;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: radial-gradient(circle at 50% 0%, #E7EEFF 0%, #F5F7FF 58%, #EEF2FF 100%);
+    color: #101944;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Rounded", "Segoe UI", Roboto, sans-serif;
   }}
   .toy-shell {{
-    width: min(380px, 88vw);
-    background: #FFFDF8;
-    border: 3px solid #2C2621;
-    border-radius: 22px;
-    box-shadow: 0 8px 0 #2C2621;
-    padding: 28px 24px;
+    width: min(400px, 88vw);
+    background: linear-gradient(180deg, #FFFFFF 0%, #F7F9FF 100%);
+    border: 1.5px solid #D6DEF5;
+    border-radius: 26px;
+    box-shadow: 0 4px 0 #D6DEF5, 0 22px 48px rgba(16, 25, 68, 0.12);
+    padding: 34px 28px 28px;
     text-align: center;
+  }}
+  .mark {{
+    width: 60px;
+    height: 60px;
+    margin: 0 auto 16px;
+    display: block;
+    filter: drop-shadow(0 8px 16px rgba(59, 89, 242, 0.28));
   }}
   .badge {{
     display: inline-block;
     padding: 4px 12px;
     border-radius: 999px;
-    background: {accent};
-    color: #FFFDF8;
-    font-size: 11px;
+    background: {badge_bg};
+    color: {badge_fg};
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 10.5px;
     font-weight: 700;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.1em;
     margin-bottom: 14px;
   }}
   h1 {{
-    margin: 0 0 10px 0;
-    font-size: 20px;
-    line-height: 1.25;
+    margin: 0 0 8px 0;
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
   }}
   p {{
     margin: 0;
     font-size: 14px;
-    line-height: 1.5;
-    color: #5E5348;
+    line-height: 1.55;
+    color: #4A567C;
+  }}
+  .foot {{
+    margin-top: 20px;
+    padding-top: 14px;
+    border-top: 1px solid #E6ECFA;
+    font-size: 11px;
+    color: #7D89AD;
   }}
 </style>
 </head>
 <body>
   <main class="toy-shell">
+    <svg class="mark" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <defs>
+        <linearGradient id="g" x1="64" y1="8" x2="64" y2="120" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stop-color="#5876FF"/>
+          <stop offset="38%" stop-color="#3B59F2"/>
+          <stop offset="100%" stop-color="#101944"/>
+        </linearGradient>
+      </defs>
+      <path d="M64 8C95.5 8 106.4 8 113.2 14.8C120 21.6 120 32.5 120 64C120 95.5 120 106.4 113.2 113.2C106.4 120 95.5 120 64 120C32.5 120 21.6 120 14.8 113.2C8 106.4 8 95.5 8 64C8 32.5 8 21.6 14.8 14.8C21.6 8 32.5 8 64 8Z" fill="url(#g)"/>
+      <g fill="#FFFFFF">
+        <rect x="44" y="40" width="12" height="12"/>
+        <rect x="72" y="40" width="12" height="12"/>
+        <rect x="32" y="52" width="12" height="36"/>
+        <rect x="84" y="52" width="12" height="36"/>
+        <rect x="44" y="76" width="40" height="12"/>
+      </g>
+    </svg>
     <div class="badge">{badge}</div>
     <h1>{heading}</h1>
     <p>{message}</p>
+    <div class="foot">Petdex · Crafter Station</div>
   </main>
 </body>
 </html>"#
