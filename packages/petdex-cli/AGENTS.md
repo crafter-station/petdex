@@ -23,7 +23,7 @@ The published name is plain `petdex` (unscoped, no `@crafter/` prefix). Requires
 | `petdex login` | Sign in with Clerk OAuth + PKCE (opens browser, localhost callback; tokens in OS keychain) |
 | `petdex logout` | Clear stored credentials |
 | `petdex whoami` | Show signed-in user |
-| `petdex submit <path> [--force]` | Submit a pet folder, zip, or parent folder of pets (bulk) |
+| `petdex submit <path> [--license <id>] [--force]` | Submit a pet folder, zip, or parent folder of pets (bulk). Without a TTY, `--license` is required (the license prompt is never answered for the caller); `--force` resubmits pets you already own |
 | `petdex edit <slug>` | Edit a pet you own: `--desc "..."`, `--displayName "..."`, `--sprite <file>`, `--meta <pet.json>`, `--zip <file>` |
 | `petdex collection list` | List your collections (`--json` for machine output) |
 | `petdex collection create` | Create a collection with `--title`, `--desc`, `--pets`, `--cover`, `--external-url`, or `--all-approved` |

@@ -105,6 +105,14 @@ petdex submit ~/Downloads/boba.zip     # single zip with the same root layout
 petdex submit ~/.petdex/pets           # parent folder: every subfolder containing pet.json is submitted
 ```
 
+**No terminal? Pass `--license` explicitly.** The license is a legal
+declaration about the artwork, so `submit` never picks one on the caller's
+behalf: without a TTY and without `--license`, it exits 1 and lists the
+options (`cc0`, `cc-by`, `cc-by-sa`, `cc-by-nc`, `all-rights-reserved`)
+instead of rendering a prompt nobody can answer. The same rule covers the
+other prompts: a duplicate needs `--force` to be resubmitted, and a batch of
+more than one pet has to be submitted one pet at a time.
+
 Per submission the CLI:
 
 1. Builds a clean zip in memory from `pet.json` + `spritesheet.{webp,png}`.

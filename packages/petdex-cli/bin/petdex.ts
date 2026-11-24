@@ -713,6 +713,17 @@ function parseLicenseFlag(args: string[]): string | null {
   return i >= 0 ? (args[i + 1] ?? "") : null;
 }
 
+/**
+ * Report a submit failure that must reach scripts and exit. clack's `cancel`
+ * writes to stdout, which is where the successful-submission summary goes; a
+ * no-terminal failure is an error, so it goes to stderr like the other
+ * non-interactive error paths.
+ */
+function failSubmit(message: string): never {
+  p.cancel(message, { output: process.stderr });
+  process.exit(1);
+}
+
 async function cmdSubmit(args: string[]) {
   const positionals = args.filter((a) => !a.startsWith("--"));
   const target = positionals[0];
@@ -736,6 +747,13 @@ async function cmdSubmit(args: string[]) {
       process.exit(1);
     }
     license = match.value;
+  } else if (!process.stdin.isTTY) {
+    // A license has legal meaning, so the CLI will not pick one for the user,
+    // and clack's prompt would never settle on a stdin already at EOF: Node
+    // would drain the event loop and exit 0 with nothing submitted.
+    failSubmit(
+      `submit needs --license when there is no terminal. Run: ${pc.cyan("petdex submit <path> --license <id>")}. Options: ${LICENSE_CHOICES.map((c) => c.value).join(", ")}`,
+    );
   } else {
     const picked = await p.select({
       message: "License for this pet's artwork (you keep the copyright)",
@@ -821,6 +839,15 @@ async function cmdSubmit(args: string[]) {
         .join("\n"),
       `${dupes.length} already submitted by you`,
     );
+    // The same rule as the license prompt: never let a prompt decide for a
+    // caller that has no terminal. `--force` is the explicit way to say
+    // "submit them again"; skipping is the default a terminal user would get.
+    // Only a real duplicate needs that decision, not merely a non-empty map.
+    if (dupes.length > 0 && !process.stdin.isTTY) {
+      failSubmit(
+        `${dupes.length} already submitted by you. No terminal to ask how to handle them. Re-run with ${pc.cyan("--force")} to submit them again, or remove them from this path first.`,
+      );
+    }
     const choice = await p.select({
       message: "How should we handle these duplicates?",
       options: [
@@ -850,6 +877,11 @@ async function cmdSubmit(args: string[]) {
   }
 
   if (toSubmit.length > 1) {
+    if (!process.stdin.isTTY) {
+      failSubmit(
+        `${toSubmit.length} pets to submit. No terminal to confirm the batch. Run this from a terminal, or submit one pet at a time: ${pc.cyan("petdex submit <path-to-one-pet>")}."`,
+      );
+    }
     const proceed = await p.confirm({
       message: `Submit ${pc.bold(String(toSubmit.length))} pet${toSubmit.length === 1 ? "" : "s"}?`,
     });
