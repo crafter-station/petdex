@@ -9,6 +9,11 @@ import pc from "picocolors";
 import pkg from "../package.json";
 import { isTrustedAssetUrl } from "../src/asset-hosts.js";
 import { resolveAuthConfig } from "../src/auth-config.js";
+import {
+  accountLabel,
+  describeAuthFailure,
+  describeLoginFailure,
+} from "../src/cli-auth/cli-messages.js";
 import { ClerkCliAuth } from "../src/cli-auth/index.js";
 import {
   collectionRequest,
@@ -249,14 +254,14 @@ async function cmdLogin() {
   try {
     const auth = await getAuth();
     const { user } = await auth.login();
-    const label = firstString(user.email, user.username, user.sub) ?? "unknown";
+    const label = accountLabel(user) ?? "unknown";
     s.stop(`${pc.green("✓ ")}Signed in as ${pc.cyan(label)}`);
     p.outro(
       `Try ${pc.cyan("petdex submit ~/.codex/pets")} to share your pets.`,
     );
   } catch (err) {
     s.stop(pc.red("× login failed"));
-    throw new Error(translateLoginError((err as Error).message));
+    throw new Error(describeLoginFailure(err));
   }
 }
 
@@ -315,10 +320,10 @@ async function cmdCollection(args: string[]): Promise<void> {
     const accessToken = await (await getAuth()).getAccessToken();
     if (!accessToken) failCollection(notSignedIn, json);
     token = accessToken;
-  } catch {
-    // An expired or revoked refresh token throws here; surface the same
-    // guidance submit/edit give instead of the raw Clerk error.
-    failCollection(notSignedIn, json);
+  } catch (error) {
+    // An expired session, an unreadable store and missing credentials have
+    // different fixes; only the last one is "not signed in".
+    failCollection(authFailureMessage(error), json);
   }
   // Every request below can throw (404, 429, a network failure). Letting it
   // reach main().catch() would print through clack to stdout, which is the
@@ -432,7 +437,10 @@ async function cmdWhoami() {
   try {
     const auth = await getAuth();
     const me = await auth.whoami();
-    if (!me) throw new Error("not signed in");
+    if (!me) {
+      p.cancel(`Not signed in. Run ${pc.cyan("petdex login")}.`);
+      process.exit(1);
+    }
     const name = [asString(me.given_name), asString(me.family_name)]
       .filter(Boolean)
       .join(" ");
@@ -445,10 +453,27 @@ async function cmdWhoami() {
       ].join("\n"),
       "Signed in",
     );
-  } catch {
-    p.cancel(`Not signed in. Run ${pc.cyan("petdex login")}.`);
+  } catch (error) {
+    // A locked keychain, a profile endpoint outage and an expired session are
+    // different problems with different fixes; collapsing them into "not
+    // signed in" hides the one thing the reader could act on.
+    p.cancel(authFailureMessage(error));
     process.exit(1);
   }
+}
+
+/**
+ * Describe why a command could not use the saved session, with the terminal
+ * pointing at the commands that fix it.
+ */
+function authFailureMessage(error: unknown): string {
+  const message = describeAuthFailure(error);
+  if (message === "Not signed in.") {
+    return `Not signed in. Run ${pc.cyan("petdex login")}.`;
+  }
+  return message
+    .replaceAll("petdex login", pc.cyan("petdex login"))
+    .replaceAll("petdex logout", pc.cyan("petdex logout"));
 }
 
 function parseSpriteVersionNumber(petJson: Record<string, unknown>): 1 | 2 {
@@ -717,8 +742,8 @@ async function cmdSubmit(args: string[]) {
       process.exit(1);
     }
     token = t;
-  } catch {
-    p.cancel(`Not signed in. Run ${pc.cyan("petdex login")}.`);
+  } catch (error) {
+    p.cancel(authFailureMessage(error));
     process.exit(1);
   }
   let profileUrl = PETDEX_URL;
@@ -819,13 +844,15 @@ async function cmdSubmit(args: string[]) {
   let failed = 0;
   const failures: Array<{ label: string; error: string }> = [];
 
+  // `token` was just resolved above — refreshed if it was close to expiring,
+  // with a failure already reported and the command exited. Re-resolving it
+  // per candidate would make a dead refresh token cost the full network
+  // timeout once per pet, and print the same raw error in every row, so the
+  // batch runs on the token the command already proved it has.
   for (const cand of toSubmit) {
     const ps = p.spinner();
     ps.start(`Submitting ${pc.cyan(cand.label)}`);
     try {
-      const t = await auth.getAccessToken();
-      if (!t) throw new Error("session expired");
-      token = t;
       const result = await submitOne(cand, token, license);
       profileUrl = absoluteProfileUrl(result.profileUrl) ?? profileUrl;
       ps.stop(
@@ -884,8 +911,8 @@ async function cmdEdit(args: string[]): Promise<void> {
       process.exit(1);
     }
     token = t;
-  } catch {
-    p.cancel(`Not signed in. Run ${pc.cyan("petdex login")}.`);
+  } catch (error) {
+    p.cancel(authFailureMessage(error));
     process.exit(1);
   }
 
@@ -1357,37 +1384,6 @@ async function fetchOwnedSlugs(
     /* server doesn't support dedup yet — fall back to old behavior */
   }
   return out;
-}
-
-function translateLoginError(message: string): string {
-  const m = message.toLowerCase();
-  if (m.includes("invalid_client") || m.includes("client does not exist")) {
-    return [
-      "Clerk OAuth rejected this CLI build (invalid_client).",
-      "This usually means your installed CLI is out of date. Try:",
-      "  npm cache clean --force && npx -y petdex@latest login",
-      "If it still fails: https://github.com/crafter-station/petdex/issues",
-    ].join("\n");
-  }
-  if (
-    m.includes("invalid_grant") ||
-    m.includes("does not match the redirect")
-  ) {
-    return [
-      "OAuth callback was rejected by Clerk (invalid_grant).",
-      "Common cause: you closed the browser before approving, or the local",
-      "callback server timed out. Try `petdex login` again.",
-    ].join("\n");
-  }
-  if (m.includes("redirect_uri") && m.includes("pre-registered")) {
-    return [
-      "Clerk OAuth rejected the local callback URL.",
-      "The petdex OAuth Application needs http://127.0.0.1 in its allowed",
-      "redirect URLs. Please file an issue:",
-      "  https://github.com/crafter-station/petdex/issues",
-    ].join("\n");
-  }
-  return message;
 }
 
 async function fileExists(p: string): Promise<boolean> {
