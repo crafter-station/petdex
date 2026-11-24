@@ -43,6 +43,17 @@ describe("describeLoginFailure", () => {
     expect(message).not.toMatch(/^Signed in/);
   });
 
+  test("with no usable stored account it says so instead of naming one", () => {
+    // `getCachedUser` returns null when the token record is missing or
+    // damaged, so this is the branch a half-written store reaches: the
+    // profile may be readable, but no command could act as that account.
+    const message = describeLoginFailure(
+      new ClerkCliAuthError("userinfo", "HTTP 503"),
+    );
+    expect(message).toContain("No usable sign-in is stored");
+    expect(message).not.toContain("previous sign-in");
+  });
+
   test("a storage failure points at whoami instead of guessing the account", () => {
     // The token is written before the profile, so this failure can leave the
     // new sign-in half saved. Naming the previous account here would be a
@@ -56,7 +67,7 @@ describe("describeLoginFailure", () => {
     expect(message).not.toContain("old@example.test");
   });
 
-  test("a timeout says nothing was saved and keeps the previous account", () => {
+  test("a timeout keeps the previous account when one is usable", () => {
     const message = describeLoginFailure(
       new ClerkCliAuthError("timeout", "2min"),
       "old@example.test",

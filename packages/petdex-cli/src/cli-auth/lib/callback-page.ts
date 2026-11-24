@@ -32,12 +32,22 @@ export type CallbackFailureReason =
   | "token_exchange_failed"
   | "userinfo_failed"
   | "storage_failed"
+  | "config_failed"
   | "timeout"
   | "closed";
 
 export type CallbackOutcome =
   | { kind: "success" }
-  | { kind: "error"; reason: CallbackFailureReason };
+  | {
+      kind: "error";
+      reason: CallbackFailureReason;
+      /**
+       * The account a failed re-login left in effect, when the store still
+       * holds one. Naming it is what keeps the page from saying only "a
+       * previous sign-in, if any" while the terminal already knows whose.
+       */
+      previousAccount?: string;
+    };
 
 /**
  * Where the success page's button points.
@@ -127,8 +137,17 @@ const STRINGS: Record<Locale, Strings> = {
       missing_code: "The provider didn't return an authorization code.",
       token_exchange_failed:
         "The authorization code couldn't be exchanged for a token.",
-      userinfo_failed: "Signed in, but your profile couldn't be loaded.",
-      storage_failed: "The credentials couldn't be saved on this machine.",
+      // A failed login saves nothing, so the page must not claim a session
+      // exists: the previous sign-in — or none — is still what the CLI runs.
+      userinfo_failed:
+        "Your profile couldn't be loaded, so this sign-in wasn't saved. A previous sign-in, if any, is still in effect.",
+      // Not the same claim: the tokens land before the profile is written,
+      // so a failure here can leave the new sign-in half saved. The terminal
+      // says what to run next; the page must not guess which account won.
+      storage_failed:
+        "The credentials couldn't be fully saved on this machine, so the sign-in may not have completed. Check the terminal.",
+      config_failed:
+        "This sign-in couldn't start. Check the terminal for the reason.",
       timeout: "The sign-in attempt timed out before it completed.",
       closed: "The sign-in attempt ended before it completed.",
     },
@@ -149,8 +168,12 @@ const STRINGS: Record<Locale, Strings> = {
       missing_code: "El proveedor no devolvió un código de autorización.",
       token_exchange_failed:
         "No se pudo canjear el código de autorización por un token.",
-      userinfo_failed: "Se inició sesión, pero no se pudo cargar tu perfil.",
-      storage_failed: "No se pudieron guardar las credenciales en este equipo.",
+      userinfo_failed:
+        "No se pudo cargar tu perfil, así que este acceso no se guardó. Un acceso anterior, si lo había, sigue vigente.",
+      storage_failed:
+        "No se pudieron guardar las credenciales del todo en este equipo, así que puede que el acceso no se haya completado. Revisa la terminal.",
+      config_failed:
+        "No se pudo iniciar este acceso. Revisa la terminal para ver el motivo.",
       timeout: "El intento de inicio de sesión agotó el tiempo.",
       closed: "El intento de inicio de sesión terminó antes de completarse.",
     },
@@ -168,8 +191,11 @@ const STRINGS: Record<Locale, Strings> = {
       state_mismatch: "返回的 state 和这个终端发起的请求对不上，请重新登录。",
       missing_code: "授权方没有返回授权码。",
       token_exchange_failed: "授权码没能换成令牌。",
-      userinfo_failed: "已经登录，但没能读取你的账号信息。",
-      storage_failed: "凭据没能保存到本机。",
+      userinfo_failed:
+        "没能读取你的账号信息，这次登录没有保存。此前的登录状态（如果有）仍然有效。",
+      storage_failed:
+        "凭据没能完整保存到本机，这次登录可能没有完成，请在终端查看结果。",
+      config_failed: "没能启动这次登录，请在终端查看原因。",
       timeout: "登录在完成前超时了。",
       closed: "登录在完成前就结束了。",
     },
@@ -181,7 +207,56 @@ export function callbackStringsByLocale(): Record<Locale, Strings> {
   return STRINGS;
 }
 
+/**
+ * The failure copy when the store still holds an account, which the page
+ * can name the same way the terminal does. Kept out of `STRINGS` because
+ * these are functions and the locale table is serialized into the document.
+ *
+ * The page shows the masked label `maskAccount` produces, not the full one
+ * the terminal prints: the browser document is a less controlled surface
+ * than the terminal, and the reader only needs to recognise the account.
+ *
+ * Only `userinfo_failed` can name an account. The profile call runs before
+ * anything is written, so a failure there leaves the stored `tokens` + `user`
+ * pair untouched. A storage failure happens *inside* the write sequence —
+ * `tokens` land before `user` — so the previous account is not necessarily
+ * still in effect, and the page says only that the sign-in may not have
+ * completed.
+ */
+const NAMED_REASON: Record<
+  Locale,
+  Partial<Record<CallbackFailureReason, (account: string) => string>>
+> = {
+  en: {
+    userinfo_failed: (account) =>
+      `Your profile couldn't be loaded, so this sign-in wasn't saved. Your previous sign-in (${account}) is still saved and still in use.`,
+  },
+  es: {
+    userinfo_failed: (account) =>
+      `No se pudo cargar tu perfil, así que este acceso no se guardó. Tu acceso anterior (${account}) sigue guardado y sigue en uso.`,
+  },
+  zh: {
+    userinfo_failed: (account) =>
+      `没能读取你的账号信息，这次登录没有保存。此前的登录（${account}）仍然保存并继续有效。`,
+  },
+};
+
 export const LOCALES_FOR_TEST = LOCALES;
+
+/**
+ * A recognisable but partial account label for the page.
+ *
+ * The terminal prints the full label (`accountLabel`); the browser document
+ * carries only enough to recognise the account: `o***@example.test` for an
+ * email, the first two characters for a username or subject. The label is
+ * still escaped where it lands in the string table.
+ */
+export function maskAccount(label: string): string {
+  const at = label.indexOf("@");
+  if (at > 0) return `${label.slice(0, 1)}***${label.slice(at)}`;
+  if (label.length <= 2) return "***";
+  return `${label.slice(0, 2)}***`;
+}
 
 /**
  * `[...]` in a JSON script block is still parsed as markup: a literal `</`
@@ -432,17 +507,24 @@ export function renderCallbackPage(
 ): string {
   const isSuccess = outcome.kind === "success";
   const reason = isSuccess ? null : outcome.reason;
+  const previousAccount =
+    outcome.kind === "error" && outcome.previousAccount
+      ? clampDetail(maskAccount(outcome.previousAccount), 120)
+      : undefined;
 
   const strings = {} as Record<Locale, Record<string, string>>;
   for (const locale of LOCALES) {
     const s = STRINGS[locale];
+    const named = previousAccount
+      ? NAMED_REASON[locale][reason as CallbackFailureReason]?.(previousAccount)
+      : undefined;
     strings[locale] = {
       eyebrow: s.eyebrow,
       chip: isSuccess ? s.successChip : s.errorChip,
       title: isSuccess ? s.successTitle : s.errorTitle,
       body: isSuccess
         ? s.successBody
-        : s.reason[reason as CallbackFailureReason],
+        : (named ?? s.reason[reason as CallbackFailureReason]),
       cta: isSuccess ? s.successCta : "",
     };
   }

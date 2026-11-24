@@ -247,12 +247,25 @@ function printHelp() {
 
 // ─── commands ──────────────────────────────────────────────────────────────
 
+/**
+ * The account the previous sign-in left behind, if any, for a message that
+ * has to say whose session survived a failed login. The profile is read from
+ * the saved record — never from the network. Only the failures that leave
+ * the store untouched use it; `describeLoginFailure` says so per code.
+ */
+async function previousAccountLabel(
+  auth: ClerkCliAuth,
+): Promise<string | undefined> {
+  return accountLabel(await auth.getCachedUser());
+}
+
 async function cmdLogin() {
   p.intro(pc.bgMagenta(pc.white(" petdex login ")));
   const s = p.spinner();
   s.start("Opening your browser to sign in with Clerk");
+  let auth: ClerkCliAuth | undefined;
   try {
-    const auth = await getAuth();
+    auth = await getAuth();
     const { user } = await auth.login();
     const label = accountLabel(user) ?? "unknown";
     s.stop(`${pc.green("✓ ")}Signed in as ${pc.cyan(label)}`);
@@ -261,7 +274,13 @@ async function cmdLogin() {
     );
   } catch (err) {
     s.stop(pc.red("× login failed"));
-    throw new Error(describeLoginFailure(err));
+    // Where the login failed decides which account the CLI now acts as, and
+    // the message must not claim more than the write sequence allows: a
+    // profile failure leaves the store untouched, a credential-write failure
+    // can leave it half saved. `describeLoginFailure` carries that split and
+    // reads this label only for the cases where it holds.
+    const previous = auth ? await previousAccountLabel(auth) : undefined;
+    throw new Error(describeLoginFailure(err, previous));
   }
 }
 

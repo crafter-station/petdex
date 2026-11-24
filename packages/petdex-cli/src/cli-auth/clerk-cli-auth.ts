@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 
+import { accountLabel } from "./cli-messages.js";
 import { startAuthServer } from "./lib/auth-server.js";
 import { browserCommand } from "./lib/browser-command.js";
 import { createCredentialStore } from "./lib/credential-store.js";
@@ -23,6 +24,26 @@ import type {
 import { ClerkCliAuthError } from "./types.js";
 
 const DEFAULT_SCOPES = ["profile", "email", "openid", "offline_access"];
+
+/**
+ * A refresh that could not renew the saved token.
+ *
+ * `refreshAccessToken` reports a dead refresh token as `token_exchange`, the
+ * same code a failed code exchange uses — but the reader's situation is
+ * different: the store holds a session that has expired, and the fix is to
+ * sign in again, not to retry a login that was never attempted. The CLI's
+ * message table has a case for exactly that, so the code is raised here
+ * rather than leaving it to fall through to "Not signed in".
+ */
+function tokenExpired(error: unknown): ClerkCliAuthError {
+  if (error instanceof ClerkCliAuthError && error.code === "token_expired")
+    return error;
+  const detail = error instanceof Error ? error.message : String(error);
+  return new ClerkCliAuthError(
+    "token_expired",
+    `Saved session could not be refreshed: ${detail}`,
+  );
+}
 
 function normalizeIssuer(issuer: string): string {
   const normalized = issuer.trim().replace(/\/+$/, "");
@@ -146,7 +167,23 @@ export class ClerkCliAuth {
       try {
         await this.config.storage.delete("user");
       } catch (error) {
-        throw storageError("clear stored user", error);
+        // A delete can fail on a machine whose keychain is unreachable while
+        // the file store works — a redirected HOME, a locked login keychain,
+        // a CI container — even after it cleared the copy `get()` would have
+        // read. Aborting the whole login there would make the CLI unusable on
+        // exactly the machines that already fell back to the file, so check
+        // what the guarantee actually needs: no *readable* old profile to
+        // pair with the new token. Only a definite "there is nothing to
+        // read" clears the way; an unreadable store is treated like a
+        // still-readable profile, because a pairing this call cannot rule
+        // out is exactly what must not be written.
+        let cleared = false;
+        try {
+          cleared = (await this.config.storage.get("user")) === null;
+        } catch {
+          cleared = false;
+        }
+        if (!cleared) throw storageError("clear stored user", error);
       }
       await this.setJson("tokens", tokens);
       await this.setJson("user", user);
@@ -162,13 +199,22 @@ export class ClerkCliAuth {
       // Also reached when the opener rejects after the browser has already
       // delivered its callback, which is the case where only this call can
       // tell the reader anything. A no-op if the response was already sent.
+      // A configuration failure is its own reason on the page: the reader's
+      // fix is an updated or corrected CLI, not a retry of the code exchange
+      // that never ran. The account a failed sign-in left in place is passed
+      // along too, read from the store and never the network, so the page can
+      // say what the terminal says — but the page shows it only for
+      // `userinfo_failed`, where the store provably was not touched.
       const reason = (error as { code?: unknown }).code;
       server.respond({
         kind: "error",
         reason:
           reason === "userinfo" || reason === "storage"
             ? (`${reason}_failed` as const)
-            : "token_exchange_failed",
+            : reason === "config"
+              ? "config_failed"
+              : "token_exchange_failed",
+        previousAccount: accountLabel(await this.getCachedUser()),
       });
       throw error;
     } finally {
@@ -185,12 +231,20 @@ export class ClerkCliAuth {
 
     if (!tokens.refreshToken) return null;
 
-    const refreshed = await refreshAccessToken({
-      issuer: this.config.issuer,
-      clientId: this.config.clientId,
-      refreshToken: tokens.refreshToken,
-      scopes: this.config.scopes,
-    });
+    let refreshed: TokenSet;
+    try {
+      refreshed = await refreshAccessToken({
+        issuer: this.config.issuer,
+        clientId: this.config.clientId,
+        refreshToken: tokens.refreshToken,
+        scopes: this.config.scopes,
+      });
+    } catch (error) {
+      // The stored token is unusable and could not be renewed. This is its
+      // own outcome: "not signed in" would hide a session the user still has
+      // to clear or renew with `petdex login`.
+      throw tokenExpired(error);
+    }
     const nextTokens = {
       ...tokens,
       ...refreshed,
@@ -223,6 +277,31 @@ export class ClerkCliAuth {
     });
     await this.setJson("user", user);
     return user;
+  }
+
+  /**
+   * The profile of a session that is actually usable, without any network
+   * call. Used by the CLI to name the account in a message that claims a
+   * previous sign-in is still in effect.
+   *
+   * Both records are read, because only the pair is evidence: `tokens` are
+   * written before `user`, and either key can be damaged on its own, so a
+   * readable profile beside an unparsable token record is an account no
+   * command can act as. Reporting that as "your previous sign-in" would be
+   * the same wrong-answer problem the messages exist to remove.
+   *
+   * Never throws: a store it cannot read is reported as "no previous
+   * session", which is what the command's own credential access will hit
+   * anyway.
+   */
+  async getCachedUser(): Promise<UserInfo | null> {
+    try {
+      const tokens = await this.getJson<TokenSet>("tokens");
+      if (!tokens?.accessToken) return null;
+      return await this.getJson<UserInfo>("user");
+    } catch {
+      return null;
+    }
   }
 
   async logout(): Promise<void> {

@@ -64,7 +64,7 @@ export function describeLoginFailure(
   const code = error instanceof ClerkCliAuthError ? error.code : undefined;
   const kept = previousAccount
     ? `Your previous sign-in (${previousAccount}) is still saved and still in use.`
-    : "Nothing was saved, and the CLI stays signed out.";
+    : "No usable sign-in is stored, and the CLI stays signed out.";
 
   if (code === "userinfo") {
     return `This sign-in wasn't saved: your profile couldn't be loaded (${detail}). ${kept}`;
