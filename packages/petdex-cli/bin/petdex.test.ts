@@ -489,19 +489,25 @@ test("submit scenario", async () => {
   test("an auth failure mid-batch stops the rest and reports once", async () => {
     // The server refused the bearer and the store cannot produce a new one.
     // Repeating that per pet is noise: the batch stops, and the pets after it
-    // are reported once as "not attempted", not as failures.
+    // are reported once as "not attempted", not as failures. The pet whose
+    // presign was actually refused is a failure of its own — calling it "not
+    // attempted" would undercount what happened.
     const result = await runScenario({
       pets: ["pet-one", "pet-two"],
       duplicateSlugs: [],
       promptChoice: "skip",
-      tokens: ["tok-1", "tok-1", null],
+      tokens: ["tok-1", "tok-2", null],
       useParent: true,
     });
 
     // Only the first pet was ever presigned.
     expect(result.presigns).toBe(1);
-    expect(result.sent).toEqual(["Bearer tok-1"]);
-    expect(result.notes.join("\n")).toContain("not attempted");
+    expect(result.sent).toEqual(["Bearer tok-2"]);
+    const notes = result.notes.join("\n");
+    expect(notes).toContain("pet-one");
+    // One pet was attempted (and failed); exactly one was left unsent.
+    expect(notes).toContain("1 not attempted");
+    expect(notes).not.toContain("2 not attempted");
   });
 
   test("a retry refused with a fresh token stops the batch too", async () => {
@@ -528,5 +534,43 @@ test("submit scenario", async () => {
     expect(result.notes.join("\n")).toContain(
       "rejected again after refreshing",
     );
+  });
+
+  test("a one-pet batch stopped by the retried refusal has no '0 not attempted' line", async () => {
+    // The aborting pet is already in the failure list with its own cause.
+    // There is nothing left over, and a line labelled "0 not attempted"
+    // contradicts the failure above it — in a script it reads as an extra
+    // failed item.
+    const result = await runScenario({
+      pets: ["only-pet"],
+      duplicateSlugs: [],
+      promptChoice: "skip",
+      tokens: ["tok-1", "tok-2", "tok-3"],
+    });
+
+    const notes = result.notes.join("\n");
+    expect(notes).toContain("rejected again after refreshing");
+    expect(notes).not.toContain("not attempted");
+    expect(notes).not.toContain("0 not attempted");
+  });
+
+  test("a store that keeps handing back the refused bearer stops the batch", async () => {
+    // The re-resolve answered with the very token the server just refused.
+    // The session exists but this bearer is not accepted, so no later pet can
+    // fix it: each one would spend a presign to learn the same refusal.
+    const result = await runScenario({
+      pets: ["pet-one", "pet-two"],
+      duplicateSlugs: [],
+      promptChoice: "skip",
+      tokens: ["tok-1", "tok-1", "tok-1", "tok-1"],
+      useParent: true,
+    });
+
+    // The first pet only.
+    expect(result.presigns).toBe(1);
+    const notes = result.notes.join("\n");
+    expect(notes).toContain("stored session did not change");
+    expect(notes).toContain("1 not attempted");
+    expect(notes).not.toContain("2 not attempted");
   });
 });

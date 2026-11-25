@@ -875,6 +875,121 @@ describe("every write takes the process-local mutex", () => {
       tokens: "fresh",
     });
   });
+
+  test("a waiter that timed out leaves the queue in place for the next caller", async () => {
+    // A caller queued with a deadline gives up without ever running its
+    // operation. Its queue entry had replaced the holder's in the map, and
+    // deleting that entry would leave the map empty while the holder is still
+    // inside its section: the next caller would take `Promise.resolve()` and
+    // run beside it. The timed-out call must put the displaced entry back.
+    const key = `${filePath}.lock`;
+    let inside = 0;
+    let maxInside = 0;
+    let releaseHolder: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      releaseHolder = resolve;
+    });
+    let holding: () => void = () => {};
+    const holdingStarted = new Promise<void>((resolve) => {
+      holding = resolve;
+    });
+
+    const holder = withFileMutex(key, async () => {
+      inside++;
+      maxInside = Math.max(maxInside, inside);
+      holding();
+      await gate;
+      inside--;
+    });
+    await holdingStarted;
+
+    const queued = withFileMutex(
+      key,
+      async () => {
+        inside++;
+        maxInside = Math.max(maxInside, inside);
+        inside--;
+      },
+      40,
+    );
+    await expect(queued).rejects.toMatchObject({
+      name: "FileMutexTimeoutError",
+    });
+
+    // Arrives after the timed-out waiter is gone; the holder is still in.
+    let thirdRan = false;
+    const third = withFileMutex(key, async () => {
+      inside++;
+      maxInside = Math.max(maxInside, inside);
+      thirdRan = true;
+      inside--;
+    });
+    await Bun.sleep(100);
+    expect(thirdRan).toBe(false);
+    expect(maxInside).toBe(1);
+
+    releaseHolder();
+    await holder;
+    await third;
+    expect(thirdRan).toBe(true);
+    expect(maxInside).toBe(1);
+  });
+
+  test("a repairing reader stays out after a queued write timed out", async () => {
+    // The same defect through the store. A write queued behind a holder
+    // times out and must not take the mutex entry with it: a reader that
+    // finds a torn file re-enters the same mutex to move it, and if the map
+    // is empty it lands inside the holder's section and renames the file.
+    await writeFile(filePath, "{torn-record");
+
+    let releaseHolder: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      releaseHolder = resolve;
+    });
+    let holding: () => void = () => {};
+    const holdingStarted = new Promise<void>((resolve) => {
+      holding = resolve;
+    });
+    const holder = withFileMutex(`${filePath}.lock`, async () => {
+      holding();
+      await gate;
+    });
+    await holdingStarted;
+
+    const impatient = createCredentialStore("file", {
+      filePath,
+      lockTimeoutMs: 40,
+    });
+    const failure = await impatient.set("tokens", "would-be-write").then(
+      () => null,
+      (error: unknown) => error as Error,
+    );
+    // The holder was another operation in this process; the lock file is not
+    // even there, so pointing the reader at "another petdex process" would
+    // send them hunting for a second CLI.
+    expect(failure?.message).toContain(
+      "another operation in this petdex process",
+    );
+    expect(failure?.message).not.toContain("another petdex process");
+
+    const reader = createCredentialStore("file", { filePath });
+    const reading = reader.get("tokens");
+    await Bun.sleep(250);
+
+    expect(
+      await stat(filePath).then(
+        () => true,
+        () => false,
+      ),
+    ).toBe(true);
+    expect(
+      (await readdir(directory)).filter((n) => n.includes(".corrupt-")),
+    ).toEqual([]);
+
+    releaseHolder();
+    await holder;
+    await reading;
+  });
 });
 
 describe("keychain compare-and-swap honesty", () => {

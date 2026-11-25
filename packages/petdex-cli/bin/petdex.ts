@@ -907,11 +907,11 @@ async function cmdSubmit(args: string[]) {
   // presign that comes back 401 re-resolves and retries that pet once — the
   // server saying the bearer was refused is the only reliable trigger, and
   // it keeps a healthy batch at one resolve per token. When the refresh
-  // cannot produce a token, *or* the freshly resolved token is refused as
-  // well, the whole batch stops with one report: repeating the same auth
-  // failure per pet is the noise this loop exists to avoid, and the pets
-  // after it would fail identically. A retry that is refused too is the
-  // server saying the session itself is no good, which no later pet can fix.
+  // cannot produce a token, *or* the store cannot produce a *different* one,
+  // the whole batch stops with one report: repeating the same auth failure
+  // per pet is the noise this loop exists to avoid, and the pets after it
+  // would fail identically. A retry that is refused too is the server saying
+  // the session itself is no good, which no later pet can fix.
   try {
     token = await resolveSubmitToken(auth);
   } catch (error) {
@@ -920,7 +920,12 @@ async function cmdSubmit(args: string[]) {
   }
 
   let abortReason: string | null = null;
+  // How many pets the loop actually entered. The tail after `break` is the
+  // batch that was never sent; the pet the abort landed on is recorded as a
+  // failure by the handler below like any other.
+  let attempted = 0;
   for (const cand of toSubmit) {
+    attempted++;
     const ps = p.spinner();
     ps.start(`Submitting ${pc.cyan(cand.label)}`);
     try {
@@ -933,14 +938,22 @@ async function cmdSubmit(args: string[]) {
         try {
           nextToken = await resolveSubmitToken(auth);
         } catch (authError) {
-          ps.stop(`${pc.red("×")} ${pc.cyan(cand.label)}`);
+          // This pet's presign went out and was refused; the store cannot
+          // produce a token to retry with. Rethrown so the handler below
+          // records the pet that was actually attempted, rather than folding
+          // it into the pets that never were.
           abortReason = authFailureMessage(authError);
-          break;
+          throw authError;
         }
         // The store answered with the same bearer the server just refused:
         // the session exists but this token is not accepted, and sending it
-        // again would only repeat the refusal. Reported as that pet's failure.
-        if (nextToken === token) throw err;
+        // again would only repeat the refusal. No later pet can fix that —
+        // every one of them would spend a presign to learn the same thing —
+        // so this stops the batch as well.
+        if (nextToken === token) {
+          abortReason = `the sign-in was refused and the stored session did not change (${err.message}); run ${pc.cyan("petdex login")} to sign in again`;
+          throw err;
+        }
         token = nextToken;
         try {
           result = await submitOne(cand, token, license);
@@ -960,7 +973,11 @@ async function cmdSubmit(args: string[]) {
       );
       succeeded++;
     } catch (err) {
-      const msg = (err as Error).message;
+      // When this pet's failure is what stopped the batch, the reason names
+      // the cause once, here — the raw 401 would repeat what the reason
+      // already says, and the pets that were never sent get no line of their
+      // own to carry it when there are none of them.
+      const msg = abortReason ?? (err as Error).message;
       ps.stop(
         `${pc.red("×")} ${pc.cyan(cand.label)} ${pc.red(msg.slice(0, 60))}`,
       );
@@ -974,15 +991,19 @@ async function cmdSubmit(args: string[]) {
   }
 
   if (abortReason !== null) {
-    // Stopped mid-batch: nothing after this point was attempted, so it is
-    // reported as one line naming the cause — "failed" would be a claim the
-    // CLI cannot make about pets it never sent.
-    const notAttempted = toSubmit.length - succeeded - failures.length;
-    failed = toSubmit.length - succeeded;
-    failures.push({
-      label: `${notAttempted} not attempted`,
-      error: abortReason,
-    });
+    // Stopped mid-batch: only the pets after this point were never attempted,
+    // and they are reported as one line naming the cause — "failed" would be
+    // a claim the CLI cannot make about pets it never sent. The aborting pet
+    // is already in the list above with its own cause, so a count of zero is
+    // not a line at all: "0 not attempted" under a failure that explains
+    // itself is noise, and in a script it reads as a failed item.
+    const notAttempted = toSubmit.length - attempted;
+    if (notAttempted > 0) {
+      failures.push({
+        label: `${notAttempted} not attempted`,
+        error: abortReason,
+      });
+    }
   }
 
   if (failures.length > 0) {

@@ -245,17 +245,30 @@ class FileCredentialStore implements CredentialStore {
         this.lockTimeoutMs,
       );
     } catch (error) {
-      if (error instanceof FileMutexTimeoutError) throw this.busyFailure();
+      if (error instanceof FileMutexTimeoutError)
+        throw this.busyFailure("mutex");
       throw error;
     }
   }
 
-  /** The one "someone else holds it" error, whichever wait timed out. */
-  private busyFailure(): ClerkCliAuthError {
+  /**
+   * The one "someone else holds it" error, whichever wait timed out.
+   *
+   * Which wait it was matters to the reader: the process-local mutex is only
+   * ever held by another operation in *this* process — the lock file usually
+   * does not exist at that moment — while the lock-file loop means another
+   * petdex process. Sending every timeout to "another petdex process" has the
+   * reader hunting for a second CLI that is not running.
+   */
+  private busyFailure(
+    waitedOn: "mutex" | "lock-file" = "lock-file",
+  ): ClerkCliAuthError {
     return storageError(
       `acquire lock ${this.lockPath}`,
       new Error(
-        `the credential file is busy (held by another petdex process) past ${this.lockTimeoutMs}ms`,
+        waitedOn === "mutex"
+          ? `the credential file is busy (another operation in this petdex process held it) past ${this.lockTimeoutMs}ms`
+          : `the credential file is busy (held by another petdex process) past ${this.lockTimeoutMs}ms`,
       ),
     );
   }

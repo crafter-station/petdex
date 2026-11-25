@@ -635,9 +635,65 @@ describe("a refresh that failed", () => {
     if (!outcome.ok) {
       expect(outcome.error.code).toBe("token_expired");
       expect(outcome.error.message).toContain("invalid_grant");
+      // The verdict could not be read *because the store failed*, not
+      // because the endpoint was unreachable. Without that sentence the
+      // reader waits for the service instead of repairing the credentials.
+      expect(outcome.error.message).toContain(
+        "could not be read on this machine",
+      );
+      expect(outcome.error.message).toContain("transient store read failure");
     }
     // One refresh, one decision: the refused bearer is never returned and the
     // loop does not spend a second round trip on it.
+    expect(refreshRequests).toBe(1);
+    expect(values.get("tokens")).toBe(JSON.stringify(expiredA));
+  });
+
+  test("a temporary refresh failure with an unreadable store names the local read failure", async () => {
+    // Same folding, the other code: the provider is merely unavailable, so
+    // the reader is told to retry — and also that this machine could not
+    // read its own copy, which is the half the generic text used to hide.
+    const values = new Map<string, string>([
+      ["tokens", JSON.stringify(expiredA)],
+    ]);
+    let tokensGets = 0;
+    const store: CredentialStore = {
+      get: async (key) => {
+        if (key === "tokens") {
+          tokensGets++;
+          // Not an Error object: a keyring binding can reject with a plain
+          // string, and the message must still carry it.
+          if (tokensGets === 2) throw "keychain is locked";
+        }
+        return values.get(key) ?? null;
+      },
+      set: async (key, value) => {
+        values.set(key, value);
+      },
+      delete: async (key) => {
+        values.delete(key);
+      },
+      replaceIfUnchanged: async () => false,
+    };
+    let refreshRequests = 0;
+    type FetchArgs = Parameters<typeof fetch>;
+    globalThis.fetch = (async (input: FetchArgs[0]) => {
+      if (!String(input).startsWith(`${ISSUER}/oauth/token`)) {
+        return new Response("unexpected", { status: 500 });
+      }
+      refreshRequests++;
+      return json({ error: "unavailable" }, 503);
+    }) as unknown as typeof fetch;
+
+    const failure = await authOver(store)
+      .getAccessToken()
+      .then(
+        () => null,
+        (error: { code?: string; message?: string }) => error,
+      );
+    expect(failure?.code).toBe("refresh_failed");
+    expect(failure?.message).toContain("could not be checked");
+    expect(failure?.message).toContain("keychain is locked");
     expect(refreshRequests).toBe(1);
     expect(values.get("tokens")).toBe(JSON.stringify(expiredA));
   });
@@ -803,6 +859,133 @@ describe("failed-refresh classification", () => {
         (error: unknown) => error as { code?: string },
       );
     expect(failure?.code).toBe("token_expired");
+  });
+});
+
+describe("a tokens record that is not a token set", () => {
+  // `describeSavedSession` calls these bytes `damaged`, and `readCurrentSession`
+  // rejects them. The primary read path must agree: handing `JSON.parse`'s
+  // result on unchecked turned `"null"` into a bare TypeError (reported as
+  // "Not signed in.") and `"false"`/`"[]"`/`"{}"` into a userinfo call with
+  // `Bearer undefined`, which the CLI then described as "Signed in".
+  const BAD_SHAPES: Array<[string, string]> = [
+    ["null", "null"],
+    ["false", "false"],
+    ["zero", "0"],
+    ["empty string", '""'],
+    ["array", "[]"],
+    ["empty object", "{}"],
+    ["empty access token", '{"accessToken":""}'],
+  ];
+
+  for (const [name, raw] of BAD_SHAPES) {
+    test(`is a storage failure, not a session (${name})`, async () => {
+      const store = memoryStore();
+      await store.set("tokens", raw);
+      let userinfoCalls = 0;
+      type FetchArgs = Parameters<typeof fetch>;
+      globalThis.fetch = (async (input: FetchArgs[0]) => {
+        if (String(input).includes("/oauth/userinfo")) userinfoCalls++;
+        return json({ sub: "user_A" });
+      }) as unknown as typeof fetch;
+
+      const auth = new ClerkCliAuth({
+        clientId: "client-id",
+        issuer: ISSUER,
+        storage: store,
+      });
+
+      const tokenFailure = await auth.getAccessToken().then(
+        () => null,
+        (error: { code?: string }) => error,
+      );
+      expect(tokenFailure?.code).toBe("storage");
+      const whoamiFailure = await auth.whoami().then(
+        () => null,
+        (error: { code?: string }) => error,
+      );
+      expect(whoamiFailure?.code).toBe("storage");
+      // No request ever carried the record to the provider.
+      expect(userinfoCalls).toBe(0);
+      expect(await auth.describeSavedSession()).toEqual({ state: "damaged" });
+    });
+  }
+
+  test("a tokens slot that cannot be read is a read failure, not a sign-out", async () => {
+    // Different failure, same reader: an unreadable store must say so, not
+    // answer "no session" and let every command behave as if the user had
+    // never signed in.
+    const store: CredentialStore = {
+      get: async () => {
+        throw new Error("keychain is locked");
+      },
+      set: async () => {},
+      delete: async () => {},
+      replaceIfUnchanged: async () => false,
+    };
+    const auth = new ClerkCliAuth({
+      clientId: "client-id",
+      issuer: ISSUER,
+      storage: store,
+    });
+    const failure = await auth.getAccessToken().then(
+      () => null,
+      (error: { code?: string; message?: string }) => error,
+    );
+    expect(failure?.code).toBe("storage");
+    expect(failure?.message).toContain("read tokens");
+    expect(failure?.message).toContain("keychain is locked");
+  });
+});
+
+describe("whoami when the profile slot cannot be read", () => {
+  test("reports the store failure instead of fetching a profile", async () => {
+    // A slot that does not parse is not an error (it heals — see the damaged
+    // profile tests); a store that cannot be read at all is. Folding it into
+    // "no profile" would send whoami to the network and then write the answer
+    // into a store it just failed to read.
+    const values = new Map<string, string>([
+      [
+        "tokens",
+        JSON.stringify({
+          accessToken: "tok-A",
+          expiresAt: Date.now() + 3_600_000,
+        }),
+      ],
+    ]);
+    const store: CredentialStore = {
+      get: async (key) => {
+        if (key === "user") throw new Error("keychain is locked");
+        return values.get(key) ?? null;
+      },
+      set: async (key, value) => {
+        values.set(key, value);
+      },
+      delete: async (key) => {
+        values.delete(key);
+      },
+      replaceIfUnchanged: async () => false,
+    };
+    let userinfoCalls = 0;
+    globalThis.fetch = (async () => {
+      userinfoCalls++;
+      return json({ sub: "user_A" });
+    }) as unknown as typeof fetch;
+
+    const auth = new ClerkCliAuth({
+      clientId: "client-id",
+      issuer: ISSUER,
+      storage: store,
+    });
+
+    const failure = await auth.whoami().then(
+      () => null,
+      (error: { code?: string; message?: string }) => error,
+    );
+    expect(failure?.code).toBe("storage");
+    expect(failure?.message).toContain("read user");
+    expect(userinfoCalls).toBe(0);
+    expect(values.has("user")).toBe(false);
   });
 });
 

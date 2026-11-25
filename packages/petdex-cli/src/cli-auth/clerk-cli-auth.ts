@@ -74,15 +74,41 @@ const WHOAMI_PROFILE_READS = 3;
  * for the same reason `getStoredTokens` does.
  */
 function parseStoredTokens(raw: string): TokenSet | null {
+  const read = readStoredTokens(raw);
+  return read.ok ? read.tokens : null;
+}
+
+/**
+ * The one place that decides whether a stored `tokens` value is a credential.
+ *
+ * Three readers see the same bytes — `resolveSession` (through
+ * `getStoredTokens`), `readCurrentSession` and `describeSavedSession` — and
+ * all of them must give the same answer. Calling a `null`, `false`, `[]` or
+ * `{}` record a token set sends `Bearer undefined` to the profile endpoint
+ * and then reports "Signed in, but your profile couldn't be loaded", while
+ * `describeSavedSession` calls the same bytes `damaged`. So the shape rule
+ * lives here and the failure carries *why* it failed: bytes that are not JSON
+ * at all are a parse error, bytes that parse into something else are a shape
+ * error, and both become a `storage` answer upstream.
+ */
+type StoredTokensRead =
+  | { ok: true; tokens: TokenSet }
+  | { ok: false; reason: "parse"; error: unknown }
+  | { ok: false; reason: "shape" };
+
+function readStoredTokens(raw: string): StoredTokensRead {
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(raw) as TokenSet;
-    if (!parsed || typeof parsed !== "object") return null;
-    if (typeof parsed.accessToken !== "string" || !parsed.accessToken)
-      return null;
-    return parsed;
-  } catch {
-    return null;
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    return { ok: false, reason: "parse", error };
   }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+    return { ok: false, reason: "shape" };
+  const tokens = parsed as TokenSet;
+  if (typeof tokens.accessToken !== "string" || !tokens.accessToken)
+    return { ok: false, reason: "shape" };
+  return { ok: true, tokens };
 }
 
 /**
@@ -183,13 +209,36 @@ function isDeadRefreshGrant(error: unknown): boolean {
  * from. Dead credentials are `token_expired`; anything else — an endpoint
  * outage, an offline machine, a timeout — keeps its own code, because the
  * session may well still be valid and only the check failed.
+ *
+ * `readFailure` is the re-read that decides "still the same session" failing
+ * too. The provider's answer still picks the code — the session's own fate
+ * does not depend on whether this machine could read its copy — but the
+ * message has to mention it: without that, a local credential file that
+ * cannot be read looks exactly like a service outage, and the reader waits
+ * for the endpoint instead of repairing the store.
  */
-function refreshFailure(error: unknown): ClerkCliAuthError {
-  if (isDeadRefreshGrant(error)) return tokenExpired(error);
+function refreshFailure(
+  error: unknown,
+  readFailure?: unknown,
+): ClerkCliAuthError {
+  const suffix =
+    readFailure === undefined
+      ? ""
+      : `; the saved credentials also could not be read on this machine (${
+          readFailure instanceof Error
+            ? readFailure.message
+            : String(readFailure)
+        })`;
+  if (isDeadRefreshGrant(error)) {
+    const expired = tokenExpired(error);
+    return suffix
+      ? new ClerkCliAuthError(expired.code, `${expired.message}${suffix}`)
+      : expired;
+  }
   const detail = error instanceof Error ? error.message : String(error);
   return new ClerkCliAuthError(
     "refresh_failed",
-    `Saved session could not be checked with the sign-in service right now: ${detail}`,
+    `Saved session could not be checked with the sign-in service right now: ${detail}${suffix}`,
   );
 }
 
@@ -363,10 +412,14 @@ export class ClerkCliAuth {
       // cannot parse) is not "still in use", and the page must not say it is.
       const reason = (error as { code?: unknown }).code;
       const previous = await this.describeSavedSession();
+      // Account and state travel together or not at all: the page has no
+      // default between them, and passing a name with no state would make it
+      // describe a session it has no evidence for.
       const inEffect =
-        previous.state === "usable" || previous.state === "expired"
-          ? { account: previous.label, state: previous.state }
-          : { account: undefined, state: undefined };
+        (previous.state === "usable" || previous.state === "expired") &&
+        previous.label
+          ? { previousAccount: previous.label, previousSession: previous.state }
+          : {};
       server.respond({
         kind: "error",
         reason:
@@ -375,8 +428,7 @@ export class ClerkCliAuth {
             : reason === "config"
               ? "config_failed"
               : "token_exchange_failed",
-        previousAccount: inEffect.account,
-        previousSession: inEffect.state,
+        ...inEffect,
       });
       throw error;
     } finally {
@@ -463,9 +515,9 @@ export class ClerkCliAuth {
         // it worked. The loop only continues on a record that actually
         // changed.
         const changed = await this.storedTokensVerdict(raw);
-        if (changed === "logged-out") return null;
-        if (changed === "same" || changed === "unknown")
-          throw refreshFailure(error);
+        if (changed.verdict === "logged-out") return null;
+        if (changed.verdict === "same" || changed.verdict === "unknown")
+          throw refreshFailure(error, changed.readFailure);
         continue;
       }
       const nextTokens = {
@@ -498,24 +550,33 @@ export class ClerkCliAuth {
    * for the opposite case: a login that is *still* writing can replace the
    * record again while this call is reading, so each observation is
    * classified in turn, up to `MAX_REFRESH_ATTEMPTS` reads.
+   *
+   * `readFailure` travels with an `unknown` verdict so the message built from
+   * it can say the store could not be read, rather than leaving the reader to
+   * guess "service outage" from a provider answer that was fine.
    */
-  private async storedTokensVerdict(raw: string): Promise<TokensVerdict> {
-    let verdict: TokensVerdict = "unknown";
-    for (let read = 0; read < MAX_REFRESH_ATTEMPTS; read++) {
+  private async storedTokensVerdict(raw: string): Promise<{
+    verdict: TokensVerdict;
+    readFailure?: unknown;
+  }> {
+    // Every path out of this loop is a `return`, so the bound is the
+    // `read + 1 >= MAX_REFRESH_ATTEMPTS` check rather than the loop header.
+    // Keeping it that way leaves no unreachable tail for coverage to report
+    // as a branch nobody exercises.
+    for (let read = 0; ; read++) {
       let current: string | null;
       try {
         current = await this.config.storage.get("tokens");
-      } catch {
-        return "unknown";
+      } catch (readFailure) {
+        return { verdict: "unknown", readFailure };
       }
-      verdict = await classifyTokens(current, raw);
-      if (verdict !== "changed") return verdict;
+      const verdict = await classifyTokens(current, raw);
+      if (verdict !== "changed") return { verdict };
       // Still moving: either this read is the settled one, or the next pass
       // in `getAccessToken` takes over on the last observation.
-      if (read + 1 >= MAX_REFRESH_ATTEMPTS) return "changed";
+      if (read + 1 >= MAX_REFRESH_ATTEMPTS) return { verdict };
       await Promise.resolve();
     }
-    return verdict;
   }
 
   async whoami(): Promise<UserInfo | null> {
@@ -805,9 +866,26 @@ export class ClerkCliAuth {
     raw: string;
     tokens: TokenSet;
   } | null> {
-    const stored = await this.getRawJson<TokenSet>("tokens");
-    if (!stored) return null;
-    return { raw: stored.raw, tokens: stored.value };
+    const raw = await this.currentTokensRaw();
+    if (raw === null) return null;
+
+    // The same shape rule `describeSavedSession` and `readCurrentSession`
+    // apply. A record that is present but is not a token set is a storage
+    // failure, not "signed out" and not a session: handing it to the refresh
+    // and userinfo paths produces a bare TypeError or a `Bearer undefined`
+    // request — and, on the second, the false claim that the user is signed
+    // in. `raw` is returned to the caller as the write's expectation, so an
+    // empty or damaged value still has somewhere to be compared against.
+    const read = readStoredTokens(raw);
+    if (!read.ok) {
+      throw storageError(
+        "parse stored tokens",
+        read.reason === "shape"
+          ? new Error("the saved token record is not a token set")
+          : read.error,
+      );
+    }
+    return { raw, tokens: read.tokens };
   }
 
   /**

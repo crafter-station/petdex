@@ -38,25 +38,41 @@ export type CallbackFailureReason =
 
 export type CallbackOutcome =
   | { kind: "success" }
-  | {
+  | ({
       kind: "error";
       reason: CallbackFailureReason;
-      /**
-       * The account a failed re-login left in effect, when the store pairs a
-       * name with a credential-shaped record. Naming it is what keeps the
-       * page from saying only "a previous sign-in, if any" while the terminal
-       * already knows whose. A profile with no credential beside it is not a
-       * session, and the caller passes no account for it.
-       */
-      previousAccount?: string;
-      /**
-       * What the named record is: `usable` (a token that has not run out, or
-       * one with a refresh token) or `expired` (saved, but no usable token).
-       * The copy differs because "still in use" is only true of the first —
-       * an expired record is saved and nothing more.
-       */
-      previousSession?: "usable" | "expired";
-    };
+    } & (
+      | {
+          // Nothing to name: no account, no state. The page falls back to the
+          // reason's own copy.
+          previousAccount?: undefined;
+          previousSession?: undefined;
+        }
+      | {
+          /**
+           * The account a failed re-login left in effect, when the store
+           * pairs a name with a credential-shaped record. Naming it is what
+           * keeps the page from saying only "a previous sign-in, if any"
+           * while the terminal already knows whose. A profile with no
+           * credential beside it is not a session, and the caller passes no
+           * account for it.
+           *
+           * Paired with `previousSession` on purpose: the copy differs by
+           * what the record is, and there is no safe default between the two.
+           * An account with no state on record would have to be described
+           * without claiming it works — the page must not print "still in
+           * use" for a caller that supplied no evidence of that.
+           */
+          previousAccount: string;
+          /**
+           * What the named record is: `usable` (a token that has not run
+           * out, or one with a refresh token) or `expired` (saved, but no
+           * usable token). The copy differs because "still in use" is only
+           * true of the first — an expired record is saved and nothing more.
+           */
+          previousSession: "usable" | "expired";
+        }
+    ));
 
 /**
  * Where the success page's button points.
@@ -535,20 +551,28 @@ export function renderCallbackPage(
 ): string {
   const isSuccess = outcome.kind === "success";
   const reason = isSuccess ? null : outcome.reason;
-  const previousAccount =
-    outcome.kind === "error" && outcome.previousAccount
-      ? clampDetail(maskAccount(outcome.previousAccount), 120)
+  // Only a paired account + state names the previous session. A caller that
+  // supplies one without the other — a JavaScript caller outside the types,
+  // or an older build — gets the reason's own copy: "still in use" is a claim
+  // that needs the record behind it, and there is no evidence-free default.
+  const previous =
+    outcome.kind === "error" &&
+    "previousAccount" in outcome &&
+    outcome.previousAccount &&
+    outcome.previousSession
+      ? {
+          account: clampDetail(maskAccount(outcome.previousAccount), 120),
+          state: outcome.previousSession,
+        }
       : undefined;
-  const previousSession =
-    outcome.kind === "error" ? outcome.previousSession : undefined;
 
   const strings = {} as Record<Locale, Record<string, string>>;
   for (const locale of LOCALES) {
     const s = STRINGS[locale];
-    const named = previousAccount
+    const named = previous
       ? NAMED_REASON[locale][reason as CallbackFailureReason]?.(
-          previousAccount,
-          previousSession ?? "usable",
+          previous.account,
+          previous.state,
         )
       : undefined;
     strings[locale] = {

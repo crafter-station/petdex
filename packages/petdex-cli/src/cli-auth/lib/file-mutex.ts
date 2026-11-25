@@ -75,25 +75,36 @@ export async function withFileMutex<T>(
   mutexes.set(key, slot);
 
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let tookTurn = false;
   try {
     if (timeoutMs !== undefined) {
-      const tookTurn = await Promise.race([
+      const gotTurn = await Promise.race([
         ready.then(() => true),
         new Promise<boolean>((resolve) => {
           timer = setTimeout(() => resolve(false), Math.max(0, timeoutMs));
           (timer as unknown as { unref?: () => void }).unref?.();
         }),
       ]);
-      if (!tookTurn) throw new FileMutexTimeoutError(timeoutMs);
+      if (!gotTurn) throw new FileMutexTimeoutError(timeoutMs);
     } else {
       await ready;
     }
+    tookTurn = true;
     return await operation();
   } finally {
     if (timer !== undefined) clearTimeout(timer);
     release();
-    // Drop the entry once this holder is the tail, so a long-lived process
-    // does not accumulate one promise per path it ever touched.
-    if (mutexes.get(key) === slot) mutexes.delete(key);
+    if (mutexes.get(key) === slot) {
+      // Drop the entry once this holder is the tail, so a long-lived process
+      // does not accumulate one promise per path it ever touched — but only
+      // when this call actually ran its operation. A waiter that timed out
+      // never ran, and while it was queued its slot had replaced the entry of
+      // the holder it was queued behind. Deleting that slot would empty the
+      // map while the holder is still inside its section, and the next caller
+      // would take `Promise.resolve()` and run beside it. Put the displaced
+      // entry back instead; the holder deletes it when it becomes the tail.
+      if (tookTurn) mutexes.delete(key);
+      else mutexes.set(key, previous);
+    }
   }
 }

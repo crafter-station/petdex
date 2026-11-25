@@ -186,6 +186,7 @@ describe("callback page previous account", () => {
         kind: "error",
         reason: "userinfo_failed",
         previousAccount: "old@example.test",
+        previousSession: "usable",
       },
       APP_URL,
     );
@@ -209,6 +210,7 @@ describe("callback page previous account", () => {
         kind: "error",
         reason: "storage_failed",
         previousAccount: "old@example.test",
+        previousSession: "usable",
       },
       APP_URL,
     );
@@ -225,6 +227,7 @@ describe("callback page previous account", () => {
         kind: "error",
         reason: "userinfo_failed",
         previousAccount: "user_2abc",
+        previousSession: "usable",
       },
       APP_URL,
     );
@@ -244,13 +247,37 @@ describe("callback page previous account", () => {
     expect(runPageScript(html).text("body")).toBe(plain);
   });
 
+  test("an account with no session state is not called 'still in use'", () => {
+    // The named copy differs by what the stored record is, and there is no
+    // safe default between the two: "still in use" is a claim about a
+    // credential. A caller that names an account and supplies no state gets
+    // the reason's own copy, not the most optimistic one. The type requires
+    // the pair; this pins the runtime behaviour for a JavaScript caller.
+    const plain = callbackStringsByLocale().en.reason.userinfo_failed;
+    const unpaired = {
+      kind: "error",
+      reason: "userinfo_failed",
+      previousAccount: "old@example.test",
+    } as unknown as Parameters<typeof renderCallbackPage>[0];
+    const html = renderCallbackPage(unpaired, APP_URL);
+    const body = runPageScript(html).text("body") ?? "";
+    expect(body).toBe(plain);
+    expect(body).not.toContain("still in use");
+    expect(html).not.toContain("o***@example.test");
+  });
+
   test("falls back for reasons that cannot name an account", () => {
     // A timeout or a declined consent has no "previous sign-in" story to tell,
     // and the named copy exists only for the two reasons a failed write can
     // leave one behind.
     const plain = callbackStringsByLocale().en.reason.timeout;
     const html = renderCallbackPage(
-      { kind: "error", reason: "timeout", previousAccount: "old@example.test" },
+      {
+        kind: "error",
+        reason: "timeout",
+        previousAccount: "old@example.test",
+        previousSession: "usable",
+      },
       APP_URL,
     );
     expect(runPageScript(html).text("body")).toBe(plain);
@@ -264,6 +291,7 @@ describe("callback page previous account", () => {
         kind: "error",
         reason: "userinfo_failed",
         previousAccount: '<img src=x onerror="alert(1)">',
+        previousSession: "usable",
       },
       APP_URL,
     );
@@ -278,6 +306,7 @@ describe("callback page previous account", () => {
         kind: "error",
         reason: "userinfo_failed",
         previousAccount: "a".repeat(500),
+        previousSession: "usable",
       },
       APP_URL,
     );
