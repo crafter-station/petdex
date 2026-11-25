@@ -574,3 +574,101 @@ test("submit scenario", async () => {
     expect(notes).not.toContain("2 not attempted");
   });
 });
+
+/**
+ * `whoami` renders claims the provider never promised to type.
+ *
+ * `parseStoredProfile` and `fetchUserInfo` both require `sub` to be a
+ * non-empty string, so that line is printed as-is. Everything else is
+ * whatever the userinfo answer carried — the shape rule deliberately does
+ * not inspect `email` — so the panel formats those claims itself. Reading
+ * an object claim with string interpolation printed `[object Object]`, a
+ * boolean printed `true`, and `""` or `[]` printed a blank line that reads
+ * like a label whose value went missing. `--` is the panel's own answer for
+ * "not set", and it is the same answer the sibling `name`/`username` lines
+ * give for the same values.
+ *
+ * The claim reaches the CLI through the store, so each value is seeded as a
+ * real saved profile in a redirected HOME and rendered by the real command
+ * with the real clack note. No module is mocked here.
+ */
+describe("whoami profile panel", () => {
+  const ROOT = path.resolve(import.meta.dir, "..");
+
+  /**
+   * Run the real `whoami` against a saved profile whose `email` is `value`.
+   *
+   * The CLI's file store is used because the keychain is unreachable under a
+   * redirected HOME; the seeded token is live, so `whoami` answers from the
+   * cached profile without a network call.
+   */
+  async function renderWhoami(email: unknown): Promise<string> {
+    const home = mkdtempSync(path.join(tmpdir(), "petdex-whoami-"));
+    try {
+      const dir = path.join(home, ".config", "clerk-cli-auth");
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(
+        path.join(dir, "default.json"),
+        JSON.stringify({
+          tokens: JSON.stringify({
+            accessToken: "tok-test",
+            expiresAt: Date.now() + 3_600_000,
+          }),
+          user: JSON.stringify({
+            sub: "user_test",
+            given_name: "Alice",
+            family_name: "Smith",
+            preferred_username: "alice",
+            email,
+          }),
+        }),
+      );
+      const child = Bun.spawn({
+        cmd: [process.execPath, `${ROOT}/bin/petdex.ts`, "whoami"],
+        env: {
+          ...process.env,
+          NO_COLOR: "1",
+          HOME: home,
+          PETDEX_TELEMETRY: "0",
+        },
+        stdin: "ignore",
+        stderr: "pipe",
+        stdout: "pipe",
+      });
+      const timer = setTimeout(() => child.kill("SIGKILL"), 20_000);
+      const [stdout, stderr] = await Promise.all([
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+        child.exited,
+      ]);
+      clearTimeout(timer);
+      expect(child.exitCode, stdout + stderr).toBe(0);
+      return stdout;
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  }
+
+  test.each([
+    ["an object", {}],
+    ["an array", []],
+    ["a boolean", true],
+    ["an empty string", ""],
+    ["null", null],
+    ["a number", 123],
+  ])("renders %s email as a dash, not the raw value", async (_name, email) => {
+    const stdout = await renderWhoami(email);
+
+    // clack pads every note line to the box width, so match the prefix only.
+    expect(stdout).toContain("email:   —");
+    expect(stdout).not.toContain("[object Object]");
+    expect(stdout).not.toContain("email:   true");
+    expect(stdout).not.toContain("email:   123");
+  });
+
+  test("still shows a real email", async () => {
+    const stdout = await renderWhoami("a@b.test");
+
+    expect(stdout).toContain("email:   a@b.test");
+  });
+});

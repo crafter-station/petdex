@@ -1079,6 +1079,7 @@ describe("a tokens record whose optional fields have the wrong type", () => {
   const RECORDS: Array<[string, Record<string, unknown>]> = [
     ["a string expiresAt", { accessToken: "tok-A", expiresAt: "not-a-number" }],
     ["a null expiresAt", { accessToken: "tok-A", expiresAt: null }],
+    ["a null refreshToken", { accessToken: "tok-A", refreshToken: null }],
     [
       "an epoch rendered as a string",
       { accessToken: "tok-A", expiresAt: "1300000000000" },

@@ -106,6 +106,13 @@ function parseStoredTokens(raw: string): TokenSet | null {
  * from this build (a hand-edit, an older layout, an external writer) —
  * declaring it not a token set is the honest answer, and the one every reader
  * can give without going to the network.
+ *
+ * `Array.isArray` here is defence in depth, the same way it is in
+ * `parseStoredProfile`: a JSON array has no own `accessToken`, so the rule
+ * below rejects it anyway and no behaviour test can tell the two apart
+ * (deleting the guard leaves the gate green). It stays because it states, at
+ * the point where the shape rule is written, what "an object" means; it is
+ * not relied on by any test.
  */
 type StoredTokensRead =
   | { ok: true; tokens: TokenSet }

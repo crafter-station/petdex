@@ -465,10 +465,18 @@ async function cmdWhoami() {
     const name = [asString(me.given_name), asString(me.family_name)]
       .filter(Boolean)
       .join(" ");
+    // Only `sub` is printed as-is. Both producers of a profile — the stored
+    // `user` slot read back by `parseStoredProfile` and a live userinfo answer
+    // through `fetchUserInfo` — reject anything whose `sub` is not a non-empty
+    // string, so this line always has a string to show. The other claims are
+    // whatever the provider sent and are never inspected, so each goes through
+    // `asString`: printing `email` directly showed `[object Object]` for an
+    // object claim, `true` for a boolean, and — for `""` or `[]` — a blank
+    // line that reads like a label with a value missing rather than "not set".
     p.note(
       [
         `${pc.dim("user:    ")}${me.sub}`,
-        `${pc.dim("email:   ")}${me.email ?? "—"}`,
+        `${pc.dim("email:   ")}${asString(me.email) ?? "—"}`,
         `${pc.dim("name:    ")}${name || "—"}`,
         `${pc.dim("username:")}${asString(me.preferred_username) ?? "—"}`,
       ].join("\n"),
