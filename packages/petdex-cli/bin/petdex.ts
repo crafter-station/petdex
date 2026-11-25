@@ -13,6 +13,7 @@ import {
   accountLabel,
   describeAuthFailure,
   describeLoginFailure,
+  type SavedSessionSummary,
 } from "../src/cli-auth/cli-messages.js";
 import { ClerkCliAuth } from "../src/cli-auth/index.js";
 import {
@@ -248,15 +249,16 @@ function printHelp() {
 // ─── commands ──────────────────────────────────────────────────────────────
 
 /**
- * The account the previous sign-in left behind, if any, for a message that
- * has to say whose session survived a failed login. The profile is read from
- * the saved record — never from the network. Only the failures that leave
- * the store untouched use it; `describeLoginFailure` says so per code.
+ * What the store held when a login failed, for the message that has to say
+ * what survived it. Read from the saved records — never from the network.
+ * Only the failures that leave the store untouched use it;
+ * `describeLoginFailure` says so per code, and `describeSavedSession` says
+ * what the two records can and cannot support.
  */
-async function previousAccountLabel(
+async function previousSessionSummary(
   auth: ClerkCliAuth,
-): Promise<string | undefined> {
-  return accountLabel(await auth.getCachedUser());
+): Promise<SavedSessionSummary> {
+  return auth.describeSavedSession();
 }
 
 async function cmdLogin() {
@@ -279,7 +281,7 @@ async function cmdLogin() {
     // profile failure leaves the store untouched, a credential-write failure
     // can leave it half saved. `describeLoginFailure` carries that split and
     // reads this label only for the cases where it holds.
-    const previous = auth ? await previousAccountLabel(auth) : undefined;
+    const previous = auth ? await previousSessionSummary(auth) : undefined;
     throw new Error(describeLoginFailure(err, previous));
   }
 }
@@ -771,14 +773,12 @@ async function cmdSubmit(args: string[]) {
 
   // Ensure auth before doing any work.
   const auth = await getAuth();
+  // The first resolution happens before any prompt or upload: it is what
+  // proves a usable session exists, and what the dedup lookup below uses.
+  // The batch resolves again after the prompts — see `resolveSubmitToken`.
   let token: string;
   try {
-    const t = await auth.getAccessToken();
-    if (!t) {
-      p.cancel(`Not signed in. Run ${pc.cyan("petdex login")}.`);
-      process.exit(1);
-    }
-    token = t;
+    token = await resolveSubmitToken(auth);
   } catch (error) {
     p.cancel(authFailureMessage(error));
     process.exit(1);
@@ -895,16 +895,53 @@ async function cmdSubmit(args: string[]) {
   let failed = 0;
   const failures: Array<{ label: string; error: string }> = [];
 
-  // `token` was just resolved above — refreshed if it was close to expiring,
-  // with a failure already reported and the command exited. Re-resolving it
-  // per candidate would make a dead refresh token cost the full network
-  // timeout once per pet, and print the same raw error in every row, so the
-  // batch runs on the token the command already proved it has.
+  // The token resolved before the prompts is the one the *interactive* part
+  // used — the dedup lookup. A duplicate decision or a batch confirmation can
+  // sit open for longer than an access token lives, and the presign below is
+  // the first authenticated call made after all of them. So the batch
+  // re-resolves here, once every prompt has settled: `getAccessToken()`
+  // refreshes when the record is near expiry, and a dead session is reported
+  // through `authFailureMessage` instead of as a 401 on the first pet.
+  //
+  // A batch longer than one token's life can still go stale mid-way, so a
+  // presign that comes back 401 re-resolves and retries that pet once — the
+  // server saying the bearer was refused is the only reliable trigger, and
+  // it keeps a healthy batch at one resolve per token. When the refresh
+  // cannot produce a token the whole batch stops with one report: repeating
+  // the same auth failure per pet is the noise this loop exists to avoid,
+  // and the pets after it would fail identically.
+  try {
+    token = await resolveSubmitToken(auth);
+  } catch (error) {
+    p.cancel(authFailureMessage(error));
+    process.exit(1);
+  }
+
+  let abortReason: string | null = null;
   for (const cand of toSubmit) {
     const ps = p.spinner();
     ps.start(`Submitting ${pc.cyan(cand.label)}`);
     try {
-      const result = await submitOne(cand, token, license);
+      let result: SubmitOneResult;
+      try {
+        result = await submitOne(cand, token, license);
+      } catch (err) {
+        if (!(err instanceof PresignAuthError)) throw err;
+        let nextToken: string;
+        try {
+          nextToken = await resolveSubmitToken(auth);
+        } catch (authError) {
+          ps.stop(`${pc.red("×")} ${pc.cyan(cand.label)}`);
+          abortReason = authFailureMessage(authError);
+          break;
+        }
+        // The store answered with the same bearer the server just refused:
+        // the session exists but this token is not accepted, and sending it
+        // again would only repeat the refusal. Reported as that pet's failure.
+        if (nextToken === token) throw err;
+        token = nextToken;
+        result = await submitOne(cand, token, license);
+      }
       profileUrl = absoluteProfileUrl(result.profileUrl) ?? profileUrl;
       ps.stop(
         `${pc.green("✓")} ${pc.cyan(cand.label)} → ${formatSubmissionOutcome(result)}`,
@@ -918,6 +955,18 @@ async function cmdSubmit(args: string[]) {
       failures.push({ label: cand.label, error: msg });
       failed++;
     }
+  }
+
+  if (abortReason !== null) {
+    // Stopped mid-batch: nothing after this point was attempted, so it is
+    // reported as one line naming the cause — "failed" would be a claim the
+    // CLI cannot make about pets it never sent.
+    const notAttempted = toSubmit.length - succeeded - failures.length;
+    failed = toSubmit.length - succeeded;
+    failures.push({
+      label: `${notAttempted} not attempted`,
+      error: abortReason,
+    });
   }
 
   if (failures.length > 0) {
@@ -1258,6 +1307,23 @@ async function readZipCandidate(zipPath: string): Promise<Candidate | null> {
 
 // ─── upload pipeline ───────────────────────────────────────────────────────
 
+/** A presign refusal that names the bearer as the problem (HTTP 401). */
+class PresignAuthError extends Error {}
+
+/**
+ * A token for the submit batch, resolved *after* the interactive prompts.
+ *
+ * Kept separate from the pre-scan resolution so the two moments are distinct
+ * in the code: the first proves a session exists before doing any work, the
+ * second is what the presign calls actually use. A missing session is an
+ * error here, not `null`, because every caller would have to report it.
+ */
+async function resolveSubmitToken(auth: ClerkCliAuth): Promise<string> {
+  const token = await auth.getAccessToken();
+  if (!token) throw new Error("Not signed in.");
+  return token;
+}
+
 async function submitOne(
   cand: Candidate,
   bearer: string,
@@ -1281,6 +1347,13 @@ async function submitOne(
     }),
   });
 
+  if (presignRes.status === 401) {
+    // The server refused the bearer itself, which is the one presign failure
+    // a fresh token can fix. Typed separately so the batch can re-resolve and
+    // retry instead of reporting the pet as failed.
+    const text = await presignRes.text().catch(() => "");
+    throw new PresignAuthError(`presign 401 ${text.slice(0, 100)}`);
+  }
   if (!presignRes.ok) {
     const text = await presignRes.text().catch(() => "");
     throw new Error(`presign ${presignRes.status} ${text.slice(0, 100)}`);

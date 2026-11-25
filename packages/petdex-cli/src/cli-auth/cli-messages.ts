@@ -1,6 +1,30 @@
 import { ClerkCliAuthError, type UserInfo } from "./types.js";
 
 /**
+ * What a failed login left behind, as far as a read of the store can say.
+ *
+ * The two questions the messages used to answer from one `getCachedUser()`
+ * are different, and a profile alone answers neither:
+ *
+ * - `none`: no parseable token record. Nothing was in effect to begin with.
+ * - `expired`: a token record that has run out and has no refresh token to
+ *   renew it. A profile may well sit beside it; it names an account, not a
+ *   usable session.
+ * - `usable`: a token record that has not expired, or has a refresh token.
+ *   Still not proof — a revoked token reads the same — which is why the
+ *   message below says the attempt did not change it, not that it works.
+ * - `unknown`: the store could not be read. The attempt may or may not have
+ *   written something, and nothing about the account can be claimed.
+ */
+export type SavedSessionState = "none" | "expired" | "usable" | "unknown";
+
+export interface SavedSessionSummary {
+  state: SavedSessionState;
+  /** The account the stored pair names, when the store reads far enough. */
+  label?: string;
+}
+
+/**
  * The name a person recognises for an account: the email they signed in
  * with, then a username, then the opaque subject as the last resort. Shared
  * by the terminal and the callback page so both name the same account with
@@ -34,6 +58,8 @@ export function describeAuthFailure(error: unknown): string {
       return `Your saved credentials couldn't be read on this machine (${detail}). Run \`petdex logout\`, then \`petdex login\`.`;
     case "token_expired":
       return `Your saved session has expired (${detail}). Run \`petdex login\` to sign in again.`;
+    case "refresh_failed":
+      return `Your saved session couldn't be checked with the sign-in service (${detail}). It has not been changed; try again once the service is reachable, or run \`petdex login\` if the problem is your account.`;
     case "config":
       return `The CLI's sign-in configuration is wrong (${detail}).`;
     default:
@@ -48,23 +74,31 @@ export function describeAuthFailure(error: unknown): string {
  * must not claim more than the write sequence allows:
  *
  * - `userinfo`: the profile call runs before anything is written, so the
- *   stored `tokens` + `user` pair is untouched. The previous account can be
- *   named — the caller reads it from the store, no network call.
+ *   stored `tokens` + `user` pair is untouched. The caller reads it from the
+ *   store, no network call.
  * - `storage`: `tokens` are written before `user`, so a failure can leave the
  *   new token with no profile, or the old profile already cleared. Which
  *   account the CLI now acts as is exactly what the terminal must not guess;
  *   `petdex whoami` answers it.
  * - `timeout` / `config`: nothing reached storage.
+ *
+ * The sentence about the old session is built from `SavedSessionSummary`,
+ * because the two facts it needs are independent: a stored profile does not
+ * mean the credential works (an expired token with no refresh token sits
+ * beside one and `getAccessToken()` still returns null), and a missing
+ * profile does not mean there is no credential (a token record with no
+ * `user` is a state `login` can leave and every command still uses). So the
+ * message names an account only when the store pairs one with a credential,
+ * says only that the attempt did not change what was saved, and never
+ * announces a sign-out the store cannot prove.
  */
 export function describeLoginFailure(
   error: unknown,
-  previousAccount?: string,
+  previous?: SavedSessionSummary,
 ): string {
   const detail = error instanceof Error ? error.message : String(error);
   const code = error instanceof ClerkCliAuthError ? error.code : undefined;
-  const kept = previousAccount
-    ? `Your previous sign-in (${previousAccount}) is still saved and still in use.`
-    : "No usable sign-in is stored, and the CLI stays signed out.";
+  const kept = describeSavedSession(previous);
 
   if (code === "userinfo") {
     return `This sign-in wasn't saved: your profile couldn't be loaded (${detail}). ${kept}`;
@@ -74,6 +108,9 @@ export function describeLoginFailure(
   }
   if (code === "timeout") {
     return `This sign-in timed out before it completed and was not saved. ${kept}`;
+  }
+  if (code === "refresh_failed") {
+    return `Your saved session couldn't be checked with the sign-in service (${detail}). It was not changed; try again, or run \`petdex login\` if it keeps failing.`;
   }
   if (code === "config") {
     return `This sign-in couldn't start (${detail}).`;
@@ -110,4 +147,29 @@ export function describeLoginFailure(
     ].join("\n");
   }
   return detail;
+}
+
+/**
+ * The one-sentence account of what a failed login left in the store.
+ *
+ * Deliberately not a claim about usability: a read without the network
+ * cannot tell a working token from a revoked one, so the strongest true
+ * statement is that the attempt did not rewrite it.
+ */
+export function describeSavedSession(
+  previous: SavedSessionSummary | undefined,
+): string {
+  if (!previous || previous.state === "unknown") {
+    return "What was saved on this machine could not be checked; run `petdex whoami` to see which account is in effect.";
+  }
+  if (previous.state === "none") {
+    return "No sign-in was saved before this attempt either; run `petdex whoami` to confirm.";
+  }
+  if (previous.label && previous.state === "expired") {
+    return `Your previous sign-in (${previous.label}) is still saved, but that session has expired; run \`petdex login\` to sign in again.`;
+  }
+  if (previous.label) {
+    return `Your previous sign-in (${previous.label}) is still saved, and this attempt did not change it.`;
+  }
+  return "A saved sign-in was not changed by this attempt; run `petdex whoami` to see which account is in effect.";
 }

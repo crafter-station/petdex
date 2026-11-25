@@ -14,6 +14,7 @@ import { dirname, join } from "node:path";
 
 import type { CredentialStore, StorageKind } from "../types.js";
 import { ClerkCliAuthError } from "../types.js";
+import { withFileMutex } from "./file-mutex.js";
 
 export interface CreateStoreOptions {
   keychainService?: string;
@@ -128,8 +129,11 @@ class MemoryCredentialStore implements CredentialStore {
     key: string,
     expected: string | null,
     value: string,
+    guard?: { key: string; expected: string | null },
   ): Promise<boolean> {
     if ((this.values.get(key) ?? null) !== expected) return false;
+    if (guard && (this.values.get(guard.key) ?? null) !== guard.expected)
+      return false;
     this.values.set(key, value);
     return true;
   }
@@ -206,11 +210,27 @@ class FileCredentialStore implements CredentialStore {
    * before the check commits", not "no takeover ever commits".
    *
    * This closes the window the rename probe found: read, temp write and
-   * rename all happen while the lock is held, so a second store — another
-   * process or just another instance over the same path — queues behind
-   * this section instead of landing inside it.
+   * rename all happen while the lock is held, so a second *writer* — another
+   * process, or another instance in this one — queues behind this section
+   * instead of landing inside it. Reads do not take the lock file; the one
+   * read that changes the directory (moving a torn file aside) is instead
+   * coordinated through the process-local mutex in `withFileMutex`, which
+   * this section holds for its whole duration. So within one process no
+   * operation of any kind lands inside this section, and across processes
+   * the only uncovered read-side move is a quarantine that races a write
+   * from a different process (see `quarantine`).
    */
   private async withLock<T>(
+    operation: (assertOwned: () => Promise<void>) => Promise<T>,
+  ): Promise<T> {
+    // The process-local mutex wraps the lock file, not the other way round:
+    // a repairing reader (below) takes the same mutex, so it cannot be
+    // re-admitted in the middle of this section and move the file this
+    // section is about to write.
+    return withFileMutex(this.lockPath, () => this.withLockFile(operation));
+  }
+
+  private async withLockFile<T>(
     operation: (assertOwned: () => Promise<void>) => Promise<T>,
   ): Promise<T> {
     const token = `${process.pid}:${randomUUID()}`;
@@ -377,35 +397,51 @@ class FileCredentialStore implements CredentialStore {
   }
 
   private async readAll(): Promise<Record<string, string>> {
+    const { values, corrupt } = await this.readSnapshot();
+    if (corrupt !== undefined) await this.quarantine(corrupt);
+    return values;
+  }
+
+  /**
+   * Read and parse once, saying whether the bytes were torn.
+   *
+   * `corrupt` carries the exact content that failed to parse, so the caller
+   * can quarantine *those* bytes rather than whatever the path happens to
+   * hold later. Undefined means the read was fine (including absent or
+   * empty), and the caller has nothing to move.
+   */
+  private async readSnapshot(): Promise<{
+    values: Record<string, string>;
+    corrupt?: string;
+  }> {
     let content: string;
     try {
       content = await readFile(this.filePath, "utf8");
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+      if ((error as NodeJS.ErrnoException).code === "ENOENT")
+        return { values: {} };
       throw storageError(
         `Failed to read credential file ${this.filePath}`,
         error,
       );
     }
-    if (!content.trim()) return {};
+    if (!content.trim()) return { values: {} };
 
     let parsed: unknown;
     try {
       parsed = JSON.parse(content);
     } catch {
-      await this.quarantine();
-      return {};
+      return { values: {}, corrupt: content };
     }
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      await this.quarantine();
-      return {};
+      return { values: {}, corrupt: content };
     }
 
     const result: Record<string, string> = {};
     for (const [key, value] of Object.entries(parsed)) {
       if (typeof value === "string") result[key] = value;
     }
-    return result;
+    return { values: result };
   }
 
   /**
@@ -422,14 +458,60 @@ class FileCredentialStore implements CredentialStore {
    * quarantine is announced once per path per process with the evidence
    * file's name: silent loss reads as an expired password and sends the
    * user hunting in the wrong direction.
+   *
+   * The move is coordinated as a write, not as the follow-up to the read
+   * that found the damage. A reader can be paused between its read and its
+   * rename while a writer takes the lock, quarantines the same file and
+   * writes a fresh credential. A rename from the reader's stale snapshot
+   * would then move the *new* record away, leaving the path empty and a
+   * perfectly good login behind a `.corrupt-*` name. So the quarantine
+   * re-enters on the same process-local mutex every locked write takes, and
+   * inside it re-reads the path and moves only bytes that are *still* the
+   * torn ones (`expected` is what the reader actually parsed). A writer's
+   * fresh file — or another reader's successful quarantine — therefore
+   * wins, and this one reports nothing and moves nothing.
+   *
+   * The re-read inside the mutex must not go back through `readAll`, which
+   * would take the mutex again and deadlock; `readSnapshot` is the
+   * lock-free half this shares with it.
+   *
+   * Honest limit: the mutex is this process's. A reader in another process
+   * can still move a file this process wrote after the reader's snapshot,
+   * in the gap the cross-process lock file does not cover for reads. Within
+   * one process — the CLI's normal shape, and the one where a store and its
+   * keychain fallback share a path — the move is decided on current bytes.
    */
-  private async quarantine(): Promise<void> {
+  private async quarantine(expected: string): Promise<void> {
+    await withFileMutex(this.lockPath, async () => {
+      const { corrupt } = await this.readSnapshot();
+      // Clean, absent, or replaced since the caller's read: nothing to move.
+      if (corrupt !== expected) return;
+      await this.moveCorruptToEvidence();
+    });
+  }
+
+  /**
+   * Read inside the lock section, where the mutex is already held.
+   *
+   * A torn record met here is still quarantined, but through the direct
+   * move: `quarantine` would take the mutex this section owns and deadlock.
+   * The bytes were read a moment ago under the lock, so there is no stale
+   * snapshot to guard against.
+   */
+  private async readAllLocked(): Promise<Record<string, string>> {
+    const { values, corrupt } = await this.readSnapshot();
+    if (corrupt !== undefined) await this.moveCorruptToEvidence();
+    return values;
+  }
+
+  /** The rename-and-warn half of `quarantine`; the caller has the bytes. */
+  private async moveCorruptToEvidence(): Promise<void> {
     const destination = `${this.filePath}.corrupt-${Date.now()}`;
     try {
       await rename(this.filePath, destination);
     } catch {
-      // Already moved by a concurrent reader, or the directory is unwritable.
-      // Either way the caller proceeds with an empty view.
+      // Already moved by a concurrent reader, or the directory is
+      // unwritable. Either way the caller proceeds with an empty view.
       return;
     }
     if (quarantinedWarnings.has(destination)) return;
@@ -481,7 +563,7 @@ class FileCredentialStore implements CredentialStore {
   async set(key: string, value: string): Promise<void> {
     return this.enqueue(async () => {
       await this.withLock(async (assertOwned) => {
-        const values = await this.readAll();
+        const values = await this.readAllLocked();
         values[key] = value;
         await this.writeAll(values, assertOwned);
       });
@@ -498,7 +580,7 @@ class FileCredentialStore implements CredentialStore {
       const preview = await this.readAll();
       if (!(key in preview)) return;
       await this.withLock(async (assertOwned) => {
-        const values = await this.readAll();
+        const values = await this.readAllLocked();
         if (!(key in values)) return;
         delete values[key];
         await this.writeAll(values, assertOwned);
@@ -529,11 +611,14 @@ class FileCredentialStore implements CredentialStore {
     key: string,
     expected: string | null,
     value: string,
+    guard?: { key: string; expected: string | null },
   ): Promise<boolean> {
     return this.enqueue(async () =>
       this.withLock(async (assertOwned) => {
-        const values = await this.readAll();
+        const values = await this.readAllLocked();
         if ((values[key] ?? null) !== expected) return false;
+        if (guard && (values[guard.key] ?? null) !== guard.expected)
+          return false;
         values[key] = value;
         await this.writeAll(values, assertOwned);
         return true;
@@ -555,7 +640,11 @@ class KeychainCredentialStore implements CredentialStore {
     return `${this.environment}:${key}`;
   }
 
-  private warnFallback(operation: string, error: unknown): void {
+  private warnFallback(
+    operation: string,
+    error: unknown,
+    detailNote?: string,
+  ): void {
     const detail = error instanceof Error ? error.message : String(error);
     // `Cannot find package` means the optional native dep wasn't installed
     // (e.g. npx download). That's expected — file store handles it. Only
@@ -566,8 +655,9 @@ class KeychainCredentialStore implements CredentialStore {
     ) {
       return;
     }
+    const suffix = detailNote ? ` ${detailNote}` : "";
     console.warn(
-      `Keychain ${operation} failed; falling back to file store. ${detail}`,
+      `Keychain ${operation} failed; using the file store where it stands in for the keychain. ${detail}${suffix}`,
     );
   }
 
@@ -604,9 +694,15 @@ class KeychainCredentialStore implements CredentialStore {
    * Clearing it on every successful keychain write is what keeps "sign in as
    * B" meaning only B survives, whichever store the next read reaches.
    *
-   * The cleanup is best effort: the keychain now holds the new value, so a
-   * file that cannot be cleared costs a stale copy (warned about), not the
-   * login. Falling back to writing the file instead would defeat the point.
+   * The cleanup is best effort, and that is a real remaining risk rather
+   * than a formality: the keychain now holds the new value, so a file that
+   * cannot be cleared costs a stale copy, not the login — but if the keychain
+   * entry later disappears (reset, migration, deleted item), `get()` reads
+   * that stale copy back as the current session. The warning names that; the
+   * alternative, falling back to writing the file instead, would defeat the
+   * point of using the keychain at all. These are the only two behaviours a
+   * write can have, given a fallback copy and an API with no transaction
+   * across the two stores.
    */
   async set(key: string, value: string): Promise<void> {
     try {
@@ -631,57 +727,108 @@ class KeychainCredentialStore implements CredentialStore {
    * The native credential stores this wraps (macOS Keychain, libsecret, the
    * Windows credential manager) offer neither a transaction nor a
    * compare-and-swap: `getPassword()` and `setPassword()` are two independent
-   * calls with nothing between them. What this implementation gives is the
-   * comparison *immediately* before the write instead of one network round
-   * trip earlier. That shrinks the window from the length of a token refresh
-   * — hundreds of milliseconds, which is what makes a `login` landing inside
-   * it observable — to the gap between two keychain calls, microseconds to a
-   * millisecond.
+   * calls with nothing between them. What this implementation gives is a
+   * narrower window than the call that started it:
    *
-   * What it does not give: two processes whose compare windows overlap can
-   * both read the same value and both write, and the later write lands.
-   * Closing that needs either a lock every writer takes — the file store's
-   * lock covers only processes that share that file path, and a keychain
-   * `set` does not take it — or a CAS the keyring API does not offer. Anyone
-   * reading a claim about this guard should read it as "the refresh window is
-   * closed", not "no two writers can ever interleave".
+   * - The compare is the value read *after* the `fallback.get` await, not
+   *   one taken before it. A login that finishes while the fallback read is
+   *   in flight is therefore seen by the compare, instead of being
+   *   overwritten by a value computed from the record it replaced.
+   * - The native read, the guard read and the compare are one synchronous
+   *   run of statements, so no other write from this process can land
+   *   between them.
+   * - The write then goes through `set`, which both writes the keychain and
+   *   clears the older file copy.
+   *
+   * What it still does not give, and must not be read as giving: the last
+   * native read and `setPassword()` are separated by an `await`. Another
+   * process (or another store in this process, since a keychain `set` takes
+   * no lock) can write in that gap, and the later write wins. `false` means
+   * the compare *as this call performed it* did not match; `true` does not
+   * mean no other writer exists. Closing the gap needs a lock every writer
+   * takes or a CAS the keyring API does not offer.
    *
    * The fallback file copy is consulted exactly as `get()` consults it: a
    * keychain that holds nothing, or a keychain call that fails, means the
    * file is the store's current answer, so the compare is against that. When
    * the keychain is unusable the whole operation is delegated to the
-   * fallback's own compare-and-swap, which keeps the stronger guarantee in
-   * the degraded mode. A successful write goes through `set`, so it also
-   * inherits that method's rule of clearing the older file copy.
+   * fallback's own compare-and-swap, which is a real critical section and
+   * keeps the stronger guarantee in the degraded mode. A successful write
+   * goes through `set`, so it also inherits that method's rule of clearing
+   * the older file copy — including the best-effort residue documented
+   * there.
    */
   async replaceIfUnchanged(
     key: string,
     expected: string | null,
     value: string,
+    guard?: { key: string; expected: string | null },
   ): Promise<boolean> {
-    let current: string | null;
+    let keyring: KeyringModule | null;
     try {
-      const keyring = await this.loadKeyring();
-      if (!keyring) {
-        return this.fallback.replaceIfUnchanged(key, expected, value);
-      }
-      const entry = new keyring.Entry(this.service, this.account(key));
-      current = entry.getPassword() ?? (await this.fallback.get(key));
+      keyring = await this.loadKeyring();
     } catch (error) {
       this.warnFallback("get", error);
-      return this.fallback.replaceIfUnchanged(key, expected, value);
+      return this.fallback.replaceIfUnchanged(key, expected, value, guard);
     }
-    if (current !== expected) return false;
+    if (!keyring) {
+      return this.fallback.replaceIfUnchanged(key, expected, value, guard);
+    }
+
+    // Every await that can land between the compare and the write happens
+    // *before* the compare starts. The native values below are read at the
+    // end of that, so the fallback reads cannot hide a newer login.
+    let fallbackValue: string | null = null;
+    let fallbackGuard: string | null = null;
+    const entry = new keyring.Entry(this.service, this.account(key));
+    const guardEntry = guard
+      ? new keyring.Entry(this.service, this.account(guard.key))
+      : null;
+    try {
+      // Only consult the fallback when the keychain itself answers nothing;
+      // a keychain hit is authoritative and needs no file read at all.
+      const nativeCurrent = entry.getPassword();
+      if (nativeCurrent === null) fallbackValue = await this.fallback.get(key);
+      if (guard && guardEntry) {
+        const nativeGuard = guardEntry.getPassword();
+        if (nativeGuard === null)
+          fallbackGuard = await this.fallback.get(guard.key);
+      }
+      const current = nativeCurrent ?? fallbackValue;
+      const guardCurrent = guardEntry
+        ? (guardEntry.getPassword() ?? fallbackGuard)
+        : null;
+      // From here to `set`, every statement below is synchronous in the
+      // values it compares — the remaining await is the `set` itself, which
+      // is the gap this method documents.
+      if (current !== expected) return false;
+      if (guard && guardCurrent !== guard.expected) return false;
+    } catch (error) {
+      this.warnFallback("get", error);
+      return this.fallback.replaceIfUnchanged(key, expected, value, guard);
+    }
     await this.set(key, value);
     return true;
   }
 
   /** Remove the file copy after a successful keychain write. Never throws. */
+  /**
+   * Remove the file copy after a successful keychain write. Never throws.
+   *
+   * The keychain write already succeeded, so this is not a fallback: it is
+   * cleanup of a copy that must not outlive it. The warning says so, and
+   * names what a failure leaves behind — an older credential that a later
+   * keychain miss would read as current.
+   */
   private async clearFallback(key: string): Promise<void> {
     try {
       await this.fallback.delete(key);
     } catch (error) {
-      this.warnFallback("cleanup", error);
+      this.warnFallback(
+        "cleanup",
+        error,
+        "The newer value is saved in the keychain, but an older file copy could not be removed; if the keychain entry disappears later, that older copy is read as current.",
+      );
     }
   }
 

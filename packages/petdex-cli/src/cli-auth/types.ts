@@ -27,6 +27,14 @@ export interface CredentialStore {
     key: string,
     expected: string | null,
     value: string,
+    /**
+     * An additional condition read and compared in the same critical
+     * section: `guard.key` must still be exactly `guard.expected`, or
+     * nothing is written and `false` is returned. `whoami` uses it to make a
+     * profile's write-back conditional on the `tokens` record the profile
+     * was fetched with, because the pair is what names an account.
+     */
+    guard?: { key: string; expected: string | null },
   ): Promise<boolean>;
 }
 
@@ -75,6 +83,16 @@ export interface LoginResult {
 
 export class ClerkCliAuthError extends Error {
   code: string;
+  /**
+   * The OAuth `error` code the provider returned, when it sent one.
+   *
+   * Kept apart from `message` because the human-readable description and the
+   * machine-readable code answer different questions: an endpoint can say
+   * `invalid_grant` with any wording, and the message may quote the wording.
+   * Code that must not guess — telling an expired session from a temporary
+   * outage — reads this, not the prose.
+   */
+  providerError?: string;
   constructor(code: string, message: string) {
     super(message);
     this.name = "ClerkCliAuthError";

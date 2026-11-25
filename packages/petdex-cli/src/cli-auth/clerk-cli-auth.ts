@@ -1,6 +1,10 @@
 import { spawn } from "node:child_process";
 
-import { accountLabel } from "./cli-messages.js";
+import {
+  accountLabel,
+  type SavedSessionState,
+  type SavedSessionSummary,
+} from "./cli-messages.js";
 import { startAuthServer } from "./lib/auth-server.js";
 import { browserCommand } from "./lib/browser-command.js";
 import { createCredentialStore } from "./lib/credential-store.js";
@@ -26,6 +30,17 @@ import { ClerkCliAuthError } from "./types.js";
 const DEFAULT_SCOPES = ["profile", "email", "openid", "offline_access"];
 
 /**
+ * The record key an earlier build stored the whole session under.
+ *
+ * Nothing in this build reads or writes it — `tokens` and `user` are the
+ * layout, and this branch does not migrate between the two. It is named here
+ * only so `logout` (and a successful login) can remove it: it holds a full
+ * access + refresh token pair, and any old bundle that still reads it would
+ * sign the machine back in as whoever wrote it.
+ */
+const LEGACY_SESSION_KEY = "session";
+
+/**
  * How many refreshes `getAccessToken()` will attempt before it settles for
  * whatever the store holds.
  *
@@ -39,14 +54,74 @@ const DEFAULT_SCOPES = ["profile", "email", "openid", "offline_access"];
 const MAX_REFRESH_ATTEMPTS = 2;
 
 /**
- * A refresh that could not renew the saved token.
+ * How many times `whoami` re-reads the store to pair a profile with its
+ * credential.
  *
- * `refreshAccessToken` reports a dead refresh token as `token_exchange`, the
- * same code a failed code exchange uses — but the reader's situation is
- * different: the store holds a session that has expired, and the fix is to
- * sign in again, not to retry a login that was never attempted. The CLI's
- * message table has a case for exactly that, so the code is raised here
- * rather than leaving it to fall through to "Not signed in".
+ * One pass is the normal case. A second is only reached when a login landed
+ * between the token read and the profile read (or answered the userinfo call
+ * first), which is one writer moving once; the re-read almost always pairs.
+ * Past the cap the call answers `null` rather than naming an account it
+ * cannot tie to the credential it holds — a wrong name is worse than asking
+ * the reader to run the command again.
+ */
+const WHOAMI_PROFILE_READS = 3;
+
+/**
+ * A stored `tokens` record, or null when the bytes are not one.
+ *
+ * Only used to read the access token for a userinfo call; a record that does
+ * not parse has no credential to check, so the caller reports "signed out"
+ * for the same reason `getStoredTokens` does.
+ */
+function parseStoredTokens(raw: string): TokenSet | null {
+  try {
+    const parsed = JSON.parse(raw) as TokenSet;
+    if (!parsed || typeof parsed !== "object") return null;
+    if (typeof parsed.accessToken !== "string" || !parsed.accessToken)
+      return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Read the store's current `tokens` record and say which of three states it
+ * is in, relative to the bytes a refresh was computed from.
+ *
+ * - `"same"`: the record is still those bytes. The failure is about the
+ *   session the caller already had, so it is reported.
+ * - `"changed"`: something replaced the record — a login, a winning refresh
+ *   in another process. The caller's session is history; the new one answers
+ *   the next pass.
+ * - `"logged-out"`: the record is gone, and so is the session; `null` is the
+ *   honest answer.
+ * - `"unknown"`: the read failed. Reported like `"same"`: the caller is about
+ *   to fail anyway, and a retry loop over an unreadable store would never
+ *   end.
+ *
+ * At most `MAX_REFRESH_ATTEMPTS` reads, so a store that keeps changing under
+ * a failing refresh cannot spin.
+ */
+type TokensVerdict = "same" | "changed" | "logged-out" | "unknown";
+
+async function classifyTokens(
+  raw: string | null,
+  previous: string,
+): Promise<TokensVerdict> {
+  if (raw === null) return "logged-out";
+  return raw === previous ? "same" : "changed";
+}
+
+/**
+ * The token endpoint answered `invalid_grant` for a refresh.
+ *
+ * That is the provider saying *these* refresh credentials are dead — spent,
+ * revoked, or expired — and `refreshAccessToken` reports it as
+ * `token_exchange` because it shares the code with a failed code exchange.
+ * For a reader the situation is different from a login that never was: the
+ * store holds a session that cannot be renewed, and the fix is to sign in
+ * again. The CLI's message table has a case for exactly that.
  */
 function tokenExpired(error: unknown): ClerkCliAuthError {
   if (error instanceof ClerkCliAuthError && error.code === "token_expired")
@@ -55,6 +130,47 @@ function tokenExpired(error: unknown): ClerkCliAuthError {
   return new ClerkCliAuthError(
     "token_expired",
     `Saved session could not be refreshed: ${detail}`,
+  );
+}
+
+/**
+ * Whether an `invalid_grant` answer is the only thing a failed refresh can
+ * mean, rather than "the exchange failed for some reason".
+ *
+ * `refreshAccessToken` flattens every failure into `token_exchange`: a 400
+ * with `error: invalid_grant`, a 503 from the endpoint, a DNS failure and an
+ * aborted timeout all arrive as that one code. Only the first is evidence
+ * the refresh credentials are dead; a 5xx or an offline machine says nothing
+ * about them, and telling the reader to sign in again would be a wrong
+ * answer with a destructive-sounding fix. Only the provider can draw that
+ * line, so the body's `error` code — kept on the error by `token-exchange` —
+ * is what decides, with the quoted description as a fallback for callers that
+ * do not carry the code. Everything else keeps a temporary-failure reason.
+ */
+function isDeadRefreshGrant(error: unknown): boolean {
+  if (!(error instanceof ClerkCliAuthError) || error.code !== "token_exchange")
+    return false;
+  // The provider's own code is the authoritative signal. Its description is
+  // arbitrary text (`unknown refresh token`, `refresh token revoked`) and can
+  // arrive *instead of* the code in the message, so the message alone misses
+  // a genuine `invalid_grant` whenever a description is present.
+  if (error.providerError === "invalid_grant") return true;
+  const detail = (error.message ?? "").toLowerCase();
+  return detail.includes("invalid_grant");
+}
+
+/**
+ * A refresh that failed while the stored session was still the one it came
+ * from. Dead credentials are `token_expired`; anything else — an endpoint
+ * outage, an offline machine, a timeout — keeps its own code, because the
+ * session may well still be valid and only the check failed.
+ */
+function refreshFailure(error: unknown): ClerkCliAuthError {
+  if (isDeadRefreshGrant(error)) return tokenExpired(error);
+  const detail = error instanceof Error ? error.message : String(error);
+  return new ClerkCliAuthError(
+    "refresh_failed",
+    `Saved session could not be checked with the sign-in service right now: ${detail}`,
   );
 }
 
@@ -200,6 +316,13 @@ export class ClerkCliAuth {
       }
       await this.setJson("tokens", tokens);
       await this.setJson("user", user);
+      // A successful sign-in is the other safe moment to drop the legacy
+      // record: the two keys now describe the new session, and an old
+      // single-record copy beside them is a stale secret nothing should
+      // revive. Best effort here — unlike `logout`, the session is saved and
+      // a cleanup failure must not turn a good login into a failed one. The
+      // next `logout` will try again.
+      await this.config.storage.delete(LEGACY_SESSION_KEY).catch(() => {});
 
       // Last, and only once every step that can still fail has succeeded.
       // The browser is holding its connection open until this call, so
@@ -253,18 +376,45 @@ export class ClerkCliAuth {
    * stored record is returned as it is rather than refreshing again, because
    * the server, not this 30-second heuristic, decides whether a token still
    * works.
+   *
+   * A *failed* refresh takes the same route through the store before it is
+   * an error. The fetch can fail because `petdex login` replaced the session
+   * inside the round trip — in which case the new session simply answers the
+   * next pass, and there is nothing wrong with it — or because the issuer
+   * refused *these* refresh credentials, or because the endpoint was briefly
+   * unavailable. Only the middle case is a session the user has to renew; it
+   * is the only one reported as `token_expired`, and only when the record is
+   * still byte-for-byte the one the refresh was computed from. A temporary
+   * failure keeps its own reason (`refresh_failed`) so the reader is not told
+   * to sign in again over an outage.
    */
   async getAccessToken(): Promise<string | null> {
+    return (await this.resolveSession())?.accessToken ?? null;
+  }
+
+  /**
+   * The token and the exact record it was read from.
+   *
+   * `whoami` needs the bytes, not only the token: the profile has to be
+   * paired with the `tokens` record this call is acting on, and only that
+   * record's identity survives a concurrent login.
+   */
+  private async resolveSession(): Promise<{
+    accessToken: string;
+    raw: string;
+  } | null> {
     for (let attempt = 1; ; attempt++) {
       const stored = await this.getStoredTokens();
       if (!stored) return null;
 
       const { raw, tokens } = stored;
       const expiresAt = tokens.expiresAt ?? Number.POSITIVE_INFINITY;
-      if (expiresAt >= Date.now() + 30_000) return tokens.accessToken;
+      if (expiresAt >= Date.now() + 30_000)
+        return { accessToken: tokens.accessToken, raw };
 
       if (!tokens.refreshToken) return null;
-      if (attempt > MAX_REFRESH_ATTEMPTS) return tokens.accessToken;
+      if (attempt > MAX_REFRESH_ATTEMPTS)
+        return { accessToken: tokens.accessToken, raw };
 
       let refreshed: TokenSet;
       try {
@@ -275,10 +425,16 @@ export class ClerkCliAuth {
           scopes: this.config.scopes,
         });
       } catch (error) {
-        // The stored token is unusable and could not be renewed. This is its
-        // own outcome: "not signed in" would hide a session the user still has
-        // to clear or renew with `petdex login`.
-        throw tokenExpired(error);
+        // Re-read before deciding. A login (or a winning refresh) that landed
+        // inside this round trip owns the store now, and that session is what
+        // the command must answer with — not "your session expired" about a
+        // refresh token the store no longer describes. `storedTokensVerdict`
+        // bounds the re-reads, and "unknown" — an unreadable store — is
+        // reported like an unchanged one rather than retried forever.
+        const changed = await this.storedTokensVerdict(raw);
+        if (changed === "logged-out") return null;
+        if (changed === "same") throw refreshFailure(error);
+        continue;
       }
       const nextTokens = {
         ...tokens,
@@ -291,9 +447,43 @@ export class ClerkCliAuth {
       // as the account that is actually signed in. The next pass reads that
       // account's record.
       if (await this.writeBackRefresh(raw, nextTokens)) {
-        return nextTokens.accessToken;
+        // The bytes the store now holds for this session: the guarded write
+        // succeeded, so the record is exactly what it was given.
+        return {
+          accessToken: nextTokens.accessToken,
+          raw: JSON.stringify(nextTokens),
+        };
       }
     }
+  }
+
+  /**
+   * Re-read the `tokens` record after a failed refresh, within a bound.
+   *
+   * The first read decides: unchanged bytes mean the failure is about the
+   * session this call started with, and the second pass reads again. A record
+   * that changed hands (or vanished) answers the first pass. The loop exists
+   * for the opposite case: a login that is *still* writing can replace the
+   * record again while this call is reading, so each observation is
+   * classified in turn, up to `MAX_REFRESH_ATTEMPTS` reads.
+   */
+  private async storedTokensVerdict(raw: string): Promise<TokensVerdict> {
+    let verdict: TokensVerdict = "unknown";
+    for (let read = 0; read < MAX_REFRESH_ATTEMPTS; read++) {
+      let current: string | null;
+      try {
+        current = await this.config.storage.get("tokens");
+      } catch {
+        return "unknown";
+      }
+      verdict = await classifyTokens(current, raw);
+      if (verdict !== "changed") return verdict;
+      // Still moving: either this read is the settled one, or the next pass
+      // in `getAccessToken` takes over on the last observation.
+      if (read + 1 >= MAX_REFRESH_ATTEMPTS) return "changed";
+      await Promise.resolve();
+    }
+    return verdict;
   }
 
   async whoami(): Promise<UserInfo | null> {
@@ -312,50 +502,219 @@ export class ClerkCliAuth {
     // before that call is already stale by the time the answer is returned.
     // Resolving the token first means the profile read below describes the
     // same session the command will actually use.
-    const accessToken = await this.getAccessToken();
-    if (!accessToken) return null;
+    const session = await this.resolveSession();
+    if (!session) return null;
 
-    const cachedUser = await this.getJson<UserInfo>("user");
-    if (cachedUser) return cachedUser;
+    // The profile must belong to the credential above, and both keys are
+    // separate records: a login writes them one after the other, so the read
+    // of `user` can land in the middle of a login and describe a different
+    // account than the token this call holds.
+    //
+    // The first pass reads the pair and only trusts the profile if the
+    // `tokens` record is still the one the access token came from. On a
+    // mismatch — a login landed, a refresh in this or another process wrote
+    // a new record — it re-reads under the memory of who it just saw. That
+    // re-read is bounded by `WHOAMI_PROFILE_READS`; past it the call reports
+    // a profile it cannot pair with *this* credential as missing rather than
+    // serving the wrong account's name.
+    //
+    // A profile fetched from the network is written back only when the
+    // record is still the one the userinfo call was made with
+    // (`writeBackProfile`). Without that check a login finishing inside the
+    // userinfo round trip would be paired with the *previous* account's
+    // profile — and because the profile then looks cached, every later
+    // command would keep reporting it while the API ran as the new account.
+    let current = session;
+    for (let read = 0; read < WHOAMI_PROFILE_READS; read++) {
+      const cachedUser = await this.getJson<UserInfo>("user");
+      if (cachedUser && (await this.tokensStillCurrent(current.raw))) {
+        return cachedUser;
+      }
+      if (cachedUser) {
+        // A profile that is not this token's: a login is writing the pair.
+        const next = await this.readCurrentSession();
+        if (!next) return null;
+        current = next;
+        continue;
+      }
 
-    const user = await fetchUserInfo({
-      issuer: this.config.issuer,
-      accessToken,
-    });
-    await this.setJson("user", user);
-    return user;
+      const user = await fetchUserInfo({
+        issuer: this.config.issuer,
+        accessToken: current.accessToken,
+      });
+      if (await this.writeBackProfile(current.raw, user)) return user;
+      // The session changed while userinfo was in flight: the answer names an
+      // account the store no longer describes. Re-read and answer for the
+      // session that is signed in now.
+      const next = await this.readCurrentSession();
+      if (!next) return null;
+      current = next;
+    }
+    return null;
   }
 
   /**
-   * The profile of a session that is actually usable, without any network
-   * call. Used by the CLI to name the account in a message that claims a
-   * previous sign-in is still in effect.
+   * The store's current session, or null when it holds no usable token.
    *
-   * Both records are read, because only the pair is evidence: `tokens` are
-   * written before `user`, and either key can be damaged on its own, so a
-   * readable profile beside an unparsable token record is an account no
-   * command can act as. Reporting that as "your previous sign-in" would be
-   * the same wrong-answer problem the messages exist to remove.
+   * Deliberately a plain read rather than `resolveSession`: the caller is
+   * mid-`whoami` and only needs the record that replaced the one it held. A
+   * refresh here would be a second network call in a re-read loop bound by
+   * `WHOAMI_PROFILE_READS`; the next command refreshes as usual.
+   */
+  private async readCurrentSession(): Promise<{
+    accessToken: string;
+    raw: string;
+  } | null> {
+    const raw = await this.currentTokensRaw();
+    if (raw === null) return null;
+    const tokens = parseStoredTokens(raw);
+    if (!tokens) return null;
+    return { accessToken: tokens.accessToken, raw };
+  }
+
+  /**
+   * The raw `tokens` record, or null when the store holds none.
    *
-   * Never throws: a store it cannot read is reported as "no previous
-   * session", which is what the command's own credential access will hit
-   * anyway.
+   * `whoami` binds every profile read to these bytes: the record is what a
+   * login replaces when it drops the old profile, so comparing it is the only
+   * way to tell "this profile is the one beside this token" from "this
+   * profile is from before a login that is still writing".
+   */
+  private async currentTokensRaw(): Promise<string | null> {
+    try {
+      return await this.config.storage.get("tokens");
+    } catch (error) {
+      throw storageError("read tokens", error);
+    }
+  }
+
+  /** Whether the stored `tokens` record is still exactly `raw`. */
+  private async tokensStillCurrent(raw: string): Promise<boolean> {
+    try {
+      return (await this.config.storage.get("tokens")) === raw;
+    } catch {
+      // An unreadable store cannot confirm the pairing; the caller treats it
+      // like a mismatch and re-reads, which surfaces the storage error.
+      return false;
+    }
+  }
+
+  /**
+   * Write a profile fetched with `accessToken` back, only onto the token
+   * record it was fetched from.
+   *
+   * `tokens` and `user` are separate records, so a login running at the same
+   * time can replace the token while the userinfo call is in flight. Writing
+   * the answer unconditionally then leaves the new session's token beside the
+   * previous account's profile — a pairing no later command can detect,
+   * because the profile looks cached and `whoami` trusts a cached profile.
+   * The guarded write makes the pairing itself the condition: it lands only
+   * if the token record is still the bytes the userinfo call used, and the
+   * caller re-reads the winner when it does not.
+   */
+  private async writeBackProfile(
+    rawTokens: string,
+    user: UserInfo,
+  ): Promise<boolean> {
+    try {
+      // One store call, not `get` + `set`: the check and the write have to
+      // share a critical section, or the gap between them is the same race
+      // one step smaller. The compare-and-swap primitive the store contract
+      // already has writes one key conditioned on another's bytes; the
+      // stores implement it so that a refused compare writes nothing at all,
+      // including the key the compare read.
+      return await this.config.storage.replaceIfUnchanged(
+        "user",
+        null,
+        JSON.stringify(user),
+        // The condition: `tokens` must still be the bytes userinfo ran with.
+        { key: "tokens", expected: rawTokens },
+      );
+    } catch (error) {
+      throw storageError("write user", error);
+    }
+  }
+
+  /**
+   * The stored profile, without any network call.
+   *
+   * Used for the callback page's "previous sign-in" label. It is deliberately
+   * *only* the profile: whether a credential is stored beside it, and whether
+   * that credential could still work, are separate questions, and
+   * `describeSavedSession` answers both together for the terminal message.
+   * Reading the profile alone here means a caller cannot accidentally treat
+   * "a name is cached" as "the session works".
+   *
+   * Never throws: a store it cannot read is reported as "no profile", which
+   * is what the command's own credential access will hit anyway.
    */
   async getCachedUser(): Promise<UserInfo | null> {
     try {
-      const tokens = await this.getJson<TokenSet>("tokens");
-      if (!tokens?.accessToken) return null;
       return await this.getJson<UserInfo>("user");
     } catch {
       return null;
     }
   }
 
+  /**
+   * What a failed login left in the store, as far as reading it can say.
+   *
+   * Split from `getCachedUser` on purpose: the login-failure message used to
+   * read "is there a cached name?" as "is there a session?", and both
+   * directions of that are wrong. A usable token record with no `user` is a
+   * state `login` itself can leave and every command still uses, and the
+   * message called it "signed out". An expired token with no refresh token
+   * sits beside a perfectly readable profile, and the message called that
+   * account "still in use" while `getAccessToken()` returns null.
+   *
+   * The answer therefore carries two independent facts: whether the store
+   * holds a credential-shaped `tokens` record (`state`), and which account
+   * the pair names (`label`, when readable). "Usable" is a claim about the
+   * record only — expiry and a refresh token, not a live check — because
+   * nothing here may go to the network; the message built from it says the
+   * attempt did not change it, not that it works.
+   */
+  async describeSavedSession(): Promise<SavedSessionSummary> {
+    let raw: string | null;
+    try {
+      raw = await this.config.storage.get("tokens");
+    } catch {
+      return { state: "unknown" };
+    }
+    if (!raw) return { state: "none" };
+
+    const tokens = parseStoredTokens(raw);
+    if (!tokens) return { state: "none" };
+    const state: SavedSessionState =
+      tokens.expiresAt !== undefined &&
+      tokens.expiresAt < Date.now() &&
+      !tokens.refreshToken
+        ? "expired"
+        : "usable";
+
+    let label: string | undefined;
+    try {
+      label = accountLabel(await this.getJson<UserInfo>("user"));
+    } catch {
+      label = undefined;
+    }
+    return { state, label };
+  }
+
   async logout(): Promise<void> {
     try {
+      // `tokens` and `user` are what every read uses. The legacy `session`
+      // record is a leftover of the single-record layout an earlier build
+      // wrote; nothing reads it, but it holds a whole access + refresh token
+      // pair, and a build that still understands that layout would revive the
+      // old account from it. Clearing it is cleanup, deliberately not a
+      // merge: nothing from it may reach `tokens` or `user`, and a failure to
+      // remove it fails the logout rather than being swallowed — a secret
+      // left behind is what this is meant to prevent.
       const results = await Promise.allSettled([
         this.config.storage.delete("tokens"),
         this.config.storage.delete("user"),
+        this.config.storage.delete(LEGACY_SESSION_KEY),
       ]);
       const failure = results.find((result) => result.status === "rejected");
       if (failure) throw failure.reason;

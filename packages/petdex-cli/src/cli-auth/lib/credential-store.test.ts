@@ -418,6 +418,85 @@ describe("file store cross-process lock", () => {
   });
 });
 
+describe("lock liveness and commit ownership", () => {
+  const lockPath = () => `${filePath}.lock`;
+
+  test("a holder's heartbeat keeps its lock fresh past the stale threshold", async () => {
+    // A write can take longer than `lockStaleMs` — the heartbeat is what
+    // keeps it from looking wedged. The competitor addresses the same lock
+    // file through a path with a `.` segment: a real second process has no
+    // in-process mutex, and the mutex is keyed by the path string, so this
+    // contends on the file lock without waiting in RAM. (`path.join` would
+    // normalise the segment away, so the string is built by hand.)
+    const staleMs = 200;
+    const holder = createCredentialStore("file", {
+      filePath,
+      lockStaleMs: staleMs,
+      lockHeartbeatMs: 60,
+    }) as unknown as {
+      withLock<T>(operation: () => Promise<T>): Promise<T>;
+    };
+    const competitor = createCredentialStore("file", {
+      filePath,
+      lockPath: `${directory}/./credentials.json.lock`,
+      lockTimeoutMs: 500,
+      lockStaleMs: staleMs,
+    });
+
+    let held = false;
+    const holding = holder.withLock(async () => {
+      held = true;
+      await Bun.sleep(staleMs * 3);
+    });
+    while (!held) await Bun.sleep(5);
+
+    const refused = await competitor.set("tokens", "intruder").then(
+      () => null,
+      (error: unknown) => error as Error,
+    );
+    expect(refused).not.toBeNull();
+    expect((refused as Error).message).toContain("busy");
+    await holding;
+    // Nothing was written: the lock was never stolen from its live holder.
+    expect(await fallback.get("tokens")).toBeNull();
+    expect(await stat(lockPath()).catch(() => null)).toBeNull();
+  });
+
+  test("a commit whose lock was taken over before the rename writes nothing", async () => {
+    // `writeAll` runs its ownership check after the (possibly slow) temp
+    // write. The check it is given is the only thing that notices a takeover
+    // between taking the lock and renaming. Replace the lock inside the
+    // section and ask it to commit: the rename must be refused and the
+    // previous contents must survive.
+    await fallback.set("tokens", "kept");
+    const store = createCredentialStore("file", { filePath }) as unknown as {
+      withLock<T>(
+        operation: (assertOwned: () => Promise<void>) => Promise<T>,
+      ): Promise<T>;
+      writeAll(
+        values: Record<string, string>,
+        assertOwned: () => Promise<void>,
+      ): Promise<void>;
+    };
+    const thiefToken = "999999999:writeAll-thief";
+
+    await store.withLock(async (assertOwned) => {
+      await writeFile(lockPath(), `${thiefToken}\n`);
+      await expect(
+        store.writeAll({ tokens: "must-not-land" }, assertOwned),
+      ).rejects.toMatchObject({
+        code: "storage",
+        message: expect.stringContaining("taken over"),
+      });
+    });
+
+    expect(JSON.parse(await readFile(filePath, "utf8"))).toEqual({
+      tokens: "kept",
+    });
+    await rm(lockPath(), { force: true });
+  });
+});
+
 describe("logout after a failed delete", () => {
   test("a failed logout leaves the records whole and says what failed", async () => {
     // Fallback-first ordering: the file copy goes first, so a keychain
@@ -604,6 +683,31 @@ describe("guarded write (replaceIfUnchanged)", () => {
     // `get` falls back to the file whenever the keychain holds nothing, so a
     // leftover older copy would otherwise come back after a keychain reset.
     expect(await fallback.get("tokens")).toBeNull();
+  });
+
+  test("keychain: the guard is compared against the native record as well", async () => {
+    // `whoami` pairs the profile with the token record it was fetched from.
+    // On the keychain the guard read must be native too, or a profile write
+    // conditioned on a token that changed is allowed through.
+    await store.set("tokens", "A");
+    await store.set("user", "U");
+    expect(
+      await store.replaceIfUnchanged("user", "U", "U2", {
+        key: "tokens",
+        expected: "A",
+      }),
+    ).toBe(true);
+    expect(native.get("default:user")).toBe("U2");
+
+    // The key to write still matches; only the guard is stale. Nothing may
+    // be written — a refusal is not a partial write.
+    expect(
+      await store.replaceIfUnchanged("user", "U2", "U3", {
+        key: "tokens",
+        expected: "stale",
+      }),
+    ).toBe(false);
+    expect(native.get("default:user")).toBe("U2");
   });
 
   test("keychain: an unreadable keychain delegates the compare to the file store", async () => {
