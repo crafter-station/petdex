@@ -119,6 +119,20 @@ class MemoryCredentialStore implements CredentialStore {
   async delete(key: string): Promise<void> {
     this.values.delete(key);
   }
+
+  /**
+   * Exact compare-and-swap: one process's map, one synchronous step, so no
+   * other write can land between the compare and the set.
+   */
+  async replaceIfUnchanged(
+    key: string,
+    expected: string | null,
+    value: string,
+  ): Promise<boolean> {
+    if ((this.values.get(key) ?? null) !== expected) return false;
+    this.values.set(key, value);
+    return true;
+  }
 }
 
 interface FileLockOptions {
@@ -491,6 +505,41 @@ class FileCredentialStore implements CredentialStore {
       });
     });
   }
+
+  /**
+   * Compare-and-swap one key: write only when the stored record is still
+   * exactly `expected`, and report whether the write happened.
+   *
+   * The read, the compare and the write all run inside a single lock
+   * section, which is what makes this a swap rather than the re-read-then-set
+   * that still loses the race in the gap between the two: any other store
+   * over this file either lands before the read (the compare then refuses) or
+   * waits for the section to finish. The one window that remains is the one
+   * `withLock` documents — a lock takeover between the ownership check and
+   * the rename, which this call cannot see.
+   *
+   * A torn file is quarantined by `readAll` exactly as on a plain read, so
+   * the compare sees an absent key and refuses: a damaged record is never
+   * silently replaced by a value computed from bytes nobody could read.
+   *
+   * A refused compare writes nothing at all — in particular it does not
+   * create the credential file when `expected` is `null`.
+   */
+  async replaceIfUnchanged(
+    key: string,
+    expected: string | null,
+    value: string,
+  ): Promise<boolean> {
+    return this.enqueue(async () =>
+      this.withLock(async (assertOwned) => {
+        const values = await this.readAll();
+        if ((values[key] ?? null) !== expected) return false;
+        values[key] = value;
+        await this.writeAll(values, assertOwned);
+        return true;
+      }),
+    );
+  }
 }
 
 class KeychainCredentialStore implements CredentialStore {
@@ -574,6 +623,57 @@ class KeychainCredentialStore implements CredentialStore {
       this.warnFallback("set", error);
       await this.fallback.set(key, value);
     }
+  }
+
+  /**
+   * Compare-and-write one key, at the strength the keyring API allows.
+   *
+   * The native credential stores this wraps (macOS Keychain, libsecret, the
+   * Windows credential manager) offer neither a transaction nor a
+   * compare-and-swap: `getPassword()` and `setPassword()` are two independent
+   * calls with nothing between them. What this implementation gives is the
+   * comparison *immediately* before the write instead of one network round
+   * trip earlier. That shrinks the window from the length of a token refresh
+   * — hundreds of milliseconds, which is what makes a `login` landing inside
+   * it observable — to the gap between two keychain calls, microseconds to a
+   * millisecond.
+   *
+   * What it does not give: two processes whose compare windows overlap can
+   * both read the same value and both write, and the later write lands.
+   * Closing that needs either a lock every writer takes — the file store's
+   * lock covers only processes that share that file path, and a keychain
+   * `set` does not take it — or a CAS the keyring API does not offer. Anyone
+   * reading a claim about this guard should read it as "the refresh window is
+   * closed", not "no two writers can ever interleave".
+   *
+   * The fallback file copy is consulted exactly as `get()` consults it: a
+   * keychain that holds nothing, or a keychain call that fails, means the
+   * file is the store's current answer, so the compare is against that. When
+   * the keychain is unusable the whole operation is delegated to the
+   * fallback's own compare-and-swap, which keeps the stronger guarantee in
+   * the degraded mode. A successful write goes through `set`, so it also
+   * inherits that method's rule of clearing the older file copy.
+   */
+  async replaceIfUnchanged(
+    key: string,
+    expected: string | null,
+    value: string,
+  ): Promise<boolean> {
+    let current: string | null;
+    try {
+      const keyring = await this.loadKeyring();
+      if (!keyring) {
+        return this.fallback.replaceIfUnchanged(key, expected, value);
+      }
+      const entry = new keyring.Entry(this.service, this.account(key));
+      current = entry.getPassword() ?? (await this.fallback.get(key));
+    } catch (error) {
+      this.warnFallback("get", error);
+      return this.fallback.replaceIfUnchanged(key, expected, value);
+    }
+    if (current !== expected) return false;
+    await this.set(key, value);
+    return true;
   }
 
   /** Remove the file copy after a successful keychain write. Never throws. */

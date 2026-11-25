@@ -24,6 +24,11 @@ function memoryStore(): CredentialStore {
     delete: async (key) => {
       values.delete(key);
     },
+    replaceIfUnchanged: async (key, expected, value) => {
+      if ((values.get(key) ?? null) !== expected) return false;
+      values.set(key, value);
+      return true;
+    },
   };
 }
 
@@ -97,6 +102,119 @@ async function runLogin(options: {
   return { outcome, page };
 }
 
+describe("clerk cli auth token refresh", () => {
+  /** A store seeded with one `tokens` record, plus a hook on the guarded write. */
+  function seededStore(
+    tokens: unknown,
+    opts: {
+      onReplace?: (
+        expected: string | null,
+        value: string,
+      ) => Promise<boolean> | boolean;
+    } = {},
+  ) {
+    const values = new Map<string, string>([
+      ["tokens", JSON.stringify(tokens)],
+    ]);
+    const store: CredentialStore = {
+      get: async (key) => values.get(key) ?? null,
+      set: async (key, value) => {
+        values.set(key, value);
+      },
+      delete: async (key) => {
+        values.delete(key);
+      },
+      replaceIfUnchanged: async (key, expected, value) => {
+        if (opts.onReplace) {
+          const written = await opts.onReplace(expected, value);
+          if (!written) return false;
+        }
+        if ((values.get(key) ?? null) !== expected) return false;
+        values.set(key, value);
+        return true;
+      },
+    };
+    return { store, values };
+  }
+
+  function answerToken(body: unknown) {
+    type FetchArgs = Parameters<typeof fetch>;
+    globalThis.fetch = (async (input: FetchArgs[0]) => {
+      const url = String(input);
+      if (url.startsWith(`${ISSUER}/oauth/token`)) return json(body);
+      return new Response("unexpected", { status: 500 });
+    }) as typeof fetch;
+  }
+
+  const expired = {
+    accessToken: "tok-A",
+    refreshToken: "r-A",
+    expiresAt: Date.now() - 1000,
+  };
+
+  test("a refresh that the issuer does not rotate keeps the stored refresh token", async () => {
+    const { store } = seededStore(expired);
+    answerToken({ access_token: "tok-A-refreshed", token_type: "Bearer" });
+
+    const auth = new ClerkCliAuth({
+      clientId: "client-id",
+      issuer: ISSUER,
+      storage: store,
+    });
+    expect(await auth.getAccessToken()).toBe("tok-A-refreshed");
+
+    const stored = JSON.parse((await store.get("tokens")) as string) as {
+      accessToken: string;
+      refreshToken: string;
+    };
+    expect(stored.accessToken).toBe("tok-A-refreshed");
+    // No rotation means the old refresh token is still the only one there is.
+    expect(stored.refreshToken).toBe("r-A");
+  });
+
+  test("a refresh whose record changed mid-flight is dropped, and the stored session is used", async () => {
+    // A login lands while the refresh is in the network round trip. The
+    // guarded write must compare the bytes read before that round trip and
+    // drop the result; the call then answers as the account that is actually
+    // signed in, without throwing and without printing anything.
+    let compared: { expected: string | null; value: string } | undefined;
+    const { store, values } = seededStore(expired, {
+      onReplace: (expected, value) => {
+        compared = { expected, value };
+        values.set(
+          "tokens",
+          JSON.stringify({
+            accessToken: "tok-B",
+            refreshToken: "r-B",
+            expiresAt: Date.now() + 3_600_000,
+          }),
+        );
+        return false;
+      },
+    });
+    answerToken({ access_token: "tok-A-refreshed", token_type: "Bearer" });
+
+    const auth = new ClerkCliAuth({
+      clientId: "client-id",
+      issuer: ISSUER,
+      storage: store,
+    });
+    expect(await auth.getAccessToken()).toBe("tok-B");
+
+    // What was compared: the exact record the refresh was computed from.
+    const compare = compared as { expected: string | null; value: string };
+    expect(JSON.parse(compare.expected as string)).toEqual(expired);
+    // What would have been written had the compare passed.
+    expect(JSON.parse(compare.value).accessToken).toBe("tok-A-refreshed");
+    // The store still holds the login's session, untouched.
+    expect(JSON.parse(values.get("tokens") as string)).toEqual({
+      accessToken: "tok-B",
+      refreshToken: "r-B",
+      expiresAt: expect.any(Number),
+    });
+  });
+});
+
 describe("clerk cli auth login page", () => {
   test("serves the success page only after the credentials are stored", async () => {
     const store = memoryStore();
@@ -168,6 +286,11 @@ describe("clerk cli auth login page", () => {
         throw new Error("keychain unavailable");
       },
       delete: async () => {},
+      // Never reached: the login fails at `set` before any refresh can ask
+      // for a guarded write.
+      replaceIfUnchanged: async () => {
+        throw new Error("keychain unavailable");
+      },
     };
     const { outcome, page } = await runLogin({ store: failing });
 

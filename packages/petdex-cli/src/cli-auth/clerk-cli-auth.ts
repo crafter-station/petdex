@@ -26,6 +26,19 @@ import { ClerkCliAuthError } from "./types.js";
 const DEFAULT_SCOPES = ["profile", "email", "openid", "offline_access"];
 
 /**
+ * How many refreshes `getAccessToken()` will attempt before it settles for
+ * whatever the store holds.
+ *
+ * One is the normal case. A second is only reached when the first refresh's
+ * write-back was refused because another process replaced the session inside
+ * the refresh window — and that replacement is itself a freshly written
+ * session, so it almost always answers on the next read without any network
+ * call at all. Reaching the cap means logins are landing faster than this
+ * command can refresh, where another round would keep losing the same race.
+ */
+const MAX_REFRESH_ATTEMPTS = 2;
+
+/**
  * A refresh that could not renew the saved token.
  *
  * `refreshAccessToken` reports a dead refresh token as `token_exchange`, the
@@ -222,36 +235,65 @@ export class ClerkCliAuth {
     }
   }
 
+  /**
+   * A token for the next API call, refreshed when it is about to expire.
+   *
+   * The refreshed record is written back only if the `tokens` record it was
+   * computed from is still the one in the store (see `writeBackRefresh`).
+   * The refresh holds a network round trip open, and a `petdex login`
+   * finishing inside it used to have its session overwritten by a result
+   * derived from the previous one — leaving the new account's profile beside
+   * the old account's tokens, invisible to `whoami`, and destroying the new
+   * session's refresh token. That is now refused instead.
+   *
+   * A refusal is not an error and prints nothing: the store's current
+   * session is the newer one, so this call re-reads it and answers for *that*
+   * account — the command carries on exactly as the next command would, just
+   * without refreshing. `MAX_REFRESH_ATTEMPTS` bounds the loop; past it the
+   * stored record is returned as it is rather than refreshing again, because
+   * the server, not this 30-second heuristic, decides whether a token still
+   * works.
+   */
   async getAccessToken(): Promise<string | null> {
-    const tokens = await this.getTokenSet();
-    if (!tokens) return null;
+    for (let attempt = 1; ; attempt++) {
+      const stored = await this.getStoredTokens();
+      if (!stored) return null;
 
-    const expiresAt = tokens.expiresAt ?? Number.POSITIVE_INFINITY;
-    if (expiresAt >= Date.now() + 30_000) return tokens.accessToken;
+      const { raw, tokens } = stored;
+      const expiresAt = tokens.expiresAt ?? Number.POSITIVE_INFINITY;
+      if (expiresAt >= Date.now() + 30_000) return tokens.accessToken;
 
-    if (!tokens.refreshToken) return null;
+      if (!tokens.refreshToken) return null;
+      if (attempt > MAX_REFRESH_ATTEMPTS) return tokens.accessToken;
 
-    let refreshed: TokenSet;
-    try {
-      refreshed = await refreshAccessToken({
-        issuer: this.config.issuer,
-        clientId: this.config.clientId,
-        refreshToken: tokens.refreshToken,
-        scopes: this.config.scopes,
-      });
-    } catch (error) {
-      // The stored token is unusable and could not be renewed. This is its
-      // own outcome: "not signed in" would hide a session the user still has
-      // to clear or renew with `petdex login`.
-      throw tokenExpired(error);
+      let refreshed: TokenSet;
+      try {
+        refreshed = await refreshAccessToken({
+          issuer: this.config.issuer,
+          clientId: this.config.clientId,
+          refreshToken: tokens.refreshToken,
+          scopes: this.config.scopes,
+        });
+      } catch (error) {
+        // The stored token is unusable and could not be renewed. This is its
+        // own outcome: "not signed in" would hide a session the user still has
+        // to clear or renew with `petdex login`.
+        throw tokenExpired(error);
+      }
+      const nextTokens = {
+        ...tokens,
+        ...refreshed,
+        refreshToken: refreshed.refreshToken ?? tokens.refreshToken,
+      };
+      // Refused: the record changed while the refresh was in flight, so this
+      // result belongs to a session the store no longer describes. Dropped,
+      // not written — and not returned either, because the command must run
+      // as the account that is actually signed in. The next pass reads that
+      // account's record.
+      if (await this.writeBackRefresh(raw, nextTokens)) {
+        return nextTokens.accessToken;
+      }
     }
-    const nextTokens = {
-      ...tokens,
-      ...refreshed,
-      refreshToken: refreshed.refreshToken ?? tokens.refreshToken,
-    };
-    await this.setJson("tokens", nextTokens);
-    return nextTokens.accessToken;
   }
 
   async whoami(): Promise<UserInfo | null> {
@@ -321,7 +363,60 @@ export class ClerkCliAuth {
     return this.getJson<TokenSet>("tokens");
   }
 
+  /** The token record together with the exact bytes it was read from. */
+  private async getStoredTokens(): Promise<{
+    raw: string;
+    tokens: TokenSet;
+  } | null> {
+    const stored = await this.getRawJson<TokenSet>("tokens");
+    if (!stored) return null;
+    return { raw: stored.raw, tokens: stored.value };
+  }
+
+  /**
+   * Write a refreshed record back only onto the bytes it was computed from.
+   *
+   * Returns false when the stored `tokens` record changed while the refresh
+   * was in flight — another `petdex login`, or another process's refresh.
+   * The caller then keeps that record and drops this result: writing it would
+   * pair the newer account's `user` with the older account's tokens and
+   * destroy the newer session's refresh token.
+   *
+   * The comparison is byte-for-byte on the stored string rather than on the
+   * parsed record. The store's unit is an opaque string, so bytes are the
+   * only comparison that assumes nothing about JSON key order or number
+   * formatting; a semantic compare would have to parse both sides and decide
+   * what "equivalent" means, for no gain. A rewrite that carries the same
+   * session in different bytes is refused too, which costs one extra read
+   * (the caller falls back to that stored session) and can never write a
+   * wrong value.
+   *
+   * Only `tokens` is compared and only `tokens` is written: `user` is
+   * deliberately left alone, because a refresh never changes who the account
+   * is — and if it did, the compare above would have refused the write.
+   */
+  private async writeBackRefresh(
+    raw: string,
+    value: TokenSet,
+  ): Promise<boolean> {
+    try {
+      return await this.config.storage.replaceIfUnchanged(
+        "tokens",
+        raw,
+        JSON.stringify(value),
+      );
+    } catch (error) {
+      throw storageError("write tokens", error);
+    }
+  }
+
   private async getJson<T>(key: string): Promise<T | null> {
+    return (await this.getRawJson<T>(key))?.value ?? null;
+  }
+
+  private async getRawJson<T>(
+    key: string,
+  ): Promise<{ raw: string; value: T } | null> {
     let raw: string | null;
     try {
       raw = await this.config.storage.get(key);
@@ -331,7 +426,7 @@ export class ClerkCliAuth {
     if (!raw) return null;
 
     try {
-      return JSON.parse(raw) as T;
+      return { raw, value: JSON.parse(raw) as T };
     } catch (error) {
       throw storageError(`parse stored ${key}`, error);
     }

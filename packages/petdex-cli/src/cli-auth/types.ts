@@ -10,6 +10,24 @@ export interface CredentialStore {
   get(key: string): Promise<string | null>;
   set(key: string, value: string): Promise<void>;
   delete(key: string): Promise<void>;
+  /**
+   * Write `value` under `key` only if the stored record is still exactly
+   * `expected` (`null` meaning "absent"), and report whether it was written.
+   *
+   * This is the primitive a read-modify-write that spans a network round trip
+   * needs: the caller compares against the value it *read before* the round
+   * trip, and a `false` means someone else replaced the record in the
+   * meantime, so writing now would overwrite their value with one computed
+   * from an older one. The store decides how atomic that is; each
+   * implementation documents its own strength. A store that cannot compare
+   * honestly cannot offer this guarantee, so this is a required member rather
+   * than an optional one a silent fallback could paper over.
+   */
+  replaceIfUnchanged(
+    key: string,
+    expected: string | null,
+    value: string,
+  ): Promise<boolean>;
 }
 
 export interface ClerkCliAuthConfig {

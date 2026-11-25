@@ -142,6 +142,7 @@ test("logout waits for the second cleanup when the first one fails", async () =>
         await cleanupGate;
         cleaned = true;
       },
+      replaceIfUnchanged: async () => false,
     },
   });
   let settled = false;
@@ -476,5 +477,145 @@ describe("keychain write leaves no revivable fallback copy", () => {
     // deleted in Keychain Access, a locked login keychain.
     native.delete("default:tokens");
     expect(await store.get("tokens")).toBeNull();
+  });
+});
+
+describe("guarded write (replaceIfUnchanged)", () => {
+  test("memory: the compare is exact", async () => {
+    const memory = createCredentialStore("memory");
+    expect(await memory.replaceIfUnchanged("tokens", null, "A")).toBe(true);
+    expect(await memory.replaceIfUnchanged("tokens", "A", "B")).toBe(true);
+    expect(await memory.replaceIfUnchanged("tokens", "A", "C")).toBe(false);
+    expect(await memory.get("tokens")).toBe("B");
+  });
+
+  test("file: a guarded write lands only while the record is the one that was read", async () => {
+    // The refresh scenario in miniature: a reader takes a snapshot of the
+    // record, a login replaces it, and the reader's write-back arrives late.
+    // The bytes it was computed from are gone, so it must be dropped — with
+    // the other key left exactly as the login wrote it.
+    const reader = createCredentialStore("file", { filePath });
+    const login = createCredentialStore("file", { filePath });
+    await reader.set("tokens", JSON.stringify({ accessToken: "A" }));
+    const raw = (await reader.get("tokens")) as string;
+
+    await login.set("tokens", JSON.stringify({ accessToken: "B" }));
+    await login.set("user", JSON.stringify({ sub: "user_B" }));
+
+    const written = await reader.replaceIfUnchanged(
+      "tokens",
+      raw,
+      JSON.stringify({ accessToken: "A-refreshed" }),
+    );
+    expect(written).toBe(false);
+    expect(JSON.parse((await reader.get("tokens")) as string)).toEqual({
+      accessToken: "B",
+    });
+    // A refusal is not a partial write: the whole file is untouched.
+    expect(JSON.parse(await readFile(filePath, "utf8"))).toEqual({
+      tokens: JSON.stringify({ accessToken: "B" }),
+      user: JSON.stringify({ sub: "user_B" }),
+    });
+    expect(await stat(`${filePath}.lock`).catch(() => null)).toBeNull();
+  });
+
+  test("file: a matching compare writes and still leaves no lock behind", async () => {
+    const store1 = createCredentialStore("file", { filePath });
+    await store1.set("tokens", "A");
+    const raw = (await store1.get("tokens")) as string;
+    expect(await store1.replaceIfUnchanged("tokens", raw, "B")).toBe(true);
+    expect(await store1.get("tokens")).toBe("B");
+    expect(await stat(`${filePath}.lock`).catch(() => null)).toBeNull();
+  });
+
+  test("file: the compare happens after the lock is won, not before", async () => {
+    // The ordering is the guarantee: read-compare-write must all be inside
+    // one lock section. Here the guarded write starts while the lock is held
+    // by a live holder; the "holder" then commits B and releases. An
+    // implementation that read A before blocking would now clobber B on the
+    // way through. This one reads after winning the lock and refuses.
+    const store1 = createCredentialStore("file", {
+      filePath,
+      lockTimeoutMs: 5_000,
+    });
+    await store1.set("tokens", "A");
+    const lockPath = `${filePath}.lock`;
+    await writeFile(lockPath, `${process.pid}:holder\n`);
+
+    const guarded = store1.replaceIfUnchanged("tokens", "A", "refreshed");
+    await Bun.sleep(100);
+    await writeFile(filePath, JSON.stringify({ tokens: "B" }));
+    await rm(lockPath, { force: true });
+
+    expect(await guarded).toBe(false);
+    expect(JSON.parse(await readFile(filePath, "utf8"))).toEqual({
+      tokens: "B",
+    });
+  });
+
+  test("file: a refused compare writes nothing at all", async () => {
+    // No key to compare against, so nothing is created — a guarded write
+    // must not turn into a plain write when its expectation is stale.
+    expect(await fallback.replaceIfUnchanged("tokens", "A", "B")).toBe(false);
+    expect(await stat(filePath).catch(() => null)).toBeNull();
+  });
+
+  test("file: an expected-absent compare writes only while the key is absent", async () => {
+    expect(await fallback.replaceIfUnchanged("tokens", null, "fresh")).toBe(
+      true,
+    );
+    expect(await fallback.get("tokens")).toBe("fresh");
+    expect(await fallback.replaceIfUnchanged("tokens", null, "again")).toBe(
+      false,
+    );
+    expect(await fallback.get("tokens")).toBe("fresh");
+  });
+
+  test("file: a torn record is quarantined and the compare refuses", async () => {
+    // A file nobody can parse yields no record to compare against, so the
+    // guarded write refuses instead of replacing it with a value computed
+    // from bytes that were never readable.
+    await writeFile(filePath, '{"tokens": "{\\"accessToken');
+    expect(await fallback.replaceIfUnchanged("tokens", "stale", "B")).toBe(
+      false,
+    );
+    const quarantined = (await readdir(directory)).filter((name) =>
+      name.startsWith("credentials.json.corrupt-"),
+    );
+    expect(quarantined).toHaveLength(1);
+    expect(await stat(filePath).catch(() => null)).toBeNull();
+  });
+
+  test("keychain: the compare is against the native record", async () => {
+    await store.set("tokens", "A");
+    expect(await store.replaceIfUnchanged("tokens", "A", "B")).toBe(true);
+    expect(native.get("default:tokens")).toBe("B");
+    // The stale expectation is refused and the newer value survives.
+    expect(await store.replaceIfUnchanged("tokens", "A", "C")).toBe(false);
+    expect(native.get("default:tokens")).toBe("B");
+    expect(await store.get("tokens")).toBe("B");
+  });
+
+  test("keychain: a guarded write clears the older file copy like set does", async () => {
+    await store.set("tokens", "A");
+    await fallback.set("tokens", "old-file-copy");
+    expect(await store.replaceIfUnchanged("tokens", "A", "B")).toBe(true);
+    expect(native.get("default:tokens")).toBe("B");
+    // `get` falls back to the file whenever the keychain holds nothing, so a
+    // leftover older copy would otherwise come back after a keychain reset.
+    expect(await fallback.get("tokens")).toBeNull();
+  });
+
+  test("keychain: an unreadable keychain delegates the compare to the file store", async () => {
+    // With the keychain unreadable, the file is what every `get` answers
+    // from, so it is also what the caller's snapshot came from — and the
+    // file store's own (locked) swap is what the write must go through.
+    await fallback.set("tokens", "A");
+    readError = new Error("keychain locked");
+    expect(await store.replaceIfUnchanged("tokens", "A", "B")).toBe(true);
+    expect(await fallback.get("tokens")).toBe("B");
+    // And a stale expectation is still refused in that mode.
+    expect(await store.replaceIfUnchanged("tokens", "A", "C")).toBe(false);
+    expect(await fallback.get("tokens")).toBe("B");
   });
 });
