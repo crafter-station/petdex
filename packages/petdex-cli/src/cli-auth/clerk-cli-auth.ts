@@ -707,7 +707,7 @@ export class ClerkCliAuth {
   /**
    * The raw `user` record, or null when the store holds none.
    *
-   * Kept apart from `getRawJson` because a profile slot that does not
+   * Kept apart from `getCachedUser` because a profile slot that does not
    * parse is not an error here: `whoami` can answer from the network and
    * overwrite it, and the raw bytes are exactly what the guarded write uses
    * as its expectation. A store that cannot be read still throws — that is a
@@ -899,8 +899,27 @@ export class ClerkCliAuth {
     }
   }
 
+  /**
+   * The stored token record, or null when the store holds none.
+   *
+   * Public API, and the only reader whose caller is outside this package: an
+   * embedder that needs the whole pair (refresh token, expiry, scope) rather
+   * than the single access token `getAccessToken` hands out. It answers
+   * through `getStoredTokens` for the same reason every other reader does —
+   * this used to be a bare `getJson`, which returned whatever JSON happened
+   * to sit in the slot, so `false`, `[]`, `{}` or `{"accessToken":""}` came
+   * back typed as a `TokenSet` and the caller built a `Bearer undefined`
+   * request (or treated an empty string as a credential) from it.
+   *
+   * The failure semantics match the rest of the class: only an absent key is
+   * "no session", and answers `null`. A record that is present but is not a
+   * token set throws `storage`, exactly as `getAccessToken()` does on the
+   * same bytes. Answering `null` there would turn a damaged record back into
+   * "signed out", which is the one thing this class must not say about a
+   * credential it merely cannot read.
+   */
   async getTokenSet(): Promise<TokenSet | null> {
-    return this.getJson<TokenSet>("tokens");
+    return (await this.getStoredTokens())?.tokens ?? null;
   }
 
   /** The token record together with the exact bytes it was read from. */
@@ -964,32 +983,6 @@ export class ClerkCliAuth {
       );
     } catch (error) {
       throw storageError("write tokens", error);
-    }
-  }
-
-  private async getJson<T>(key: string): Promise<T | null> {
-    return (await this.getRawJson<T>(key))?.value ?? null;
-  }
-
-  private async getRawJson<T>(
-    key: string,
-  ): Promise<{ raw: string; value: T } | null> {
-    let raw: string | null;
-    try {
-      raw = await this.config.storage.get(key);
-    } catch (error) {
-      throw storageError(`read ${key}`, error);
-    }
-    // Only an absent key is "no record". An empty string is a stored value
-    // that does not parse, which is reported as such: folding it into "no
-    // record" would hand a caller `null` as the slot's expectation and make
-    // its compare-and-swap refuse forever.
-    if (raw === null) return null;
-
-    try {
-      return { raw, value: JSON.parse(raw) as T };
-    } catch (error) {
-      throw storageError(`parse stored ${key}`, error);
     }
   }
 

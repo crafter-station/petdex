@@ -938,6 +938,132 @@ describe("a tokens record that is not a token set", () => {
   });
 });
 
+describe("getTokenSet", () => {
+  // The public accessor an embedder uses to read the whole pair rather than
+  // just `getAccessToken`'s string. It used to answer with whatever JSON sat
+  // in the slot, so these same records came back typed as a `TokenSet` and a
+  // consumer built `Bearer undefined` from them — the defect every internal
+  // reader has already stopped making. It must answer through the same shape
+  // rule, and fail the same way, or the package's public API is the one place
+  // that still lies about a damaged record.
+  const BAD_SHAPES: Array<[string, string]> = [
+    ["null", "null"],
+    ["false", "false"],
+    ["array", "[]"],
+    ["empty object", "{}"],
+    ["empty access token", '{"accessToken":""}'],
+  ];
+
+  function authOver(store: CredentialStore) {
+    return new ClerkCliAuth({
+      clientId: "client-id",
+      issuer: ISSUER,
+      storage: store,
+    });
+  }
+
+  for (const [name, raw] of BAD_SHAPES) {
+    test(`throws storage, not a token set, for a slot holding ${name}`, async () => {
+      const store = memoryStore();
+      await store.set("tokens", raw);
+      const failure = await authOver(store)
+        .getTokenSet()
+        .then(
+          () => null,
+          (error: { code?: string; message?: string }) => error,
+        );
+      // A record that is present and unreadable is a storage failure. `null`
+      // here would be the "signed out" claim this branch spent a whole round
+      // removing, and returning the parsed value would be worse still.
+      expect(failure?.code).toBe("storage");
+      expect(failure?.message).toContain("parse stored tokens");
+      expect(failure?.message).toContain(
+        "the saved token record is not a token set",
+      );
+    });
+  }
+
+  test("answers the stored record when it is a token set", async () => {
+    // The control: a valid record is returned as it was written, so the fix
+    // did not turn a working read into an error.
+    const tokens = {
+      accessToken: "tok-A",
+      refreshToken: "refresh-A",
+      expiresAt: 1_900_000_000_000,
+      scope: "profile",
+    };
+    const store = memoryStore();
+    await store.set("tokens", JSON.stringify(tokens));
+    expect(await authOver(store).getTokenSet()).toEqual(tokens);
+  });
+
+  test("answers null only when the key is absent", async () => {
+    // "No record" is the one state that is not an error. It is told apart
+    // from a damaged record by the store's own answer (`null`), never by a
+    // parse that failed — the same rule `getAccessToken` applies.
+    expect(await authOver(memoryStore()).getTokenSet()).toBeNull();
+  });
+
+  test("keeps the parse reason when the bytes are not JSON", async () => {
+    // A torn record is a different failure from a wrong shape, and the
+    // message must not swallow why: the reader's fix (a corrupted file)
+    // differs from the one for bytes that parsed into the wrong thing.
+    const raw = "{torn";
+    const store = memoryStore();
+    await store.set("tokens", raw);
+    const parseReason = (() => {
+      try {
+        JSON.parse(raw);
+        return "";
+      } catch (error) {
+        return (error as Error).message;
+      }
+    })();
+    expect(parseReason).not.toBe("");
+
+    const failure = await authOver(store)
+      .getTokenSet()
+      .then(
+        () => null,
+        (error: { code?: string; message?: string }) => error,
+      );
+    expect(failure?.code).toBe("storage");
+    expect(failure?.message).toContain("parse stored tokens");
+    expect(failure?.message).toContain(parseReason);
+    // And not the shape wording: these bytes never parsed, so no shape was
+    // ever examined.
+    expect(failure?.message).not.toContain(
+      "the saved token record is not a token set",
+    );
+  });
+
+  test("gives the same answer as getAccessToken on the same record", async () => {
+    // One assertion over two readers: the package must not have a public
+    // accessor that calls a record a token set while the credential path
+    // calls it damaged. Both go through `getStoredTokens`, so both the
+    // category and the message are the same.
+    for (const [name, raw] of BAD_SHAPES) {
+      const store = memoryStore();
+      await store.set("tokens", raw);
+      const auth = authOver(store);
+      const read = (promise: Promise<unknown>) =>
+        promise.then(
+          () => null,
+          (error: { code?: string; message?: string }) => error,
+        );
+
+      const tokenSetFailure = await read(auth.getTokenSet());
+      const accessTokenFailure = await read(auth.getAccessToken());
+      expect({
+        name,
+        tokenSet: tokenSetFailure?.code,
+        accessToken: accessTokenFailure?.code,
+      }).toEqual({ name, tokenSet: "storage", accessToken: "storage" });
+      expect(tokenSetFailure?.message).toBe(accessTokenFailure?.message);
+    }
+  });
+});
+
 describe("whoami when the profile slot cannot be read", () => {
   test("reports the store failure instead of fetching a profile", async () => {
     // A slot that does not parse is not an error (it heals — see the damaged
