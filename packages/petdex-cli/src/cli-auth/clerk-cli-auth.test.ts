@@ -1064,6 +1064,100 @@ describe("getTokenSet", () => {
   });
 });
 
+describe("a tokens record whose optional fields have the wrong type", () => {
+  // Asked only about `accessToken`, the shape rule let these through, and the
+  // readers then disagreed about the same bytes: `describeSavedSession` said
+  // `usable` for a string `expiresAt` that `resolveSession` compared to a
+  // number (so the session never looked live), and said `expired` for
+  // `expiresAt: null`, which `??` folded into "never expires" — the opposite
+  // verdict from the same record. A non-string `refreshToken` reached the
+  // refresh request body verbatim, so the provider was asked about a
+  // credential the CLI had invented. `mapTokenResponse` writes only a
+  // `number` `expiresAt` and a `string` `refreshToken`, so these records did
+  // not come from this build; the honest answer is `damaged`, and every
+  // reader can give it without the network.
+  const RECORDS: Array<[string, Record<string, unknown>]> = [
+    ["a string expiresAt", { accessToken: "tok-A", expiresAt: "not-a-number" }],
+    ["a null expiresAt", { accessToken: "tok-A", expiresAt: null }],
+    [
+      "an epoch rendered as a string",
+      { accessToken: "tok-A", expiresAt: "1300000000000" },
+    ],
+    ["an object refreshToken", { accessToken: "tok-A", refreshToken: {} }],
+    [
+      "a numeric refreshToken",
+      { accessToken: "tok-A", expiresAt: 1, refreshToken: 12345 },
+    ],
+  ];
+
+  for (const [name, tokens] of RECORDS) {
+    test(`is damaged to every reader (${name})`, async () => {
+      const { store } = inspectableStore({
+        tokens: JSON.stringify(tokens),
+        user: JSON.stringify({ sub: "user_A" }),
+      });
+      let tokenCalls = 0;
+      type FetchArgs = Parameters<typeof fetch>;
+      globalThis.fetch = (async (input: FetchArgs[0]) => {
+        if (String(input).includes("/oauth/token")) tokenCalls++;
+        return new Response("unexpected", { status: 500 });
+      }) as unknown as typeof fetch;
+      const auth = new ClerkCliAuth({
+        clientId: "client-id",
+        issuer: ISSUER,
+        storage: store,
+      });
+      const read = (promise: Promise<unknown>) =>
+        promise.then(
+          () => null,
+          (error: { code?: string; message?: string }) => error,
+        );
+
+      // Both token readers call it the same thing — a storage failure — and
+      // the summary calls the same bytes `damaged`. No reader gets as far as
+      // a refresh request with the wrong-typed field in its body.
+      expect({
+        name,
+        accessToken: (await read(auth.getAccessToken()))?.code,
+        tokenSet: (await read(auth.getTokenSet()))?.code,
+        summary: await auth.describeSavedSession(),
+        tokenCalls,
+      }).toEqual({
+        name,
+        accessToken: "storage",
+        tokenSet: "storage",
+        summary: { state: "damaged" },
+        tokenCalls: 0,
+      });
+    });
+  }
+
+  test("still reads a record whose optional fields have the right types", async () => {
+    // The control: tightening the rule must not turn a token set this build
+    // writes into an error.
+    const tokens = {
+      accessToken: "tok-A",
+      refreshToken: "r-A",
+      expiresAt: Date.now() + 3_600_000,
+    };
+    const { store } = inspectableStore({
+      tokens: JSON.stringify(tokens),
+      user: JSON.stringify({ sub: "user_A" }),
+    });
+    const auth = new ClerkCliAuth({
+      clientId: "client-id",
+      issuer: ISSUER,
+      storage: store,
+    });
+    expect(await auth.describeSavedSession()).toEqual({
+      state: "usable",
+      label: "user_A",
+    });
+    expect(await auth.getAccessToken()).toBe("tok-A");
+    expect(await auth.getTokenSet()).toEqual(tokens);
+  });
+});
+
 describe("whoami when the profile slot cannot be read", () => {
   test("reports the store failure instead of fetching a profile", async () => {
     // A slot that does not parse is not an error (it heals — see the damaged
@@ -1218,10 +1312,6 @@ describe("a user slot that is valid JSON but not a profile", () => {
     ["object without sub", '{"error":"nope"}'],
     ["sub is not a string", '{"sub":123}'],
     ["empty sub", '{"sub":""}'],
-    // `fetchUserInfo` only checks `sub`, but `UserInfo` types `email` as a
-    // string and `accountLabel` shows it first: a profile whose email is not
-    // one is not a profile this build wrote.
-    ["email is not a string", '{"sub":"user_A","email":123}'],
     [
       "non-string sub beside a username",
       '{"sub":123,"username":"ghost@example.test"}',
@@ -1389,6 +1479,169 @@ describe("a user slot that is valid JSON but not a profile", () => {
       label: undefined,
     });
     expect(await auth.getCachedUser()).toBeNull();
+  });
+});
+
+describe("a profile carrying a non-string email claim", () => {
+  // `fetchUserInfo` accepts any answer with a non-empty string `sub` and never
+  // inspects `email`; it is the only writer of the `user` slot, because both
+  // `login` and `whoami`'s write-back store its return value. Every record
+  // below is therefore a profile this build writes, and `parseStoredProfile`
+  // has to read it back. A stricter rule (email, when present, a string) made
+  // the slot never act as a cache: each `whoami` paid a userinfo round trip
+  // and rewrote the same bytes, `whoami` could not answer at all with the
+  // endpoint down, and `describeSavedSession` lost the account name.
+  const liveTokens = JSON.stringify({
+    accessToken: "tok-A",
+    refreshToken: "r-A",
+    expiresAt: Date.now() + 3_600_000,
+  });
+
+  /**
+   * Every `email` claim `fetchUserInfo` will accept and write back. The
+   * expected profile is the bytes themselves (`JSON.parse`), because that is
+   * exactly what a reader must answer with — including claims `UserInfo`'s
+   * TypeScript type does not admit (`email: null`), which is the point.
+   */
+  const EMAILS: Array<[string, string]> = [
+    ["null", '{"sub":"user_A","email":null}'],
+    ["an array", '{"sub":"user_A","email":[]}'],
+    ["a number", '{"sub":"user_A","email":123}'],
+    ["missing", '{"sub":"user_A"}'],
+    ["an empty string", '{"sub":"user_A","email":""}'],
+  ];
+
+  function authOver(store: CredentialStore) {
+    return new ClerkCliAuth({
+      clientId: "client-id",
+      issuer: ISSUER,
+      storage: store,
+    });
+  }
+
+  /** A userinfo endpoint that counts calls and answers as `userA`. */
+  function stubUserinfo(userA: Record<string, unknown> = { sub: "user_A" }) {
+    let userinfoCalls = 0;
+    type FetchArgs = Parameters<typeof fetch>;
+    globalThis.fetch = (async (input: FetchArgs[0]) => {
+      if (!String(input).startsWith(`${ISSUER}/oauth/userinfo`)) {
+        return new Response("unexpected", { status: 500 });
+      }
+      userinfoCalls++;
+      return json(userA);
+    }) as unknown as typeof fetch;
+    return () => userinfoCalls;
+  }
+
+  for (const [name, raw] of EMAILS) {
+    test(`is a cache hit named by its subject when email is ${name}`, async () => {
+      const { store } = inspectableStore({ tokens: liveTokens, user: raw });
+      const userinfoCalls = stubUserinfo();
+      const auth = authOver(store);
+      const profile = JSON.parse(raw);
+
+      expect(await auth.getCachedUser()).toEqual(profile);
+      expect(await auth.describeSavedSession()).toEqual({
+        state: "usable",
+        label: "user_A",
+      });
+      expect(await auth.whoami()).toEqual(profile);
+      // The whole point: the profile is in the store, so nothing goes to the
+      // network and the slot is not rewritten.
+      expect(userinfoCalls()).toBe(0);
+    });
+  }
+
+  test("every reader gives the same answer for every email claim", async () => {
+    // One assertion over three readers: `whoami`, `getCachedUser` and the
+    // summary's label must not disagree about a record that is in the store.
+    // A split here is how the CLI names an account (or refuses to) on bytes
+    // it wrote itself.
+    for (const [name, raw] of EMAILS) {
+      const { store, values } = inspectableStore({
+        tokens: liveTokens,
+        user: raw,
+      });
+      const auth = authOver(store);
+      const profile = JSON.parse(raw);
+      expect({
+        name,
+        cached: await auth.getCachedUser(),
+        summary: await auth.describeSavedSession(),
+        whoami: await auth.whoami(),
+        slot: values.get("user"),
+      }).toEqual({
+        name,
+        cached: profile,
+        summary: { state: "usable", label: "user_A" },
+        whoami: profile,
+        slot: raw,
+      });
+    }
+  });
+
+  test("a profile the producer just wrote is a steady-state hit", async () => {
+    // The end the two rules have to meet: take bytes from the *real*
+    // `fetchUserInfo`, put them in the store, and ask again. The producer's
+    // answer has no email claim it would keep, so this uses the case the old
+    // rule rejected — `email: null` — served live on both passes.
+    const { fetchUserInfo } = await import("./lib/token-exchange");
+    const body = { sub: "user_A", email: null };
+    stubUserinfo(body);
+    const produced = await fetchUserInfo({
+      issuer: ISSUER,
+      accessToken: "tok-A",
+    });
+    const written = JSON.stringify(produced);
+    expect(written).toBe('{"sub":"user_A","email":null}');
+
+    const { store, values } = inspectableStore({
+      tokens: liveTokens,
+      user: written,
+    });
+    const userinfoCalls = stubUserinfo(body);
+    const auth = authOver(store);
+
+    const expected = JSON.parse(written);
+    expect(await auth.getCachedUser()).toEqual(expected);
+    expect(await auth.whoami()).toEqual(expected);
+    expect(await auth.whoami()).toEqual(expected);
+    // Two commands on a profile that is already stored: no round trip, and
+    // the same bytes in the slot (no write-back of an identical value).
+    expect(userinfoCalls()).toBe(0);
+    expect(values.get("user")).toBe(written);
+  });
+
+  test("answers the cached profile with the userinfo endpoint unreachable", async () => {
+    // The failure the strict rule turned into a lie: the profile is on disk,
+    // so `whoami` must answer it rather than report that the profile it is
+    // holding "couldn't be loaded" and send the user to `petdex login` (which
+    // would only write the same shape again).
+    const raw = '{"sub":"user_A","email":null}';
+    const { store } = inspectableStore({ tokens: liveTokens, user: raw });
+    globalThis.fetch = (async () => {
+      throw new TypeError("fetch failed");
+    }) as unknown as typeof fetch;
+    const auth = authOver(store);
+
+    const expected = JSON.parse(raw);
+    expect(await auth.whoami()).toEqual(expected);
+    expect(await auth.getCachedUser()).toEqual(expected);
+  });
+
+  test("does not name a non-string email as the account", async () => {
+    // `accountLabel` takes the first value whose `typeof` is `"string"`, which
+    // is what makes dropping the shape rule safe: `email: 123` cannot reach a
+    // message. With a username beside it, the label is the username — proof
+    // the number was skipped rather than stringified.
+    const { store } = inspectableStore({
+      tokens: liveTokens,
+      user: '{"sub":"user_A","email":123,"username":"alice"}',
+    });
+    expect(await authOver(store).describeSavedSession()).toEqual({
+      state: "usable",
+      label: "alice",
+    });
   });
 });
 

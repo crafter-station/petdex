@@ -90,6 +90,22 @@ function parseStoredTokens(raw: string): TokenSet | null {
  * lives here and the failure carries *why* it failed: bytes that are not JSON
  * at all are a parse error, bytes that parse into something else are a shape
  * error, and both become a `storage` answer upstream.
+ *
+ * The rule covers the optional fields too, not just `accessToken`, because the
+ * readers used them differently and reached opposite verdicts on the same
+ * bytes. `resolveSession` compares `expiresAt` with `>=` (a non-numeric string
+ * fails that comparison, so the session is treated as stale) and folds `null`
+ * into "never expires" with `??`; `describeSavedSession` compares the same
+ * value with `<`, so a non-numeric string could be called `usable` while
+ * `getAccessToken` answered `null`, and `null` was called `expired` while
+ * `getAccessToken` handed the token back. A non-string `refreshToken` was
+ * worse than a disagreement: when a refresh ran, it went into the request
+ * body verbatim, so the provider was asked about a credential the CLI had
+ * made up. `mapTokenResponse` only ever writes a `number` `expiresAt` and a
+ * `string` `refreshToken`, so a record that fails these checks did not come
+ * from this build (a hand-edit, an older layout, an external writer) —
+ * declaring it not a token set is the honest answer, and the one every reader
+ * can give without going to the network.
  */
 type StoredTokensRead =
   | { ok: true; tokens: TokenSet }
@@ -108,6 +124,13 @@ function readStoredTokens(raw: string): StoredTokensRead {
   const tokens = parsed as TokenSet;
   if (typeof tokens.accessToken !== "string" || !tokens.accessToken)
     return { ok: false, reason: "shape" };
+  if (tokens.expiresAt !== undefined && typeof tokens.expiresAt !== "number")
+    return { ok: false, reason: "shape" };
+  if (
+    tokens.refreshToken !== undefined &&
+    typeof tokens.refreshToken !== "string"
+  )
+    return { ok: false, reason: "shape" };
   return { ok: true, tokens };
 }
 
@@ -120,23 +143,39 @@ function readStoredTokens(raw: string): StoredTokensRead {
  * that `describeSavedSession` refuses to name. So the rule lives here, the
  * same way `readStoredTokens` owns the `tokens` shape.
  *
- * The predicate is `fetchUserInfo`'s, because that is the only producer: a
- * stored profile is whatever that call wrote back, so it has to pass the
- * check that call applies to the network answer. `typeof x === "object"` is
- * not enough on its own — `[]`, `{}`, `{"error":"boom"}` and `{"sub":123}`
- * are all objects, and handing one to `whoami` prints it as the account or
- * reports an identity with no subject.
+ * The predicate is exactly `fetchUserInfo`'s, because that is the only
+ * producer: a stored profile is whatever that call wrote back, so it has to
+ * pass the check that call applies to the network answer — no more and no
+ * less. Stricter is not safer here. Every extra field this function looked at
+ * was a field the producer had not, so bytes the CLI itself wrote could fail
+ * to read back: the slot never acted as a cache (each `whoami` paid a
+ * userinfo round trip and rewrote the same bytes), and with the endpoint
+ * unreachable the command reported a profile it held on disk as missing.
  *
- * - an object that is not null and not an array (a JSON array is not an
- *   object shape here, whatever `typeof` says);
+ * `typeof x === "object"` is not enough on its own — `[]`, `{}`,
+ * `{"error":"boom"}` and `{"sub":123}` are all objects, and handing one to
+ * `whoami` prints it as the account or reports an identity with no subject.
+ * So:
+ *
+ * - an object that is not null and not an array;
  * - `sub` present as a non-empty string — `fetchUserInfo` throws without it,
- *   and it is `accountLabel`'s last resort when there is no email;
- * - `email`, when present, a string — `UserInfo` types it as one, and it is
- *   the first thing `accountLabel` shows a person.
+ *   and it is `accountLabel`'s last resort when there is no email.
  *
- * Everything else about the object is left alone: `UserInfo` carries an
- * index signature, so extra keys (`username`, provider claims) are expected,
- * and a profile is not rejected for having them.
+ * Nothing else is checked; in particular not `email`. `UserInfo` types it as
+ * an optional string, but `fetchUserInfo` never inspects it, so an answer
+ * carrying `"email": null` is written back as it stands and must read back as
+ * a profile. `accountLabel` takes the first value whose `typeof` is
+ * `"string"`, so a non-string `email` cannot reach a message — it falls
+ * through to `username`, then `sub`.
+ *
+ * Extra keys (`username`, provider claims) are expected: `UserInfo` carries
+ * an index signature, and a profile is not rejected for having them.
+ *
+ * `Array.isArray` is defence in depth, not a rule that carries behaviour: a
+ * JSON array has no own `sub` property, so the check below rejects it anyway
+ * and no test can tell the two apart. It stays because it states what this
+ * function means by "an object" at the point where it says it, and costs
+ * nothing; it is not relied on by any test.
  *
  * Damaged and falsey slots (`"null"`, `"false"`, `"0"`, `"\"\""`, an empty
  * string, bytes that are not JSON) also answer null: none of them names an
@@ -156,7 +195,6 @@ function parseStoredProfile(raw: string | null): UserInfo | null {
     return null;
   const user = parsed as UserInfo;
   if (typeof user.sub !== "string" || user.sub.length === 0) return null;
-  if (user.email !== undefined && typeof user.email !== "string") return null;
   return user;
 }
 
