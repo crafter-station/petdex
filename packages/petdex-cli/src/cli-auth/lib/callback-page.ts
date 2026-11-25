@@ -42,11 +42,20 @@ export type CallbackOutcome =
       kind: "error";
       reason: CallbackFailureReason;
       /**
-       * The account a failed re-login left in effect, when the store still
-       * holds one. Naming it is what keeps the page from saying only "a
-       * previous sign-in, if any" while the terminal already knows whose.
+       * The account a failed re-login left in effect, when the store pairs a
+       * name with a credential-shaped record. Naming it is what keeps the
+       * page from saying only "a previous sign-in, if any" while the terminal
+       * already knows whose. A profile with no credential beside it is not a
+       * session, and the caller passes no account for it.
        */
       previousAccount?: string;
+      /**
+       * What the named record is: `usable` (a token that has not run out, or
+       * one with a refresh token) or `expired` (saved, but no usable token).
+       * The copy differs because "still in use" is only true of the first —
+       * an expired record is saved and nothing more.
+       */
+      previousSession?: "usable" | "expired";
     };
 
 /**
@@ -222,22 +231,41 @@ export function callbackStringsByLocale(): Record<Locale, Strings> {
  * `tokens` land before `user` — so the previous account is not necessarily
  * still in effect, and the page says only that the sign-in may not have
  * completed.
+ *
+ * The copy also follows what the record actually is. "Still in use" is a
+ * claim about a credential: an expired record with no refresh token is saved
+ * and names an account, but no command can act as it, so the page must not
+ * say it is in use — the same distinction the terminal's
+ * `describeSavedSession` makes.
  */
+type NamedSessionState = "usable" | "expired";
+
 const NAMED_REASON: Record<
   Locale,
-  Partial<Record<CallbackFailureReason, (account: string) => string>>
+  Partial<
+    Record<
+      CallbackFailureReason,
+      (account: string, state: NamedSessionState) => string
+    >
+  >
 > = {
   en: {
-    userinfo_failed: (account) =>
-      `Your profile couldn't be loaded, so this sign-in wasn't saved. Your previous sign-in (${account}) is still saved and still in use.`,
+    userinfo_failed: (account, state) =>
+      state === "expired"
+        ? `Your profile couldn't be loaded, so this sign-in wasn't saved. Your previous sign-in (${account}) is still saved, but that session has expired; sign in again from your terminal.`
+        : `Your profile couldn't be loaded, so this sign-in wasn't saved. Your previous sign-in (${account}) is still saved and still in use.`,
   },
   es: {
-    userinfo_failed: (account) =>
-      `No se pudo cargar tu perfil, así que este acceso no se guardó. Tu acceso anterior (${account}) sigue guardado y sigue en uso.`,
+    userinfo_failed: (account, state) =>
+      state === "expired"
+        ? `No se pudo cargar tu perfil, así que este acceso no se guardó. Tu acceso anterior (${account}) sigue guardado, pero esa sesión ha caducado; vuelve a iniciar sesión desde tu terminal.`
+        : `No se pudo cargar tu perfil, así que este acceso no se guardó. Tu acceso anterior (${account}) sigue guardado y sigue en uso.`,
   },
   zh: {
-    userinfo_failed: (account) =>
-      `没能读取你的账号信息，这次登录没有保存。此前的登录（${account}）仍然保存并继续有效。`,
+    userinfo_failed: (account, state) =>
+      state === "expired"
+        ? `没能读取你的账号信息，这次登录没有保存。此前的登录（${account}）仍然保存，但该会话已过期，请在终端重新登录。`
+        : `没能读取你的账号信息，这次登录没有保存。此前的登录（${account}）仍然保存并继续有效。`,
   },
 };
 
@@ -511,12 +539,17 @@ export function renderCallbackPage(
     outcome.kind === "error" && outcome.previousAccount
       ? clampDetail(maskAccount(outcome.previousAccount), 120)
       : undefined;
+  const previousSession =
+    outcome.kind === "error" ? outcome.previousSession : undefined;
 
   const strings = {} as Record<Locale, Record<string, string>>;
   for (const locale of LOCALES) {
     const s = STRINGS[locale];
     const named = previousAccount
-      ? NAMED_REASON[locale][reason as CallbackFailureReason]?.(previousAccount)
+      ? NAMED_REASON[locale][reason as CallbackFailureReason]?.(
+          previousAccount,
+          previousSession ?? "usable",
+        )
       : undefined;
     strings[locale] = {
       eyebrow: s.eyebrow,

@@ -86,6 +86,25 @@ function parseStoredTokens(raw: string): TokenSet | null {
 }
 
 /**
+ * A stored `user` value, or null when it is not a profile object.
+ *
+ * Damaged and falsey slots (`"null"`, `"false"`, `"0"`, `"\"\""`, an empty
+ * string, bytes that are not JSON) all answer null: none of them names an
+ * account, so the caller fetches the profile and writes it back. The raw
+ * bytes stay with the caller as the write's expectation — see
+ * `writeBackProfile`.
+ */
+function parseStoredProfile(raw: string | null): UserInfo | null {
+  if (raw === null) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed && typeof parsed === "object" ? (parsed as UserInfo) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Read the store's current `tokens` record and say which of three states it
  * is in, relative to the bytes a refresh was computed from.
  *
@@ -337,11 +356,17 @@ export class ClerkCliAuth {
       // tell the reader anything. A no-op if the response was already sent.
       // A configuration failure is its own reason on the page: the reader's
       // fix is an updated or corrected CLI, not a retry of the code exchange
-      // that never ran. The account a failed sign-in left in place is passed
-      // along too, read from the store and never the network, so the page can
-      // say what the terminal says — but the page shows it only for
-      // `userinfo_failed`, where the store provably was not touched.
+      // that never ran. What the failed sign-in left in place is passed along
+      // too, read from the store and never the network — but only when the
+      // store pairs a name with a credential-shaped record. An account the
+      // CLI cannot act as (a profile with no `tokens` beside it, a record it
+      // cannot parse) is not "still in use", and the page must not say it is.
       const reason = (error as { code?: unknown }).code;
+      const previous = await this.describeSavedSession();
+      const inEffect =
+        previous.state === "usable" || previous.state === "expired"
+          ? { account: previous.label, state: previous.state }
+          : { account: undefined, state: undefined };
       server.respond({
         kind: "error",
         reason:
@@ -350,7 +375,8 @@ export class ClerkCliAuth {
             : reason === "config"
               ? "config_failed"
               : "token_exchange_failed",
-        previousAccount: accountLabel(await this.getCachedUser()),
+        previousAccount: inEffect.account,
+        previousSession: inEffect.state,
       });
       throw error;
     } finally {
@@ -429,11 +455,17 @@ export class ClerkCliAuth {
         // inside this round trip owns the store now, and that session is what
         // the command must answer with — not "your session expired" about a
         // refresh token the store no longer describes. `storedTokensVerdict`
-        // bounds the re-reads, and "unknown" — an unreadable store — is
-        // reported like an unchanged one rather than retried forever.
+        // bounds the re-reads. "unknown" — the store could not be read at
+        // all — is reported exactly like an unchanged record: there is no
+        // evidence anyone replaced the session, and treating it as "a new
+        // session landed" would re-run a refresh the provider just refused
+        // until the attempt cap returns that same refused credential as if
+        // it worked. The loop only continues on a record that actually
+        // changed.
         const changed = await this.storedTokensVerdict(raw);
         if (changed === "logged-out") return null;
-        if (changed === "same") throw refreshFailure(error);
+        if (changed === "same" || changed === "unknown")
+          throw refreshFailure(error);
         continue;
       }
       const nextTokens = {
@@ -526,7 +558,16 @@ export class ClerkCliAuth {
     // command would keep reporting it while the API ran as the new account.
     let current = session;
     for (let read = 0; read < WHOAMI_PROFILE_READS; read++) {
-      const cachedUser = await this.getJson<UserInfo>("user");
+      // The raw bytes, not only the parsed profile: the guarded write below
+      // has to name the slot's *current* value as its expectation. A record
+      // that parses to a falsey scalar (`null`, `false`, `0`, `""`), an empty
+      // string, or bytes that are not JSON at all is not a profile — but it
+      // is still what the store holds, and expecting `null` there would make
+      // the compare-and-swap refuse forever and leave the command alternating
+      // between network calls and "Not signed in" while the token works. Only
+      // a key that is genuinely absent is `null`.
+      const rawUser = await this.currentUserRaw();
+      const cachedUser = parseStoredProfile(rawUser);
       if (cachedUser && (await this.tokensStillCurrent(current.raw))) {
         return cachedUser;
       }
@@ -542,7 +583,7 @@ export class ClerkCliAuth {
         issuer: this.config.issuer,
         accessToken: current.accessToken,
       });
-      if (await this.writeBackProfile(current.raw, user)) return user;
+      if (await this.writeBackProfile(current.raw, rawUser, user)) return user;
       // The session changed while userinfo was in flight: the answer names an
       // account the store no longer describes. Re-read and answer for the
       // session that is signed in now.
@@ -573,6 +614,23 @@ export class ClerkCliAuth {
   }
 
   /**
+   * The raw `user` record, or null when the store holds none.
+   *
+   * Kept apart from `getRawJson` because a profile slot that does not
+   * parse is not an error here: `whoami` can answer from the network and
+   * overwrite it, and the raw bytes are exactly what the guarded write uses
+   * as its expectation. A store that cannot be read still throws — that is a
+   * different failure from a value that is merely not a profile.
+   */
+  private async currentUserRaw(): Promise<string | null> {
+    try {
+      return await this.config.storage.get("user");
+    } catch (error) {
+      throw storageError("read user", error);
+    }
+  }
+
+  /**
    * The raw `tokens` record, or null when the store holds none.
    *
    * `whoami` binds every profile read to these bytes: the record is what a
@@ -600,8 +658,8 @@ export class ClerkCliAuth {
   }
 
   /**
-   * Write a profile fetched with `accessToken` back, only onto the token
-   * record it was fetched from.
+   * Write a profile fetched with `accessToken` back, only onto the slot and
+   * token record it was fetched from.
    *
    * `tokens` and `user` are separate records, so a login running at the same
    * time can replace the token while the userinfo call is in flight. Writing
@@ -611,9 +669,17 @@ export class ClerkCliAuth {
    * The guarded write makes the pairing itself the condition: it lands only
    * if the token record is still the bytes the userinfo call used, and the
    * caller re-reads the winner when it does not.
+   *
+   * `expectedUser` is the raw value the `user` slot held when the caller
+   * decided it had no usable profile — `null` only when the key is absent,
+   * never as a stand-in for "not a profile". A slot holding a damaged or
+   * falsey value is exactly what this write exists to heal; expecting
+   * absence there would refuse every attempt and pin the command to that
+   * value forever.
    */
   private async writeBackProfile(
     rawTokens: string,
+    expectedUser: string | null,
     user: UserInfo,
   ): Promise<boolean> {
     try {
@@ -625,7 +691,7 @@ export class ClerkCliAuth {
       // including the key the compare read.
       return await this.config.storage.replaceIfUnchanged(
         "user",
-        null,
+        expectedUser,
         JSON.stringify(user),
         // The condition: `tokens` must still be the bytes userinfo ran with.
         { key: "tokens", expected: rawTokens },
@@ -638,13 +704,14 @@ export class ClerkCliAuth {
   /**
    * The stored profile, without any network call.
    *
-   * Used for the callback page's "previous sign-in" label. It is deliberately
-   * *only* the profile: whether a credential is stored beside it, and whether
-   * that credential could still work, are separate questions, and
-   * `describeSavedSession` answers both together for the terminal message.
-   * Reading the profile alone here means a caller cannot accidentally treat
-   * "a name is cached" as "the session works".
+   * It is deliberately *only* the profile: whether a credential is stored
+   * beside it, and whether that credential could still work, are separate
+   * questions, and `describeSavedSession` answers both together. Callers that
+   * need to name an account the CLI can still act as must use that summary —
+   * a cached name beside no credential is not a session (`logout` can leave
+   * exactly that pair behind when one of its two deletes fails).
    *
+   * Kept on the public surface for callers that want the profile itself.
    * Never throws: a store it cannot read is reported as "no profile", which
    * is what the command's own credential access will hit anyway.
    */
@@ -673,6 +740,12 @@ export class ClerkCliAuth {
    * record only — expiry and a refresh token, not a live check — because
    * nothing here may go to the network; the message built from it says the
    * attempt did not change it, not that it works.
+   *
+   * A record that is present but does not parse is `damaged`, not `none`.
+   * `none` means there was never anything to read; a damaged record is
+   * evidence that something was saved and can no longer be read, and the
+   * message for `none` ("nothing was saved before this attempt either")
+   * would be a claim about the past the store contradicts.
    */
   async describeSavedSession(): Promise<SavedSessionSummary> {
     let raw: string | null;
@@ -681,10 +754,10 @@ export class ClerkCliAuth {
     } catch {
       return { state: "unknown" };
     }
-    if (!raw) return { state: "none" };
+    if (raw === null) return { state: "none" };
 
     const tokens = parseStoredTokens(raw);
-    if (!tokens) return { state: "none" };
+    if (!tokens) return { state: "damaged" };
     const state: SavedSessionState =
       tokens.expiresAt !== undefined &&
       tokens.expiresAt < Date.now() &&
@@ -787,7 +860,11 @@ export class ClerkCliAuth {
     } catch (error) {
       throw storageError(`read ${key}`, error);
     }
-    if (!raw) return null;
+    // Only an absent key is "no record". An empty string is a stored value
+    // that does not parse, which is reported as such: folding it into "no
+    // record" would hand a caller `null` as the slot's expectation and make
+    // its compare-and-swap refuse forever.
+    if (raw === null) return null;
 
     try {
       return { raw, value: JSON.parse(raw) as T };

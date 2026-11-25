@@ -22,7 +22,11 @@ import { join } from "node:path";
 
 import { ClerkCliAuth } from "../clerk-cli-auth";
 import type { ClerkCliAuthError, CredentialStore } from "../types";
-import { createCredentialStore } from "./credential-store";
+import {
+  createCredentialStore,
+  KeychainCredentialStore,
+} from "./credential-store";
+import { withFileMutex } from "./file-mutex";
 
 const native = new Map<string, string>();
 let readError: Error | undefined;
@@ -721,5 +725,216 @@ describe("guarded write (replaceIfUnchanged)", () => {
     // And a stale expectation is still refused in that mode.
     expect(await store.replaceIfUnchanged("tokens", "A", "C")).toBe(false);
     expect(await fallback.get("tokens")).toBe("B");
+  });
+});
+
+describe("the write timeout covers the wait, not just the lock file", () => {
+  const lockPath = () => `${filePath}.lock`;
+
+  test("a write queued behind another operation still honours its own timeout", async () => {
+    // The process-local mutex is entered before the lock-file deadline used
+    // to start, so a second store could wait in RAM forever while promising
+    // its caller `lockTimeoutMs`. The lock file here is held by a live, fresh
+    // holder, so the first store sits in its own (long) wait; the second must
+    // still give up on its 60 ms rather than inherit the first one's budget.
+    await writeFile(lockPath(), `${process.pid}:external-holder\n`);
+    const now = new Date();
+    await utimes(lockPath(), now, now);
+
+    const options = {
+      filePath,
+      lockPath: lockPath(),
+      lockStaleMs: 60_000,
+      lockHeartbeatMs: 1_000,
+    };
+    const patient = createCredentialStore("file", {
+      ...options,
+      lockTimeoutMs: 5_000,
+    });
+    const impatient = createCredentialStore("file", {
+      ...options,
+      lockTimeoutMs: 60,
+    });
+
+    const patientWrite = patient.set("a", "1").then(
+      () => ({ ok: true as const }),
+      (error: Error) => ({ ok: false as const, message: error.message }),
+    );
+    const impatientWrite = impatient.set("b", "2").then(
+      () => ({ ok: true as const }),
+      (error: Error) => ({ ok: false as const, message: error.message }),
+    );
+
+    // Settles on its own: the external lock is never released before this.
+    const refused = await impatientWrite;
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) {
+      expect(refused.message).toContain("busy");
+      expect(refused.message).toContain("60ms");
+    }
+
+    await rm(lockPath(), { force: true });
+    expect(await patientWrite).toEqual({ ok: true });
+    // The impatient write never ran: no second key was written.
+    expect(JSON.parse(await readFile(filePath, "utf8"))).toEqual({ a: "1" });
+  });
+});
+
+describe("guarded writes in the production stores", () => {
+  const PROFILE = JSON.stringify({ sub: "user_A", email: "a@example.test" });
+
+  test("file: a stale guard refuses the write and leaves the file untouched", async () => {
+    // `whoami` conditions the profile write on the token record the profile
+    // was fetched with. The tracking tests use their own map-backed store, so
+    // only this one executes the file store's guard.
+    await writeFile(filePath, JSON.stringify({ tokens: "tok-A" }));
+    expect(
+      await fallback.replaceIfUnchanged("user", null, PROFILE, {
+        key: "tokens",
+        expected: "tok-A",
+      }),
+    ).toBe(true);
+    expect(JSON.parse(await readFile(filePath, "utf8")).user).toBe(PROFILE);
+
+    // A login replaced the token record: the profile fetched from the old one
+    // must not be paired with it. The write goes through the store so the
+    // profile stays where it is — only the guard can refuse what follows.
+    await fallback.set("tokens", "tok-B");
+    const applied = await fallback.replaceIfUnchanged(
+      "user",
+      PROFILE,
+      JSON.stringify({ sub: "user_B" }),
+      { key: "tokens", expected: "tok-A" },
+    );
+    expect(applied).toBe(false);
+    // A refusal writes nothing at all, not even the key it compared.
+    expect(JSON.parse(await readFile(filePath, "utf8"))).toEqual({
+      tokens: "tok-B",
+      user: PROFILE,
+    });
+  });
+
+  test("memory: a stale guard refuses the write", async () => {
+    const memory = createCredentialStore("memory");
+    await memory.set("tokens", "tok-A");
+    expect(
+      await memory.replaceIfUnchanged("user", null, PROFILE, {
+        key: "tokens",
+        expected: "tok-A",
+      }),
+    ).toBe(true);
+
+    await memory.set("tokens", "tok-B");
+    // The target key is absent again, so only the guard can refuse this.
+    await memory.delete("user");
+    expect(
+      await memory.replaceIfUnchanged("user", null, PROFILE, {
+        key: "tokens",
+        expected: "tok-A",
+      }),
+    ).toBe(false);
+    expect(await memory.get("user")).toBeNull();
+  });
+});
+
+describe("every write takes the process-local mutex", () => {
+  test("a write cannot land while a repairing reader holds the mutex", async () => {
+    // A reader that moves a torn file aside takes the mutex, re-reads inside
+    // it and then renames. If a writer did not queue behind the same mutex,
+    // it could commit between that re-read and the rename, and the reader
+    // would move the brand-new credential away. Holding the mutex directly is
+    // the deterministic version of that interleaving.
+    const store = createCredentialStore("file", { filePath });
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let holding: () => void = () => {};
+    const holdingStarted = new Promise<void>((resolve) => {
+      holding = resolve;
+    });
+
+    const holder = withFileMutex(`${filePath}.lock`, async () => {
+      holding();
+      await gate;
+    });
+    await holdingStarted;
+
+    let written = false;
+    const write = store.set("tokens", "fresh").then(() => {
+      written = true;
+    });
+    await Bun.sleep(100);
+    expect(written).toBe(false);
+    expect(await stat(filePath).catch(() => null)).toBeNull();
+
+    release();
+    await holder;
+    await write;
+    expect(JSON.parse(await readFile(filePath, "utf8"))).toEqual({
+      tokens: "fresh",
+    });
+  });
+});
+
+describe("keychain compare-and-swap honesty", () => {
+  test("a login that lands during the fallback read is seen by the compare", async () => {
+    // The keychain holds nothing, so the compare has to consult the file
+    // fallback — an await. A login that writes the keychain inside that await
+    // is the newer session; comparing the value read *before* the await would
+    // pass and overwrite it with a result derived from the record it replaced.
+    const A = JSON.stringify({ accessToken: "A", expiresAt: 1 });
+    const refreshed = JSON.stringify({
+      accessToken: "A-refreshed",
+      expiresAt: 2,
+    });
+    const B = JSON.stringify({ accessToken: "B", expiresAt: 3 });
+
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let readStarted: () => void = () => {};
+    const started = new Promise<void>((resolve) => {
+      readStarted = resolve;
+    });
+
+    const slowFallback: CredentialStore = {
+      get: async (key) => {
+        readStarted();
+        await gate;
+        return key === "tokens" ? A : null;
+      },
+      set: async () => {},
+      delete: async () => {},
+      replaceIfUnchanged: async () => false,
+    };
+    const quietFallback: CredentialStore = {
+      get: async () => null,
+      set: async () => {},
+      delete: async () => {},
+      replaceIfUnchanged: async () => false,
+    };
+    const refresher = new KeychainCredentialStore(
+      "petdex-test",
+      "default",
+      slowFallback,
+    );
+    const login = new KeychainCredentialStore(
+      "petdex-test",
+      "default",
+      quietFallback,
+    );
+
+    // A refresh computed from A, consulting the fallback because the keychain
+    // entry is empty — and paused inside that read.
+    const refresh = refresher.replaceIfUnchanged("tokens", A, refreshed);
+    await started;
+    // A login for another account completes entirely while that read is held.
+    await login.set("tokens", B);
+    release();
+
+    expect(await refresh).toBe(false);
+    expect(native.get("default:tokens")).toBe(B);
   });
 });

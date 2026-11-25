@@ -14,7 +14,7 @@ import { dirname, join } from "node:path";
 
 import type { CredentialStore, StorageKind } from "../types.js";
 import { ClerkCliAuthError } from "../types.js";
-import { withFileMutex } from "./file-mutex.js";
+import { FileMutexTimeoutError, withFileMutex } from "./file-mutex.js";
 
 export interface CreateStoreOptions {
   keychainService?: string;
@@ -186,7 +186,9 @@ class FileCredentialStore implements CredentialStore {
    * carries the holder's pid and an unguessable token: the pid identifies a
    * holder that died, and the token makes the release remove only what this
    * call created. Contenders back off 5 ms → 50 ms and give up after
-   * `lockTimeoutMs`; a timeout is reported rather than ignored.
+   * `lockTimeoutMs`; a timeout is reported rather than ignored. That budget
+   * is for the whole wait — see `withLock`, which also bounds the
+   * process-local queue with it.
    *
    * A lock that cannot be created at all (read-only home, an unusable lock
    * path) is a reported storage error, not a fallback to an unlocked write.
@@ -227,14 +229,43 @@ class FileCredentialStore implements CredentialStore {
     // a repairing reader (below) takes the same mutex, so it cannot be
     // re-admitted in the middle of this section and move the file this
     // section is about to write.
-    return withFileMutex(this.lockPath, () => this.withLockFile(operation));
+    //
+    // One deadline covers both waits. Queueing for the mutex is time this
+    // call spends inside the critical path just as much as the lock-file
+    // poll is, so a caller that promises `lockTimeoutMs` must not be able to
+    // sit behind another operation in RAM forever while its own lock file is
+    // free. The mutex is told the bound (it walks away without running
+    // anything), and the lock-file loop gets the same absolute deadline, so
+    // the total is one `lockTimeoutMs` rather than twice that.
+    const deadline = Date.now() + this.lockTimeoutMs;
+    try {
+      return await withFileMutex(
+        this.lockPath,
+        () => this.withLockFile(operation, deadline),
+        this.lockTimeoutMs,
+      );
+    } catch (error) {
+      if (error instanceof FileMutexTimeoutError) throw this.busyFailure();
+      throw error;
+    }
+  }
+
+  /** The one "someone else holds it" error, whichever wait timed out. */
+  private busyFailure(): ClerkCliAuthError {
+    return storageError(
+      `acquire lock ${this.lockPath}`,
+      new Error(
+        `the credential file is busy (held by another petdex process) past ${this.lockTimeoutMs}ms`,
+      ),
+    );
   }
 
   private async withLockFile<T>(
     operation: (assertOwned: () => Promise<void>) => Promise<T>,
+    deadline: number,
   ): Promise<T> {
     const token = `${process.pid}:${randomUUID()}`;
-    await this.acquireLock(token);
+    await this.acquireLock(token, deadline);
     const stopHeartbeat = this.startHeartbeat(token);
     try {
       return await operation(() => this.assertLockOwned(token));
@@ -244,8 +275,7 @@ class FileCredentialStore implements CredentialStore {
     }
   }
 
-  private async acquireLock(token: string): Promise<void> {
-    const deadline = Date.now() + this.lockTimeoutMs;
+  private async acquireLock(token: string, deadline: number): Promise<void> {
     let delay = LOCK_RETRY_BASE_MS;
 
     for (;;) {
@@ -272,14 +302,7 @@ class FileCredentialStore implements CredentialStore {
 
         if (await this.stealStaleLock(deadline)) continue;
 
-        if (Date.now() + delay > deadline) {
-          throw storageError(
-            `acquire lock ${this.lockPath}`,
-            new Error(
-              `the credential file is busy (held by another petdex process) past ${this.lockTimeoutMs}ms`,
-            ),
-          );
-        }
+        if (Date.now() + delay > deadline) throw this.busyFailure();
         await sleep(delay);
         delay = Math.min(delay * 2, LOCK_RETRY_MAX_MS);
       }
@@ -627,7 +650,16 @@ class FileCredentialStore implements CredentialStore {
   }
 }
 
-class KeychainCredentialStore implements CredentialStore {
+/**
+ * The keychain store, over an injectable file fallback.
+ *
+ * Exported so its own tests can supply a fallback whose reads the test holds
+ * open — the interleavings that decide whether the compare is honest all
+ * happen during a fallback read, and the real file store's reads are too fast
+ * to place one deliberately. Production code always builds it through
+ * `createCredentialStore`.
+ */
+export class KeychainCredentialStore implements CredentialStore {
   private keyringPromise: Promise<KeyringModule | null> | null = null;
 
   constructor(
@@ -730,13 +762,14 @@ class KeychainCredentialStore implements CredentialStore {
    * calls with nothing between them. What this implementation gives is a
    * narrower window than the call that started it:
    *
-   * - The compare is the value read *after* the `fallback.get` await, not
-   *   one taken before it. A login that finishes while the fallback read is
-   *   in flight is therefore seen by the compare, instead of being
-   *   overwritten by a value computed from the record it replaced.
-   * - The native read, the guard read and the compare are one synchronous
-   *   run of statements, so no other write from this process can land
-   *   between them.
+   * - The compare uses native values read *after* every `fallback.get` await,
+   *   not ones captured before it. A login that finishes while a fallback
+   *   read is in flight is therefore seen by the compare, instead of being
+   *   overwritten by a value computed from the record it replaced. The guard
+   *   key is read the same way, so both sides of the condition describe the
+   *   store at the same moment.
+   * - Those final reads and the compare are one synchronous run of
+   *   statements, so no other write from this process can land between them.
    * - The write then goes through `set`, which both writes the keychain and
    *   clears the older file copy.
    *
@@ -775,9 +808,9 @@ class KeychainCredentialStore implements CredentialStore {
       return this.fallback.replaceIfUnchanged(key, expected, value, guard);
     }
 
-    // Every await that can land between the compare and the write happens
-    // *before* the compare starts. The native values below are read at the
-    // end of that, so the fallback reads cannot hide a newer login.
+    // The two fallback reads below are the only awaits before the compare;
+    // the native values are read again after them, so neither read can hide
+    // a login that landed while it was in flight.
     let fallbackValue: string | null = null;
     let fallbackGuard: string | null = null;
     const entry = new keyring.Entry(this.service, this.account(key));
@@ -787,14 +820,18 @@ class KeychainCredentialStore implements CredentialStore {
     try {
       // Only consult the fallback when the keychain itself answers nothing;
       // a keychain hit is authoritative and needs no file read at all.
-      const nativeCurrent = entry.getPassword();
-      if (nativeCurrent === null) fallbackValue = await this.fallback.get(key);
+      const nativeBefore = entry.getPassword();
+      if (nativeBefore === null) fallbackValue = await this.fallback.get(key);
       if (guard && guardEntry) {
-        const nativeGuard = guardEntry.getPassword();
-        if (nativeGuard === null)
+        const guardBefore = guardEntry.getPassword();
+        if (guardBefore === null)
           fallbackGuard = await this.fallback.get(guard.key);
       }
-      const current = nativeCurrent ?? fallbackValue;
+      // Re-read both native records now that every await is behind us. A
+      // keychain write that landed during a fallback read is the newer
+      // session, and comparing it (rather than the pre-await read) is what
+      // refuses this write instead of overwriting it.
+      const current = entry.getPassword() ?? fallbackValue;
       const guardCurrent = guardEntry
         ? (guardEntry.getPassword() ?? fallbackGuard)
         : null;

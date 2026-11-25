@@ -26,6 +26,18 @@ describe("describeAuthFailure", () => {
     expect(describeAuthFailure(new Error("something"))).toBe("Not signed in.");
   });
 
+  test("a failed refresh says the saved session was not changed", () => {
+    // The saved session may well still be valid: only the check failed. The
+    // copy has to say that, or the reader is sent to `petdex login` over an
+    // outage — the same wrong answer the codes distinguish.
+    const message = describeAuthFailure(
+      new ClerkCliAuthError("refresh_failed", "HTTP 503"),
+    );
+    expect(message).toContain("couldn't be checked with the sign-in service");
+    expect(message).toContain("It has not been changed");
+    expect(message).not.toMatch(/expired/i);
+  });
+
   test("keeps the server detail visible", () => {
     expect(
       describeAuthFailure(new ClerkCliAuthError("userinfo", "HTTP 503")),
@@ -84,6 +96,17 @@ describe("describeLoginFailure", () => {
     expect(message).toContain("old@example.test");
   });
 
+  test("a failed refresh keeps the saved session and says so", () => {
+    const message = describeLoginFailure(
+      new ClerkCliAuthError("refresh_failed", "HTTP 503"),
+      { state: "usable", label: "old@example.test" },
+    );
+    expect(message).toContain("couldn't be checked with the sign-in service");
+    expect(message).toContain("It was not changed");
+    expect(message).not.toMatch(/expired/i);
+    expect(message).toContain("HTTP 503");
+  });
+
   test("maps timeout, config and the provider-specific exchanges", () => {
     expect(
       describeLoginFailure(new ClerkCliAuthError("config", "issuer")),
@@ -129,6 +152,21 @@ describe("describeSavedSession", () => {
     });
     expect(message).toContain("has expired");
     expect(message).not.toContain("did not change it");
+  });
+
+  test("a damaged record is not called one that was never saved", () => {
+    // `tokens` is there but does not parse. The past claim "nothing was saved
+    // before this attempt either" is exactly what the store contradicts.
+    const message = describeSavedSession({ state: "damaged" });
+    expect(message).toContain("could not be checked");
+    expect(message).not.toContain("No sign-in was saved before this attempt");
+
+    const login = describeLoginFailure(
+      new ClerkCliAuthError("userinfo", "HTTP 503"),
+      { state: "damaged" },
+    );
+    expect(login).not.toContain("No sign-in was saved before this attempt");
+    expect(login).toContain("could not be checked");
   });
 
   test("an unreadable store claims nothing about the account", () => {

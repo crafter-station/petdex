@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { ClerkCliAuth } from "./clerk-cli-auth";
+import { callbackStringsByLocale } from "./lib/callback-page";
+import { createCredentialStore } from "./lib/credential-store";
 import type { CredentialStore } from "./types";
 
 const ISSUER = "https://clerk.test";
@@ -578,6 +583,64 @@ describe("a refresh that failed", () => {
 
     expect(await authOver(store).getAccessToken()).toBeNull();
   });
+
+  test("a verdict read that fails is not mistaken for a session that changed", async () => {
+    // The provider refused the refresh, and the re-read that decides whether
+    // anyone replaced the record fails too. "Unreadable" is not evidence of a
+    // new session: treating it as one repeats the refused refresh until the
+    // attempt cap returns the same dead bearer as a success. The failure must
+    // surface, on the first refused refresh, with the session's expiry named.
+    const values = new Map<string, string>([
+      ["tokens", JSON.stringify(expiredA)],
+    ]);
+    let tokensGets = 0;
+    const store: CredentialStore = {
+      get: async (key) => {
+        if (key === "tokens") {
+          tokensGets++;
+          // The loop's own read is fine; the verdict re-read is the failure.
+          if (tokensGets === 2) throw new Error("transient store read failure");
+        }
+        return values.get(key) ?? null;
+      },
+      set: async (key, value) => {
+        values.set(key, value);
+      },
+      delete: async (key) => {
+        values.delete(key);
+      },
+      replaceIfUnchanged: async () => false,
+    };
+    let refreshRequests = 0;
+    type FetchArgs = Parameters<typeof fetch>;
+    globalThis.fetch = (async (input: FetchArgs[0]) => {
+      if (!String(input).startsWith(`${ISSUER}/oauth/token`)) {
+        return new Response("unexpected", { status: 500 });
+      }
+      refreshRequests++;
+      return json({ error: "invalid_grant" }, 400);
+    }) as unknown as typeof fetch;
+
+    const outcome = await authOver(store)
+      .getAccessToken()
+      .then(
+        (token) => ({ ok: true as const, token }),
+        (error: { code?: string; message?: string }) => ({
+          ok: false as const,
+          error,
+        }),
+      );
+
+    expect(outcome).toMatchObject({ ok: false });
+    if (!outcome.ok) {
+      expect(outcome.error.code).toBe("token_expired");
+      expect(outcome.error.message).toContain("invalid_grant");
+    }
+    // One refresh, one decision: the refused bearer is never returned and the
+    // loop does not spend a second round trip on it.
+    expect(refreshRequests).toBe(1);
+    expect(values.get("tokens")).toBe(JSON.stringify(expiredA));
+  });
 });
 
 describe("describeSavedSession", () => {
@@ -620,14 +683,38 @@ describe("describeSavedSession", () => {
     });
   });
 
-  test("an unparseable token record is no credential, not a usable one", async () => {
+  test("an unparseable token record is damaged, not absent and not usable", async () => {
+    // A record that is there but cannot be read is evidence something was
+    // saved. Calling it `none` lets the login-failure copy say "nothing was
+    // saved before this attempt either" — a claim about the past that the
+    // store contradicts.
     const { store } = inspectableStore({
       tokens: "{not json",
       user: JSON.stringify({ sub: "user_A" }),
     });
     expect(await authOver(store).describeSavedSession()).toEqual({
-      state: "none",
+      state: "damaged",
     });
+  });
+
+  test("an empty token value is damaged too", async () => {
+    // Only an absent key may read as "no record": an empty string is a
+    // stored value that cannot be parsed, and folding it into `null` would
+    // make every credential read silently answer "signed out" over a record
+    // that is there.
+    const { store } = inspectableStore({ tokens: "" });
+    expect(await authOver(store).describeSavedSession()).toEqual({
+      state: "damaged",
+    });
+
+    const failure = await authOver(store)
+      .getAccessToken()
+      .then(
+        () => null,
+        (error: { code?: string; message?: string }) => error,
+      );
+    expect(failure?.code).toBe("storage");
+    expect(failure?.message).toContain("parse stored tokens");
   });
 
   test("an unreadable store claims nothing", async () => {
@@ -716,5 +803,181 @@ describe("failed-refresh classification", () => {
         (error: unknown) => error as { code?: string },
       );
     expect(failure?.code).toBe("token_expired");
+  });
+});
+
+describe("whoami over a damaged profile slot", () => {
+  // The guarded profile write has to name the slot's current bytes as its
+  // expectation. A slot holding `null`, `false`, `0`, `""`, empty bytes or
+  // non-JSON is not a profile, but it is what the store holds: expecting
+  // absence there refuses every write, and the command answers "Not signed
+  // in" forever while the token works. A real file store, because the
+  // compare-and-swap that refuses is the store's.
+  const CASES: Array<[string, string]> = [
+    ["null", "null"],
+    ["false", "false"],
+    ["zero", "0"],
+    ["empty string", '""'],
+    ["empty bytes", ""],
+    ["not json", "{torn"],
+  ];
+
+  for (const [name, raw] of CASES) {
+    test(`heals a ${name} user record instead of refusing every write`, async () => {
+      const directory = await mkdtemp(join(tmpdir(), "petdex-profile-slot-"));
+      try {
+        const filePath = join(directory, "credentials.json");
+        await writeFile(
+          filePath,
+          JSON.stringify({
+            tokens: JSON.stringify({
+              accessToken: "tok-A",
+              refreshToken: "r-A",
+              expiresAt: Date.now() + 3_600_000,
+            }),
+            user: raw,
+          }),
+        );
+        const storage = createCredentialStore("file", {
+          filePath,
+          lockPath: `${filePath}.lock`,
+        });
+
+        let userinfoCalls = 0;
+        type FetchArgs = Parameters<typeof fetch>;
+        globalThis.fetch = (async (input: FetchArgs[0]) => {
+          const url = String(input);
+          if (!url.startsWith(`${ISSUER}/oauth/userinfo`)) {
+            return new Response("unexpected", { status: 500 });
+          }
+          userinfoCalls++;
+          return json({ sub: "user_A", email: "a@example.test" });
+        }) as unknown as typeof fetch;
+
+        const auth = new ClerkCliAuth({
+          clientId: "client-id",
+          issuer: ISSUER,
+          storage,
+        });
+
+        // A live token plus a successful userinfo answer names the account on
+        // the first pass, whatever the damaged slot holds.
+        expect(await auth.whoami()).toEqual({
+          sub: "user_A",
+          email: "a@example.test",
+        });
+        expect(userinfoCalls).toBe(1);
+        const stored = JSON.parse(await readFile(filePath, "utf8")) as Record<
+          string,
+          string
+        >;
+        expect(JSON.parse(stored.user)).toMatchObject({ sub: "user_A" });
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
+describe("the callback page a failed login leaves behind", () => {
+  const userA = { sub: "user_A", email: "alice@example.test" };
+
+  /** The body copy the browser would show, per locale. */
+  function pageBodies(html: string): Record<"en" | "es" | "zh", string> {
+    const payload =
+      /<script type="application\/json" id="i18n">([\s\S]*?)<\/script>/.exec(
+        html,
+      )?.[1];
+    const strings = (
+      JSON.parse(payload ?? "{}") as {
+        strings?: Record<string, { body: string }>;
+      }
+    ).strings;
+    return {
+      en: strings?.en?.body ?? "",
+      es: strings?.es?.body ?? "",
+      zh: strings?.zh?.body ?? "",
+    };
+  }
+
+  test("does not call an orphan profile 'still in use'", async () => {
+    // `logout` deletes `tokens` and `user` independently, so a half-cleared
+    // store can hold a profile with no credential beside it. No command can
+    // act as that account, and the page must not tell the reader it is in
+    // use — in any of the three languages it ships.
+    const store = memoryStore();
+    await store.set("user", JSON.stringify(userA));
+
+    const { outcome, page } = await runLogin({ store, userinfoStatus: 503 });
+    expect(outcome.ok).toBe(false);
+    const html = (await page?.text()) ?? "";
+
+    expect(await store.get("tokens")).toBeNull();
+    expect(html).not.toContain("still saved and still in use");
+    expect(html).not.toContain("sigue guardado y sigue en uso");
+    expect(html).not.toContain("仍然保存并继续有效");
+    const bodies = pageBodies(html);
+    for (const body of Object.values(bodies)) {
+      expect(body).not.toContain("a***@example.test");
+    }
+    // With no account to name, all three locales fall back to the neutral
+    // copy rather than inventing one.
+    const strings = callbackStringsByLocale();
+    expect(bodies.en).toBe(strings.en.reason.userinfo_failed);
+    expect(bodies.es).toBe(strings.es.reason.userinfo_failed);
+    expect(bodies.zh).toBe(strings.zh.reason.userinfo_failed);
+  });
+
+  test("still names the account a failed re-login left in use", async () => {
+    // The control for the test above: when the store does pair a name with a
+    // usable credential, the page names it — masked — in every locale.
+    const store = memoryStore();
+    await store.set(
+      "tokens",
+      JSON.stringify({
+        accessToken: "tok-A",
+        expiresAt: Date.now() + 3_600_000,
+      }),
+    );
+    await store.set("user", JSON.stringify(userA));
+
+    const { outcome, page } = await runLogin({ store, userinfoStatus: 503 });
+    expect(outcome.ok).toBe(false);
+    const bodies = pageBodies((await page?.text()) ?? "");
+
+    expect(bodies.en).toContain(
+      "Your previous sign-in (a***@example.test) is still saved and still in use.",
+    );
+    expect(bodies.es).toContain(
+      "Tu acceso anterior (a***@example.test) sigue guardado y sigue en uso.",
+    );
+    expect(bodies.zh).toContain(
+      "此前的登录（a***@example.test）仍然保存并继续有效。",
+    );
+  });
+
+  test("names an expired previous session as saved, not as in use", async () => {
+    // A saved record with no refresh token and a past expiry is an account
+    // name and nothing else: `getAccessToken()` answers null. "Still in use"
+    // would be the same false claim as above, one state over.
+    const store = memoryStore();
+    await store.set(
+      "tokens",
+      JSON.stringify({ accessToken: "tok-A", expiresAt: Date.now() - 60_000 }),
+    );
+    await store.set("user", JSON.stringify(userA));
+
+    const { outcome, page } = await runLogin({ store, userinfoStatus: 503 });
+    expect(outcome.ok).toBe(false);
+    const html = (await page?.text()) ?? "";
+    const bodies = pageBodies(html);
+
+    expect(bodies.en).toContain("a***@example.test");
+    expect(bodies.en).toContain("has expired");
+    expect(bodies.es).toContain("ha caducado");
+    expect(bodies.zh).toContain("已过期");
+    expect(html).not.toContain("still saved and still in use");
+    expect(html).not.toContain("sigue guardado y sigue en uso");
+    expect(html).not.toContain("仍然保存并继续有效");
   });
 });

@@ -6,7 +6,10 @@ import { ClerkCliAuthError, type UserInfo } from "./types.js";
  * The two questions the messages used to answer from one `getCachedUser()`
  * are different, and a profile alone answers neither:
  *
- * - `none`: no parseable token record. Nothing was in effect to begin with.
+ * - `none`: no token record at all. Nothing was in effect to begin with.
+ * - `damaged`: a token record is stored but cannot be read as one. Something
+ *   *was* saved; saying "nothing was ever saved" would be a claim the store
+ *   contradicts, and saying it is usable would be one the bytes cannot back.
  * - `expired`: a token record that has run out and has no refresh token to
  *   renew it. A profile may well sit beside it; it names an account, not a
  *   usable session.
@@ -16,7 +19,12 @@ import { ClerkCliAuthError, type UserInfo } from "./types.js";
  * - `unknown`: the store could not be read. The attempt may or may not have
  *   written something, and nothing about the account can be claimed.
  */
-export type SavedSessionState = "none" | "expired" | "usable" | "unknown";
+export type SavedSessionState =
+  | "none"
+  | "damaged"
+  | "expired"
+  | "usable"
+  | "unknown";
 
 export interface SavedSessionSummary {
   state: SavedSessionState;
@@ -161,6 +169,9 @@ export function describeSavedSession(
 ): string {
   if (!previous || previous.state === "unknown") {
     return "What was saved on this machine could not be checked; run `petdex whoami` to see which account is in effect.";
+  }
+  if (previous.state === "damaged") {
+    return "A saved sign-in is stored on this machine but could not be checked; run `petdex whoami` to see which account is in effect.";
   }
   if (previous.state === "none") {
     return "No sign-in was saved before this attempt either; run `petdex whoami` to confirm.";

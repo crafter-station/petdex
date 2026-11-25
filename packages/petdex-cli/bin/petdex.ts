@@ -907,9 +907,11 @@ async function cmdSubmit(args: string[]) {
   // presign that comes back 401 re-resolves and retries that pet once — the
   // server saying the bearer was refused is the only reliable trigger, and
   // it keeps a healthy batch at one resolve per token. When the refresh
-  // cannot produce a token the whole batch stops with one report: repeating
-  // the same auth failure per pet is the noise this loop exists to avoid,
-  // and the pets after it would fail identically.
+  // cannot produce a token, *or* the freshly resolved token is refused as
+  // well, the whole batch stops with one report: repeating the same auth
+  // failure per pet is the noise this loop exists to avoid, and the pets
+  // after it would fail identically. A retry that is refused too is the
+  // server saying the session itself is no good, which no later pet can fix.
   try {
     token = await resolveSubmitToken(auth);
   } catch (error) {
@@ -940,7 +942,17 @@ async function cmdSubmit(args: string[]) {
         // again would only repeat the refusal. Reported as that pet's failure.
         if (nextToken === token) throw err;
         token = nextToken;
-        result = await submitOne(cand, token, license);
+        try {
+          result = await submitOne(cand, token, license);
+        } catch (retryError) {
+          if (!(retryError instanceof PresignAuthError)) throw retryError;
+          // A second 401 on a token this batch had just resolved: the session
+          // is not usable, and every remaining pet would spend one presign to
+          // learn the same thing. Stop here; this pet is recorded by the
+          // handler below and the rest are reported as not attempted.
+          abortReason = `the sign-in was rejected again after refreshing (${retryError.message}); run ${pc.cyan("petdex login")} to sign in again`;
+          throw retryError;
+        }
       }
       profileUrl = absoluteProfileUrl(result.profileUrl) ?? profileUrl;
       ps.stop(
@@ -955,6 +967,10 @@ async function cmdSubmit(args: string[]) {
       failures.push({ label: cand.label, error: msg });
       failed++;
     }
+    // A retry the server refused on a freshly resolved token sets the reason
+    // and rethrows so this handler records that pet; the remaining pets must
+    // not be sent with the same rejected session.
+    if (abortReason !== null) break;
   }
 
   if (abortReason !== null) {

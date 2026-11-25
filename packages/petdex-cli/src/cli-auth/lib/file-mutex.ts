@@ -31,24 +31,69 @@
  */
 const mutexes = new Map<string, Promise<unknown>>();
 
+/**
+ * A caller gave up waiting for its turn at the mutex.
+ *
+ * Only thrown when a timeout was given, and only by the wait — never by the
+ * operation, which runs with whatever deadline the caller applies itself.
+ */
+export class FileMutexTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`no turn at the file mutex within ${timeoutMs}ms`);
+    this.name = "FileMutexTimeoutError";
+  }
+}
+
 export async function withFileMutex<T>(
   key: string,
   operation: () => Promise<T>,
+  /**
+   * How long this call may wait for the holder in front of it. Without it the
+   * wait is unbounded, which is fine for a repair that must not be skipped —
+   * but a write that promises its caller a `lockTimeoutMs` bound has to
+   * include the time spent queued here, not just the time spent on the lock
+   * file after its turn arrives.
+   */
+  timeoutMs?: number,
 ): Promise<T> {
   const previous = mutexes.get(key) ?? Promise.resolve();
   // `operation` runs whether the previous holder resolved or rejected: a
   // failed section must not wedge the queue for every later caller.
-  const next = previous.then(operation, operation);
-  const settled = next.then(
+  const ready = previous.then(
     () => undefined,
     () => undefined,
   );
-  mutexes.set(key, settled);
+  let release: () => void = () => {};
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  // The queue entry later callers chain on: the holder in front of this call,
+  // and then this call's own turn — completed or given up. A timeout here
+  // must not let the *next* waiter run beside the holder this call was queued
+  // behind, so the entry waits for `ready` even when this call walks away.
+  const slot = ready.then(() => released);
+  mutexes.set(key, slot);
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    return await next;
+    if (timeoutMs !== undefined) {
+      const tookTurn = await Promise.race([
+        ready.then(() => true),
+        new Promise<boolean>((resolve) => {
+          timer = setTimeout(() => resolve(false), Math.max(0, timeoutMs));
+          (timer as unknown as { unref?: () => void }).unref?.();
+        }),
+      ]);
+      if (!tookTurn) throw new FileMutexTimeoutError(timeoutMs);
+    } else {
+      await ready;
+    }
+    return await operation();
   } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    release();
     // Drop the entry once this holder is the tail, so a long-lived process
     // does not accumulate one promise per path it ever touched.
-    if (mutexes.get(key) === settled) mutexes.delete(key);
+    if (mutexes.get(key) === slot) mutexes.delete(key);
   }
 }

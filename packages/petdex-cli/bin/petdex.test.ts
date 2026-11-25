@@ -503,4 +503,30 @@ test("submit scenario", async () => {
     expect(result.sent).toEqual(["Bearer tok-1"]);
     expect(result.notes.join("\n")).toContain("not attempted");
   });
+
+  test("a retry refused with a fresh token stops the batch too", async () => {
+    // The first 401 triggered a re-resolve and the store produced a *new*
+    // token — but the server refused that one as well. The session itself is
+    // unusable, so every remaining pet would spend one presign to learn the
+    // same thing. One retry, then the rest is reported once as not attempted
+    // instead of as N raw 401 failures.
+    const result = await runScenario({
+      pets: ["pet-one", "pet-two"],
+      duplicateSlugs: [],
+      promptChoice: "skip",
+      tokens: ["tok-1", "tok-2", "tok-3"],
+      useParent: true,
+    });
+
+    // The first pet only: one refused presign, one retry, and nothing after.
+    // (`tok-1` was spent before the prompts; the batch resolves again after
+    // them, so its first presign already carries `tok-2`.)
+    expect(result.sent).toEqual(["Bearer tok-2", "Bearer tok-3"]);
+    expect(result.presigns).toBe(2);
+    // The second pet was never sent.
+    expect(result.notes.join("\n")).toContain("not attempted");
+    expect(result.notes.join("\n")).toContain(
+      "rejected again after refreshing",
+    );
+  });
 });
