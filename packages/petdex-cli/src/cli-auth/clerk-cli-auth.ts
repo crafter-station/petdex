@@ -297,21 +297,26 @@ export class ClerkCliAuth {
   }
 
   async whoami(): Promise<UserInfo | null> {
+    // The credential comes first, before the cached profile, for two reasons.
+    //
     // The cached profile is not evidence of a usable session: `logout` clears
     // both records through Promise.allSettled, so a half-cleared store can
     // leave the profile behind with no tokens next to it. Reporting that as
     // "signed in" hides the problem until some later command 401s, which is
     // the one place the user cannot act on it. Confirming the credential
     // first turns a confusing failure into a prompt to sign in again.
-    const cachedUser = await this.getJson<UserInfo>("user");
-    if (cachedUser) {
-      const accessToken = await this.getAccessToken();
-      if (!accessToken) return null;
-      return cachedUser;
-    }
-
+    //
+    // Reading it *first* also answered with the account that had just lost a
+    // login race: `getAccessToken()` can refuse a refresh whose store record
+    // changed mid-flight and re-read the winner's session, but a profile read
+    // before that call is already stale by the time the answer is returned.
+    // Resolving the token first means the profile read below describes the
+    // same session the command will actually use.
     const accessToken = await this.getAccessToken();
     if (!accessToken) return null;
+
+    const cachedUser = await this.getJson<UserInfo>("user");
+    if (cachedUser) return cachedUser;
 
     const user = await fetchUserInfo({
       issuer: this.config.issuer,

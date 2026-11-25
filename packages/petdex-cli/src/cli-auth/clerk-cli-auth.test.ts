@@ -137,11 +137,12 @@ describe("clerk cli auth token refresh", () => {
     return { store, values };
   }
 
-  function answerToken(body: unknown) {
+  function answerToken(body: unknown, userInfo: unknown = { sub: "user_1" }) {
     type FetchArgs = Parameters<typeof fetch>;
     globalThis.fetch = (async (input: FetchArgs[0]) => {
       const url = String(input);
       if (url.startsWith(`${ISSUER}/oauth/token`)) return json(body);
+      if (url.startsWith(`${ISSUER}/oauth/userinfo`)) return json(userInfo);
       return new Response("unexpected", { status: 500 });
     }) as typeof fetch;
   }
@@ -212,6 +213,82 @@ describe("clerk cli auth token refresh", () => {
       refreshToken: "r-B",
       expiresAt: expect.any(Number),
     });
+  });
+
+  test("whoami names the account that won a login race on that very call", async () => {
+    // A's token is due and another terminal finishes `petdex login` as B
+    // inside this call's refresh round trip, replacing both records. The
+    // refresh write-back is refused because the record changed under it, so
+    // the store now holds B's session. `whoami` must answer as B on *this*
+    // call — it used to read the profile before refreshing the token, so it
+    // returned A's name and only the next command saw B.
+    const userA = { sub: "user_A", email: "alice@example.test" };
+    const userB = { sub: "user_B", email: "bob@example.test" };
+    let compared: { expected: string | null; value: string } | undefined;
+    const { store, values } = seededStore(expired, {
+      onReplace: (expected, value) => {
+        compared = { expected, value };
+        // B's login in login()'s own order: drop the old profile, write the
+        // new tokens, then the new profile.
+        values.delete("user");
+        values.set(
+          "tokens",
+          JSON.stringify({
+            accessToken: "tok-B",
+            refreshToken: "r-B",
+            expiresAt: Date.now() + 3_600_000,
+          }),
+        );
+        values.set("user", JSON.stringify(userB));
+        return false;
+      },
+    });
+    // A's profile sits beside A's expired token when the command starts.
+    values.set("user", JSON.stringify(userA));
+    // The token answer is A's refresh (dropped), and userinfo would answer a
+    // third identity — distinct from both, so the assertions below cannot be
+    // satisfied by an accidental network fetch.
+    answerToken(
+      { access_token: "tok-A-refreshed", token_type: "Bearer" },
+      {
+        sub: "user_FROM_SERVER",
+        email: "server@example.test",
+      },
+    );
+
+    const auth = new ClerkCliAuth({
+      clientId: "client-id",
+      issuer: ISSUER,
+      storage: store,
+    });
+
+    // The very call that lost the race reports B, not the A profile it would
+    // have read first, and not the server's third identity (so no fetch
+    // happened — the winner's cached profile was used).
+    expect(await auth.whoami()).toEqual(userB);
+
+    // A's refresh was compared against the record it came from and dropped;
+    // B's tokens and profile are exactly what the login wrote.
+    const compare = compared as { expected: string | null; value: string };
+    expect(JSON.parse(compare.expected as string)).toEqual(expired);
+    expect(JSON.parse(values.get("tokens") as string).accessToken).toBe(
+      "tok-B",
+    );
+    expect(values.get("user")).toBe(JSON.stringify(userB));
+  });
+
+  test("whoami stays signed out when only a profile is stored, with no tokens", async () => {
+    // The cached profile is not evidence of a session: ordering the credential
+    // check first must still turn a profile-without-tokens store into "signed
+    // out" rather than naming an account no command can act as.
+    const store = memoryStore();
+    await store.set("user", JSON.stringify({ sub: "user_A" }));
+    const auth = new ClerkCliAuth({
+      clientId: "client-id",
+      issuer: ISSUER,
+      storage: store,
+    });
+    expect(await auth.whoami()).toBeNull();
   });
 });
 
