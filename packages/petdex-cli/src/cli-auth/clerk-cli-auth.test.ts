@@ -1062,6 +1062,210 @@ describe("whoami over a damaged profile slot", () => {
   }
 });
 
+describe("a user slot that is valid JSON but not a profile", () => {
+  // `parseStoredProfile` used to answer anything `typeof` called an object, so
+  // an array or a plain object in the `user` slot read as a cached profile:
+  // `whoami` skipped the userinfo call that would have healed the slot and
+  // answered with the parsed bytes, which `petdex whoami` printed as the
+  // account (an empty block for `{}` and `[]`, `{"sub":123}` verbatim).
+  // `tokens` has had a shape rule since the damaged-record work; this is the
+  // same rule for the other record of the pair, shared by every reader.
+  const userA = { sub: "user_A", email: "alice@example.test" };
+  const liveTokens = JSON.stringify({
+    accessToken: "tok-A",
+    refreshToken: "r-A",
+    expiresAt: Date.now() + 3_600_000,
+  });
+
+  /**
+   * Values `typeof` calls objects and a reader must not call profiles.
+   *
+   * The last one carries a string a lax reader would happily name:
+   * `accountLabel` falls back to `username`, so a `describeSavedSession` (and
+   * the callback page built from it) that only checked `typeof` would show
+   * `ghost@example.test` as the account in effect while `whoami` refuses to
+   * act as it.
+   */
+  const NOT_PROFILES: Array<[string, string]> = [
+    ["empty object", "{}"],
+    ["array", "[]"],
+    ["object without sub", '{"error":"nope"}'],
+    ["sub is not a string", '{"sub":123}'],
+    ["empty sub", '{"sub":""}'],
+    // `fetchUserInfo` only checks `sub`, but `UserInfo` types `email` as a
+    // string and `accountLabel` shows it first: a profile whose email is not
+    // one is not a profile this build wrote.
+    ["email is not a string", '{"sub":"user_A","email":123}'],
+    [
+      "non-string sub beside a username",
+      '{"sub":123,"username":"ghost@example.test"}',
+    ],
+  ];
+
+  function authOver(store: CredentialStore) {
+    return new ClerkCliAuth({
+      clientId: "client-id",
+      issuer: ISSUER,
+      storage: store,
+    });
+  }
+
+  /** A userinfo endpoint that counts calls and answers as `userA`. */
+  function stubUserinfo(): () => number {
+    let userinfoCalls = 0;
+    type FetchArgs = Parameters<typeof fetch>;
+    globalThis.fetch = (async (input: FetchArgs[0]) => {
+      const url = String(input);
+      if (!url.startsWith(`${ISSUER}/oauth/userinfo`)) {
+        return new Response("unexpected", { status: 500 });
+      }
+      userinfoCalls++;
+      return json(userA);
+    }) as unknown as typeof fetch;
+    return () => userinfoCalls;
+  }
+
+  for (const [name, raw] of NOT_PROFILES) {
+    test(`heals a ${name} user record instead of reporting it`, async () => {
+      // The credential is live, so the first pass reaches the profile read.
+      // A slot that is not a profile must send the call to the network and
+      // write the answer over the bytes — not answer with them.
+      const { store, values } = inspectableStore({
+        tokens: liveTokens,
+        user: raw,
+      });
+      const userinfoCalls = stubUserinfo();
+
+      expect(await authOver(store).whoami()).toEqual(userA);
+      expect(userinfoCalls()).toBe(1);
+      // The guarded write healed the slot: the next command reads a profile.
+      expect(JSON.parse(values.get("user") as string)).toEqual(userA);
+    });
+  }
+
+  test("uses a profile that passes the shape rule without a network call", async () => {
+    // The control for the tests above: a real profile is cached, so `whoami`
+    // answers from the store and never reaches userinfo.
+    const { store } = inspectableStore({
+      tokens: liveTokens,
+      user: JSON.stringify(userA),
+    });
+    const userinfoCalls = stubUserinfo();
+
+    expect(await authOver(store).whoami()).toEqual(userA);
+    expect(userinfoCalls()).toBe(0);
+  });
+
+  test("every reader gives a non-profile slot the same answer", async () => {
+    // `whoami`, `getCachedUser` and `describeSavedSession` see the same bytes
+    // and must agree about them. A split here is the bug shape the last round
+    // fixed on the token side: one reader trusting a value another refuses
+    // leaves the CLI naming an account the command will not act as.
+    for (const [name, raw] of NOT_PROFILES) {
+      const { store } = inspectableStore({
+        tokens: liveTokens,
+        user: raw,
+      });
+      const auth = authOver(store);
+      // Read before `whoami` heals the slot, so all three describe the same
+      // record rather than two readers and a repaired copy.
+      expect({
+        reader: "getCachedUser",
+        name,
+        value: await auth.getCachedUser(),
+      }).toEqual({ reader: "getCachedUser", name, value: null });
+      expect({
+        reader: "describeSavedSession",
+        name,
+        value: await auth.describeSavedSession(),
+      }).toEqual({
+        reader: "describeSavedSession",
+        name,
+        value: { state: "usable", label: undefined },
+      });
+      const userinfoCalls = stubUserinfo();
+      expect({ reader: "whoami", name, value: await auth.whoami() }).toEqual({
+        reader: "whoami",
+        name,
+        value: userA,
+      });
+      expect(userinfoCalls()).toBe(1);
+    }
+  });
+
+  test("every reader gives a profile slot the same account", async () => {
+    // The control: with a real profile stored, the three readers agree the
+    // other way — the account is named and no network call is made.
+    const { store } = inspectableStore({
+      tokens: liveTokens,
+      user: JSON.stringify(userA),
+    });
+    const auth = authOver(store);
+    const userinfoCalls = stubUserinfo();
+
+    expect(await auth.getCachedUser()).toEqual(userA);
+    expect(await auth.describeSavedSession()).toEqual({
+      state: "usable",
+      label: "alice@example.test",
+    });
+    expect(await auth.whoami()).toEqual(userA);
+    expect(userinfoCalls()).toBe(0);
+  });
+
+  test("getCachedUser answers null for an absent, unreadable or torn slot", async () => {
+    // The documented contract: "never throws — a store it cannot read is
+    // reported as no profile". `describeSavedSession` keeps the label
+    // optional for the same reason, so a locked keychain does not turn a
+    // readable token record into `unknown`.
+    expect(await authOver(inspectableStore().store).getCachedUser()).toBeNull();
+    expect(
+      await authOver(inspectableStore({ user: "{torn" }).store).getCachedUser(),
+    ).toBeNull();
+
+    const locked: CredentialStore = {
+      get: async () => {
+        throw new Error("keychain locked");
+      },
+      set: async () => {},
+      delete: async () => {},
+      replaceIfUnchanged: async () => false,
+    };
+    expect(await authOver(locked).getCachedUser()).toBeNull();
+    expect(await authOver(locked).describeSavedSession()).toEqual({
+      state: "unknown",
+    });
+  });
+
+  test("an unreadable user slot leaves the summary's state standing", async () => {
+    // The label is the optional half of `describeSavedSession`. A store that
+    // reads `tokens` fine and fails on `user` still describes a usable
+    // credential — the opposite (turning the whole answer into `unknown`)
+    // would hide a working session behind a profile-read failure, and the
+    // session is the part the reader can act on.
+    const values = new Map<string, string>([["tokens", liveTokens]]);
+    const store: CredentialStore = {
+      get: async (key) => {
+        if (key === "user") throw new Error("keychain locked");
+        return values.get(key) ?? null;
+      },
+      set: async (key, value) => {
+        values.set(key, value);
+      },
+      delete: async (key) => {
+        values.delete(key);
+      },
+      replaceIfUnchanged: async () => false,
+    };
+    const auth = authOver(store);
+
+    expect(await auth.describeSavedSession()).toEqual({
+      state: "usable",
+      label: undefined,
+    });
+    expect(await auth.getCachedUser()).toBeNull();
+  });
+});
+
 describe("the callback page a failed login leaves behind", () => {
   const userA = { sub: "user_A", email: "alice@example.test" };
 
@@ -1162,5 +1366,40 @@ describe("the callback page a failed login leaves behind", () => {
     expect(html).not.toContain("still saved and still in use");
     expect(html).not.toContain("sigue guardado y sigue en uso");
     expect(html).not.toContain("仍然保存并继续有效");
+  });
+
+  test("does not name a non-profile user object as the previous account", async () => {
+    // The page's label comes from `describeSavedSession`, so a `user` slot
+    // that is an object but not a profile used to reach the copy as a name.
+    // This value is exactly that: `sub` is not a string, so no command can
+    // act as it and `whoami` refuses it — but `accountLabel` would happily
+    // fall back to `username` and the page would print the masked handle of
+    // an account the CLI does not have.
+    const store = memoryStore();
+    await store.set(
+      "tokens",
+      JSON.stringify({
+        accessToken: "tok-A",
+        refreshToken: "r-A",
+        expiresAt: Date.now() + 3_600_000,
+      }),
+    );
+    await store.set("user", '{"sub":123,"username":"ghost@example.test"}');
+
+    const { outcome, page } = await runLogin({ store, userinfoStatus: 503 });
+    expect(outcome.ok).toBe(false);
+    const html = (await page?.text()) ?? "";
+    const bodies = pageBodies(html);
+
+    expect(html).not.toContain("ghost@example.test");
+    expect(html).not.toContain("g***@example.test");
+    expect(html).not.toContain("still saved and still in use");
+    // With no account to name, all three locales fall back to the neutral
+    // copy rather than inventing one — the same answer as the orphan-profile
+    // case above, for the same reason.
+    const strings = callbackStringsByLocale();
+    expect(bodies.en).toBe(strings.en.reason.userinfo_failed);
+    expect(bodies.es).toBe(strings.es.reason.userinfo_failed);
+    expect(bodies.zh).toBe(strings.zh.reason.userinfo_failed);
   });
 });

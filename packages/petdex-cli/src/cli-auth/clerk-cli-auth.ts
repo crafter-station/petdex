@@ -112,22 +112,52 @@ function readStoredTokens(raw: string): StoredTokensRead {
 }
 
 /**
- * A stored `user` value, or null when it is not a profile object.
+ * The one place that decides whether a stored `user` value is a profile.
+ *
+ * Three readers see the same bytes — `whoami`, `getCachedUser` (the callback
+ * page's label) and `describeSavedSession` — and all of them must give the
+ * same answer; a split here is how `whoami` ends up trusting a cached value
+ * that `describeSavedSession` refuses to name. So the rule lives here, the
+ * same way `readStoredTokens` owns the `tokens` shape.
+ *
+ * The predicate is `fetchUserInfo`'s, because that is the only producer: a
+ * stored profile is whatever that call wrote back, so it has to pass the
+ * check that call applies to the network answer. `typeof x === "object"` is
+ * not enough on its own — `[]`, `{}`, `{"error":"boom"}` and `{"sub":123}`
+ * are all objects, and handing one to `whoami` prints it as the account or
+ * reports an identity with no subject.
+ *
+ * - an object that is not null and not an array (a JSON array is not an
+ *   object shape here, whatever `typeof` says);
+ * - `sub` present as a non-empty string — `fetchUserInfo` throws without it,
+ *   and it is `accountLabel`'s last resort when there is no email;
+ * - `email`, when present, a string — `UserInfo` types it as one, and it is
+ *   the first thing `accountLabel` shows a person.
+ *
+ * Everything else about the object is left alone: `UserInfo` carries an
+ * index signature, so extra keys (`username`, provider claims) are expected,
+ * and a profile is not rejected for having them.
  *
  * Damaged and falsey slots (`"null"`, `"false"`, `"0"`, `"\"\""`, an empty
- * string, bytes that are not JSON) all answer null: none of them names an
+ * string, bytes that are not JSON) also answer null: none of them names an
  * account, so the caller fetches the profile and writes it back. The raw
  * bytes stay with the caller as the write's expectation — see
  * `writeBackProfile`.
  */
 function parseStoredProfile(raw: string | null): UserInfo | null {
   if (raw === null) return null;
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(raw) as unknown;
-    return parsed && typeof parsed === "object" ? (parsed as UserInfo) : null;
+    parsed = JSON.parse(raw) as unknown;
   } catch {
     return null;
   }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+    return null;
+  const user = parsed as UserInfo;
+  if (typeof user.sub !== "string" || user.sub.length === 0) return null;
+  if (user.email !== undefined && typeof user.email !== "string") return null;
+  return user;
 }
 
 /**
@@ -772,13 +802,16 @@ export class ClerkCliAuth {
    * a cached name beside no credential is not a session (`logout` can leave
    * exactly that pair behind when one of its two deletes fails).
    *
-   * Kept on the public surface for callers that want the profile itself.
-   * Never throws: a store it cannot read is reported as "no profile", which
-   * is what the command's own credential access will hit anyway.
+   * "The stored profile" means one that passes `parseStoredProfile`: a slot
+   * holding `[]`, `{}` or `{"sub":123}` is an empty slot to every reader,
+   * including this one, so a caller never gets bytes back that `whoami`
+   * would refuse. Never throws: a store it cannot read is reported as "no
+   * profile", which is what the command's own credential access will hit
+   * anyway.
    */
   async getCachedUser(): Promise<UserInfo | null> {
     try {
-      return await this.getJson<UserInfo>("user");
+      return parseStoredProfile(await this.config.storage.get("user"));
     } catch {
       return null;
     }
@@ -826,9 +859,18 @@ export class ClerkCliAuth {
         ? "expired"
         : "usable";
 
+    // The label comes from the same shape rule `whoami` and `getCachedUser`
+    // apply, so all three agree on what counts as a stored account: a slot
+    // holding `[]` or `{"sub":123}` names nobody, and the page falls back to
+    // its neutral copy instead of showing the parsed bytes. A store this read
+    // cannot reach still leaves the state above standing — the label is the
+    // optional half, and throwing here would turn a readable token record
+    // into "unknown".
     let label: string | undefined;
     try {
-      label = accountLabel(await this.getJson<UserInfo>("user"));
+      label = accountLabel(
+        parseStoredProfile(await this.config.storage.get("user")),
+      );
     } catch {
       label = undefined;
     }
