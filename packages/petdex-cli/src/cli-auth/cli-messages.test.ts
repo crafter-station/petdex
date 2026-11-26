@@ -154,6 +154,29 @@ describe("describeSavedSession", () => {
     expect(message).not.toContain("did not change it");
   });
 
+  test("an expiring credential is neither still in use nor expired", () => {
+    // Inside the 30-second refresh window `getAccessToken()` answers null,
+    // but the record has not run out. Both "still in use" and "has expired"
+    // would be false about the same bytes.
+    const message = describeSavedSession({
+      state: "expiring",
+      label: "old@example.test",
+    });
+    expect(message).toContain("old@example.test");
+    expect(message).toContain("less than a minute");
+    expect(message).not.toContain("still in use");
+    expect(message).not.toContain("has expired");
+    expect(message).toContain("petdex login");
+  });
+
+  test("an expiring credential with no cached name still says why", () => {
+    // `login` can leave a token record with no `user`; the state alone is
+    // enough to tell the reader the record will not be used.
+    const message = describeSavedSession({ state: "expiring" });
+    expect(message).toContain("less than a minute");
+    expect(message).not.toContain("still in use");
+  });
+
   test("a damaged record is not called one that was never saved", () => {
     // `tokens` is there but does not parse. The past claim "nothing was saved
     // before this attempt either" is exactly what the store contradicts.

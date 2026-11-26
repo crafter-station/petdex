@@ -258,7 +258,11 @@ function printHelp() {
 async function previousSessionSummary(
   auth: ClerkCliAuth,
 ): Promise<SavedSessionSummary> {
-  return auth.describeSavedSession();
+  const summary = await auth.describeSavedSession();
+  // The label is a provider claim (`email`, `username` or `sub`) and this
+  // summary is read only to be printed, so it goes through the display rule
+  // here. The stored bytes and the session-state decision are untouched.
+  return { ...summary, label: displayString(summary.label) ?? undefined };
 }
 
 async function cmdLogin() {
@@ -269,7 +273,7 @@ async function cmdLogin() {
   try {
     auth = await getAuth();
     const { user } = await auth.login();
-    const label = accountLabel(user) ?? "unknown";
+    const label = displayString(accountLabel(user)) ?? "unknown";
     s.stop(`${pc.green("✓ ")}Signed in as ${pc.cyan(label)}`);
     p.outro(
       `Try ${pc.cyan("petdex submit ~/.codex/pets")} to share your pets.`,
@@ -462,23 +466,25 @@ async function cmdWhoami() {
       p.cancel(`Not signed in. Run ${pc.cyan("petdex login")}.`);
       process.exit(1);
     }
-    const name = [asString(me.given_name), asString(me.family_name)]
+    const name = [displayString(me.given_name), displayString(me.family_name)]
       .filter(Boolean)
       .join(" ");
-    // Only `sub` is printed as-is. Both producers of a profile — the stored
-    // `user` slot read back by `parseStoredProfile` and a live userinfo answer
-    // through `fetchUserInfo` — reject anything whose `sub` is not a non-empty
-    // string, so this line always has a string to show. The other claims are
-    // whatever the provider sent and are never inspected, so each goes through
-    // `asString`: printing `email` directly showed `[object Object]` for an
+    // Every line here is a provider claim and goes through `displayString`.
+    // `sub` is the one a profile cannot lack, but "present" is not
+    // "printable": the shape rule only requires a non-empty string, and a
+    // provider can send one made of control characters. The rest are never
+    // inspected at all, so printing them raw showed `[object Object]` for an
     // object claim, `true` for a boolean, and — for `""` or `[]` — a blank
-    // line that reads like a label with a value missing rather than "not set".
+    // line that reads like a label with its value missing rather than "not
+    // set". Control characters are the same class of problem one step worse:
+    // an ESC sequence lets the value repaint the panel, move the cursor or
+    // erase the line above it.
     p.note(
       [
-        `${pc.dim("user:    ")}${me.sub}`,
-        `${pc.dim("email:   ")}${asString(me.email) ?? "—"}`,
+        `${pc.dim("user:    ")}${displayString(me.sub) ?? "—"}`,
+        `${pc.dim("email:   ")}${displayString(me.email) ?? "—"}`,
         `${pc.dim("name:    ")}${name || "—"}`,
-        `${pc.dim("username:")}${asString(me.preferred_username) ?? "—"}`,
+        `${pc.dim("username:")}${displayString(me.preferred_username) ?? "—"}`,
       ].join("\n"),
       "Signed in",
     );
@@ -1571,6 +1577,40 @@ function pickString(value: unknown, fallback: string): string {
 
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+/**
+ * ANSI escape sequences and the rest of C0/C1: the terminal gives these
+ * bytes meaning, so a provider-supplied claim must not carry them to the
+ * screen. ESC followed by `[` recolours or erases the line, an OSC sequence
+ * can retitle or link the window, and even a bare carriage return can
+ * overwrite what the reader just saw.
+ */
+const ANSI_SEQUENCE =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: these characters are what the rule is about; this matches them to strip them from display text.
+  /\u001b\[[0-?]*[ -/]*[@-~]|\u001b\][^\u0007]*(?:\u0007|\u001b\\)|\u001b[@-_]/g;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: these characters are what the rule is about; this matches them to strip them from display text.
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/g;
+
+/**
+ * Remove terminal control characters from provider-supplied text.
+ *
+ * This is a display rule, deliberately not a credential-shape rule: the
+ * stored bytes are never rejected or rewritten for containing controls, and
+ * `parseStoredProfile` keeps answering the same thing for the same bytes.
+ * Cleaning happens where a claim is about to be printed, so `whoami` and the
+ * login messages cannot repaint the panel with an `email` or `sub` the
+ * provider chose.
+ */
+function terminalSafe(value: string): string {
+  return value.replace(ANSI_SEQUENCE, "").replace(CONTROL_CHARACTERS, "");
+}
+
+/** An `asString` value that is also safe to print, or null when nothing is. */
+function displayString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const text = terminalSafe(value).trim();
+  return text ? text : null;
 }
 
 function firstString(...values: unknown[]): string | null {

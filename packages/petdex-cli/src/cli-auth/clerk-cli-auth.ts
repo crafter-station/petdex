@@ -54,6 +54,40 @@ const LEGACY_SESSION_KEY = "session";
 const MAX_REFRESH_ATTEMPTS = 2;
 
 /**
+ * How much life a token must have left to count as usable without a refresh.
+ *
+ * `resolveSession` refuses a token inside this window — it refreshes a record
+ * that has a refresh token, and answers "not signed in" for one that does not.
+ * `describeSavedSession` applies the same window so the summary can never call
+ * a record usable while `getAccessToken()` refuses it: a token with ten
+ * seconds left is not expired, but no command will act as it either, and the
+ * login-failure copy has to say that instead of "still in use".
+ */
+const MIN_TOKEN_LIFETIME_MS = 30_000;
+
+/**
+ * The saved-session state for a token record, under the same availability
+ * rule `resolveSession` applies: a record is `usable` when a command would
+ * get a token from it, `expiring` when it has a little life left but no
+ * refresh token to renew it, and `expired` once its expiry has passed. A
+ * refresh token makes any expiry renew-able, so it is always `usable`.
+ *
+ * The three-way split exists because 'some seconds left' is neither expired
+ * nor usable, and the old two-way rule picked the optimistic answer: it told
+ * the reader a session was still in use while `getAccessToken()` answered
+ * null.
+ */
+function savedSessionState(tokens: TokenSet, now: number): SavedSessionState {
+  if (tokens.refreshToken) return "usable";
+  // An absent expiry reads as "never expires" here, exactly as
+  // `resolveSession` does with `?? Number.POSITIVE_INFINITY`.
+  if (tokens.expiresAt === undefined) return "usable";
+  if (tokens.expiresAt < now) return "expired";
+  if (tokens.expiresAt < now + MIN_TOKEN_LIFETIME_MS) return "expiring";
+  return "usable";
+}
+
+/**
  * How many times `whoami` re-reads the store to pair a profile with its
  * credential.
  *
@@ -491,7 +525,9 @@ export class ClerkCliAuth {
       // default between them, and passing a name with no state would make it
       // describe a session it has no evidence for.
       const inEffect =
-        (previous.state === "usable" || previous.state === "expired") &&
+        (previous.state === "usable" ||
+          previous.state === "expired" ||
+          previous.state === "expiring") &&
         previous.label
           ? { previousAccount: previous.label, previousSession: previous.state }
           : {};
@@ -562,7 +598,7 @@ export class ClerkCliAuth {
 
       const { raw, tokens } = stored;
       const expiresAt = tokens.expiresAt ?? Number.POSITIVE_INFINITY;
-      if (expiresAt >= Date.now() + 30_000)
+      if (expiresAt >= Date.now() + MIN_TOKEN_LIFETIME_MS)
         return { accessToken: tokens.accessToken, raw };
 
       if (!tokens.refreshToken) return null;
@@ -875,10 +911,16 @@ export class ClerkCliAuth {
    *
    * The answer therefore carries two independent facts: whether the store
    * holds a credential-shaped `tokens` record (`state`), and which account
-   * the pair names (`label`, when readable). "Usable" is a claim about the
-   * record only — expiry and a refresh token, not a live check — because
-   * nothing here may go to the network; the message built from it says the
-   * attempt did not change it, not that it works.
+   * the pair names (`label`, when readable). The state uses
+   * `savedSessionState`, the same availability rule `resolveSession` applies
+   * — expiry, the refresh token, and the 30-second window — so "usable" here
+   * means `getAccessToken()` would hand back a token, not merely that the
+   * record parses. It still is not a live check — nothing here may go to the
+   * network, and a revoked token reads the same — so the message built from
+   * it says the attempt did not change the record, not that the session
+   * works. A record with seconds left and no refresh token is `expiring`,
+   * not `usable` and not `expired`: no command will act as it, and it has
+   * not run out yet.
    *
    * A record that is present but does not parse is `damaged`, not `none`.
    * `none` means there was never anything to read; a damaged record is
@@ -897,12 +939,7 @@ export class ClerkCliAuth {
 
     const tokens = parseStoredTokens(raw);
     if (!tokens) return { state: "damaged" };
-    const state: SavedSessionState =
-      tokens.expiresAt !== undefined &&
-      tokens.expiresAt < Date.now() &&
-      !tokens.refreshToken
-        ? "expired"
-        : "usable";
+    const state = savedSessionState(tokens, Date.now());
 
     // The label comes from the same shape rule `whoami` and `getCachedUser`
     // apply, so all three agree on what counts as a stored account: a slot

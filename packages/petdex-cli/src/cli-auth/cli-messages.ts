@@ -13,6 +13,10 @@ import { ClerkCliAuthError, type UserInfo } from "./types.js";
  * - `expired`: a token record that has run out and has no refresh token to
  *   renew it. A profile may well sit beside it; it names an account, not a
  *   usable session.
+ * - `expiring`: a token record that has not run out yet but has less than the
+ *   CLI's refresh window left, and no refresh token to renew it. That is
+ *   exactly the state `getAccessToken()` answers `null` for without the
+ *   record being expired, so the copy must not call it either.
  * - `usable`: a token record that has not expired, or has a refresh token.
  *   Still not proof — a revoked token reads the same — which is why the
  *   message below says the attempt did not change it, not that it works.
@@ -23,6 +27,7 @@ export type SavedSessionState =
   | "none"
   | "damaged"
   | "expired"
+  | "expiring"
   | "usable"
   | "unknown";
 
@@ -178,6 +183,14 @@ export function describeSavedSession(
   }
   if (previous.label && previous.state === "expired") {
     return `Your previous sign-in (${previous.label}) is still saved, but that session has expired; run \`petdex login\` to sign in again.`;
+  }
+  if (previous.state === "expiring") {
+    // A few seconds of life is neither expired nor usable: the record is
+    // saved, but the CLI will not act as it. Say which, so the reader does
+    // not chase a "signed in" state that every command refuses.
+    return previous.label
+      ? `Your previous sign-in (${previous.label}) is still saved, but it expires in less than a minute and commands are not using it; run \`petdex login\` to renew it.`
+      : "A saved sign-in is stored on this machine, but it expires in less than a minute and commands are not using it; run `petdex login` to renew it.";
   }
   if (previous.label) {
     return `Your previous sign-in (${previous.label}) is still saved, and this attempt did not change it.`;

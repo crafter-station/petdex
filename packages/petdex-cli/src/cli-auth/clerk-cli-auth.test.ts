@@ -490,6 +490,82 @@ describe("whoami profile write-back", () => {
       "tok-B",
     );
   });
+
+  test("a cached profile whose token record changed before the pairing check is not answered", async () => {
+    // The interleaving the review reproduced: `whoami` reads A's cached
+    // profile, and before it can confirm the `tokens` record is still the one
+    // its access token came from, a login writes B's `tokens` and `user`.
+    // Answering the profile read before that check returns A for a session
+    // the store no longer holds; the pairing check re-reads the record, sees
+    // B, and answers B.
+    const tokensA = JSON.stringify({
+      accessToken: "tok-A",
+      expiresAt: Date.now() + 3_600_000,
+    });
+    const tokensB = JSON.stringify({
+      accessToken: "tok-B",
+      expiresAt: Date.now() + 3_600_000,
+    });
+    const userA = { sub: "user_A", email: "alice@example.test" };
+    const userB = { sub: "user_B", email: "bob@example.test" };
+    const { store, values } = inspectableStore({
+      tokens: tokensA,
+      user: JSON.stringify(userA),
+    });
+
+    let tokensReads = 0;
+    let paused!: () => void;
+    const atPairingCheck = new Promise<void>((resolve) => {
+      paused = resolve;
+    });
+    let release!: () => void;
+    const resume = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    const gated: CredentialStore = {
+      ...store,
+      get: async (key) => {
+        if (key === "tokens") {
+          tokensReads++;
+          // Read 1 belongs to `resolveSession`; read 2 is the pairing check.
+          // Hold that one so the login can land in the gap.
+          if (tokensReads === 2) {
+            paused();
+            await resume;
+          }
+        }
+        return store.get(key);
+      },
+    };
+
+    globalThis.fetch = (async () => {
+      throw new Error("whoami answered from the store; nothing was fetched");
+    }) as unknown as typeof fetch;
+
+    const auth = new ClerkCliAuth({
+      clientId: "client-id",
+      issuer: ISSUER,
+      storage: gated,
+    });
+    const answered = auth.whoami();
+
+    // Without the pairing check `whoami` resolves A before reaching read 2,
+    // so the race reports the wrong account instead of timing out.
+    const first = await Promise.race([
+      atPairingCheck.then(() => "paused" as const),
+      answered.then((user) => ({ user })),
+      Bun.sleep(1_000).then(() => "timeout" as const),
+    ]);
+    expect(first).toBe("paused");
+
+    values.set("tokens", tokensB);
+    values.set("user", JSON.stringify(userB));
+    release();
+
+    expect(await answered).toEqual(userB);
+    expect(values.get("user")).toBe(JSON.stringify(userB));
+  });
 });
 
 describe("a refresh that failed", () => {
@@ -736,6 +812,61 @@ describe("describeSavedSession", () => {
     expect(await authOver(store).describeSavedSession()).toEqual({
       state: "expired",
       label: "alice@example.test",
+    });
+  });
+
+  test("a token inside the refresh window is expiring, not usable", async () => {
+    // Ten seconds left and no refresh token: `resolveSession` answers null.
+    // The summary used to compare only against "has it passed yet" and said
+    // "usable", so the login-failure page called this session still in use
+    // while every command refused it. The two readers now share one rule —
+    // and "expiring" is not "expired": the record has not run out.
+    const { store } = inspectableStore({
+      tokens: JSON.stringify({
+        accessToken: "tok",
+        expiresAt: Date.now() + 10_000,
+      }),
+      user: JSON.stringify({ sub: "user_A", email: "alice@example.test" }),
+    });
+    const auth = authOver(store);
+
+    expect(await auth.getAccessToken()).toBeNull();
+    expect(await auth.describeSavedSession()).toEqual({
+      state: "expiring",
+      label: "alice@example.test",
+    });
+  });
+
+  test("a token outside the refresh window is usable by both readers", async () => {
+    const { store } = inspectableStore({
+      tokens: JSON.stringify({
+        accessToken: "tok",
+        expiresAt: Date.now() + 35_000,
+      }),
+      user: JSON.stringify({ sub: "user_A", email: "alice@example.test" }),
+    });
+    const auth = authOver(store);
+
+    expect(await auth.getAccessToken()).toBe("tok");
+    expect(await auth.describeSavedSession()).toEqual({
+      state: "usable",
+      label: "alice@example.test",
+    });
+  });
+
+  test("a near-expiry token with a refresh token stays usable", async () => {
+    // `resolveSession` renews this record, so the summary must not call it
+    // expiring just because the clock is close.
+    const { store } = inspectableStore({
+      tokens: JSON.stringify({
+        accessToken: "tok",
+        refreshToken: "refresh",
+        expiresAt: Date.now() + 10_000,
+      }),
+    });
+    expect(await authOver(store).describeSavedSession()).toEqual({
+      state: "usable",
+      label: undefined,
     });
   });
 
@@ -1746,6 +1877,35 @@ describe("the callback page a failed login leaves behind", () => {
     expect(html).not.toContain("still saved and still in use");
     expect(html).not.toContain("sigue guardado y sigue en uso");
     expect(html).not.toContain("仍然保存并继续有效");
+  });
+
+  test("names a previous session inside the refresh window as expiring, not in use", async () => {
+    // Ten seconds left and no refresh token: the terminal's own
+    // `getAccessToken()` refuses this session, so "still in use" would be the
+    // false claim one state over from the expired case — and "has expired"
+    // would be false in the other direction. The page gets its own sentence.
+    const store = memoryStore();
+    await store.set(
+      "tokens",
+      JSON.stringify({ accessToken: "tok-A", expiresAt: Date.now() + 10_000 }),
+    );
+    await store.set("user", JSON.stringify(userA));
+
+    const { outcome, page } = await runLogin({ store, userinfoStatus: 503 });
+    expect(outcome.ok).toBe(false);
+    const html = (await page?.text()) ?? "";
+    const bodies = pageBodies(html);
+
+    expect(bodies.en).toContain("a***@example.test");
+    expect(bodies.en).toContain("less than a minute");
+    expect(bodies.es).toContain("menos de un minuto");
+    expect(bodies.zh).toContain("不到一分钟");
+    expect(html).not.toContain("still saved and still in use");
+    expect(html).not.toContain("sigue guardado y sigue en uso");
+    expect(html).not.toContain("仍然保存并继续有效");
+    expect(bodies.en).not.toContain("has expired");
+    expect(bodies.es).not.toContain("ha caducado");
+    expect(bodies.zh).not.toContain("已过期");
   });
 
   test("does not name a non-profile user object as the previous account", async () => {

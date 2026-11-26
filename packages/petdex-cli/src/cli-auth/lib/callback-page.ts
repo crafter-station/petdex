@@ -66,11 +66,14 @@ export type CallbackOutcome =
           previousAccount: string;
           /**
            * What the named record is: `usable` (a token that has not run
-           * out, or one with a refresh token) or `expired` (saved, but no
-           * usable token). The copy differs because "still in use" is only
-           * true of the first — an expired record is saved and nothing more.
+           * out, or one with a refresh token), `expired` (saved, but no
+           * usable token) or `expiring` (a token with seconds left and no
+           * refresh token to renew it). The copy differs because "still in
+           * use" is only true of the first — an expired record is saved and
+           * nothing more, and an expiring one is saved but already refused by
+           * the terminal's own 30-second availability rule.
            */
-          previousSession: "usable" | "expired";
+          previousSession: "usable" | "expired" | "expiring";
         }
     ));
 
@@ -252,9 +255,10 @@ export function callbackStringsByLocale(): Record<Locale, Strings> {
  * claim about a credential: an expired record with no refresh token is saved
  * and names an account, but no command can act as it, so the page must not
  * say it is in use — the same distinction the terminal's
- * `describeSavedSession` makes.
+ * `describeSavedSession` makes. A record inside the terminal's 30-second
+ * refresh window is neither expired nor in use, and gets its own sentence.
  */
-type NamedSessionState = "usable" | "expired";
+type NamedSessionState = "usable" | "expired" | "expiring";
 
 const NAMED_REASON: Record<
   Locale,
@@ -266,22 +270,31 @@ const NAMED_REASON: Record<
   >
 > = {
   en: {
-    userinfo_failed: (account, state) =>
-      state === "expired"
-        ? `Your profile couldn't be loaded, so this sign-in wasn't saved. Your previous sign-in (${account}) is still saved, but that session has expired; sign in again from your terminal.`
-        : `Your profile couldn't be loaded, so this sign-in wasn't saved. Your previous sign-in (${account}) is still saved and still in use.`,
+    userinfo_failed: (account, state) => {
+      if (state === "expired")
+        return `Your profile couldn't be loaded, so this sign-in wasn't saved. Your previous sign-in (${account}) is still saved, but that session has expired; sign in again from your terminal.`;
+      if (state === "expiring")
+        return `Your profile couldn't be loaded, so this sign-in wasn't saved. Your previous sign-in (${account}) is still saved, but it expires in less than a minute and commands are not using it; sign in again from your terminal.`;
+      return `Your profile couldn't be loaded, so this sign-in wasn't saved. Your previous sign-in (${account}) is still saved and still in use.`;
+    },
   },
   es: {
-    userinfo_failed: (account, state) =>
-      state === "expired"
-        ? `No se pudo cargar tu perfil, así que este acceso no se guardó. Tu acceso anterior (${account}) sigue guardado, pero esa sesión ha caducado; vuelve a iniciar sesión desde tu terminal.`
-        : `No se pudo cargar tu perfil, así que este acceso no se guardó. Tu acceso anterior (${account}) sigue guardado y sigue en uso.`,
+    userinfo_failed: (account, state) => {
+      if (state === "expired")
+        return `No se pudo cargar tu perfil, así que este acceso no se guardó. Tu acceso anterior (${account}) sigue guardado, pero esa sesión ha caducado; vuelve a iniciar sesión desde tu terminal.`;
+      if (state === "expiring")
+        return `No se pudo cargar tu perfil, así que este acceso no se guardó. Tu acceso anterior (${account}) sigue guardado, pero caduca en menos de un minuto y los comandos no lo están usando; vuelve a iniciar sesión desde tu terminal.`;
+      return `No se pudo cargar tu perfil, así que este acceso no se guardó. Tu acceso anterior (${account}) sigue guardado y sigue en uso.`;
+    },
   },
   zh: {
-    userinfo_failed: (account, state) =>
-      state === "expired"
-        ? `没能读取你的账号信息，这次登录没有保存。此前的登录（${account}）仍然保存，但该会话已过期，请在终端重新登录。`
-        : `没能读取你的账号信息，这次登录没有保存。此前的登录（${account}）仍然保存并继续有效。`,
+    userinfo_failed: (account, state) => {
+      if (state === "expired")
+        return `没能读取你的账号信息，这次登录没有保存。此前的登录（${account}）仍然保存，但该会话已过期，请在终端重新登录。`;
+      if (state === "expiring")
+        return `没能读取你的账号信息，这次登录没有保存。此前的登录（${account}）仍然保存，但不到一分钟就会过期，命令暂不使用它，请在终端重新登录。`;
+      return `没能读取你的账号信息，这次登录没有保存。此前的登录（${account}）仍然保存并继续有效。`;
+    },
   },
 };
 

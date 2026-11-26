@@ -200,6 +200,26 @@ describe("callback page previous account", () => {
     );
   });
 
+  test("an expiring previous session is neither in use nor expired", () => {
+    // Inside the terminal's 30-second refresh window the CLI refuses the
+    // token, but it has not run out. The page has to say that, or the reader
+    // is told one of two false things about the same record.
+    const html = renderCallbackPage(
+      {
+        kind: "error",
+        reason: "userinfo_failed",
+        previousAccount: "old@example.test",
+        previousSession: "expiring",
+      },
+      APP_URL,
+    );
+    const body = runPageScript(html).text("body") ?? "";
+    expect(body).toContain("o***@example.test");
+    expect(body).toContain("less than a minute");
+    expect(body).not.toContain("still in use");
+    expect(body).not.toContain("has expired");
+  });
+
   test("a storage failure does not claim the previous account is in use", () => {
     // `tokens` are written before `user`, so this failure can leave the new
     // sign-in half saved. Naming the old account as still in use would be a

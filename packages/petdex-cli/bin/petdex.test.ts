@@ -1,7 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+
+import { startFakeClerk } from "../test/local-env/fake-clerk";
 
 function runCli(...args: string[]): {
   exitCode: number;
@@ -596,13 +604,15 @@ describe("whoami profile panel", () => {
   const ROOT = path.resolve(import.meta.dir, "..");
 
   /**
-   * Run the real `whoami` against a saved profile whose `email` is `value`.
+   * Run the real `whoami` against a saved profile.
    *
    * The CLI's file store is used because the keychain is unreachable under a
    * redirected HOME; the seeded token is live, so `whoami` answers from the
    * cached profile without a network call.
    */
-  async function renderWhoami(email: unknown): Promise<string> {
+  async function renderProfile(
+    profile: Record<string, unknown>,
+  ): Promise<string> {
     const home = mkdtempSync(path.join(tmpdir(), "petdex-whoami-"));
     try {
       const dir = path.join(home, ".config", "clerk-cli-auth");
@@ -614,13 +624,7 @@ describe("whoami profile panel", () => {
             accessToken: "tok-test",
             expiresAt: Date.now() + 3_600_000,
           }),
-          user: JSON.stringify({
-            sub: "user_test",
-            given_name: "Alice",
-            family_name: "Smith",
-            preferred_username: "alice",
-            email,
-          }),
+          user: JSON.stringify(profile),
         }),
       );
       const child = Bun.spawn({
@@ -649,6 +653,16 @@ describe("whoami profile panel", () => {
     }
   }
 
+  function renderWhoami(email: unknown): Promise<string> {
+    return renderProfile({
+      sub: "user_test",
+      given_name: "Alice",
+      family_name: "Smith",
+      preferred_username: "alice",
+      email,
+    });
+  }
+
   test.each([
     ["an object", {}],
     ["an array", []],
@@ -671,4 +685,187 @@ describe("whoami profile panel", () => {
 
     expect(stdout).toContain("email:   a@b.test");
   });
+
+  test("strips ANSI escapes from every claim it prints", async () => {
+    // Claims are whatever the provider sent. ESC starts a sequence the
+    // terminal obeys — recolouring the line, moving the cursor, erasing what
+    // is above it — so `NO_COLOR` cannot help: it governs the CLI's own
+    // colouring, not bytes echoed back from a claim. Every line of the panel
+    // is cleaned, not only `email`.
+    const stdout = await renderProfile({
+      sub: "\u001b[31muser_test\u001b[0m",
+      given_name: "\u001b[1mAlice\u001b[0m",
+      family_name: "\u001b[32mSmith\u001b[0m",
+      preferred_username: "\u001b[35malice\u001b[0m",
+      email: "\u001b[31mred@example.test\u001b[0m",
+    });
+
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: matching the ESC that must not survive is the assertion.
+    expect(stdout).not.toMatch(/\u001b\[[0-9;]*m/);
+    expect(stdout).toContain("user:    user_test");
+    expect(stdout).toContain("email:   red@example.test");
+    expect(stdout).toContain("name:    Alice Smith");
+    expect(stdout).toContain("username:alice");
+  });
+
+  test("strips bare C0 controls, not only escape sequences", async () => {
+    // A carriage return can overwrite the line the reader just saw, and a
+    // BEL is noise; neither needs an ESC to reach the terminal.
+    const stdout = await renderProfile({
+      sub: "user_test",
+      email: "red\r@example.test\u0007",
+    });
+
+    expect(stdout).toContain("email:   red@example.test");
+    expect(stdout).not.toContain("red\r@");
+    expect(stdout).not.toContain("\u0007");
+  });
+
+  test("renders a claim made only of control characters as not set", async () => {
+    // Stripping can leave nothing. `—` is the panel's existing answer for a
+    // claim that is present but has nothing to show.
+    const stdout = await renderProfile({
+      sub: "user_test",
+      email: "\u001b[31m\u001b[0m",
+    });
+
+    expect(stdout).toContain("email:   —");
+  });
+});
+
+/**
+ * `login` against a local issuer, run as a real child process.
+ *
+ * These drive `cmdLogin` itself: the summary of what a failed sign-in left
+ * behind is read by the real command, not by a unit test of
+ * `describeLoginFailure`. The `open` shim fetches the authorize URL so the
+ * loopback callback completes without a browser window.
+ */
+describe("login against a local issuer", () => {
+  const ROOT = path.resolve(import.meta.dir, "..");
+
+  /** A HOME whose `open` shim follows the authorize redirect with curl. */
+  function loginHome(): { home: string; pathEnv: string } {
+    const home = mkdtempSync(path.join(tmpdir(), "petdex-login-"));
+    const bin = path.join(home, "bin");
+    mkdirSync(bin, { recursive: true });
+    const opener = path.join(bin, "open");
+    writeFileSync(
+      opener,
+      '#!/bin/sh\nnohup curl -sL "$1" -o /dev/null >/dev/null 2>&1 &\nexit 0\n',
+    );
+    chmodSync(opener, 0o755);
+    return { home, pathEnv: `${bin}:${process.env.PATH ?? ""}` };
+  }
+
+  /** What a previous CLI invocation left in the file store. */
+  function seedSession(
+    home: string,
+    session: { tokens: unknown; user: unknown },
+  ): void {
+    const dir = path.join(home, ".config", "clerk-cli-auth");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      path.join(dir, "default.json"),
+      JSON.stringify({
+        tokens: JSON.stringify(session.tokens),
+        user: JSON.stringify(session.user),
+      }),
+    );
+  }
+
+  /** Spawn the real CLI against the fake issuer; answer its combined output. */
+  async function runLogin(
+    home: string,
+    pathEnv: string,
+    issuer: { issuer: string; clientId: string },
+  ): Promise<{ code: number | null; output: string }> {
+    const child = Bun.spawn({
+      cmd: [process.execPath, `${ROOT}/bin/petdex.ts`, "login"],
+      env: {
+        ...process.env,
+        NO_COLOR: "1",
+        FORCE_COLOR: "0",
+        PETDEX_TELEMETRY: "0",
+        HOME: home,
+        PATH: pathEnv,
+        PETDEX_URL: issuer.issuer,
+        CLERK_ISSUER: issuer.issuer,
+        CLERK_OAUTH_CLIENT_ID: issuer.clientId,
+      },
+      stdin: "ignore",
+      stderr: "pipe",
+      stdout: "pipe",
+    });
+    const timer = setTimeout(() => child.kill("SIGKILL"), 30_000);
+    const [stdout, stderr] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ]);
+    clearTimeout(timer);
+    return { code: child.exitCode, output: stdout + stderr };
+  }
+
+  test("a failed re-login names the session that is still saved", async () => {
+    // The wiring behind `describeLoginFailure(err, previous)`: the command
+    // reads the store after the failure. Removing that read left the gate
+    // green, because no test drove the real `cmdLogin` failure path — the
+    // message then says only that what was saved could not be checked, while
+    // the terminal can name the account every command is still using.
+    const clerk = await startFakeClerk({
+      accounts: [
+        { sub: "user_A", email: "old@example.test" },
+        { sub: "user_B", email: "new@example.test", userinfoStatus: 503 },
+      ],
+      defaultSub: "user_B",
+    });
+    const { home, pathEnv } = loginHome();
+    try {
+      seedSession(home, {
+        tokens: {
+          accessToken: "tok-A",
+          refreshToken: "refresh-A",
+          expiresAt: Date.now() + 3_600_000,
+        },
+        user: { sub: "user_A", email: "old@example.test" },
+      });
+
+      const result = await runLogin(home, pathEnv, clerk);
+      expect(result.code).toBe(1);
+      expect(result.output).toContain(
+        "Your previous sign-in (old@example.test) is still saved",
+      );
+      expect(result.output).not.toContain("could not be checked");
+    } finally {
+      await clerk.close();
+      rmSync(home, { recursive: true, force: true });
+    }
+  }, 40_000);
+
+  test("the signed-in label strips control characters from a provider email", async () => {
+    // The success path prints the same claim the panel does. `NO_COLOR` was
+    // already set for the child, and it does not strip an ESC that came from
+    // the provider — only the CLI's own colouring.
+    const clerk = await startFakeClerk({
+      accounts: [
+        {
+          sub: "user_A",
+          email: "\u001b[31mred@example.test\u001b[0m",
+          name: "Red",
+        },
+      ],
+      defaultSub: "user_A",
+    });
+    const { home, pathEnv } = loginHome();
+    try {
+      const result = await runLogin(home, pathEnv, clerk);
+      expect(result.code).toBe(0);
+      expect(result.output).toContain("Signed in as red@example.test");
+      expect(result.output).not.toContain("\u001b[31mred");
+    } finally {
+      await clerk.close();
+      rmSync(home, { recursive: true, force: true });
+    }
+  }, 40_000);
 });
