@@ -9,7 +9,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { startFakeClerk } from "../test/local-env/fake-clerk";
+import { startFakeClerk } from "../test-support/fake-clerk";
 
 function runCli(...args: string[]): {
   exitCode: number;
