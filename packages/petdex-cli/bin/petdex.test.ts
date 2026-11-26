@@ -9,6 +9,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { browserCommand } from "../src/cli-auth/lib/browser-command";
 import { startFakeClerk } from "../test-support/fake-clerk";
 
 function runCli(...args: string[]): {
@@ -511,8 +512,15 @@ test("submit scenario", async () => {
     // Only the first pet was ever presigned.
     expect(result.presigns).toBe(1);
     expect(result.sent).toEqual(["Bearer tok-2"]);
+    // Which pet is "first" is the filesystem's readdir order, not the order
+    // the fixtures were created in, so the test must not pin a slug. What it
+    // is about: the pet whose presign was refused is named as a failure of
+    // its own, and only the remaining one is reported as not attempted.
     const notes = result.notes.join("\n");
-    expect(notes).toContain("pet-one");
+    const failed = ["pet-one", "pet-two"].filter((slug) =>
+      notes.includes(`${slug}:`),
+    );
+    expect(failed).toHaveLength(1);
     // One pet was attempted (and failed); exactly one was left unsent.
     expect(notes).toContain("1 not attempted");
     expect(notes).not.toContain("2 not attempted");
@@ -744,12 +752,16 @@ describe("whoami profile panel", () => {
 describe("login against a local issuer", () => {
   const ROOT = path.resolve(import.meta.dir, "..");
 
-  /** A HOME whose `open` shim follows the authorize redirect with curl. */
+  /** A HOME whose opener shim follows the authorize redirect with curl. */
   function loginHome(): { home: string; pathEnv: string } {
     const home = mkdtempSync(path.join(tmpdir(), "petdex-login-"));
     const bin = path.join(home, "bin");
     mkdirSync(bin, { recursive: true });
-    const opener = path.join(bin, "open");
+    // The shim has to carry the name of the command this platform's CLI
+    // spawns — `open` on macOS, `xdg-open` on Linux. An `open`-only shim is
+    // silently ignored on Linux: the authorize URL is never fetched, the
+    // callback never arrives, and the child waits out its timeout.
+    const opener = path.join(bin, browserCommand("http://127.0.0.1/").command);
     writeFileSync(
       opener,
       '#!/bin/sh\nnohup curl -sL "$1" -o /dev/null >/dev/null 2>&1 &\nexit 0\n',
