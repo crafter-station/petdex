@@ -57,7 +57,7 @@ describe("brand-kit", () => {
   test("brand JSON-LD links Petdex, Railly Hugo, and Crafter Station", () => {
     const ids = BRAND_JSON_LD["@graph"].map((node) => node["@id"]);
     expect(ids).toContain("https://crafter.run/#organization");
-    expect(ids).toContain("https://railly.dev/#person");
+    expect(ids).toContain("https://www.railly.dev/#person");
     expect(ids).toContain("https://petdex.dev/#website");
   });
 });

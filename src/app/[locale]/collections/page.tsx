@@ -94,7 +94,7 @@ export default async function CollectionsPage({
         name: "Petdex collections",
         url: `${SITE_URL}/collections`,
         isPartOf: { "@id": `${SITE_URL}/#website` },
-        author: { "@id": "https://railly.dev/#person" },
+        author: { "@id": "https://www.railly.dev/#person" },
         publisher: { "@id": "https://crafter.run/#organization" },
         mainEntity: {
           "@type": "ItemList",

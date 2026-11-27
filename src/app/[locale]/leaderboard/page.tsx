@@ -90,7 +90,7 @@ export default async function LeaderboardPage() {
         url: `${BRAND_SITE_URL}/leaderboard`,
         description: t("subtitle"),
         isPartOf: { "@id": `${BRAND_SITE_URL}/#website` },
-        author: { "@id": "https://railly.dev/#person" },
+        author: { "@id": "https://www.railly.dev/#person" },
         publisher: { "@id": "https://crafter.run/#organization" },
       },
     ],

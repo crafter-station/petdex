@@ -111,11 +111,11 @@ export default async function Home({
         name: "Crafter Station",
         url: "https://crafter.run",
         sameAs: ["https://github.com/crafter-station"],
-        founder: { "@id": "https://railly.dev/#person" },
+        founder: { "@id": "https://www.railly.dev/#person" },
       },
       {
         "@type": "Person",
-        "@id": "https://railly.dev/#person",
+        "@id": "https://www.railly.dev/#person",
         name: "Railly Hugo",
         url: "https://railly.dev",
         sameAs: ["https://github.com/Railly", "https://x.com/raillyhugo"],
@@ -128,7 +128,7 @@ export default async function Home({
         url: `${SITE_URL}/`,
         inLanguage: locale,
         description: t("jsonLdDescription"),
-        creator: { "@id": "https://railly.dev/#person" },
+        creator: { "@id": "https://www.railly.dev/#person" },
         publisher: { "@id": "https://crafter.run/#organization" },
         potentialAction: {
           "@type": "SearchAction",
@@ -147,7 +147,7 @@ export default async function Home({
         operatingSystem: "macOS, Windows, Linux",
         url: `${SITE_URL}/${locale}/download`,
         offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
-        creator: { "@id": "https://railly.dev/#person" },
+        creator: { "@id": "https://www.railly.dev/#person" },
         publisher: { "@id": "https://crafter.run/#organization" },
       },
       {
