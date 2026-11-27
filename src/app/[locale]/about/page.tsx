@@ -81,7 +81,7 @@ export default async function AboutPage({
         url: `${SITE_URL}/about`,
         description: t("metadata.ogDescription"),
         isPartOf: { "@id": `${SITE_URL}/#website` },
-        author: { "@id": "https://railly.dev/#person" },
+        author: { "@id": "https://www.railly.dev/#person" },
         publisher: { "@id": "https://crafter.run/#organization" },
       },
       {
@@ -89,7 +89,7 @@ export default async function AboutPage({
         "@id": `${SITE_URL}/about#faq`,
         url: `${SITE_URL}/about`,
         isPartOf: { "@id": `${SITE_URL}/#website` },
-        author: { "@id": "https://railly.dev/#person" },
+        author: { "@id": "https://www.railly.dev/#person" },
         publisher: { "@id": "https://crafter.run/#organization" },
         mainEntity: faq.map((item) => ({
           "@type": "Question",

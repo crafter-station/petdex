@@ -99,7 +99,7 @@ export default async function DocsPage({
         description: t("metadata.description"),
         url: `${BRAND_SITE_URL}/docs`,
         isPartOf: { "@id": `${BRAND_SITE_URL}/#website` },
-        author: { "@id": "https://railly.dev/#person" },
+        author: { "@id": "https://www.railly.dev/#person" },
         publisher: { "@id": "https://crafter.run/#organization" },
       },
     ],

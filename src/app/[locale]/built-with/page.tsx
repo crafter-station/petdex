@@ -150,7 +150,7 @@ export default async function BuiltWithPage({
         url: `${SITE_URL}/built-with`,
         description: t("metadata.description", { total }),
         isPartOf: { "@id": `${SITE_URL}/#website` },
-        author: { "@id": "https://railly.dev/#person" },
+        author: { "@id": "https://www.railly.dev/#person" },
         publisher: { "@id": "https://crafter.run/#organization" },
         hasPart: builtWithData.projects.map((project) => ({
           "@type": "SoftwareApplication",
