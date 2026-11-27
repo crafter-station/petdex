@@ -9,6 +9,12 @@ import pc from "picocolors";
 import pkg from "../package.json";
 import { isTrustedAssetUrl } from "../src/asset-hosts.js";
 import { resolveAuthConfig } from "../src/auth-config.js";
+import {
+  accountLabel,
+  describeAuthFailure,
+  describeLoginFailure,
+  type SavedSessionSummary,
+} from "../src/cli-auth/cli-messages.js";
 import { ClerkCliAuth } from "../src/cli-auth/index.js";
 import {
   collectionRequest,
@@ -242,21 +248,45 @@ function printHelp() {
 
 // ─── commands ──────────────────────────────────────────────────────────────
 
+/**
+ * What the store held when a login failed, for the message that has to say
+ * what survived it. Read from the saved records — never from the network.
+ * Only the failures that leave the store untouched use it;
+ * `describeLoginFailure` says so per code, and `describeSavedSession` says
+ * what the two records can and cannot support.
+ */
+async function previousSessionSummary(
+  auth: ClerkCliAuth,
+): Promise<SavedSessionSummary> {
+  const summary = await auth.describeSavedSession();
+  // The label is a provider claim (`email`, `username` or `sub`) and this
+  // summary is read only to be printed, so it goes through the display rule
+  // here. The stored bytes and the session-state decision are untouched.
+  return { ...summary, label: displayString(summary.label) ?? undefined };
+}
+
 async function cmdLogin() {
   p.intro(pc.bgMagenta(pc.white(" petdex login ")));
   const s = p.spinner();
   s.start("Opening your browser to sign in with Clerk");
+  let auth: ClerkCliAuth | undefined;
   try {
-    const auth = await getAuth();
+    auth = await getAuth();
     const { user } = await auth.login();
-    const label = firstString(user.email, user.username, user.sub) ?? "unknown";
+    const label = displayString(accountLabel(user)) ?? "unknown";
     s.stop(`${pc.green("✓ ")}Signed in as ${pc.cyan(label)}`);
     p.outro(
       `Try ${pc.cyan("petdex submit ~/.codex/pets")} to share your pets.`,
     );
   } catch (err) {
     s.stop(pc.red("× login failed"));
-    throw new Error(translateLoginError((err as Error).message));
+    // Where the login failed decides which account the CLI now acts as, and
+    // the message must not claim more than the write sequence allows: a
+    // profile failure leaves the store untouched, a credential-write failure
+    // can leave it half saved. `describeLoginFailure` carries that split and
+    // reads this label only for the cases where it holds.
+    const previous = auth ? await previousSessionSummary(auth) : undefined;
+    throw new Error(describeLoginFailure(err, previous));
   }
 }
 
@@ -315,10 +345,10 @@ async function cmdCollection(args: string[]): Promise<void> {
     const accessToken = await (await getAuth()).getAccessToken();
     if (!accessToken) failCollection(notSignedIn, json);
     token = accessToken;
-  } catch {
-    // An expired or revoked refresh token throws here; surface the same
-    // guidance submit/edit give instead of the raw Clerk error.
-    failCollection(notSignedIn, json);
+  } catch (error) {
+    // An expired session, an unreadable store and missing credentials have
+    // different fixes; only the last one is "not signed in".
+    failCollection(authFailureMessage(error), json);
   }
   // Every request below can throw (404, 429, a network failure). Letting it
   // reach main().catch() would print through clack to stdout, which is the
@@ -432,23 +462,53 @@ async function cmdWhoami() {
   try {
     const auth = await getAuth();
     const me = await auth.whoami();
-    if (!me) throw new Error("not signed in");
-    const name = [asString(me.given_name), asString(me.family_name)]
+    if (!me) {
+      p.cancel(`Not signed in. Run ${pc.cyan("petdex login")}.`);
+      process.exit(1);
+    }
+    const name = [displayString(me.given_name), displayString(me.family_name)]
       .filter(Boolean)
       .join(" ");
+    // Every line here is a provider claim and goes through `displayString`.
+    // `sub` is the one a profile cannot lack, but "present" is not
+    // "printable": the shape rule only requires a non-empty string, and a
+    // provider can send one made of control characters. The rest are never
+    // inspected at all, so printing them raw showed `[object Object]` for an
+    // object claim, `true` for a boolean, and — for `""` or `[]` — a blank
+    // line that reads like a label with its value missing rather than "not
+    // set". Control characters are the same class of problem one step worse:
+    // an ESC sequence lets the value repaint the panel, move the cursor or
+    // erase the line above it.
     p.note(
       [
-        `${pc.dim("user:    ")}${me.sub}`,
-        `${pc.dim("email:   ")}${me.email ?? "—"}`,
+        `${pc.dim("user:    ")}${displayString(me.sub) ?? "—"}`,
+        `${pc.dim("email:   ")}${displayString(me.email) ?? "—"}`,
         `${pc.dim("name:    ")}${name || "—"}`,
-        `${pc.dim("username:")}${asString(me.preferred_username) ?? "—"}`,
+        `${pc.dim("username:")}${displayString(me.preferred_username) ?? "—"}`,
       ].join("\n"),
       "Signed in",
     );
-  } catch {
-    p.cancel(`Not signed in. Run ${pc.cyan("petdex login")}.`);
+  } catch (error) {
+    // A locked keychain, a profile endpoint outage and an expired session are
+    // different problems with different fixes; collapsing them into "not
+    // signed in" hides the one thing the reader could act on.
+    p.cancel(authFailureMessage(error));
     process.exit(1);
   }
+}
+
+/**
+ * Describe why a command could not use the saved session, with the terminal
+ * pointing at the commands that fix it.
+ */
+function authFailureMessage(error: unknown): string {
+  const message = describeAuthFailure(error);
+  if (message === "Not signed in.") {
+    return `Not signed in. Run ${pc.cyan("petdex login")}.`;
+  }
+  return message
+    .replaceAll("petdex login", pc.cyan("petdex login"))
+    .replaceAll("petdex logout", pc.cyan("petdex logout"));
 }
 
 function parseSpriteVersionNumber(petJson: Record<string, unknown>): 1 | 2 {
@@ -669,6 +729,17 @@ function parseLicenseFlag(args: string[]): string | null {
   return i >= 0 ? (args[i + 1] ?? "") : null;
 }
 
+/**
+ * Report a submit failure that must reach scripts and exit. clack's `cancel`
+ * writes to stdout, which is where the successful-submission summary goes; a
+ * no-terminal failure is an error, so it goes to stderr like the other
+ * non-interactive error paths.
+ */
+function failSubmit(message: string): never {
+  p.cancel(message, { output: process.stderr });
+  process.exit(1);
+}
+
 async function cmdSubmit(args: string[]) {
   const positionals = args.filter((a) => !a.startsWith("--"));
   const target = positionals[0];
@@ -692,6 +763,13 @@ async function cmdSubmit(args: string[]) {
       process.exit(1);
     }
     license = match.value;
+  } else if (!process.stdin.isTTY) {
+    // A license has legal meaning, so the CLI will not pick one for the user,
+    // and clack's prompt would never settle on a stdin already at EOF: Node
+    // would drain the event loop and exit 0 with nothing submitted.
+    failSubmit(
+      `submit needs --license when there is no terminal. Run: ${pc.cyan("petdex submit <path> --license <id>")}. Options: ${LICENSE_CHOICES.map((c) => c.value).join(", ")}`,
+    );
   } else {
     const picked = await p.select({
       message: "License for this pet's artwork (you keep the copyright)",
@@ -709,16 +787,14 @@ async function cmdSubmit(args: string[]) {
 
   // Ensure auth before doing any work.
   const auth = await getAuth();
+  // The first resolution happens before any prompt or upload: it is what
+  // proves a usable session exists, and what the dedup lookup below uses.
+  // The batch resolves again after the prompts — see `resolveSubmitToken`.
   let token: string;
   try {
-    const t = await auth.getAccessToken();
-    if (!t) {
-      p.cancel(`Not signed in. Run ${pc.cyan("petdex login")}.`);
-      process.exit(1);
-    }
-    token = t;
-  } catch {
-    p.cancel(`Not signed in. Run ${pc.cyan("petdex login")}.`);
+    token = await resolveSubmitToken(auth);
+  } catch (error) {
+    p.cancel(authFailureMessage(error));
     process.exit(1);
   }
   let profileUrl = PETDEX_URL;
@@ -777,6 +853,15 @@ async function cmdSubmit(args: string[]) {
         .join("\n"),
       `${dupes.length} already submitted by you`,
     );
+    // The same rule as the license prompt: never let a prompt decide for a
+    // caller that has no terminal. `--force` is the explicit way to say
+    // "submit them again"; skipping is the default a terminal user would get.
+    // Only a real duplicate needs that decision, not merely a non-empty map.
+    if (dupes.length > 0 && !process.stdin.isTTY) {
+      failSubmit(
+        `${dupes.length} already submitted by you. No terminal to ask how to handle them. Re-run with ${pc.cyan("--force")} to submit them again, or remove them from this path first.`,
+      );
+    }
     const choice = await p.select({
       message: "How should we handle these duplicates?",
       options: [
@@ -806,6 +891,11 @@ async function cmdSubmit(args: string[]) {
   }
 
   if (toSubmit.length > 1) {
+    if (!process.stdin.isTTY) {
+      failSubmit(
+        `${toSubmit.length} pets to submit. No terminal to confirm the batch. Run this from a terminal, or submit one pet at a time: ${pc.cyan("petdex submit <path-to-one-pet>")}."`,
+      );
+    }
     const proceed = await p.confirm({
       message: `Submit ${pc.bold(String(toSubmit.length))} pet${toSubmit.length === 1 ? "" : "s"}?`,
     });
@@ -819,26 +909,114 @@ async function cmdSubmit(args: string[]) {
   let failed = 0;
   const failures: Array<{ label: string; error: string }> = [];
 
+  // The token resolved before the prompts is the one the *interactive* part
+  // used — the dedup lookup. A duplicate decision or a batch confirmation can
+  // sit open for longer than an access token lives, and the presign below is
+  // the first authenticated call made after all of them. So the batch
+  // re-resolves here, once every prompt has settled: `getAccessToken()`
+  // refreshes when the record is near expiry, and a dead session is reported
+  // through `authFailureMessage` instead of as a 401 on the first pet.
+  //
+  // A batch longer than one token's life can still go stale mid-way, so a
+  // presign that comes back 401 re-resolves and retries that pet once — the
+  // server saying the bearer was refused is the only reliable trigger, and
+  // it keeps a healthy batch at one resolve per token. When the refresh
+  // cannot produce a token, *or* the store cannot produce a *different* one,
+  // the whole batch stops with one report: repeating the same auth failure
+  // per pet is the noise this loop exists to avoid, and the pets after it
+  // would fail identically. A retry that is refused too is the server saying
+  // the session itself is no good, which no later pet can fix.
+  try {
+    token = await resolveSubmitToken(auth);
+  } catch (error) {
+    p.cancel(authFailureMessage(error));
+    process.exit(1);
+  }
+
+  let abortReason: string | null = null;
+  // How many pets the loop actually entered. The tail after `break` is the
+  // batch that was never sent; the pet the abort landed on is recorded as a
+  // failure by the handler below like any other.
+  let attempted = 0;
   for (const cand of toSubmit) {
+    attempted++;
     const ps = p.spinner();
     ps.start(`Submitting ${pc.cyan(cand.label)}`);
     try {
-      const t = await auth.getAccessToken();
-      if (!t) throw new Error("session expired");
-      token = t;
-      const result = await submitOne(cand, token, license);
+      let result: SubmitOneResult;
+      try {
+        result = await submitOne(cand, token, license);
+      } catch (err) {
+        if (!(err instanceof PresignAuthError)) throw err;
+        let nextToken: string;
+        try {
+          nextToken = await resolveSubmitToken(auth);
+        } catch (authError) {
+          // This pet's presign went out and was refused; the store cannot
+          // produce a token to retry with. Rethrown so the handler below
+          // records the pet that was actually attempted, rather than folding
+          // it into the pets that never were.
+          abortReason = authFailureMessage(authError);
+          throw authError;
+        }
+        // The store answered with the same bearer the server just refused:
+        // the session exists but this token is not accepted, and sending it
+        // again would only repeat the refusal. No later pet can fix that —
+        // every one of them would spend a presign to learn the same thing —
+        // so this stops the batch as well.
+        if (nextToken === token) {
+          abortReason = `the sign-in was refused and the stored session did not change (${err.message}); run ${pc.cyan("petdex login")} to sign in again`;
+          throw err;
+        }
+        token = nextToken;
+        try {
+          result = await submitOne(cand, token, license);
+        } catch (retryError) {
+          if (!(retryError instanceof PresignAuthError)) throw retryError;
+          // A second 401 on a token this batch had just resolved: the session
+          // is not usable, and every remaining pet would spend one presign to
+          // learn the same thing. Stop here; this pet is recorded by the
+          // handler below and the rest are reported as not attempted.
+          abortReason = `the sign-in was rejected again after refreshing (${retryError.message}); run ${pc.cyan("petdex login")} to sign in again`;
+          throw retryError;
+        }
+      }
       profileUrl = absoluteProfileUrl(result.profileUrl) ?? profileUrl;
       ps.stop(
         `${pc.green("✓")} ${pc.cyan(cand.label)} → ${formatSubmissionOutcome(result)}`,
       );
       succeeded++;
     } catch (err) {
-      const msg = (err as Error).message;
+      // When this pet's failure is what stopped the batch, the reason names
+      // the cause once, here — the raw 401 would repeat what the reason
+      // already says, and the pets that were never sent get no line of their
+      // own to carry it when there are none of them.
+      const msg = abortReason ?? (err as Error).message;
       ps.stop(
         `${pc.red("×")} ${pc.cyan(cand.label)} ${pc.red(msg.slice(0, 60))}`,
       );
       failures.push({ label: cand.label, error: msg });
       failed++;
+    }
+    // A retry the server refused on a freshly resolved token sets the reason
+    // and rethrows so this handler records that pet; the remaining pets must
+    // not be sent with the same rejected session.
+    if (abortReason !== null) break;
+  }
+
+  if (abortReason !== null) {
+    // Stopped mid-batch: only the pets after this point were never attempted,
+    // and they are reported as one line naming the cause — "failed" would be
+    // a claim the CLI cannot make about pets it never sent. The aborting pet
+    // is already in the list above with its own cause, so a count of zero is
+    // not a line at all: "0 not attempted" under a failure that explains
+    // itself is noise, and in a script it reads as a failed item.
+    const notAttempted = toSubmit.length - attempted;
+    if (notAttempted > 0) {
+      failures.push({
+        label: `${notAttempted} not attempted`,
+        error: abortReason,
+      });
     }
   }
 
@@ -884,8 +1062,8 @@ async function cmdEdit(args: string[]): Promise<void> {
       process.exit(1);
     }
     token = t;
-  } catch {
-    p.cancel(`Not signed in. Run ${pc.cyan("petdex login")}.`);
+  } catch (error) {
+    p.cancel(authFailureMessage(error));
     process.exit(1);
   }
 
@@ -1180,6 +1358,23 @@ async function readZipCandidate(zipPath: string): Promise<Candidate | null> {
 
 // ─── upload pipeline ───────────────────────────────────────────────────────
 
+/** A presign refusal that names the bearer as the problem (HTTP 401). */
+class PresignAuthError extends Error {}
+
+/**
+ * A token for the submit batch, resolved *after* the interactive prompts.
+ *
+ * Kept separate from the pre-scan resolution so the two moments are distinct
+ * in the code: the first proves a session exists before doing any work, the
+ * second is what the presign calls actually use. A missing session is an
+ * error here, not `null`, because every caller would have to report it.
+ */
+async function resolveSubmitToken(auth: ClerkCliAuth): Promise<string> {
+  const token = await auth.getAccessToken();
+  if (!token) throw new Error("Not signed in.");
+  return token;
+}
+
 async function submitOne(
   cand: Candidate,
   bearer: string,
@@ -1203,6 +1398,13 @@ async function submitOne(
     }),
   });
 
+  if (presignRes.status === 401) {
+    // The server refused the bearer itself, which is the one presign failure
+    // a fresh token can fix. Typed separately so the batch can re-resolve and
+    // retry instead of reporting the pet as failed.
+    const text = await presignRes.text().catch(() => "");
+    throw new PresignAuthError(`presign 401 ${text.slice(0, 100)}`);
+  }
   if (!presignRes.ok) {
     const text = await presignRes.text().catch(() => "");
     throw new Error(`presign ${presignRes.status} ${text.slice(0, 100)}`);
@@ -1359,37 +1561,6 @@ async function fetchOwnedSlugs(
   return out;
 }
 
-function translateLoginError(message: string): string {
-  const m = message.toLowerCase();
-  if (m.includes("invalid_client") || m.includes("client does not exist")) {
-    return [
-      "Clerk OAuth rejected this CLI build (invalid_client).",
-      "This usually means your installed CLI is out of date. Try:",
-      "  npm cache clean --force && npx -y petdex@latest login",
-      "If it still fails: https://github.com/crafter-station/petdex/issues",
-    ].join("\n");
-  }
-  if (
-    m.includes("invalid_grant") ||
-    m.includes("does not match the redirect")
-  ) {
-    return [
-      "OAuth callback was rejected by Clerk (invalid_grant).",
-      "Common cause: you closed the browser before approving, or the local",
-      "callback server timed out. Try `petdex login` again.",
-    ].join("\n");
-  }
-  if (m.includes("redirect_uri") && m.includes("pre-registered")) {
-    return [
-      "Clerk OAuth rejected the local callback URL.",
-      "The petdex OAuth Application needs http://127.0.0.1 in its allowed",
-      "redirect URLs. Please file an issue:",
-      "  https://github.com/crafter-station/petdex/issues",
-    ].join("\n");
-  }
-  return message;
-}
-
 async function fileExists(p: string): Promise<boolean> {
   try {
     await stat(p);
@@ -1406,6 +1577,40 @@ function pickString(value: unknown, fallback: string): string {
 
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+/**
+ * ANSI escape sequences and the rest of C0/C1: the terminal gives these
+ * bytes meaning, so a provider-supplied claim must not carry them to the
+ * screen. ESC followed by `[` recolours or erases the line, an OSC sequence
+ * can retitle or link the window, and even a bare carriage return can
+ * overwrite what the reader just saw.
+ */
+const ANSI_SEQUENCE =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: these characters are what the rule is about; this matches them to strip them from display text.
+  /\u001b\[[0-?]*[ -/]*[@-~]|\u001b\][^\u0007]*(?:\u0007|\u001b\\)|\u001b[@-_]/g;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: these characters are what the rule is about; this matches them to strip them from display text.
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/g;
+
+/**
+ * Remove terminal control characters from provider-supplied text.
+ *
+ * This is a display rule, deliberately not a credential-shape rule: the
+ * stored bytes are never rejected or rewritten for containing controls, and
+ * `parseStoredProfile` keeps answering the same thing for the same bytes.
+ * Cleaning happens where a claim is about to be printed, so `whoami` and the
+ * login messages cannot repaint the panel with an `email` or `sub` the
+ * provider chose.
+ */
+function terminalSafe(value: string): string {
+  return value.replace(ANSI_SEQUENCE, "").replace(CONTROL_CHARACTERS, "");
+}
+
+/** An `asString` value that is also safe to print, or null when nothing is. */
+function displayString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const text = terminalSafe(value).trim();
+  return text ? text : null;
 }
 
 function firstString(...values: unknown[]): string | null {

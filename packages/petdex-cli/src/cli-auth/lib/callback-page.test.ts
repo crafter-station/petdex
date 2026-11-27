@@ -9,6 +9,7 @@ import {
   defaultAppUrl,
   escapeHtml,
   LOCALES_FOR_TEST,
+  maskAccount,
   renderCallbackPage,
   safeJson,
 } from "./callback-page";
@@ -20,6 +21,7 @@ const REASONS: CallbackFailureReason[] = [
   "token_exchange_failed",
   "userinfo_failed",
   "storage_failed",
+  "config_failed",
   "timeout",
   "closed",
 ];
@@ -170,6 +172,168 @@ describe("callback page success state", () => {
     expect(html).toContain("clearTimeout(timer)");
     expect(html).toContain('"mousemove"');
     expect(html).toContain('"keydown"');
+  });
+});
+
+describe("callback page previous account", () => {
+  test("names the account a failed sign-in left in place, masked, in every locale", () => {
+    // The terminal names the account in full (`describeLoginFailure`); the
+    // page has to say the same thing or the reader who only sees the browser
+    // is told "not saved" without being told who is still signed in — but the
+    // browser document carries the masked label, not the full email.
+    const html = renderCallbackPage(
+      {
+        kind: "error",
+        reason: "userinfo_failed",
+        previousAccount: "old@example.test",
+        previousSession: "usable",
+      },
+      APP_URL,
+    );
+    for (const language of ["en", "es", "zh-CN"]) {
+      const { text } = runPageScript(html, language);
+      expect(text("body")).toContain("o***@example.test");
+      expect(text("body")).not.toContain("old@example.test");
+    }
+    expect(runPageScript(html).text("body")).toContain(
+      "Your previous sign-in (o***@example.test) is still saved and still in use.",
+    );
+  });
+
+  test("an expiring previous session is neither in use nor expired", () => {
+    // Inside the terminal's 30-second refresh window the CLI refuses the
+    // token, but it has not run out. The page has to say that, or the reader
+    // is told one of two false things about the same record.
+    const html = renderCallbackPage(
+      {
+        kind: "error",
+        reason: "userinfo_failed",
+        previousAccount: "old@example.test",
+        previousSession: "expiring",
+      },
+      APP_URL,
+    );
+    const body = runPageScript(html).text("body") ?? "";
+    expect(body).toContain("o***@example.test");
+    expect(body).toContain("less than a minute");
+    expect(body).not.toContain("still in use");
+    expect(body).not.toContain("has expired");
+  });
+
+  test("a storage failure does not claim the previous account is in use", () => {
+    // `tokens` are written before `user`, so this failure can leave the new
+    // sign-in half saved. Naming the old account as still in use would be a
+    // claim the write sequence does not support.
+    const plain = callbackStringsByLocale().en.reason.storage_failed;
+    const html = renderCallbackPage(
+      {
+        kind: "error",
+        reason: "storage_failed",
+        previousAccount: "old@example.test",
+        previousSession: "usable",
+      },
+      APP_URL,
+    );
+    expect(runPageScript(html).text("body")).toBe(plain);
+    expect(html).not.toContain("o***@example.test");
+    expect(html).not.toContain("old@example.test");
+  });
+
+  test("masks usernames and subjects too", () => {
+    // No `@`: keep the first two characters so the account is still
+    // recognisable, and nothing beyond them.
+    const html = renderCallbackPage(
+      {
+        kind: "error",
+        reason: "userinfo_failed",
+        previousAccount: "user_2abc",
+        previousSession: "usable",
+      },
+      APP_URL,
+    );
+    const body = runPageScript(html).text("body") ?? "";
+    expect(body).toContain("us***");
+    expect(body).not.toContain("user_2abc");
+    expect(maskAccount("ab")).toBe("***");
+    expect(maskAccount("a@b.test")).toBe("a***@b.test");
+  });
+
+  test("falls back to the plain reason when there is no account to name", () => {
+    const plain = callbackStringsByLocale().en.reason.userinfo_failed;
+    const html = renderCallbackPage(
+      { kind: "error", reason: "userinfo_failed" },
+      APP_URL,
+    );
+    expect(runPageScript(html).text("body")).toBe(plain);
+  });
+
+  test("an account with no session state is not called 'still in use'", () => {
+    // The named copy differs by what the stored record is, and there is no
+    // safe default between the two: "still in use" is a claim about a
+    // credential. A caller that names an account and supplies no state gets
+    // the reason's own copy, not the most optimistic one. The type requires
+    // the pair; this pins the runtime behaviour for a JavaScript caller.
+    const plain = callbackStringsByLocale().en.reason.userinfo_failed;
+    const unpaired = {
+      kind: "error",
+      reason: "userinfo_failed",
+      previousAccount: "old@example.test",
+    } as unknown as Parameters<typeof renderCallbackPage>[0];
+    const html = renderCallbackPage(unpaired, APP_URL);
+    const body = runPageScript(html).text("body") ?? "";
+    expect(body).toBe(plain);
+    expect(body).not.toContain("still in use");
+    expect(html).not.toContain("o***@example.test");
+  });
+
+  test("falls back for reasons that cannot name an account", () => {
+    // A timeout or a declined consent has no "previous sign-in" story to tell,
+    // and the named copy exists only for the two reasons a failed write can
+    // leave one behind.
+    const plain = callbackStringsByLocale().en.reason.timeout;
+    const html = renderCallbackPage(
+      {
+        kind: "error",
+        reason: "timeout",
+        previousAccount: "old@example.test",
+        previousSession: "usable",
+      },
+      APP_URL,
+    );
+    expect(runPageScript(html).text("body")).toBe(plain);
+    expect(html).not.toContain("old@example.test");
+    expect(html).not.toContain("o***@example.test");
+  });
+
+  test("escapes the account label", () => {
+    const html = renderCallbackPage(
+      {
+        kind: "error",
+        reason: "userinfo_failed",
+        previousAccount: '<img src=x onerror="alert(1)">',
+        previousSession: "usable",
+      },
+      APP_URL,
+    );
+    const payload = /id="i18n">([\s\S]*?)<\/script>/.exec(html)?.[1] ?? "";
+    expect(payload).not.toContain("<");
+    expect(html).not.toContain("<img src=x");
+  });
+
+  test("clamps a pathological label", () => {
+    const html = renderCallbackPage(
+      {
+        kind: "error",
+        reason: "userinfo_failed",
+        previousAccount: "a".repeat(500),
+        previousSession: "usable",
+      },
+      APP_URL,
+    );
+    const payload = JSON.parse(
+      /id="i18n">([\s\S]*?)<\/script>/.exec(html)?.[1] ?? "{}",
+    ) as { strings: { en: { body: string } } };
+    expect(payload.strings.en.body.length).toBeLessThan(400);
   });
 });
 

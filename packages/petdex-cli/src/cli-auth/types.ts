@@ -10,6 +10,32 @@ export interface CredentialStore {
   get(key: string): Promise<string | null>;
   set(key: string, value: string): Promise<void>;
   delete(key: string): Promise<void>;
+  /**
+   * Write `value` under `key` only if the stored record is still exactly
+   * `expected` (`null` meaning "absent"), and report whether it was written.
+   *
+   * This is the primitive a read-modify-write that spans a network round trip
+   * needs: the caller compares against the value it *read before* the round
+   * trip, and a `false` means someone else replaced the record in the
+   * meantime, so writing now would overwrite their value with one computed
+   * from an older one. The store decides how atomic that is; each
+   * implementation documents its own strength. A store that cannot compare
+   * honestly cannot offer this guarantee, so this is a required member rather
+   * than an optional one a silent fallback could paper over.
+   */
+  replaceIfUnchanged(
+    key: string,
+    expected: string | null,
+    value: string,
+    /**
+     * An additional condition read and compared in the same critical
+     * section: `guard.key` must still be exactly `guard.expected`, or
+     * nothing is written and `false` is returned. `whoami` uses it to make a
+     * profile's write-back conditional on the `tokens` record the profile
+     * was fetched with, because the pair is what names an account.
+     */
+    guard?: { key: string; expected: string | null },
+  ): Promise<boolean>;
 }
 
 export interface ClerkCliAuthConfig {
@@ -57,6 +83,16 @@ export interface LoginResult {
 
 export class ClerkCliAuthError extends Error {
   code: string;
+  /**
+   * The OAuth `error` code the provider returned, when it sent one.
+   *
+   * Kept apart from `message` because the human-readable description and the
+   * machine-readable code answer different questions: an endpoint can say
+   * `invalid_grant` with any wording, and the message may quote the wording.
+   * Code that must not guess — telling an expired session from a temporary
+   * outage — reads this, not the prose.
+   */
+  providerError?: string;
   constructor(code: string, message: string) {
     super(message);
     this.name = "ClerkCliAuthError";

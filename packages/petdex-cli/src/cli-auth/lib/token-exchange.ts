@@ -53,6 +53,15 @@ async function parseBody(response: Response): Promise<unknown> {
   return response.text();
 }
 
+/** The OAuth `error` code from a token-endpoint body, when it has one. */
+function providerErrorFromBody(body: unknown): string | undefined {
+  if (body && typeof body === "object") {
+    const value = (body as Record<string, unknown>).error;
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
 function messageFromBody(body: unknown, fallback: string): string {
   if (typeof body === "string" && body.trim()) return body.trim();
   if (body && typeof body === "object") {
@@ -118,10 +127,12 @@ async function requestTokens(
     );
   }
   if (!response.ok) {
-    throw new ClerkCliAuthError(
+    const failure = new ClerkCliAuthError(
       "token_exchange",
       messageFromBody(parsed, authMessages().tokenRequestHttp(response.status)),
     );
+    failure.providerError = providerErrorFromBody(parsed);
+    throw failure;
   }
 
   if (!parsed || typeof parsed !== "object") {
